@@ -279,6 +279,9 @@ function App() {
   // ==============================
   const [homeSearch, setHomeSearch] = useState("");
   const [shopSearch, setShopSearch] = useState("");
+  const [shopCategory, setShopCategory] = useState("All");
+  const [shopSort, setShopSort] = useState("featured");
+  const [shopOffersOnly, setShopOffersOnly] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchType, setSearchType] = useState("all");
   const [searchCategory, setSearchCategory] = useState("All");
@@ -1106,61 +1109,49 @@ const [selectedCancellationOrder, setSelectedCancellationOrder] = useState(null)
     setShowCancellationModal(true);
   };
 
-  const confirmCancellation = () => {
+  const confirmCancellation = async () => {
     if (!selectedCancellationOrder || !cancellationReason) return;
 
-    const now = new Date();
     const orderId = selectedCancellationOrder.id || selectedCancellationOrder.order_id;
-    const event = {
-      status: "Cancelled",
-      actor: cancellationActor,
-      reason: cancellationReason,
-      details:
-        cancellationDetails.trim() ||
-        `Order cancelled by ${cancellationActor.toLowerCase()} because: ${cancellationReason}.`,
-      date: now.toISOString(),
-      refundStatus: cancellationActor === "Customer" ? "Refund initiated" : "Refund to be initiated",
-    };
+    const details = cancellationDetails.trim() ||
+      `Order cancelled by ${cancellationActor.toLowerCase()} because: ${cancellationReason}.`;
 
-    setOrders((current) => {
-      const nextOrders = current.map((order) =>
-        String(order.id || order.order_id) === String(orderId)
-          ? {
-              ...order,
-              status: "cancelled",
-              cancellation: event,
-              timeline: [
-                ...(order.timeline || getOrderTimeline(order)),
-                { label: "Cancelled", date: now.toISOString(), note: event.details },
-              ],
-            }
-          : order
+    try {
+      const response = await fetch(
+        `http://localhost:5000/api/orders/${encodeURIComponent(orderId)}/cancel`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ actor: cancellationActor, reason: cancellationReason, details }),
+        }
       );
-      if (currentUser?.id) {
-        localStorage.setItem(`howdiOrders_${currentUser.id}`, JSON.stringify(nextOrders));
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data.status !== "success" || !data.order) {
+        throw new Error(data.message || "Unable to cancel this order.");
       }
-      return nextOrders;
-    });
 
-    setSelectedOrder((current) =>
-      current && String(current.id || current.order_id) === String(orderId)
-        ? {
-            ...current,
-            status: "cancelled",
-            cancellation: event,
-            timeline: [
-              ...(current.timeline || getOrderTimeline(current)),
-              { label: "Cancelled", date: now.toISOString(), note: event.details },
-            ],
-          }
-        : current
-    );
-    setShowCancellationModal(false);
-    setSelectedCancellationOrder(null);
-    setCancellationReason("");
-    setCancellationDetails("");
+      const cancelledOrder = data.order;
+      setOrders((current) => {
+        const nextOrders = current.map((order) =>
+          String(order.id || order.order_id) === String(orderId) ? cancelledOrder : order
+        );
+        if (currentUser?.id) {
+          localStorage.setItem(`howdiOrders_${currentUser.id}`, JSON.stringify(nextOrders));
+        }
+        return nextOrders;
+      });
+      setSelectedOrder((current) =>
+        current && String(current.id || current.order_id) === String(orderId) ? cancelledOrder : current
+      );
+      setShowCancellationModal(false);
+      setSelectedCancellationOrder(null);
+      setCancellationReason("");
+      setCancellationDetails("");
+    } catch (error) {
+      console.error("HOWDI CANCEL ORDER ERROR:", error);
+      alert(error?.message || "Unable to cancel this order. Please try again.");
+    }
   };
-
   const getCancellationDescription = (order) => {
     if (!order?.cancellation) {
       return "No cancellation information has been recorded for this order.";
@@ -2028,198 +2019,32 @@ return () => window.clearInterval(timer);
 
   // ==============================
   // ADDRESS BOOK HELPERS
-  // Backend is the source of truth. LocalStorage is kept only as a temporary offline cache.
   // ==============================
 
-  const ADDRESS_API = "http://localhost:5000/api/addresses";
-
   useEffect(() => {
-    let cancelled = false;
+    if (!currentUser?.id) {
+      setAddresses([]);
+      return;
+    }
 
-    const loadCustomerAddresses = async () => {
-      if (!currentUser?.id) {
-        setAddresses([]);
-        setSelectedCheckoutAddress(null);
-        return;
-      }
-
-      const cacheKey = `howdiAddresses_${currentUser.id}`;
-      let cachedAddresses = [];
-      try {
-        const saved = JSON.parse(localStorage.getItem(cacheKey) || "[]");
-        cachedAddresses = Array.isArray(saved) ? saved : [];
-      } catch {}
-
-      try {
-        const response = await fetch(
-          `${ADDRESS_API}?customer_id=${encodeURIComponent(currentUser.id)}`,
-          { cache: "no-store" }
-        );
-        const data = await response.json().catch(() => ({}));
-
-        if (!response.ok || data.status !== "success") {
-          throw new Error(data.message || "Unable to load addresses.");
-        }
-
-        let backendAddresses = Array.isArray(data.addresses) ? data.addresses : [];
-
-        // One-time migration of addresses created by the earlier local-only version.
-        if (!backendAddresses.length && cachedAddresses.length) {
-          for (const cachedAddress of cachedAddresses) {
-            try {
-              const migrationResponse = await fetch(ADDRESS_API, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  customer_id: currentUser.id,
-                  ...cachedAddress,
-                }),
-              });
-              const migrationData = await migrationResponse.json().catch(() => ({}));
-              if (migrationResponse.ok && migrationData.address) {
-                backendAddresses.push(migrationData.address);
-              }
-            } catch {}
-          }
-        }
-
-        if (cancelled) return;
-        setAddresses(backendAddresses);
-        localStorage.setItem(cacheKey, JSON.stringify(backendAddresses));
-
-        const defaultAddress = backendAddresses.find((item) => item.is_default) || backendAddresses[0] || null;
-        setSelectedCheckoutAddress((current) => current && backendAddresses.some((item) => item.id === current.id) ? current : defaultAddress);
-      } catch (error) {
-        console.error("HOWDI LOAD ADDRESSES ERROR:", error);
-        if (!cancelled) {
-          setAddresses(cachedAddresses);
-          setSelectedCheckoutAddress(cachedAddresses.find((item) => item.is_default) || cachedAddresses[0] || null);
-        }
-      }
-    };
-
-    loadCustomerAddresses();
-
-    return () => {
-      cancelled = true;
-    };
+    try {
+      const saved = JSON.parse(
+        localStorage.getItem(`howdiAddresses_${currentUser.id}`) || "[]"
+      );
+      setAddresses(Array.isArray(saved) ? saved : []);
+    } catch {
+      setAddresses([]);
+    }
   }, [currentUser]);
 
-  const cacheAddresses = (nextAddresses) => {
+  const persistAddresses = (nextAddresses) => {
     setAddresses(nextAddresses);
+
     if (currentUser?.id) {
-      localStorage.setItem(`howdiAddresses_${currentUser.id}`, JSON.stringify(nextAddresses));
-    }
-    const defaultAddress = nextAddresses.find((item) => item.is_default) || nextAddresses[0] || null;
-    setSelectedCheckoutAddress((current) => current && nextAddresses.some((item) => item.id === current.id) ? { ...current, ...nextAddresses.find((item) => item.id === current.id) } : defaultAddress);
-  };
-
-  const saveAddress = async (event) => {
-    event.preventDefault();
-
-    if (!currentUser?.id) {
-      openLogin();
-      return;
-    }
-
-    const pincode = String(addressForm.pincode ?? "").replace(/\D/g, "").slice(0, 6);
-    const phone = String(addressForm.phone ?? "").replace(/\D/g, "").slice(0, 10);
-
-    if (!/^[1-9][0-9]{5}$/.test(pincode)) {
-      alert("Please enter a valid 6-digit pincode.");
-      return;
-    }
-
-    if (phone.length !== 10) {
-      alert("Please enter a valid 10-digit mobile number.");
-      return;
-    }
-
-    if (!addressForm.full_name.trim() || !addressForm.address_line1.trim() || !addressForm.city.trim() || !addressForm.state.trim()) {
-      alert("Please complete all required address fields.");
-      return;
-    }
-
-    const payload = {
-      customer_id: currentUser.id,
-      label: addressForm.label.trim() || "Other",
-      full_name: addressForm.full_name.trim(),
-      phone,
-      address_line1: addressForm.address_line1.trim(),
-      address_line2: addressForm.address_line2.trim(),
-      city: addressForm.city.trim(),
-      state: addressForm.state.trim(),
-      pincode,
-      is_default: !editingAddressId && addresses.length === 0,
-    };
-
-    try {
-      const response = await fetch(
-        editingAddressId ? `${ADDRESS_API}/${encodeURIComponent(editingAddressId)}` : ADDRESS_API,
-        {
-          method: editingAddressId ? "PUT" : "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        }
+      localStorage.setItem(
+        `howdiAddresses_${currentUser.id}`,
+        JSON.stringify(nextAddresses)
       );
-      const data = await response.json().catch(() => ({}));
-
-      if (!response.ok || !data.address) {
-        throw new Error(data.message || "Unable to save address.");
-      }
-
-      const savedAddress = data.address;
-      const nextAddresses = editingAddressId
-        ? addresses.map((item) => item.id === editingAddressId ? savedAddress : item)
-        : [savedAddress, ...addresses];
-
-      cacheAddresses(nextAddresses);
-      setAddressFormOpen(false);
-      setEditingAddressId(null);
-    } catch (error) {
-      console.error("HOWDI SAVE ADDRESS ERROR:", error);
-      alert(error?.message || "Unable to save address. Please try again.");
-    }
-  };
-
-  const deleteAddress = async (addressId) => {
-    const address = addresses.find((item) => item.id === addressId);
-    if (!address) return;
-    if (!window.confirm(`Delete your ${address.label || "address"}?`)) return;
-
-    try {
-      const response = await fetch(
-        `${ADDRESS_API}/${encodeURIComponent(addressId)}?customer_id=${encodeURIComponent(currentUser.id)}`,
-        { method: "DELETE" }
-      );
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.message || "Unable to delete address.");
-
-      const nextAddresses = addresses.filter((item) => item.id !== addressId);
-      cacheAddresses(nextAddresses);
-    } catch (error) {
-      console.error("HOWDI DELETE ADDRESS ERROR:", error);
-      alert(error?.message || "Unable to delete address. Please try again.");
-    }
-  };
-
-  const setDefaultAddress = async (addressId) => {
-    if (!currentUser?.id) return;
-
-    try {
-      const response = await fetch(`${ADDRESS_API}/${encodeURIComponent(addressId)}/default`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ customer_id: currentUser.id }),
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.message || "Unable to set default address.");
-
-      const nextAddresses = addresses.map((item) => ({ ...item, is_default: item.id === addressId }));
-      cacheAddresses(nextAddresses);
-    } catch (error) {
-      console.error("HOWDI DEFAULT ADDRESS ERROR:", error);
-      alert(error?.message || "Unable to set default address. Please try again.");
     }
   };
 
@@ -2407,6 +2232,44 @@ return () => window.clearInterval(timer);
     }, 900);
   };
 
+  const productByName = new Map(products.map((product) => [product.name, product]));
+
+  const homeRecentlyViewedProducts = recentlyViewed
+    .map((item) => productByName.get(typeof item === "string" ? item : item?.name))
+    .filter(Boolean)
+    .filter(isItemAvailableForCustomerLocation)
+    .slice(0, 6);
+
+  const homeLikedProducts = wishlist
+    .filter(Boolean)
+    .filter(isItemAvailableForCustomerLocation)
+    .slice(0, 6);
+
+  const purchaseCounts = {};
+  orders.forEach((order) => {
+    if (["cancelled", "canceled"].includes(String(order?.status || "").toLowerCase())) return;
+    (Array.isArray(order?.items) ? order.items : []).forEach((item) => {
+      if (!item?.name) return;
+      purchaseCounts[item.name] = (purchaseCounts[item.name] || 0) + Math.max(1, Number(item.quantity) || 1);
+    });
+  });
+
+  const homeMostPurchasedProducts = products
+    .filter(isItemAvailableForCustomerLocation)
+    .map((product, index) => ({ product, count: purchaseCounts[product.name] || 0, index }))
+    .sort((a, b) => b.count - a.count || Number(b.product.rating || 0) - Number(a.product.rating || 0) || a.index - b.index)
+    .map(({ product }) => product)
+    .slice(0, 6);
+
+  const homeOfferProducts = products
+    .filter(isItemAvailableForCustomerLocation)
+    .filter((product) => {
+      const price = Number(String(product.price || "").replace(/[^0-9.]/g, ""));
+      const oldPrice = Number(String(product.oldPrice || "").replace(/[^0-9.]/g, ""));
+      return Boolean(product.offerText) && oldPrice > price;
+    })
+    .slice(0, 6);
+
   const filteredOrders = orders.filter((order) => {
     const status = String(order.status || "processing").toLowerCase();
     if (orderFilter === "active") return !["delivered", "cancelled", "canceled"].includes(status);
@@ -2497,6 +2360,100 @@ return () => window.clearInterval(timer);
     setAddressFormOpen(true);
   };
 
+  const saveAddress = (event) => {
+    event.preventDefault();
+
+    // Normalize the pincode before validating it.
+    // This prevents spaces/formatting from causing a false validation error.
+    const pincode = String(addressForm.pincode ?? "")
+      .replace(/\D/g, "")
+      .slice(0, 6);
+
+    if (pincode.length !== 6) {
+      alert("Please enter a valid 6-digit pincode.");
+      return;
+    }
+
+    if (
+      !addressForm.full_name.trim() ||
+      !addressForm.phone.trim() ||
+      !addressForm.address_line1.trim() ||
+      !addressForm.city.trim() ||
+      !addressForm.state.trim()
+    ) {
+      alert("Please complete all required address fields.");
+      return;
+    }
+
+    const newAddress = {
+      id: editingAddressId || `addr_${Date.now()}`,
+      ...addressForm,
+      label: addressForm.label.trim() || "Other",
+      full_name: addressForm.full_name.trim(),
+      phone: addressForm.phone.trim(),
+      address_line1: addressForm.address_line1.trim(),
+      address_line2: addressForm.address_line2.trim(),
+      city: addressForm.city.trim(),
+      state: addressForm.state.trim(),
+      pincode,
+      updated_at: new Date().toISOString(),
+    };
+
+    let nextAddresses;
+
+    if (editingAddressId) {
+      nextAddresses = addresses.map((item) =>
+        item.id === editingAddressId ? newAddress : item
+      );
+    } else {
+      nextAddresses = [
+        ...addresses,
+        {
+          ...newAddress,
+          is_default: addresses.length === 0,
+        },
+      ];
+    }
+
+    persistAddresses(nextAddresses);
+    setAddressFormOpen(false);
+    setEditingAddressId(null);
+  };
+
+  const deleteAddress = (addressId) => {
+    const address = addresses.find((item) => item.id === addressId);
+    if (!address) return;
+
+    if (!window.confirm(`Delete your ${address.label || "address"}?`)) {
+      return;
+    }
+
+    let nextAddresses = addresses.filter(
+      (item) => item.id !== addressId
+    );
+
+    if (
+      address.is_default &&
+      nextAddresses.length > 0
+    ) {
+      nextAddresses = nextAddresses.map((item, index) => ({
+        ...item,
+        is_default: index === 0,
+      }));
+    }
+
+    persistAddresses(nextAddresses);
+  };
+
+  const setDefaultAddress = (addressId) => {
+    persistAddresses(
+      addresses.map((item) => ({
+        ...item,
+        is_default: item.id === addressId,
+      }))
+    );
+  };
+
   const closeProfile = () => {
     if (addressFormOpen) {
       setAddressFormOpen(false);
@@ -2509,6 +2466,27 @@ return () => window.clearInterval(timer);
   // ==============================
   // PAGE
   // ==============================
+
+  const filteredShopProducts = products
+    .filter(isItemAvailableForCustomerLocation)
+    .filter((product) => {
+      const query = shopSearch.trim().toLowerCase();
+      if (query && !`${product.name} ${product.shop} ${product.category} ${product.artisan || ""}`.toLowerCase().includes(query)) return false;
+      if (shopCategory !== "All" && product.category !== shopCategory) return false;
+      if (shopOffersOnly) {
+        const price = Number(String(product.price || "").replace(/[^0-9.]/g, ""));
+        const oldPrice = Number(String(product.oldPrice || "").replace(/[^0-9.]/g, ""));
+        if (!(product.offerText && oldPrice > price)) return false;
+      }
+      return true;
+    })
+    .sort((a, b) => {
+      if (shopSort === "price-low") return Number(String(a.price).replace(/[^0-9.]/g, "")) - Number(String(b.price).replace(/[^0-9.]/g, ""));
+      if (shopSort === "price-high") return Number(String(b.price).replace(/[^0-9.]/g, "")) - Number(String(a.price).replace(/[^0-9.]/g, ""));
+      if (shopSort === "rating") return Number(b.rating || 0) - Number(a.rating || 0);
+      if (shopSort === "popular") return Number(b.likes || 0) - Number(a.likes || 0);
+      return 0;
+    });
 
   return (
     <div className="howdi-app">
@@ -5484,6 +5462,38 @@ return () => window.clearInterval(timer);
           </section>
         )}
 
+        {currentUser && activeSection === "home" && (
+          <section style={{ padding: "26px 24px 32px", background: "#fbfaf6", borderBottom: "1px solid #eee8dc" }}>
+            <div style={{ maxWidth: "1180px", margin: "0 auto", display: "grid", gap: "24px" }}>
+              {[
+                ["👀", "Recently viewed", "Pick up where you left off", homeRecentlyViewedProducts],
+                ["❤️", "Your likes", "Products you saved for later", homeLikedProducts],
+                ["🔥", "Most purchased", "Popular with HOWDI customers", homeMostPurchasedProducts],
+                ["🏷️", "Offers for you", "Current product offers and savings", homeOfferProducts],
+              ].map(([icon, title, subtitle, items]) => (
+                <div key={title}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "end", gap: "12px", marginBottom: "12px" }}>
+                    <div><div style={{ fontSize: "11px", fontWeight: 900, letterSpacing: ".08em", color: "#9a5b1f" }}>{icon} {title.toUpperCase()}</div><h3 style={{ margin: "5px 0 2px", fontSize: "21px", color: "#172033" }}>{title}</h3><p style={{ margin: 0, color: "#64748b", fontSize: "12px" }}>{subtitle}</p></div>
+                    <button type="button" onClick={() => navigate("shop")} style={{ border: "1px solid #cbd8cf", borderRadius: "10px", padding: "8px 11px", background: "#fff", color: "#365947", fontWeight: 900, cursor: "pointer" }}>Shop all →</button>
+                  </div>
+                  {items.length ? (
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(175px,1fr))", gap: "11px" }}>
+                      {items.map((product) => (
+                        <article key={`${title}-${product.name}`} onClick={() => openProductDetails(product)} style={{ background: "#fff", border: "1px solid #e2e8e3", borderRadius: "15px", padding: "12px", cursor: "pointer", boxShadow: "0 4px 14px rgba(23,32,25,.05)" }}>
+                          <div style={{ height: "92px", borderRadius: "11px", background: "#f4f1e8", display: "grid", placeItems: "center", fontSize: "42px" }}>{product.icon}</div>
+                          <div style={{ marginTop: "9px", fontSize: "11px", color: "#9a5b1f", fontWeight: 900, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{product.category}</div>
+                          <strong style={{ display: "block", marginTop: "3px", color: "#172033", fontSize: "13px", lineHeight: 1.3 }}>{product.name}</strong>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "8px" }}><strong style={{ color: "#153b2b", fontSize: "15px" }}>{product.price}</strong>{title === "Offers for you" && <span style={{ fontSize: "10px", fontWeight: 900, color: "#24613d" }}>SAVE</span>}</div>
+                        </article>
+                      ))}
+                    </div>
+                  ) : <div style={{ padding: "18px", border: "1px dashed #cbd5e1", borderRadius: "14px", background: "#fff", color: "#64748b", fontSize: "12px" }}>No items here yet — keep browsing HOWDI and this section will update automatically.</div>}
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
         {/* ====================================
             SEARCH & DISCOVERY
         ==================================== */}
@@ -5837,13 +5847,22 @@ return () => window.clearInterval(timer);
             </div>
           )}
 
+          <div style={{ display: "flex", alignItems: "center", gap: "9px", flexWrap: "wrap", marginBottom: "16px", padding: "12px", border: "1px solid #e2e8e3", borderRadius: "14px", background: "#fff" }}>
+            <strong style={{ fontSize: "12px", color: "#475569" }}>FILTERS</strong>
+            <select value={shopCategory} onChange={(e) => setShopCategory(e.target.value)} style={{ border: "1px solid #cbd5e1", borderRadius: "9px", padding: "8px 10px", background: "#fff", color: "#172033", fontWeight: 700 }}>
+              <option value="All">All categories</option>
+              {[...new Set(products.map((p) => p.category).filter(Boolean))].map((category) => <option key={category} value={category}>{category}</option>)}
+            </select>
+            <select value={shopSort} onChange={(e) => setShopSort(e.target.value)} style={{ border: "1px solid #cbd5e1", borderRadius: "9px", padding: "8px 10px", background: "#fff", color: "#172033", fontWeight: 700 }}>
+              <option value="featured">Sort: Featured</option><option value="popular">Most liked</option><option value="rating">Top rated</option><option value="price-low">Price: Low to high</option><option value="price-high">Price: High to low</option>
+            </select>
+            <button type="button" onClick={() => setShopOffersOnly((value) => !value)} style={{ border: shopOffersOnly ? "2px solid #365947" : "1px solid #cbd5e1", borderRadius: "9px", padding: "8px 11px", background: shopOffersOnly ? "#edf6ef" : "#fff", color: shopOffersOnly ? "#365947" : "#475569", fontWeight: 800, cursor: "pointer" }}>🏷️ Offers only</button>
+            <span style={{ marginLeft: "auto", fontSize: "12px", color: "#64748b", fontWeight: 800 }}>{filteredShopProducts.length} product{filteredShopProducts.length === 1 ? "" : "s"}</span>
+          </div>
+
           <div className="product-grid">
 
-            {products.filter((product) => {
-              const query = shopSearch.trim().toLowerCase();
-              if (!query) return true;
-              return `${product.name} ${product.shop} ${product.category} ${product.artisan || ""}`.toLowerCase().includes(query);
-            }).map(
+            {filteredShopProducts.map(
               (product) => (
 
                 <article
