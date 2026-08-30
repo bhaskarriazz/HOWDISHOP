@@ -1,0 +1,10 @@
+C:\Users\prabhanjan gowda k n\howdi
+│
+├── apps
+├── backend
+├── docs          ← CREATE THIS
+│   ├── HOWDI_PRODUCT_VISION.md
+│   └── HOWDI_DEVELOPMENT_LOG.md
+├── package.json
+├── README.md
+└── ...
