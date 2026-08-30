@@ -1,29 +1,2587 @@
 [
   {
-    "id": "b2d96083-6e98-46f9-b26c-b3374e7e51f2",
-    "name": "HOWDI Everyday T-Shirt",
-    "category": "Fashion",
-    "price": 499,
-    "stock": 25,
-    "image": "",
-    "created_at": "2026-08-29T20:42:20.215Z"
-  },
-  {
-    "id": "f89f6400-dd5b-4806-bc64-ab6b41817263",
-    "name": "HOWDI Casual Sneakers",
-    "category": "Footwear",
+    "id": "58d1bb16-9c4f-43ae-8ce1-84f4be42c28b",
+    "name": "Grandma's Crochet Flower Tote",
+    "shop": "HOWDI Grandma's Collection",
+    "icon": "👜",
     "price": 1299,
-    "stock": 15,
-    "image": "",
-    "created_at": "2026-08-29T20:42:20.216Z"
+    "oldPrice": 1699,
+    "category": "Bags & Accessories",
+    "subcategory": "Tote Bags",
+    "categoryId": "8c8dcedf-fed6-4771-a4e4-b9f7bc293e80",
+    "subcategoryId": "5d7ec194-b374-4b79-b3a1-d12c11008d20",
+    "handmade": true,
+    "stock": 7,
+    "rating": "4.9",
+    "reviews": 86,
+    "sizes": [
+      "One Size"
+    ],
+    "colors": [
+      "Sky Blue",
+      "Rose Pink",
+      "Cream",
+      "Lavender"
+    ],
+    "material": "100% cotton yarn",
+    "makingTime": "6–8 hours",
+    "artisan": "Lakshmi Amma",
+    "collections": [
+      "Crochet",
+      "Summer",
+      "Gifts"
+    ],
+    "audience": [
+      "Women",
+      "All"
+    ],
+    "ageGroups": [
+      "Adult"
+    ],
+    "likes": 1284,
+    "visible": true,
+    "featured": true,
+    "trending": true,
+    "flashOffer": false,
+    "mostPurchased": false,
+    "offerText": "Handmade week · Extra 10% off",
+    "offerEndsAt": "2026-08-30T23:59:59+05:30",
+    "badges": [
+      "HANDMADE",
+      "LIMITED"
+    ],
+    "story": "A one-of-a-kind crochet piece inspired by the little bags our grandmothers lovingly made by hand.",
+    "created_at": "2026-08-30T00:00:00.000Z",
+    "dimensions": "32 × 28 cm",
+    "makerExperience": "38 years of crochet",
+    "makerPieces": "1,240+ pieces crafted",
+    "deliveryDays": "3–5 days",
+    "weight": "280 g"
   },
   {
-    "id": "4d83b95f-c31c-4a9d-9c46-95c52ffede4a",
-    "name": "HOWDI Classic Backpack",
-    "category": "Bags",
+    "id": "9e381b5f-4065-41cb-85fa-0d1201e51623",
+    "name": "Grandma's Crochet Summer Top",
+    "shop": "HOWDI Grandma's Collection",
+    "icon": "👚",
+    "price": 1899,
+    "oldPrice": 2399,
+    "category": "Handmade Clothing",
+    "subcategory": "Tops",
+    "categoryId": "dce9e4e5-98a2-471e-a38b-f54a21b64c10",
+    "subcategoryId": "750d3978-4ab4-439d-b39c-28a2f20385af",
+    "handmade": true,
+    "stock": 4,
+    "rating": "4.8",
+    "reviews": 54,
+    "sizes": [
+      "XS",
+      "S",
+      "M",
+      "L",
+      "XL",
+      "XXL",
+      "Custom"
+    ],
+    "colors": [
+      "Ivory",
+      "Peach",
+      "Mint",
+      "Sky Blue",
+      "Maroon"
+    ],
+    "material": "Soft cotton blend yarn",
+    "makingTime": "10–14 hours",
+    "artisan": "Savitri Amma",
+    "collections": [
+      "Crochet",
+      "Summer"
+    ],
+    "audience": [
+      "Women"
+    ],
+    "ageGroups": [
+      "Adult"
+    ],
+    "likes": 0,
+    "visible": true,
+    "featured": true,
+    "trending": false,
+    "flashOffer": false,
+    "mostPurchased": false,
+    "offerText": "Limited handmade offer",
+    "offerEndsAt": "2026-08-31T20:00:00+05:30",
+    "badges": [
+      "HANDMADE",
+      "MADE TO ORDER"
+    ],
+    "story": "Made carefully by hand in the spirit of Grandma’s traditional craft.",
+    "created_at": "2026-08-30T00:00:00.000Z"
+  },
+  {
+    "id": "f1c98574-3937-4fc8-a1e1-047677682cec",
+    "name": "Grandma's Crochet Table Runner",
+    "shop": "HOWDI Grandma's Collection",
+    "icon": "🌸",
     "price": 899,
-    "stock": 20,
-    "image": "",
-    "created_at": "2026-08-29T20:42:20.216Z"
+    "oldPrice": 1199,
+    "category": "Home Crochet",
+    "subcategory": "Kitchen & Table",
+    "categoryId": "8dcfe7d0-e507-47cc-95ed-a0ba4e20fb2e",
+    "subcategoryId": "e012aa41-8807-434a-bee4-3efad0e37685",
+    "handmade": true,
+    "stock": 9,
+    "rating": "4.9",
+    "reviews": 112,
+    "sizes": [
+      "Standard",
+      "Custom"
+    ],
+    "colors": [
+      "Cream",
+      "Red",
+      "Mustard",
+      "Green"
+    ],
+    "material": "100% cotton yarn",
+    "makingTime": "5–7 hours",
+    "artisan": "Anasuya Amma",
+    "collections": [
+      "Crochet",
+      "Home Crochet",
+      "Gifts"
+    ],
+    "audience": [
+      "All"
+    ],
+    "ageGroups": [
+      "Adult"
+    ],
+    "likes": 0,
+    "visible": true,
+    "featured": true,
+    "trending": false,
+    "flashOffer": false,
+    "mostPurchased": false,
+    "offerText": "Festival special",
+    "offerEndsAt": "2026-09-01T23:59:59+05:30",
+    "badges": [
+      "HANDMADE",
+      "POPULAR"
+    ],
+    "story": "Made carefully by hand in the spirit of Grandma’s traditional craft.",
+    "created_at": "2026-08-30T00:00:00.000Z",
+    "dimensions": "150 × 35 cm"
+  },
+  {
+    "id": "252b4a42-6a5f-460b-9593-5bb33a88fd1f",
+    "name": "Airpod Case",
+    "shop": "HOWDI Grandma's Collection",
+    "icon": "🎧",
+    "price": 199,
+    "oldPrice": 299,
+    "category": "Bags & Accessories",
+    "subcategory": "Useful Accessories",
+    "categoryId": "8c8dcedf-fed6-4771-a4e4-b9f7bc293e80",
+    "subcategoryId": "248fb04a-81a1-4ce7-97c8-73da52925c1a",
+    "handmade": true,
+    "stock": 10,
+    "rating": "4.8",
+    "reviews": 0,
+    "sizes": [
+      "One Size"
+    ],
+    "colors": [
+      "Natural",
+      "Cream"
+    ],
+    "material": "Handmade yarn / fabric",
+    "makingTime": "Made to order",
+    "artisan": "HOWDI Grandma Makers",
+    "collections": [
+      "Crochet"
+    ],
+    "audience": [
+      "All"
+    ],
+    "ageGroups": [
+      "All Ages"
+    ],
+    "likes": 0,
+    "visible": true,
+    "featured": false,
+    "trending": true,
+    "flashOffer": true,
+    "mostPurchased": false,
+    "offerText": "Grandma’s little-price special",
+    "offerEndsAt": "",
+    "badges": [
+      "HANDMADE"
+    ],
+    "story": "Made carefully by hand in the spirit of Grandma’s traditional craft.",
+    "created_at": "2026-08-30T00:00:00.000Z"
+  },
+  {
+    "id": "134669b2-9909-445e-b2f6-50c9ad35783c",
+    "name": "Book Cover",
+    "shop": "HOWDI Grandma's Collection",
+    "icon": "📕",
+    "price": 249,
+    "oldPrice": 349,
+    "category": "Bags & Accessories",
+    "subcategory": "Useful Accessories",
+    "categoryId": "8c8dcedf-fed6-4771-a4e4-b9f7bc293e80",
+    "subcategoryId": "248fb04a-81a1-4ce7-97c8-73da52925c1a",
+    "handmade": true,
+    "stock": 10,
+    "rating": "4.8",
+    "reviews": 0,
+    "sizes": [
+      "One Size"
+    ],
+    "colors": [
+      "Natural",
+      "Cream"
+    ],
+    "material": "Handmade yarn / fabric",
+    "makingTime": "Made to order",
+    "artisan": "HOWDI Grandma Makers",
+    "collections": [
+      "Crochet"
+    ],
+    "audience": [
+      "All"
+    ],
+    "ageGroups": [
+      "All Ages"
+    ],
+    "likes": 0,
+    "visible": true,
+    "featured": false,
+    "trending": true,
+    "flashOffer": true,
+    "mostPurchased": false,
+    "offerText": "Grandma’s little-price special",
+    "offerEndsAt": "",
+    "badges": [
+      "HANDMADE"
+    ],
+    "story": "Made carefully by hand in the spirit of Grandma’s traditional craft.",
+    "created_at": "2026-08-30T00:00:00.000Z"
+  },
+  {
+    "id": "aa5ce225-b387-4e3f-9236-91439d5065b5",
+    "name": "Beanie",
+    "shop": "HOWDI Grandma's Collection",
+    "icon": "🧶",
+    "price": 299,
+    "oldPrice": 399,
+    "category": "Crochet",
+    "subcategory": "Clothing",
+    "categoryId": "8c9c4456-112f-4703-bc0a-3e13ba1f3dc8",
+    "subcategoryId": "d641e02e-b5ab-4d8b-9a02-6bacff8f5e4e",
+    "handmade": true,
+    "stock": 10,
+    "rating": "4.8",
+    "reviews": 0,
+    "sizes": [
+      "One Size"
+    ],
+    "colors": [
+      "Natural",
+      "Cream"
+    ],
+    "material": "Handmade yarn / fabric",
+    "makingTime": "Made to order",
+    "artisan": "HOWDI Grandma Makers",
+    "collections": [
+      "Crochet"
+    ],
+    "audience": [
+      "All"
+    ],
+    "ageGroups": [
+      "All Ages"
+    ],
+    "likes": 0,
+    "visible": true,
+    "featured": false,
+    "trending": true,
+    "flashOffer": true,
+    "mostPurchased": false,
+    "offerText": "Grandma’s little-price special",
+    "offerEndsAt": "",
+    "badges": [
+      "HANDMADE"
+    ],
+    "story": "Made carefully by hand in the spirit of Grandma’s traditional craft.",
+    "created_at": "2026-08-30T00:00:00.000Z"
+  },
+  {
+    "id": "8b5a067c-0ade-4a2f-a6ae-57ef96711a8d",
+    "name": "Bucket Hat",
+    "shop": "HOWDI Grandma's Collection",
+    "icon": "👒",
+    "price": 499,
+    "oldPrice": 624,
+    "category": "Bags & Accessories",
+    "subcategory": "Hats & Headwear",
+    "categoryId": "8c8dcedf-fed6-4771-a4e4-b9f7bc293e80",
+    "subcategoryId": "91bc7247-3458-4fda-90f7-b7d7d639273c",
+    "handmade": true,
+    "stock": 10,
+    "rating": "4.8",
+    "reviews": 0,
+    "sizes": [
+      "One Size"
+    ],
+    "colors": [
+      "Natural",
+      "Cream"
+    ],
+    "material": "Handmade yarn / fabric",
+    "makingTime": "Made to order",
+    "artisan": "HOWDI Grandma Makers",
+    "collections": [
+      "Crochet"
+    ],
+    "audience": [
+      "All"
+    ],
+    "ageGroups": [
+      "All Ages"
+    ],
+    "likes": 0,
+    "visible": true,
+    "featured": false,
+    "trending": true,
+    "flashOffer": false,
+    "mostPurchased": false,
+    "offerText": "",
+    "offerEndsAt": "",
+    "badges": [
+      "HANDMADE"
+    ],
+    "story": "Made carefully by hand in the spirit of Grandma’s traditional craft.",
+    "created_at": "2026-08-30T00:00:00.000Z"
+  },
+  {
+    "id": "2133e7d1-e07b-4b12-a03b-2585e727b14d",
+    "name": "Bandana",
+    "shop": "HOWDI Grandma's Collection",
+    "icon": "🧣",
+    "price": 299,
+    "oldPrice": 399,
+    "category": "Bags & Accessories",
+    "subcategory": "Wearable Accessories",
+    "categoryId": "8c8dcedf-fed6-4771-a4e4-b9f7bc293e80",
+    "subcategoryId": "3107294c-ecd9-4489-be86-ea153ae9273e",
+    "handmade": true,
+    "stock": 10,
+    "rating": "4.8",
+    "reviews": 0,
+    "sizes": [
+      "One Size"
+    ],
+    "colors": [
+      "Natural",
+      "Cream"
+    ],
+    "material": "Handmade yarn / fabric",
+    "makingTime": "Made to order",
+    "artisan": "HOWDI Grandma Makers",
+    "collections": [
+      "Crochet"
+    ],
+    "audience": [
+      "All"
+    ],
+    "ageGroups": [
+      "All Ages"
+    ],
+    "likes": 0,
+    "visible": true,
+    "featured": false,
+    "trending": true,
+    "flashOffer": true,
+    "mostPurchased": false,
+    "offerText": "Grandma’s little-price special",
+    "offerEndsAt": "",
+    "badges": [
+      "HANDMADE"
+    ],
+    "story": "Made carefully by hand in the spirit of Grandma’s traditional craft.",
+    "created_at": "2026-08-30T00:00:00.000Z"
+  },
+  {
+    "id": "55440d97-6264-47d9-a5f3-aeeee98c1593",
+    "name": "Bottle Sleeve",
+    "shop": "HOWDI Grandma's Collection",
+    "icon": "🍶",
+    "price": 199,
+    "oldPrice": 299,
+    "category": "Bags & Accessories",
+    "subcategory": "Useful Accessories",
+    "categoryId": "8c8dcedf-fed6-4771-a4e4-b9f7bc293e80",
+    "subcategoryId": "248fb04a-81a1-4ce7-97c8-73da52925c1a",
+    "handmade": true,
+    "stock": 10,
+    "rating": "4.8",
+    "reviews": 0,
+    "sizes": [
+      "One Size"
+    ],
+    "colors": [
+      "Natural",
+      "Cream"
+    ],
+    "material": "Handmade yarn / fabric",
+    "makingTime": "Made to order",
+    "artisan": "HOWDI Grandma Makers",
+    "collections": [
+      "Crochet"
+    ],
+    "audience": [
+      "All"
+    ],
+    "ageGroups": [
+      "All Ages"
+    ],
+    "likes": 0,
+    "visible": true,
+    "featured": false,
+    "trending": true,
+    "flashOffer": true,
+    "mostPurchased": false,
+    "offerText": "Grandma’s little-price special",
+    "offerEndsAt": "",
+    "badges": [
+      "HANDMADE"
+    ],
+    "story": "Made carefully by hand in the spirit of Grandma’s traditional craft.",
+    "created_at": "2026-08-30T00:00:00.000Z"
+  },
+  {
+    "id": "41c71dfa-a839-4c01-91ae-6b19024b7a81",
+    "name": "Bookmark",
+    "shop": "HOWDI Grandma's Collection",
+    "icon": "🔖",
+    "price": 99,
+    "oldPrice": 199,
+    "category": "Bags & Accessories",
+    "subcategory": "Useful Accessories",
+    "categoryId": "8c8dcedf-fed6-4771-a4e4-b9f7bc293e80",
+    "subcategoryId": "248fb04a-81a1-4ce7-97c8-73da52925c1a",
+    "handmade": true,
+    "stock": 10,
+    "rating": "4.8",
+    "reviews": 0,
+    "sizes": [
+      "One Size"
+    ],
+    "colors": [
+      "Natural",
+      "Cream"
+    ],
+    "material": "Handmade yarn / fabric",
+    "makingTime": "Made to order",
+    "artisan": "HOWDI Grandma Makers",
+    "collections": [
+      "Crochet"
+    ],
+    "audience": [
+      "All"
+    ],
+    "ageGroups": [
+      "All Ages"
+    ],
+    "likes": 0,
+    "visible": true,
+    "featured": false,
+    "trending": true,
+    "flashOffer": true,
+    "mostPurchased": false,
+    "offerText": "Grandma’s little-price special",
+    "offerEndsAt": "",
+    "badges": [
+      "HANDMADE"
+    ],
+    "story": "Made carefully by hand in the spirit of Grandma’s traditional craft.",
+    "created_at": "2026-08-30T00:00:00.000Z"
+  },
+  {
+    "id": "96f9b0d6-84b6-4a01-b8f0-bc1d443ccdda",
+    "name": "Beach Bag",
+    "shop": "HOWDI Grandma's Collection",
+    "icon": "🏖️",
+    "price": 699,
+    "oldPrice": 874,
+    "category": "Bags & Accessories",
+    "subcategory": "Tote Bags",
+    "categoryId": "8c8dcedf-fed6-4771-a4e4-b9f7bc293e80",
+    "subcategoryId": "5d7ec194-b374-4b79-b3a1-d12c11008d20",
+    "handmade": true,
+    "stock": 10,
+    "rating": "4.8",
+    "reviews": 0,
+    "sizes": [
+      "One Size"
+    ],
+    "colors": [
+      "Natural",
+      "Cream"
+    ],
+    "material": "Handmade yarn / fabric",
+    "makingTime": "Made to order",
+    "artisan": "HOWDI Grandma Makers",
+    "collections": [
+      "Crochet",
+      "Summer"
+    ],
+    "audience": [
+      "All"
+    ],
+    "ageGroups": [
+      "All Ages"
+    ],
+    "likes": 0,
+    "visible": true,
+    "featured": false,
+    "trending": true,
+    "flashOffer": false,
+    "mostPurchased": false,
+    "offerText": "",
+    "offerEndsAt": "",
+    "badges": [
+      "HANDMADE"
+    ],
+    "story": "Made carefully by hand in the spirit of Grandma’s traditional craft.",
+    "created_at": "2026-08-30T00:00:00.000Z"
+  },
+  {
+    "id": "cce2e0a5-4e32-4ade-b97f-4442d49eafb7",
+    "name": "Belt",
+    "shop": "HOWDI Grandma's Collection",
+    "icon": "〰️",
+    "price": 399,
+    "oldPrice": 499,
+    "category": "Bags & Accessories",
+    "subcategory": "Wearable Accessories",
+    "categoryId": "8c8dcedf-fed6-4771-a4e4-b9f7bc293e80",
+    "subcategoryId": "3107294c-ecd9-4489-be86-ea153ae9273e",
+    "handmade": true,
+    "stock": 10,
+    "rating": "4.8",
+    "reviews": 0,
+    "sizes": [
+      "One Size"
+    ],
+    "colors": [
+      "Natural",
+      "Cream"
+    ],
+    "material": "Handmade yarn / fabric",
+    "makingTime": "Made to order",
+    "artisan": "HOWDI Grandma Makers",
+    "collections": [
+      "Crochet"
+    ],
+    "audience": [
+      "All"
+    ],
+    "ageGroups": [
+      "All Ages"
+    ],
+    "likes": 0,
+    "visible": true,
+    "featured": false,
+    "trending": true,
+    "flashOffer": false,
+    "mostPurchased": false,
+    "offerText": "",
+    "offerEndsAt": "",
+    "badges": [
+      "HANDMADE"
+    ],
+    "story": "Made carefully by hand in the spirit of Grandma’s traditional craft.",
+    "created_at": "2026-08-30T00:00:00.000Z"
+  },
+  {
+    "id": "a946e1ad-31c9-4229-806f-5ed850adbd40",
+    "name": "Bralette Top",
+    "shop": "HOWDI Grandma's Collection",
+    "icon": "👚",
+    "price": 899,
+    "oldPrice": 1124,
+    "category": "Handmade Clothing",
+    "subcategory": "Tops",
+    "categoryId": "dce9e4e5-98a2-471e-a38b-f54a21b64c10",
+    "subcategoryId": "750d3978-4ab4-439d-b39c-28a2f20385af",
+    "handmade": true,
+    "stock": 10,
+    "rating": "4.8",
+    "reviews": 0,
+    "sizes": [
+      "One Size"
+    ],
+    "colors": [
+      "Natural",
+      "Cream"
+    ],
+    "material": "Handmade yarn / fabric",
+    "makingTime": "Made to order",
+    "artisan": "HOWDI Grandma Makers",
+    "collections": [
+      "Crochet"
+    ],
+    "audience": [
+      "Women"
+    ],
+    "ageGroups": [
+      "All Ages"
+    ],
+    "likes": 0,
+    "visible": true,
+    "featured": false,
+    "trending": true,
+    "flashOffer": false,
+    "mostPurchased": false,
+    "offerText": "",
+    "offerEndsAt": "",
+    "badges": [
+      "HANDMADE"
+    ],
+    "story": "Made carefully by hand in the spirit of Grandma’s traditional craft.",
+    "created_at": "2026-08-30T00:00:00.000Z"
+  },
+  {
+    "id": "acddb165-decc-4cc9-a581-f2ecd2acc7e3",
+    "name": "Bow Tote Bag",
+    "shop": "HOWDI Grandma's Collection",
+    "icon": "🎀",
+    "price": 799,
+    "oldPrice": 999,
+    "category": "Bags & Accessories",
+    "subcategory": "Tote Bags",
+    "categoryId": "8c8dcedf-fed6-4771-a4e4-b9f7bc293e80",
+    "subcategoryId": "5d7ec194-b374-4b79-b3a1-d12c11008d20",
+    "handmade": true,
+    "stock": 10,
+    "rating": "4.8",
+    "reviews": 0,
+    "sizes": [
+      "One Size"
+    ],
+    "colors": [
+      "Natural",
+      "Cream"
+    ],
+    "material": "Handmade yarn / fabric",
+    "makingTime": "Made to order",
+    "artisan": "HOWDI Grandma Makers",
+    "collections": [
+      "Crochet"
+    ],
+    "audience": [
+      "All"
+    ],
+    "ageGroups": [
+      "All Ages"
+    ],
+    "likes": 0,
+    "visible": true,
+    "featured": false,
+    "trending": true,
+    "flashOffer": false,
+    "mostPurchased": false,
+    "offerText": "",
+    "offerEndsAt": "",
+    "badges": [
+      "HANDMADE"
+    ],
+    "story": "Made carefully by hand in the spirit of Grandma’s traditional craft.",
+    "created_at": "2026-08-30T00:00:00.000Z"
+  },
+  {
+    "id": "eb0d0092-d110-4a58-a516-d488e4580e29",
+    "name": "Balaclava",
+    "shop": "HOWDI Grandma's Collection",
+    "icon": "🧶",
+    "price": 599,
+    "oldPrice": 749,
+    "category": "Bags & Accessories",
+    "subcategory": "Hats & Headwear",
+    "categoryId": "8c8dcedf-fed6-4771-a4e4-b9f7bc293e80",
+    "subcategoryId": "91bc7247-3458-4fda-90f7-b7d7d639273c",
+    "handmade": true,
+    "stock": 10,
+    "rating": "4.8",
+    "reviews": 0,
+    "sizes": [
+      "One Size"
+    ],
+    "colors": [
+      "Natural",
+      "Cream"
+    ],
+    "material": "Handmade yarn / fabric",
+    "makingTime": "Made to order",
+    "artisan": "HOWDI Grandma Makers",
+    "collections": [
+      "Crochet",
+      "Winter"
+    ],
+    "audience": [
+      "All"
+    ],
+    "ageGroups": [
+      "All Ages"
+    ],
+    "likes": 0,
+    "visible": true,
+    "featured": false,
+    "trending": true,
+    "flashOffer": false,
+    "mostPurchased": false,
+    "offerText": "",
+    "offerEndsAt": "",
+    "badges": [
+      "HANDMADE"
+    ],
+    "story": "Made carefully by hand in the spirit of Grandma’s traditional craft.",
+    "created_at": "2026-08-30T00:00:00.000Z"
+  },
+  {
+    "id": "25b06de5-55fc-4a5e-9660-0d9956135742",
+    "name": "Build-a-Bear Clothes",
+    "shop": "HOWDI Grandma's Collection",
+    "icon": "🧸",
+    "price": 349,
+    "oldPrice": 449,
+    "category": "Gifts",
+    "subcategory": "Kids Gifts",
+    "categoryId": "3ff4e27c-a690-4f6d-b79a-74ce96458ae1",
+    "subcategoryId": "e91510d3-b84c-4954-bfc7-21253c601647",
+    "handmade": true,
+    "stock": 10,
+    "rating": "4.8",
+    "reviews": 0,
+    "sizes": [
+      "One Size"
+    ],
+    "colors": [
+      "Natural",
+      "Cream"
+    ],
+    "material": "Handmade yarn / fabric",
+    "makingTime": "Made to order",
+    "artisan": "HOWDI Grandma Makers",
+    "collections": [
+      "Crochet"
+    ],
+    "audience": [
+      "All"
+    ],
+    "ageGroups": [
+      "Kids"
+    ],
+    "likes": 0,
+    "visible": true,
+    "featured": false,
+    "trending": true,
+    "flashOffer": false,
+    "mostPurchased": false,
+    "offerText": "",
+    "offerEndsAt": "",
+    "badges": [
+      "HANDMADE"
+    ],
+    "story": "Made carefully by hand in the spirit of Grandma’s traditional craft.",
+    "created_at": "2026-08-30T00:00:00.000Z"
+  },
+  {
+    "id": "aebf8c01-9fe0-480d-8375-8351e27bba21",
+    "name": "Bracelets",
+    "shop": "HOWDI Grandma's Collection",
+    "icon": "📿",
+    "price": 199,
+    "oldPrice": 299,
+    "category": "Bags & Accessories",
+    "subcategory": "Jewellery",
+    "categoryId": "8c8dcedf-fed6-4771-a4e4-b9f7bc293e80",
+    "subcategoryId": "93956d6b-2d72-42b9-901d-c8937e69c947",
+    "handmade": true,
+    "stock": 10,
+    "rating": "4.8",
+    "reviews": 0,
+    "sizes": [
+      "One Size"
+    ],
+    "colors": [
+      "Natural",
+      "Cream"
+    ],
+    "material": "Handmade yarn / fabric",
+    "makingTime": "Made to order",
+    "artisan": "HOWDI Grandma Makers",
+    "collections": [
+      "Crochet"
+    ],
+    "audience": [
+      "All"
+    ],
+    "ageGroups": [
+      "All Ages"
+    ],
+    "likes": 0,
+    "visible": true,
+    "featured": false,
+    "trending": true,
+    "flashOffer": true,
+    "mostPurchased": false,
+    "offerText": "Grandma’s little-price special",
+    "offerEndsAt": "",
+    "badges": [
+      "HANDMADE"
+    ],
+    "story": "Made carefully by hand in the spirit of Grandma’s traditional craft.",
+    "created_at": "2026-08-30T00:00:00.000Z"
+  },
+  {
+    "id": "79ab0010-7fa7-4376-baf7-206161af4432",
+    "name": "Crochet Hook Holder",
+    "shop": "HOWDI Grandma's Collection",
+    "icon": "🧶",
+    "price": 299,
+    "oldPrice": 399,
+    "category": "Home Crochet",
+    "subcategory": "Organizers",
+    "categoryId": "8dcfe7d0-e507-47cc-95ed-a0ba4e20fb2e",
+    "subcategoryId": "433ecb1f-dd8e-4ad8-934d-18f75201f516",
+    "handmade": true,
+    "stock": 10,
+    "rating": "4.8",
+    "reviews": 0,
+    "sizes": [
+      "One Size"
+    ],
+    "colors": [
+      "Natural",
+      "Cream"
+    ],
+    "material": "Handmade yarn / fabric",
+    "makingTime": "Made to order",
+    "artisan": "HOWDI Grandma Makers",
+    "collections": [
+      "Crochet"
+    ],
+    "audience": [
+      "All"
+    ],
+    "ageGroups": [
+      "All Ages"
+    ],
+    "likes": 0,
+    "visible": true,
+    "featured": false,
+    "trending": true,
+    "flashOffer": true,
+    "mostPurchased": false,
+    "offerText": "Grandma’s little-price special",
+    "offerEndsAt": "",
+    "badges": [
+      "HANDMADE"
+    ],
+    "story": "Made carefully by hand in the spirit of Grandma’s traditional craft.",
+    "created_at": "2026-08-30T00:00:00.000Z"
+  },
+  {
+    "id": "c4ce7a5a-8f80-4c52-b901-9e4e99a33ded",
+    "name": "Cat Beanie",
+    "shop": "HOWDI Grandma's Collection",
+    "icon": "🐱",
+    "price": 349,
+    "oldPrice": 449,
+    "category": "Bags & Accessories",
+    "subcategory": "Hats & Headwear",
+    "categoryId": "8c8dcedf-fed6-4771-a4e4-b9f7bc293e80",
+    "subcategoryId": "91bc7247-3458-4fda-90f7-b7d7d639273c",
+    "handmade": true,
+    "stock": 10,
+    "rating": "4.8",
+    "reviews": 0,
+    "sizes": [
+      "One Size"
+    ],
+    "colors": [
+      "Natural",
+      "Cream"
+    ],
+    "material": "Handmade yarn / fabric",
+    "makingTime": "Made to order",
+    "artisan": "HOWDI Grandma Makers",
+    "collections": [
+      "Crochet"
+    ],
+    "audience": [
+      "All"
+    ],
+    "ageGroups": [
+      "Kids"
+    ],
+    "likes": 0,
+    "visible": true,
+    "featured": false,
+    "trending": true,
+    "flashOffer": false,
+    "mostPurchased": false,
+    "offerText": "",
+    "offerEndsAt": "",
+    "badges": [
+      "HANDMADE"
+    ],
+    "story": "Made carefully by hand in the spirit of Grandma’s traditional craft.",
+    "created_at": "2026-08-30T00:00:00.000Z"
+  },
+  {
+    "id": "ca1141f1-52a5-44f2-af14-fd5cd4a99dc6",
+    "name": "Coin Purse",
+    "shop": "HOWDI Grandma's Collection",
+    "icon": "👛",
+    "price": 249,
+    "oldPrice": 349,
+    "category": "Bags & Accessories",
+    "subcategory": "Small Bags & Pouches",
+    "categoryId": "8c8dcedf-fed6-4771-a4e4-b9f7bc293e80",
+    "subcategoryId": "6c0c990b-fc86-405a-b8a7-7c947ed4e25b",
+    "handmade": true,
+    "stock": 10,
+    "rating": "4.8",
+    "reviews": 0,
+    "sizes": [
+      "One Size"
+    ],
+    "colors": [
+      "Natural",
+      "Cream"
+    ],
+    "material": "Handmade yarn / fabric",
+    "makingTime": "Made to order",
+    "artisan": "HOWDI Grandma Makers",
+    "collections": [
+      "Crochet"
+    ],
+    "audience": [
+      "All"
+    ],
+    "ageGroups": [
+      "All Ages"
+    ],
+    "likes": 0,
+    "visible": true,
+    "featured": false,
+    "trending": true,
+    "flashOffer": true,
+    "mostPurchased": false,
+    "offerText": "Grandma’s little-price special",
+    "offerEndsAt": "",
+    "badges": [
+      "HANDMADE"
+    ],
+    "story": "Made carefully by hand in the spirit of Grandma’s traditional craft.",
+    "created_at": "2026-08-30T00:00:00.000Z"
+  },
+  {
+    "id": "3bd66141-bec2-4b3c-a3b2-ded6d7026e0d",
+    "name": "Cowboy Hat",
+    "shop": "HOWDI Grandma's Collection",
+    "icon": "🤠",
+    "price": 599,
+    "oldPrice": 749,
+    "category": "Bags & Accessories",
+    "subcategory": "Hats & Headwear",
+    "categoryId": "8c8dcedf-fed6-4771-a4e4-b9f7bc293e80",
+    "subcategoryId": "91bc7247-3458-4fda-90f7-b7d7d639273c",
+    "handmade": true,
+    "stock": 10,
+    "rating": "4.8",
+    "reviews": 0,
+    "sizes": [
+      "One Size"
+    ],
+    "colors": [
+      "Natural",
+      "Cream"
+    ],
+    "material": "Handmade yarn / fabric",
+    "makingTime": "Made to order",
+    "artisan": "HOWDI Grandma Makers",
+    "collections": [
+      "Crochet"
+    ],
+    "audience": [
+      "All"
+    ],
+    "ageGroups": [
+      "All Ages"
+    ],
+    "likes": 0,
+    "visible": true,
+    "featured": false,
+    "trending": true,
+    "flashOffer": false,
+    "mostPurchased": false,
+    "offerText": "",
+    "offerEndsAt": "",
+    "badges": [
+      "HANDMADE"
+    ],
+    "story": "Made carefully by hand in the spirit of Grandma’s traditional craft.",
+    "created_at": "2026-08-30T00:00:00.000Z"
+  },
+  {
+    "id": "a39794be-384d-431d-9c00-3fc3ade7dcad",
+    "name": "Crystal Pouch",
+    "shop": "HOWDI Grandma's Collection",
+    "icon": "💎",
+    "price": 299,
+    "oldPrice": 399,
+    "category": "Bags & Accessories",
+    "subcategory": "Small Bags & Pouches",
+    "categoryId": "8c8dcedf-fed6-4771-a4e4-b9f7bc293e80",
+    "subcategoryId": "6c0c990b-fc86-405a-b8a7-7c947ed4e25b",
+    "handmade": true,
+    "stock": 10,
+    "rating": "4.8",
+    "reviews": 0,
+    "sizes": [
+      "One Size"
+    ],
+    "colors": [
+      "Natural",
+      "Cream"
+    ],
+    "material": "Handmade yarn / fabric",
+    "makingTime": "Made to order",
+    "artisan": "HOWDI Grandma Makers",
+    "collections": [
+      "Crochet"
+    ],
+    "audience": [
+      "All"
+    ],
+    "ageGroups": [
+      "All Ages"
+    ],
+    "likes": 0,
+    "visible": true,
+    "featured": false,
+    "trending": true,
+    "flashOffer": true,
+    "mostPurchased": false,
+    "offerText": "Grandma’s little-price special",
+    "offerEndsAt": "",
+    "badges": [
+      "HANDMADE"
+    ],
+    "story": "Made carefully by hand in the spirit of Grandma’s traditional craft.",
+    "created_at": "2026-08-30T00:00:00.000Z"
+  },
+  {
+    "id": "183feb8a-25f3-4e4b-a62d-ae46d76ebef1",
+    "name": "Checkered Blanket",
+    "shop": "HOWDI Grandma's Collection",
+    "icon": "🧶",
+    "price": 1299,
+    "oldPrice": 1624,
+    "category": "Home Crochet",
+    "subcategory": "Blankets",
+    "categoryId": "8dcfe7d0-e507-47cc-95ed-a0ba4e20fb2e",
+    "subcategoryId": "d026ac51-d2e4-4fe4-939b-6031cba57d92",
+    "handmade": true,
+    "stock": 10,
+    "rating": "4.8",
+    "reviews": 0,
+    "sizes": [
+      "One Size"
+    ],
+    "colors": [
+      "Natural",
+      "Cream"
+    ],
+    "material": "Handmade yarn / fabric",
+    "makingTime": "Made to order",
+    "artisan": "HOWDI Grandma Makers",
+    "collections": [
+      "Crochet",
+      "Blankets",
+      "Winter"
+    ],
+    "audience": [
+      "All"
+    ],
+    "ageGroups": [
+      "All Ages"
+    ],
+    "likes": 0,
+    "visible": true,
+    "featured": false,
+    "trending": false,
+    "flashOffer": false,
+    "mostPurchased": false,
+    "offerText": "",
+    "offerEndsAt": "",
+    "badges": [
+      "HANDMADE"
+    ],
+    "story": "Made carefully by hand in the spirit of Grandma’s traditional craft.",
+    "created_at": "2026-08-30T00:00:00.000Z"
+  },
+  {
+    "id": "4b592eda-2826-424f-8c43-9861ee820dec",
+    "name": "Car Basket",
+    "shop": "HOWDI Grandma's Collection",
+    "icon": "🧺",
+    "price": 449,
+    "oldPrice": 561,
+    "category": "Home Crochet",
+    "subcategory": "Organizers",
+    "categoryId": "8dcfe7d0-e507-47cc-95ed-a0ba4e20fb2e",
+    "subcategoryId": "433ecb1f-dd8e-4ad8-934d-18f75201f516",
+    "handmade": true,
+    "stock": 10,
+    "rating": "4.8",
+    "reviews": 0,
+    "sizes": [
+      "One Size"
+    ],
+    "colors": [
+      "Natural",
+      "Cream"
+    ],
+    "material": "Handmade yarn / fabric",
+    "makingTime": "Made to order",
+    "artisan": "HOWDI Grandma Makers",
+    "collections": [
+      "Crochet"
+    ],
+    "audience": [
+      "All"
+    ],
+    "ageGroups": [
+      "All Ages"
+    ],
+    "likes": 0,
+    "visible": true,
+    "featured": false,
+    "trending": true,
+    "flashOffer": false,
+    "mostPurchased": false,
+    "offerText": "",
+    "offerEndsAt": "",
+    "badges": [
+      "HANDMADE"
+    ],
+    "story": "Made carefully by hand in the spirit of Grandma’s traditional craft.",
+    "created_at": "2026-08-30T00:00:00.000Z"
+  },
+  {
+    "id": "dadb3afa-7bff-4270-a866-3503de171edf",
+    "name": "Cow Socks",
+    "shop": "HOWDI Grandma's Collection",
+    "icon": "🧦",
+    "price": 249,
+    "oldPrice": 349,
+    "category": "Bags & Accessories",
+    "subcategory": "Wearable Accessories",
+    "categoryId": "8c8dcedf-fed6-4771-a4e4-b9f7bc293e80",
+    "subcategoryId": "3107294c-ecd9-4489-be86-ea153ae9273e",
+    "handmade": true,
+    "stock": 10,
+    "rating": "4.8",
+    "reviews": 0,
+    "sizes": [
+      "One Size"
+    ],
+    "colors": [
+      "Natural",
+      "Cream"
+    ],
+    "material": "Handmade yarn / fabric",
+    "makingTime": "Made to order",
+    "artisan": "HOWDI Grandma Makers",
+    "collections": [
+      "Crochet"
+    ],
+    "audience": [
+      "All"
+    ],
+    "ageGroups": [
+      "All Ages"
+    ],
+    "likes": 0,
+    "visible": true,
+    "featured": false,
+    "trending": true,
+    "flashOffer": true,
+    "mostPurchased": false,
+    "offerText": "Grandma’s little-price special",
+    "offerEndsAt": "",
+    "badges": [
+      "HANDMADE"
+    ],
+    "story": "Made carefully by hand in the spirit of Grandma’s traditional craft.",
+    "created_at": "2026-08-30T00:00:00.000Z"
+  },
+  {
+    "id": "e78b6677-3f81-4cec-9545-d1719ce7568f",
+    "name": "Crochet Organizer",
+    "shop": "HOWDI Grandma's Collection",
+    "icon": "🧺",
+    "price": 399,
+    "oldPrice": 499,
+    "category": "Home Crochet",
+    "subcategory": "Organizers",
+    "categoryId": "8dcfe7d0-e507-47cc-95ed-a0ba4e20fb2e",
+    "subcategoryId": "433ecb1f-dd8e-4ad8-934d-18f75201f516",
+    "handmade": true,
+    "stock": 10,
+    "rating": "4.8",
+    "reviews": 0,
+    "sizes": [
+      "One Size"
+    ],
+    "colors": [
+      "Natural",
+      "Cream"
+    ],
+    "material": "Handmade yarn / fabric",
+    "makingTime": "Made to order",
+    "artisan": "HOWDI Grandma Makers",
+    "collections": [
+      "Crochet"
+    ],
+    "audience": [
+      "All"
+    ],
+    "ageGroups": [
+      "All Ages"
+    ],
+    "likes": 0,
+    "visible": true,
+    "featured": false,
+    "trending": true,
+    "flashOffer": false,
+    "mostPurchased": false,
+    "offerText": "",
+    "offerEndsAt": "",
+    "badges": [
+      "HANDMADE"
+    ],
+    "story": "Made carefully by hand in the spirit of Grandma’s traditional craft.",
+    "created_at": "2026-08-30T00:00:00.000Z"
+  },
+  {
+    "id": "293c9672-43b0-46cd-9032-21846016df3a",
+    "name": "Candle Cover",
+    "shop": "HOWDI Grandma's Collection",
+    "icon": "🕯️",
+    "price": 149,
+    "oldPrice": 249,
+    "category": "Home Crochet",
+    "subcategory": "Home Accents",
+    "categoryId": "8dcfe7d0-e507-47cc-95ed-a0ba4e20fb2e",
+    "subcategoryId": "3abe370d-8061-431f-b123-677a2f08100b",
+    "handmade": true,
+    "stock": 10,
+    "rating": "4.8",
+    "reviews": 0,
+    "sizes": [
+      "One Size"
+    ],
+    "colors": [
+      "Natural",
+      "Cream"
+    ],
+    "material": "Handmade yarn / fabric",
+    "makingTime": "Made to order",
+    "artisan": "HOWDI Grandma Makers",
+    "collections": [
+      "Crochet"
+    ],
+    "audience": [
+      "All"
+    ],
+    "ageGroups": [
+      "All Ages"
+    ],
+    "likes": 0,
+    "visible": true,
+    "featured": false,
+    "trending": true,
+    "flashOffer": true,
+    "mostPurchased": false,
+    "offerText": "Grandma’s little-price special",
+    "offerEndsAt": "",
+    "badges": [
+      "HANDMADE"
+    ],
+    "story": "Made carefully by hand in the spirit of Grandma’s traditional craft.",
+    "created_at": "2026-08-30T00:00:00.000Z"
+  },
+  {
+    "id": "d8e4d60b-2301-4019-99e8-e251fc30e8f2",
+    "name": "Chapstick Holder",
+    "shop": "HOWDI Grandma's Collection",
+    "icon": "💄",
+    "price": 99,
+    "oldPrice": 199,
+    "category": "Bags & Accessories",
+    "subcategory": "Useful Accessories",
+    "categoryId": "8c8dcedf-fed6-4771-a4e4-b9f7bc293e80",
+    "subcategoryId": "248fb04a-81a1-4ce7-97c8-73da52925c1a",
+    "handmade": true,
+    "stock": 10,
+    "rating": "4.8",
+    "reviews": 0,
+    "sizes": [
+      "One Size"
+    ],
+    "colors": [
+      "Natural",
+      "Cream"
+    ],
+    "material": "Handmade yarn / fabric",
+    "makingTime": "Made to order",
+    "artisan": "HOWDI Grandma Makers",
+    "collections": [
+      "Crochet"
+    ],
+    "audience": [
+      "All"
+    ],
+    "ageGroups": [
+      "All Ages"
+    ],
+    "likes": 0,
+    "visible": true,
+    "featured": false,
+    "trending": true,
+    "flashOffer": true,
+    "mostPurchased": false,
+    "offerText": "Grandma’s little-price special",
+    "offerEndsAt": "",
+    "badges": [
+      "HANDMADE"
+    ],
+    "story": "Made carefully by hand in the spirit of Grandma’s traditional craft.",
+    "created_at": "2026-08-30T00:00:00.000Z"
+  },
+  {
+    "id": "2d53e4cc-602c-4e2b-815a-3daaffa40797",
+    "name": "Cross Body Bag",
+    "shop": "HOWDI Grandma's Collection",
+    "icon": "👜",
+    "price": 699,
+    "oldPrice": 874,
+    "category": "Bags & Accessories",
+    "subcategory": "Small Bags & Pouches",
+    "categoryId": "8c8dcedf-fed6-4771-a4e4-b9f7bc293e80",
+    "subcategoryId": "6c0c990b-fc86-405a-b8a7-7c947ed4e25b",
+    "handmade": true,
+    "stock": 10,
+    "rating": "4.8",
+    "reviews": 0,
+    "sizes": [
+      "One Size"
+    ],
+    "colors": [
+      "Natural",
+      "Cream"
+    ],
+    "material": "Handmade yarn / fabric",
+    "makingTime": "Made to order",
+    "artisan": "HOWDI Grandma Makers",
+    "collections": [
+      "Crochet"
+    ],
+    "audience": [
+      "All"
+    ],
+    "ageGroups": [
+      "All Ages"
+    ],
+    "likes": 0,
+    "visible": true,
+    "featured": false,
+    "trending": true,
+    "flashOffer": false,
+    "mostPurchased": false,
+    "offerText": "",
+    "offerEndsAt": "",
+    "badges": [
+      "HANDMADE"
+    ],
+    "story": "Made carefully by hand in the spirit of Grandma’s traditional craft.",
+    "created_at": "2026-08-30T00:00:00.000Z"
+  },
+  {
+    "id": "34cccb5f-a1a8-484b-a000-2053d4831329",
+    "name": "Coaster Sets",
+    "shop": "HOWDI Grandma's Collection",
+    "icon": "☕",
+    "price": 249,
+    "oldPrice": 349,
+    "category": "Home Crochet",
+    "subcategory": "Coasters & Cup Sets",
+    "categoryId": "8dcfe7d0-e507-47cc-95ed-a0ba4e20fb2e",
+    "subcategoryId": "5cd0bbe4-d6d8-4e9e-8e34-53dbb63c5015",
+    "handmade": true,
+    "stock": 10,
+    "rating": "4.8",
+    "reviews": 0,
+    "sizes": [
+      "One Size"
+    ],
+    "colors": [
+      "Natural",
+      "Cream"
+    ],
+    "material": "Handmade yarn / fabric",
+    "makingTime": "Made to order",
+    "artisan": "HOWDI Grandma Makers",
+    "collections": [
+      "Crochet"
+    ],
+    "audience": [
+      "All"
+    ],
+    "ageGroups": [
+      "All Ages"
+    ],
+    "likes": 0,
+    "visible": true,
+    "featured": false,
+    "trending": true,
+    "flashOffer": true,
+    "mostPurchased": false,
+    "offerText": "Grandma’s little-price special",
+    "offerEndsAt": "",
+    "badges": [
+      "HANDMADE"
+    ],
+    "story": "Made carefully by hand in the spirit of Grandma’s traditional craft.",
+    "created_at": "2026-08-30T00:00:00.000Z"
+  },
+  {
+    "id": "41f9098c-9acf-43a3-bd81-30f6505cb1fe",
+    "name": "Crystal Necklace",
+    "shop": "HOWDI Grandma's Collection",
+    "icon": "📿",
+    "price": 499,
+    "oldPrice": 624,
+    "category": "Bags & Accessories",
+    "subcategory": "Jewellery",
+    "categoryId": "8c8dcedf-fed6-4771-a4e4-b9f7bc293e80",
+    "subcategoryId": "93956d6b-2d72-42b9-901d-c8937e69c947",
+    "handmade": true,
+    "stock": 10,
+    "rating": "4.8",
+    "reviews": 0,
+    "sizes": [
+      "One Size"
+    ],
+    "colors": [
+      "Natural",
+      "Cream"
+    ],
+    "material": "Handmade yarn / fabric",
+    "makingTime": "Made to order",
+    "artisan": "HOWDI Grandma Makers",
+    "collections": [
+      "Crochet"
+    ],
+    "audience": [
+      "Women"
+    ],
+    "ageGroups": [
+      "All Ages"
+    ],
+    "likes": 0,
+    "visible": true,
+    "featured": false,
+    "trending": true,
+    "flashOffer": false,
+    "mostPurchased": false,
+    "offerText": "",
+    "offerEndsAt": "",
+    "badges": [
+      "HANDMADE"
+    ],
+    "story": "Made carefully by hand in the spirit of Grandma’s traditional craft.",
+    "created_at": "2026-08-30T00:00:00.000Z"
+  },
+  {
+    "id": "c992a439-1ce9-4fa4-9a0d-7d68e76002b2",
+    "name": "Cardigan",
+    "shop": "HOWDI Grandma's Collection",
+    "icon": "🧥",
+    "price": 1599,
+    "oldPrice": 1999,
+    "category": "Handmade Clothing",
+    "subcategory": "Cardigans",
+    "categoryId": "dce9e4e5-98a2-471e-a38b-f54a21b64c10",
+    "subcategoryId": "c2d6d210-45b2-451c-9b35-17aa2d05957a",
+    "handmade": true,
+    "stock": 10,
+    "rating": "4.8",
+    "reviews": 0,
+    "sizes": [
+      "One Size"
+    ],
+    "colors": [
+      "Natural",
+      "Cream"
+    ],
+    "material": "Handmade yarn / fabric",
+    "makingTime": "Made to order",
+    "artisan": "HOWDI Grandma Makers",
+    "collections": [
+      "Crochet",
+      "Winter"
+    ],
+    "audience": [
+      "All"
+    ],
+    "ageGroups": [
+      "All Ages"
+    ],
+    "likes": 0,
+    "visible": true,
+    "featured": false,
+    "trending": false,
+    "flashOffer": false,
+    "mostPurchased": false,
+    "offerText": "",
+    "offerEndsAt": "",
+    "badges": [
+      "HANDMADE"
+    ],
+    "story": "Made carefully by hand in the spirit of Grandma’s traditional craft.",
+    "created_at": "2026-08-30T00:00:00.000Z"
+  },
+  {
+    "id": "03ae7fa1-afcb-4c18-8615-717cc64c9ec7",
+    "name": "Cup Holder Coasters",
+    "shop": "HOWDI Grandma's Collection",
+    "icon": "☕",
+    "price": 199,
+    "oldPrice": 299,
+    "category": "Home Crochet",
+    "subcategory": "Coasters & Cup Sets",
+    "categoryId": "8dcfe7d0-e507-47cc-95ed-a0ba4e20fb2e",
+    "subcategoryId": "5cd0bbe4-d6d8-4e9e-8e34-53dbb63c5015",
+    "handmade": true,
+    "stock": 10,
+    "rating": "4.8",
+    "reviews": 0,
+    "sizes": [
+      "One Size"
+    ],
+    "colors": [
+      "Natural",
+      "Cream"
+    ],
+    "material": "Handmade yarn / fabric",
+    "makingTime": "Made to order",
+    "artisan": "HOWDI Grandma Makers",
+    "collections": [
+      "Crochet"
+    ],
+    "audience": [
+      "All"
+    ],
+    "ageGroups": [
+      "All Ages"
+    ],
+    "likes": 0,
+    "visible": true,
+    "featured": false,
+    "trending": true,
+    "flashOffer": true,
+    "mostPurchased": false,
+    "offerText": "Grandma’s little-price special",
+    "offerEndsAt": "",
+    "badges": [
+      "HANDMADE"
+    ],
+    "story": "Made carefully by hand in the spirit of Grandma’s traditional craft.",
+    "created_at": "2026-08-30T00:00:00.000Z"
+  },
+  {
+    "id": "80861bdf-60f2-4ead-b7d0-49bef72e2d30",
+    "name": "Cup Sets",
+    "shop": "HOWDI Grandma's Collection",
+    "icon": "🍵",
+    "price": 299,
+    "oldPrice": 399,
+    "category": "Home Crochet",
+    "subcategory": "Coasters & Cup Sets",
+    "categoryId": "8dcfe7d0-e507-47cc-95ed-a0ba4e20fb2e",
+    "subcategoryId": "5cd0bbe4-d6d8-4e9e-8e34-53dbb63c5015",
+    "handmade": true,
+    "stock": 10,
+    "rating": "4.8",
+    "reviews": 0,
+    "sizes": [
+      "One Size"
+    ],
+    "colors": [
+      "Natural",
+      "Cream"
+    ],
+    "material": "Handmade yarn / fabric",
+    "makingTime": "Made to order",
+    "artisan": "HOWDI Grandma Makers",
+    "collections": [
+      "Crochet"
+    ],
+    "audience": [
+      "All"
+    ],
+    "ageGroups": [
+      "All Ages"
+    ],
+    "likes": 0,
+    "visible": true,
+    "featured": false,
+    "trending": true,
+    "flashOffer": true,
+    "mostPurchased": false,
+    "offerText": "Grandma’s little-price special",
+    "offerEndsAt": "",
+    "badges": [
+      "HANDMADE"
+    ],
+    "story": "Made carefully by hand in the spirit of Grandma’s traditional craft.",
+    "created_at": "2026-08-30T00:00:00.000Z"
+  },
+  {
+    "id": "220db929-b30b-4089-afc7-8c021dbbbc81",
+    "name": "Checkered Tote Bag",
+    "shop": "HOWDI Grandma's Collection",
+    "icon": "👜",
+    "price": 649,
+    "oldPrice": 811,
+    "category": "Bags & Accessories",
+    "subcategory": "Tote Bags",
+    "categoryId": "8c8dcedf-fed6-4771-a4e4-b9f7bc293e80",
+    "subcategoryId": "5d7ec194-b374-4b79-b3a1-d12c11008d20",
+    "handmade": true,
+    "stock": 10,
+    "rating": "4.8",
+    "reviews": 0,
+    "sizes": [
+      "One Size"
+    ],
+    "colors": [
+      "Natural",
+      "Cream"
+    ],
+    "material": "Handmade yarn / fabric",
+    "makingTime": "Made to order",
+    "artisan": "HOWDI Grandma Makers",
+    "collections": [
+      "Crochet"
+    ],
+    "audience": [
+      "All"
+    ],
+    "ageGroups": [
+      "All Ages"
+    ],
+    "likes": 0,
+    "visible": true,
+    "featured": false,
+    "trending": true,
+    "flashOffer": false,
+    "mostPurchased": false,
+    "offerText": "",
+    "offerEndsAt": "",
+    "badges": [
+      "HANDMADE"
+    ],
+    "story": "Made carefully by hand in the spirit of Grandma’s traditional craft.",
+    "created_at": "2026-08-30T00:00:00.000Z"
+  },
+  {
+    "id": "ca761275-94ec-47c4-88b0-8b0f7784c7d0",
+    "name": "Camera Strap",
+    "shop": "HOWDI Grandma's Collection",
+    "icon": "📷",
+    "price": 399,
+    "oldPrice": 499,
+    "category": "Bags & Accessories",
+    "subcategory": "Wearable Accessories",
+    "categoryId": "8c8dcedf-fed6-4771-a4e4-b9f7bc293e80",
+    "subcategoryId": "3107294c-ecd9-4489-be86-ea153ae9273e",
+    "handmade": true,
+    "stock": 10,
+    "rating": "4.8",
+    "reviews": 0,
+    "sizes": [
+      "One Size"
+    ],
+    "colors": [
+      "Natural",
+      "Cream"
+    ],
+    "material": "Handmade yarn / fabric",
+    "makingTime": "Made to order",
+    "artisan": "HOWDI Grandma Makers",
+    "collections": [
+      "Crochet"
+    ],
+    "audience": [
+      "All"
+    ],
+    "ageGroups": [
+      "All Ages"
+    ],
+    "likes": 0,
+    "visible": true,
+    "featured": false,
+    "trending": true,
+    "flashOffer": false,
+    "mostPurchased": false,
+    "offerText": "",
+    "offerEndsAt": "",
+    "badges": [
+      "HANDMADE"
+    ],
+    "story": "Made carefully by hand in the spirit of Grandma’s traditional craft.",
+    "created_at": "2026-08-30T00:00:00.000Z"
+  },
+  {
+    "id": "65228c60-14dc-4b35-a928-466b44bb9631",
+    "name": "Cup Cozy",
+    "shop": "HOWDI Grandma's Collection",
+    "icon": "☕",
+    "price": 149,
+    "oldPrice": 249,
+    "category": "Home Crochet",
+    "subcategory": "Coasters & Cup Sets",
+    "categoryId": "8dcfe7d0-e507-47cc-95ed-a0ba4e20fb2e",
+    "subcategoryId": "5cd0bbe4-d6d8-4e9e-8e34-53dbb63c5015",
+    "handmade": true,
+    "stock": 10,
+    "rating": "4.8",
+    "reviews": 0,
+    "sizes": [
+      "One Size"
+    ],
+    "colors": [
+      "Natural",
+      "Cream"
+    ],
+    "material": "Handmade yarn / fabric",
+    "makingTime": "Made to order",
+    "artisan": "HOWDI Grandma Makers",
+    "collections": [
+      "Crochet"
+    ],
+    "audience": [
+      "All"
+    ],
+    "ageGroups": [
+      "All Ages"
+    ],
+    "likes": 0,
+    "visible": true,
+    "featured": false,
+    "trending": true,
+    "flashOffer": true,
+    "mostPurchased": false,
+    "offerText": "Grandma’s little-price special",
+    "offerEndsAt": "",
+    "badges": [
+      "HANDMADE"
+    ],
+    "story": "Made carefully by hand in the spirit of Grandma’s traditional craft.",
+    "created_at": "2026-08-30T00:00:00.000Z"
+  },
+  {
+    "id": "a7859a72-3a9d-4100-bdd5-0b8a3f4a6872",
+    "name": "Drawstring Bag",
+    "shop": "HOWDI Grandma's Collection",
+    "icon": "🎒",
+    "price": 349,
+    "oldPrice": 449,
+    "category": "Bags & Accessories",
+    "subcategory": "Small Bags & Pouches",
+    "categoryId": "8c8dcedf-fed6-4771-a4e4-b9f7bc293e80",
+    "subcategoryId": "6c0c990b-fc86-405a-b8a7-7c947ed4e25b",
+    "handmade": true,
+    "stock": 10,
+    "rating": "4.8",
+    "reviews": 0,
+    "sizes": [
+      "One Size"
+    ],
+    "colors": [
+      "Natural",
+      "Cream"
+    ],
+    "material": "Handmade yarn / fabric",
+    "makingTime": "Made to order",
+    "artisan": "HOWDI Grandma Makers",
+    "collections": [
+      "Crochet"
+    ],
+    "audience": [
+      "All"
+    ],
+    "ageGroups": [
+      "All Ages"
+    ],
+    "likes": 0,
+    "visible": true,
+    "featured": false,
+    "trending": true,
+    "flashOffer": false,
+    "mostPurchased": false,
+    "offerText": "",
+    "offerEndsAt": "",
+    "badges": [
+      "HANDMADE"
+    ],
+    "story": "Made carefully by hand in the spirit of Grandma’s traditional craft.",
+    "created_at": "2026-08-30T00:00:00.000Z"
+  },
+  {
+    "id": "f3705ae3-c94e-4e69-8635-3a5403800fd1",
+    "name": "Dragonfly Bookcase",
+    "shop": "HOWDI Grandma's Collection",
+    "icon": "🦋",
+    "price": 799,
+    "oldPrice": 999,
+    "category": "Home Crochet",
+    "subcategory": "Home Accents",
+    "categoryId": "8dcfe7d0-e507-47cc-95ed-a0ba4e20fb2e",
+    "subcategoryId": "3abe370d-8061-431f-b123-677a2f08100b",
+    "handmade": true,
+    "stock": 10,
+    "rating": "4.8",
+    "reviews": 0,
+    "sizes": [
+      "One Size"
+    ],
+    "colors": [
+      "Natural",
+      "Cream"
+    ],
+    "material": "Handmade yarn / fabric",
+    "makingTime": "Made to order",
+    "artisan": "HOWDI Grandma Makers",
+    "collections": [
+      "Crochet"
+    ],
+    "audience": [
+      "All"
+    ],
+    "ageGroups": [
+      "All Ages"
+    ],
+    "likes": 0,
+    "visible": true,
+    "featured": false,
+    "trending": true,
+    "flashOffer": false,
+    "mostPurchased": false,
+    "offerText": "",
+    "offerEndsAt": "",
+    "badges": [
+      "HANDMADE"
+    ],
+    "story": "Made carefully by hand in the spirit of Grandma’s traditional craft.",
+    "created_at": "2026-08-30T00:00:00.000Z"
+  },
+  {
+    "id": "ee573b81-38f1-401f-a833-43835543f754",
+    "name": "Drink Cozy",
+    "shop": "HOWDI Grandma's Collection",
+    "icon": "🥤",
+    "price": 149,
+    "oldPrice": 249,
+    "category": "Home Crochet",
+    "subcategory": "Coasters & Cup Sets",
+    "categoryId": "8dcfe7d0-e507-47cc-95ed-a0ba4e20fb2e",
+    "subcategoryId": "5cd0bbe4-d6d8-4e9e-8e34-53dbb63c5015",
+    "handmade": true,
+    "stock": 10,
+    "rating": "4.8",
+    "reviews": 0,
+    "sizes": [
+      "One Size"
+    ],
+    "colors": [
+      "Natural",
+      "Cream"
+    ],
+    "material": "Handmade yarn / fabric",
+    "makingTime": "Made to order",
+    "artisan": "HOWDI Grandma Makers",
+    "collections": [
+      "Crochet"
+    ],
+    "audience": [
+      "All"
+    ],
+    "ageGroups": [
+      "All Ages"
+    ],
+    "likes": 0,
+    "visible": true,
+    "featured": false,
+    "trending": true,
+    "flashOffer": true,
+    "mostPurchased": false,
+    "offerText": "Grandma’s little-price special",
+    "offerEndsAt": "",
+    "badges": [
+      "HANDMADE"
+    ],
+    "story": "Made carefully by hand in the spirit of Grandma’s traditional craft.",
+    "created_at": "2026-08-30T00:00:00.000Z"
+  },
+  {
+    "id": "f3ec4f2e-5882-451d-b919-6ae1c108e85b",
+    "name": "Digital Camera Case",
+    "shop": "HOWDI Grandma's Collection",
+    "icon": "📷",
+    "price": 399,
+    "oldPrice": 499,
+    "category": "Bags & Accessories",
+    "subcategory": "Useful Accessories",
+    "categoryId": "8c8dcedf-fed6-4771-a4e4-b9f7bc293e80",
+    "subcategoryId": "248fb04a-81a1-4ce7-97c8-73da52925c1a",
+    "handmade": true,
+    "stock": 10,
+    "rating": "4.8",
+    "reviews": 0,
+    "sizes": [
+      "One Size"
+    ],
+    "colors": [
+      "Natural",
+      "Cream"
+    ],
+    "material": "Handmade yarn / fabric",
+    "makingTime": "Made to order",
+    "artisan": "HOWDI Grandma Makers",
+    "collections": [
+      "Crochet"
+    ],
+    "audience": [
+      "All"
+    ],
+    "ageGroups": [
+      "All Ages"
+    ],
+    "likes": 0,
+    "visible": true,
+    "featured": false,
+    "trending": true,
+    "flashOffer": false,
+    "mostPurchased": false,
+    "offerText": "",
+    "offerEndsAt": "",
+    "badges": [
+      "HANDMADE"
+    ],
+    "story": "Made carefully by hand in the spirit of Grandma’s traditional craft.",
+    "created_at": "2026-08-30T00:00:00.000Z"
+  },
+  {
+    "id": "0fc50c36-9c0f-4f29-aea8-47248a647ecd",
+    "name": "Decorative Pillows",
+    "shop": "HOWDI Grandma's Collection",
+    "icon": "🛋️",
+    "price": 699,
+    "oldPrice": 874,
+    "category": "Home Crochet",
+    "subcategory": "Pillows & Cushions",
+    "categoryId": "8dcfe7d0-e507-47cc-95ed-a0ba4e20fb2e",
+    "subcategoryId": "9110ddca-228f-4ba6-b4d1-834559dae1c1",
+    "handmade": true,
+    "stock": 10,
+    "rating": "4.8",
+    "reviews": 0,
+    "sizes": [
+      "One Size"
+    ],
+    "colors": [
+      "Natural",
+      "Cream"
+    ],
+    "material": "Handmade yarn / fabric",
+    "makingTime": "Made to order",
+    "artisan": "HOWDI Grandma Makers",
+    "collections": [
+      "Crochet"
+    ],
+    "audience": [
+      "All"
+    ],
+    "ageGroups": [
+      "All Ages"
+    ],
+    "likes": 0,
+    "visible": true,
+    "featured": false,
+    "trending": true,
+    "flashOffer": false,
+    "mostPurchased": false,
+    "offerText": "",
+    "offerEndsAt": "",
+    "badges": [
+      "HANDMADE"
+    ],
+    "story": "Made carefully by hand in the spirit of Grandma’s traditional craft.",
+    "created_at": "2026-08-30T00:00:00.000Z"
+  },
+  {
+    "id": "548e6e23-ec5f-45ac-bc24-9b2f6220b77b",
+    "name": "Earmuffs",
+    "shop": "HOWDI Grandma's Collection",
+    "icon": "🧶",
+    "price": 449,
+    "oldPrice": 561,
+    "category": "Bags & Accessories",
+    "subcategory": "Hats & Headwear",
+    "categoryId": "8c8dcedf-fed6-4771-a4e4-b9f7bc293e80",
+    "subcategoryId": "91bc7247-3458-4fda-90f7-b7d7d639273c",
+    "handmade": true,
+    "stock": 10,
+    "rating": "4.8",
+    "reviews": 0,
+    "sizes": [
+      "One Size"
+    ],
+    "colors": [
+      "Natural",
+      "Cream"
+    ],
+    "material": "Handmade yarn / fabric",
+    "makingTime": "Made to order",
+    "artisan": "HOWDI Grandma Makers",
+    "collections": [
+      "Crochet",
+      "Winter"
+    ],
+    "audience": [
+      "All"
+    ],
+    "ageGroups": [
+      "All Ages"
+    ],
+    "likes": 0,
+    "visible": true,
+    "featured": false,
+    "trending": true,
+    "flashOffer": false,
+    "mostPurchased": false,
+    "offerText": "",
+    "offerEndsAt": "",
+    "badges": [
+      "HANDMADE"
+    ],
+    "story": "Made carefully by hand in the spirit of Grandma’s traditional craft.",
+    "created_at": "2026-08-30T00:00:00.000Z"
+  },
+  {
+    "id": "3e9ebdfd-fdf9-43ff-a5af-788f675cf22b",
+    "name": "Earrings",
+    "shop": "HOWDI Grandma's Collection",
+    "icon": "✨",
+    "price": 299,
+    "oldPrice": 399,
+    "category": "Bags & Accessories",
+    "subcategory": "Jewellery",
+    "categoryId": "8c8dcedf-fed6-4771-a4e4-b9f7bc293e80",
+    "subcategoryId": "93956d6b-2d72-42b9-901d-c8937e69c947",
+    "handmade": true,
+    "stock": 10,
+    "rating": "4.8",
+    "reviews": 0,
+    "sizes": [
+      "One Size"
+    ],
+    "colors": [
+      "Natural",
+      "Cream"
+    ],
+    "material": "Handmade yarn / fabric",
+    "makingTime": "Made to order",
+    "artisan": "HOWDI Grandma Makers",
+    "collections": [
+      "Crochet"
+    ],
+    "audience": [
+      "Women"
+    ],
+    "ageGroups": [
+      "All Ages"
+    ],
+    "likes": 0,
+    "visible": true,
+    "featured": false,
+    "trending": true,
+    "flashOffer": true,
+    "mostPurchased": false,
+    "offerText": "Grandma’s little-price special",
+    "offerEndsAt": "",
+    "badges": [
+      "HANDMADE"
+    ],
+    "story": "Made carefully by hand in the spirit of Grandma’s traditional craft.",
+    "created_at": "2026-08-30T00:00:00.000Z"
+  },
+  {
+    "id": "017d5aef-a6f1-4eaf-abf3-2af335599a63",
+    "name": "Fingerless Gloves",
+    "shop": "HOWDI Grandma's Collection",
+    "icon": "🧤",
+    "price": 349,
+    "oldPrice": 449,
+    "category": "Bags & Accessories",
+    "subcategory": "Wearable Accessories",
+    "categoryId": "8c8dcedf-fed6-4771-a4e4-b9f7bc293e80",
+    "subcategoryId": "3107294c-ecd9-4489-be86-ea153ae9273e",
+    "handmade": true,
+    "stock": 10,
+    "rating": "4.8",
+    "reviews": 0,
+    "sizes": [
+      "One Size"
+    ],
+    "colors": [
+      "Natural",
+      "Cream"
+    ],
+    "material": "Handmade yarn / fabric",
+    "makingTime": "Made to order",
+    "artisan": "HOWDI Grandma Makers",
+    "collections": [
+      "Crochet",
+      "Winter"
+    ],
+    "audience": [
+      "All"
+    ],
+    "ageGroups": [
+      "All Ages"
+    ],
+    "likes": 0,
+    "visible": true,
+    "featured": false,
+    "trending": true,
+    "flashOffer": false,
+    "mostPurchased": false,
+    "offerText": "",
+    "offerEndsAt": "",
+    "badges": [
+      "HANDMADE"
+    ],
+    "story": "Made carefully by hand in the spirit of Grandma’s traditional craft.",
+    "created_at": "2026-08-30T00:00:00.000Z"
+  },
+  {
+    "id": "f81e2433-41cb-487c-9d7d-46ee78b00b3f",
+    "name": "Flower Garland",
+    "shop": "HOWDI Grandma's Collection",
+    "icon": "🌸",
+    "price": 399,
+    "oldPrice": 499,
+    "category": "Home Crochet",
+    "subcategory": "Home Accents",
+    "categoryId": "8dcfe7d0-e507-47cc-95ed-a0ba4e20fb2e",
+    "subcategoryId": "3abe370d-8061-431f-b123-677a2f08100b",
+    "handmade": true,
+    "stock": 10,
+    "rating": "4.8",
+    "reviews": 0,
+    "sizes": [
+      "One Size"
+    ],
+    "colors": [
+      "Natural",
+      "Cream"
+    ],
+    "material": "Handmade yarn / fabric",
+    "makingTime": "Made to order",
+    "artisan": "HOWDI Grandma Makers",
+    "collections": [
+      "Crochet",
+      "Gifts"
+    ],
+    "audience": [
+      "All"
+    ],
+    "ageGroups": [
+      "All Ages"
+    ],
+    "likes": 0,
+    "visible": true,
+    "featured": false,
+    "trending": true,
+    "flashOffer": false,
+    "mostPurchased": false,
+    "offerText": "",
+    "offerEndsAt": "",
+    "badges": [
+      "HANDMADE"
+    ],
+    "story": "Made carefully by hand in the spirit of Grandma’s traditional craft.",
+    "created_at": "2026-08-30T00:00:00.000Z"
+  },
+  {
+    "id": "7f8765ae-6c9b-439d-971e-aa96c1e8746b",
+    "name": "Flower Crown",
+    "shop": "HOWDI Grandma's Collection",
+    "icon": "🌸",
+    "price": 299,
+    "oldPrice": 399,
+    "category": "Gifts",
+    "subcategory": "Floral Gifts",
+    "categoryId": "3ff4e27c-a690-4f6d-b79a-74ce96458ae1",
+    "subcategoryId": "08895644-03fe-43ed-b48e-9d31f07aca2f",
+    "handmade": true,
+    "stock": 10,
+    "rating": "4.8",
+    "reviews": 0,
+    "sizes": [
+      "One Size"
+    ],
+    "colors": [
+      "Natural",
+      "Cream"
+    ],
+    "material": "Handmade yarn / fabric",
+    "makingTime": "Made to order",
+    "artisan": "HOWDI Grandma Makers",
+    "collections": [
+      "Crochet",
+      "Gifts"
+    ],
+    "audience": [
+      "All"
+    ],
+    "ageGroups": [
+      "All Ages"
+    ],
+    "likes": 0,
+    "visible": true,
+    "featured": false,
+    "trending": true,
+    "flashOffer": true,
+    "mostPurchased": false,
+    "offerText": "Grandma’s little-price special",
+    "offerEndsAt": "",
+    "badges": [
+      "HANDMADE"
+    ],
+    "story": "Made carefully by hand in the spirit of Grandma’s traditional craft.",
+    "created_at": "2026-08-30T00:00:00.000Z"
+  },
+  {
+    "id": "c6845ee6-b997-4fa6-8b5b-f9631fb563ee",
+    "name": "Flower Bouquet",
+    "shop": "HOWDI Grandma's Collection",
+    "icon": "💐",
+    "price": 599,
+    "oldPrice": 749,
+    "category": "Gifts",
+    "subcategory": "Floral Gifts",
+    "categoryId": "3ff4e27c-a690-4f6d-b79a-74ce96458ae1",
+    "subcategoryId": "08895644-03fe-43ed-b48e-9d31f07aca2f",
+    "handmade": true,
+    "stock": 10,
+    "rating": "4.8",
+    "reviews": 0,
+    "sizes": [
+      "One Size"
+    ],
+    "colors": [
+      "Natural",
+      "Cream"
+    ],
+    "material": "Handmade yarn / fabric",
+    "makingTime": "Made to order",
+    "artisan": "HOWDI Grandma Makers",
+    "collections": [
+      "Crochet",
+      "Gifts"
+    ],
+    "audience": [
+      "All"
+    ],
+    "ageGroups": [
+      "All Ages"
+    ],
+    "likes": 0,
+    "visible": true,
+    "featured": false,
+    "trending": true,
+    "flashOffer": false,
+    "mostPurchased": false,
+    "offerText": "",
+    "offerEndsAt": "",
+    "badges": [
+      "HANDMADE"
+    ],
+    "story": "Made carefully by hand in the spirit of Grandma’s traditional craft.",
+    "created_at": "2026-08-30T00:00:00.000Z"
+  },
+  {
+    "id": "3ee907d5-8868-4e7c-bff0-ca5f708f77ed",
+    "name": "Fruit Pouches",
+    "shop": "HOWDI Grandma's Collection",
+    "icon": "🍓",
+    "price": 249,
+    "oldPrice": 349,
+    "category": "Bags & Accessories",
+    "subcategory": "Small Bags & Pouches",
+    "categoryId": "8c8dcedf-fed6-4771-a4e4-b9f7bc293e80",
+    "subcategoryId": "6c0c990b-fc86-405a-b8a7-7c947ed4e25b",
+    "handmade": true,
+    "stock": 10,
+    "rating": "4.8",
+    "reviews": 0,
+    "sizes": [
+      "One Size"
+    ],
+    "colors": [
+      "Natural",
+      "Cream"
+    ],
+    "material": "Handmade yarn / fabric",
+    "makingTime": "Made to order",
+    "artisan": "HOWDI Grandma Makers",
+    "collections": [
+      "Crochet"
+    ],
+    "audience": [
+      "All"
+    ],
+    "ageGroups": [
+      "All Ages"
+    ],
+    "likes": 0,
+    "visible": true,
+    "featured": false,
+    "trending": true,
+    "flashOffer": true,
+    "mostPurchased": false,
+    "offerText": "Grandma’s little-price special",
+    "offerEndsAt": "",
+    "badges": [
+      "HANDMADE"
+    ],
+    "story": "Made carefully by hand in the spirit of Grandma’s traditional craft.",
+    "created_at": "2026-08-30T00:00:00.000Z"
+  },
+  {
+    "id": "38a70d43-a71e-40d2-93df-927f98fa4122",
+    "name": "Fanny Pack",
+    "shop": "HOWDI Grandma's Collection",
+    "icon": "🎒",
+    "price": 549,
+    "oldPrice": 686,
+    "category": "Bags & Accessories",
+    "subcategory": "Small Bags & Pouches",
+    "categoryId": "8c8dcedf-fed6-4771-a4e4-b9f7bc293e80",
+    "subcategoryId": "6c0c990b-fc86-405a-b8a7-7c947ed4e25b",
+    "handmade": true,
+    "stock": 10,
+    "rating": "4.8",
+    "reviews": 0,
+    "sizes": [
+      "One Size"
+    ],
+    "colors": [
+      "Natural",
+      "Cream"
+    ],
+    "material": "Handmade yarn / fabric",
+    "makingTime": "Made to order",
+    "artisan": "HOWDI Grandma Makers",
+    "collections": [
+      "Crochet"
+    ],
+    "audience": [
+      "Women"
+    ],
+    "ageGroups": [
+      "All Ages"
+    ],
+    "likes": 0,
+    "visible": true,
+    "featured": false,
+    "trending": true,
+    "flashOffer": false,
+    "mostPurchased": false,
+    "offerText": "",
+    "offerEndsAt": "",
+    "badges": [
+      "HANDMADE"
+    ],
+    "story": "Made carefully by hand in the spirit of Grandma’s traditional craft.",
+    "created_at": "2026-08-30T00:00:00.000Z"
+  },
+  {
+    "id": "edb8fc67-950b-4078-b010-b0b217d4e739",
+    "name": "Fake Plants",
+    "shop": "HOWDI Grandma's Collection",
+    "icon": "🌿",
+    "price": 399,
+    "oldPrice": 499,
+    "category": "Home Crochet",
+    "subcategory": "Home Accents",
+    "categoryId": "8dcfe7d0-e507-47cc-95ed-a0ba4e20fb2e",
+    "subcategoryId": "3abe370d-8061-431f-b123-677a2f08100b",
+    "handmade": true,
+    "stock": 10,
+    "rating": "4.8",
+    "reviews": 0,
+    "sizes": [
+      "One Size"
+    ],
+    "colors": [
+      "Natural",
+      "Cream"
+    ],
+    "material": "Handmade yarn / fabric",
+    "makingTime": "Made to order",
+    "artisan": "HOWDI Grandma Makers",
+    "collections": [
+      "Crochet"
+    ],
+    "audience": [
+      "All"
+    ],
+    "ageGroups": [
+      "All Ages"
+    ],
+    "likes": 0,
+    "visible": true,
+    "featured": false,
+    "trending": true,
+    "flashOffer": false,
+    "mostPurchased": false,
+    "offerText": "",
+    "offerEndsAt": "",
+    "badges": [
+      "HANDMADE"
+    ],
+    "story": "Made carefully by hand in the spirit of Grandma’s traditional craft.",
+    "created_at": "2026-08-30T00:00:00.000Z"
+  },
+  {
+    "id": "83b85ea2-d014-4b03-9df6-06448f807299",
+    "name": "Flower Pillows/Cushions",
+    "shop": "HOWDI Grandma's Collection",
+    "icon": "🌼",
+    "price": 699,
+    "oldPrice": 874,
+    "category": "Home Crochet",
+    "subcategory": "Pillows & Cushions",
+    "categoryId": "8dcfe7d0-e507-47cc-95ed-a0ba4e20fb2e",
+    "subcategoryId": "9110ddca-228f-4ba6-b4d1-834559dae1c1",
+    "handmade": true,
+    "stock": 10,
+    "rating": "4.8",
+    "reviews": 0,
+    "sizes": [
+      "One Size"
+    ],
+    "colors": [
+      "Natural",
+      "Cream"
+    ],
+    "material": "Handmade yarn / fabric",
+    "makingTime": "Made to order",
+    "artisan": "HOWDI Grandma Makers",
+    "collections": [
+      "Crochet",
+      "Gifts"
+    ],
+    "audience": [
+      "All"
+    ],
+    "ageGroups": [
+      "All Ages"
+    ],
+    "likes": 0,
+    "visible": true,
+    "featured": false,
+    "trending": true,
+    "flashOffer": false,
+    "mostPurchased": false,
+    "offerText": "",
+    "offerEndsAt": "",
+    "badges": [
+      "HANDMADE"
+    ],
+    "story": "Made carefully by hand in the spirit of Grandma’s traditional craft.",
+    "created_at": "2026-08-30T00:00:00.000Z"
+  },
+  {
+    "id": "bbe201e9-4617-4c91-b31b-6565b94b703c",
+    "name": "Fall Garland",
+    "shop": "HOWDI Grandma's Collection",
+    "icon": "🍂",
+    "price": 449,
+    "oldPrice": 561,
+    "category": "Gifts",
+    "subcategory": "Seasonal Gifts",
+    "categoryId": "3ff4e27c-a690-4f6d-b79a-74ce96458ae1",
+    "subcategoryId": "52513ceb-03ac-49dd-bc54-059e70b0adb2",
+    "handmade": true,
+    "stock": 10,
+    "rating": "4.8",
+    "reviews": 0,
+    "sizes": [
+      "One Size"
+    ],
+    "colors": [
+      "Natural",
+      "Cream"
+    ],
+    "material": "Handmade yarn / fabric",
+    "makingTime": "Made to order",
+    "artisan": "HOWDI Grandma Makers",
+    "collections": [
+      "Crochet",
+      "Gifts"
+    ],
+    "audience": [
+      "All"
+    ],
+    "ageGroups": [
+      "All Ages"
+    ],
+    "likes": 0,
+    "visible": true,
+    "featured": false,
+    "trending": true,
+    "flashOffer": false,
+    "mostPurchased": false,
+    "offerText": "",
+    "offerEndsAt": "",
+    "badges": [
+      "HANDMADE"
+    ],
+    "story": "Made carefully by hand in the spirit of Grandma’s traditional craft.",
+    "created_at": "2026-08-30T00:00:00.000Z"
   }
 ]

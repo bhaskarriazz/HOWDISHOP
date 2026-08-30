@@ -155,6 +155,15 @@ function App() {
 
   const [showLogin, setShowLogin] = useState(false);
 
+  // Persist the logged-in customer across refreshes.
+  const [currentUser, setCurrentUser] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem("howdiUser")) || null;
+    } catch {
+      return null;
+    }
+  });
+
   // login = login screen
   // signup = create account screen
   const [authMode, setAuthMode] = useState("login");
@@ -240,6 +249,8 @@ function App() {
         "howdiUser",
         JSON.stringify(data.user)
       );
+
+      setCurrentUser(data.user);
 
       setLoginMessage(
         "Login successful! 🎉"
@@ -340,6 +351,8 @@ function App() {
         "howdiUser",
         JSON.stringify(data.user)
       );
+
+      setCurrentUser(data.user);
 
       setLoginMessage(
         "Account created successfully! 🎉"
@@ -617,12 +630,30 @@ function App() {
             </button>
 
 
-            <button
-              className="login-button"
-              onClick={openLogin}
-            >
-              Login / Sign up
-            </button>
+            {currentUser ? (
+              <div className="user-menu">
+                <span className="user-welcome">
+                  👋 {currentUser.full_name || currentUser.name || "Customer"}
+                </span>
+
+                <button
+                  className="login-button"
+                  onClick={() => {
+                    localStorage.removeItem("howdiUser");
+                    setCurrentUser(null);
+                  }}
+                >
+                  Logout
+                </button>
+              </div>
+            ) : (
+              <button
+                className="login-button"
+                onClick={openLogin}
+              >
+                Login / Sign up
+              </button>
+            )}
 
 
             <button

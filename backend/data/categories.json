@@ -1,0 +1,53 @@
+[
+  {
+    "id": "8c9c4456-112f-4703-bc0a-3e13ba1f3dc8",
+    "name": "Crochet",
+    "slug": "crochet",
+    "icon": "🧶",
+    "description": "Traditional and modern crochet pieces made by hand.",
+    "sortOrder": 1,
+    "visible": true,
+    "showOnHome": true,
+    "updatedAt": "2026-08-30T12:56:00.344Z"
+  },
+  {
+    "id": "dce9e4e5-98a2-471e-a38b-f54a21b64c10",
+    "name": "Handmade Clothing",
+    "slug": "handmade-clothing",
+    "icon": "🧵",
+    "description": "Handmade and custom-fit clothing created by local makers.",
+    "sortOrder": 2,
+    "visible": true,
+    "showOnHome": true
+  },
+  {
+    "id": "8c8dcedf-fed6-4771-a4e4-b9f7bc293e80",
+    "name": "Bags & Accessories",
+    "slug": "bags-accessories",
+    "icon": "👜",
+    "description": "Handmade bags, wearable accessories and useful little pieces.",
+    "sortOrder": 3,
+    "visible": true,
+    "showOnHome": true
+  },
+  {
+    "id": "8dcfe7d0-e507-47cc-95ed-a0ba4e20fb2e",
+    "name": "Home Crochet",
+    "slug": "home-crochet",
+    "icon": "🏡",
+    "description": "Crochet pieces for the home, kitchen and gifting.",
+    "sortOrder": 4,
+    "visible": true,
+    "showOnHome": true
+  },
+  {
+    "id": "3ff4e27c-a690-4f6d-b79a-74ce96458ae1",
+    "name": "Gifts",
+    "slug": "gifts",
+    "icon": "🎁",
+    "description": "Handmade gift ideas with a Grandma-made feel.",
+    "sortOrder": 5,
+    "visible": true,
+    "showOnHome": true
+  }
+]
