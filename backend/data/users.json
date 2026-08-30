@@ -1,0 +1,26 @@
+[
+  {
+    "id": "e6795c6d-aae9-4cb1-a056-72f9075ab8e2",
+    "name": "bhaskar badavath",
+    "email": "9966977763@howdi.local",
+    "phone": "9966977763",
+    "password": "5a3b60bb11ba44666d12777ea4dbd69e8a99ebe146e6b521b6a9ef8603d37d97",
+    "createdAt": "2026-08-28T14:07:13.536Z"
+  },
+  {
+    "id": "48802ed6-73d7-4cb8-89a6-9578fb1d592f",
+    "name": "vinod kumar",
+    "email": "8712157763@howdi.local",
+    "phone": "8712157763",
+    "password": "5a3b60bb11ba44666d12777ea4dbd69e8a99ebe146e6b521b6a9ef8603d37d97",
+    "createdAt": "2026-08-29T19:58:24.619Z"
+  },
+  {
+    "id": "fb660bea-6117-4964-8845-f9412f7cb5c3",
+    "name": "varun",
+    "email": "9996669773@howdi.local",
+    "phone": "9996669773",
+    "password_hash": "5a3b60bb11ba44666d12777ea4dbd69e8a99ebe146e6b521b6a9ef8603d37d97",
+    "created_at": "2026-08-29T21:33:54.377Z"
+  }
+]

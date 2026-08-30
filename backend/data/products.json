@@ -1,0 +1,29 @@
+[
+  {
+    "id": "b2d96083-6e98-46f9-b26c-b3374e7e51f2",
+    "name": "HOWDI Everyday T-Shirt",
+    "category": "Fashion",
+    "price": 499,
+    "stock": 25,
+    "image": "",
+    "created_at": "2026-08-29T20:42:20.215Z"
+  },
+  {
+    "id": "f89f6400-dd5b-4806-bc64-ab6b41817263",
+    "name": "HOWDI Casual Sneakers",
+    "category": "Footwear",
+    "price": 1299,
+    "stock": 15,
+    "image": "",
+    "created_at": "2026-08-29T20:42:20.216Z"
+  },
+  {
+    "id": "4d83b95f-c31c-4a9d-9c46-95c52ffede4a",
+    "name": "HOWDI Classic Backpack",
+    "category": "Bags",
+    "price": 899,
+    "stock": 20,
+    "image": "",
+    "created_at": "2026-08-29T20:42:20.216Z"
+  }
+]
