@@ -1,5 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import "./App.css";
+import {
+  recordTasteEvent,
+  rememberRecentlyViewed,
+  getPersonalizedProducts,
+  getCartRecommendations,
+  getWishlistRecommendations,
+  getPersonalizedOffers,
+  getTasteSummary,
+} from "./howdiPersonalization";
 
 const slides = {
   home: [
@@ -894,6 +903,7 @@ const [showCancellationModal, setShowCancellationModal] = useState(false);
 const [selectedCancellationOrder, setSelectedCancellationOrder] = useState(null);
   const [orderFilter, setOrderFilter] = useState("all");
   const [selectedOrder, setSelectedOrder] = useState(null);
+  const [selectedTrackingOrder, setSelectedTrackingOrder] = useState(null);
   const [savedForLater, setSavedForLater] = useState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem("howdiSavedForLater") || "[]");
@@ -1028,6 +1038,15 @@ const [selectedCancellationOrder, setSelectedCancellationOrder] = useState(null)
     }
   });
 
+  // HOWDI Taste Engine refresh signal.
+  const [tasteVersion, setTasteVersion] = useState(0);
+
+  useEffect(() => {
+    const handleTasteUpdate = () => setTasteVersion((value) => value + 1);
+    window.addEventListener("howdi:taste-updated", handleTasteUpdate);
+    return () => window.removeEventListener("howdi:taste-updated", handleTasteUpdate);
+  }, []);
+
   useEffect(() => {
     localStorage.setItem("howdiProductLikes", JSON.stringify(likedProducts));
   }, [likedProducts]);
@@ -1088,6 +1107,21 @@ const [selectedCancellationOrder, setSelectedCancellationOrder] = useState(null)
     setProductDetailOpen(false);
     setFitStudioOpen(false);
     setCustomerPhotoOpen(false);
+
+    recordTasteEvent({
+      type: "cart",
+      customerId: currentUser?.id,
+      productId: product.id ?? product.product_id ?? product._id ?? product.name,
+      name: product.name,
+      category: product.category,
+      subcategory: product.subcategory,
+      color: product.color ?? product.colors?.[0],
+      shop: product.shop,
+      price: product.price ?? product.offerPrice,
+      location: customerLocation,
+      weight: Math.max(1, qty),
+    });
+
     setCart((current) => {
       const exists = current.find((item) => item.name === product.name);
       if (exists) {
@@ -1119,6 +1153,19 @@ const [selectedCancellationOrder, setSelectedCancellationOrder] = useState(null)
   };
 
   const openProductDetails = (product) => {
+    rememberRecentlyViewed(product, currentUser?.id || "");
+    recordTasteEvent({
+      type: "view",
+      customerId: currentUser?.id,
+      productId: product.id ?? product.product_id ?? product._id ?? product.name,
+      name: product.name,
+      category: product.category,
+      subcategory: product.subcategory,
+      color: product.color ?? product.colors?.[0],
+      shop: product.shop,
+      price: product.price ?? product.offerPrice,
+      location: customerLocation,
+    });
     setSelectedProduct(product);
     setSelectedProductSize(product.sizes?.[0] || "");
     setSelectedProductColor(product.colors?.[0] || "");
@@ -1478,9 +1525,74 @@ return () => window.clearInterval(timer);
     return total + price * (item.quantity || 1);
   }, 0);
 
-  const checkoutDiscount = checkoutCouponApplied ? Math.min(Math.round(cartSubtotal * 0.10), 500) : 0;
+  // ============================================================
+  // SMART CART OFFER ENGINE — Cart/Checkout scope only
+  // Buy 2 → 5% off | Buy 3 → 10% off | Buy 4+ → cheapest unit free
+  // ============================================================
+  const cartPromotion = (() => {
+    const units = cart.reduce((sum, item) => sum + Math.max(1, Number(item?.quantity) || 1), 0);
+    const unitPrices = cart.flatMap((item) => {
+      const price = Number(String(item?.price || item?.offerPrice || "").replace(/[^0-9.]/g, "")) || 0;
+      return Array(Math.max(1, Number(item?.quantity) || 1)).fill(price);
+    }).filter((price) => price > 0).sort((a, b) => a - b);
+
+    if (units >= 4 && unitPrices.length >= 4) {
+      return {
+        tier: "FREE_ITEM",
+        discount: Math.round(unitPrices[0]),
+        label: "Buy 3, get the 4th item FREE",
+        message: "🎁 You unlocked a FREE item — your lowest-priced eligible item is free.",
+        next: null,
+      };
+    }
+
+    if (units === 3) {
+      return {
+        tier: "THREE",
+        discount: Math.round(cartSubtotal * 0.10),
+        label: "Buy 3 → extra 10% OFF",
+        message: "🔥 3 items unlocked 10% OFF. Add 1 more item to unlock a FREE item.",
+        next: 1,
+      };
+    }
+
+    if (units === 2) {
+      return {
+        tier: "TWO",
+        discount: Math.round(cartSubtotal * 0.05),
+        label: "Buy 2 → extra 5% OFF",
+        message: "✨ 2 items unlocked extra 5% OFF. Add 1 more item for 10% OFF.",
+        next: 1,
+      };
+    }
+
+    return {
+      tier: "ONE",
+      discount: 0,
+      label: "Add 1 more item → unlock 5% OFF",
+      message: "💡 Add 1 more item to unlock extra 5% OFF.",
+      next: 1,
+    };
+  })();
+
+  const checkoutCouponDiscount = checkoutCouponApplied ? Math.min(Math.round(cartSubtotal * 0.10), 500) : 0;
+  const checkoutDiscount = Math.max(0, cartPromotion.discount + checkoutCouponDiscount);
+  const checkoutGiftWrap = giftWrap ? 49 : 0;
   const checkoutDelivery = cartSubtotal - checkoutDiscount >= 999 ? 0 : 49;
-  const checkoutTotal = Math.max(0, cartSubtotal - checkoutDiscount + checkoutDelivery);
+  const checkoutTotal = Math.max(0, cartSubtotal - checkoutDiscount + checkoutDelivery + checkoutGiftWrap);
+
+  const cartRecommendations = getCartRecommendations(cart, products, {
+    customerId: currentUser?.id,
+    location: customerLocation,
+    wishlist,
+    recentlyViewed,
+  }).slice(0, 4);
+
+  const recommendationBudget = cartPromotion.tier === "ONE"
+    ? 1500
+    : cartPromotion.tier === "TWO"
+      ? 1800
+      : 2500;
 
 
   const applyCartCoupon = () => {
@@ -1511,7 +1623,7 @@ return () => window.clearInterval(timer);
     }
     const defaultAddress = addresses.find((item) => item.is_default) || addresses[0] || null;
     setSelectedCheckoutAddress(defaultAddress);
-    setCheckoutStep(1);
+    setCheckoutStep(defaultAddress ? 2 : 1);
     setCheckoutPayment(paymentMethods.length ? "SAVED" : "COD");
     setCheckoutCoupon("");
     setCheckoutCouponApplied(false);
@@ -1581,7 +1693,12 @@ return () => window.clearInterval(timer);
       amount: Number(checkoutTotal) || 0,
       subtotal: Number(cartSubtotal) || 0,
       discount: Number(checkoutDiscount) || 0,
+      smart_cart_discount: Number(cartPromotion.discount) || 0,
+      coupon_discount: Number(checkoutCouponDiscount) || 0,
       delivery_charge: Number(checkoutDelivery) || 0,
+      gift_wrap: Boolean(giftWrap),
+      gift_wrap_charge: Number(checkoutGiftWrap) || 0,
+      gift_message: giftWrap && giftMessageSaved ? giftMessage.trim() : "",
       tax: Number(checkoutTax) || 0,
       wallet_used: walletUsed,
       rewards_used: rewardPointsUsed,
@@ -1676,6 +1793,23 @@ return () => window.clearInterval(timer);
           JSON.stringify(cached)
         );
       } catch {}
+
+      // 🧠 HOWDI Taste Engine: a completed purchase is the strongest signal.
+      cart.forEach((item) => {
+        recordTasteEvent({
+          type: "purchase",
+          customerId: currentUser.id,
+          productId: item.id ?? item.product_id ?? item._id ?? item.name,
+          name: item.name,
+          category: item.category,
+          subcategory: item.subcategory,
+          color: item.color ?? item.colors?.[0],
+          shop: item.shop,
+          price: item.price ?? item.offerPrice,
+          location: selectedCheckoutAddress?.city || customerLocation,
+          weight: Math.max(1, Number(item.quantity) || 1),
+        });
+      });
 
       setCart([]);
       localStorage.setItem("howdiCart", "[]");
@@ -2178,6 +2312,21 @@ return () => window.clearInterval(timer);
         JSON.stringify(next)
       );
 
+      if (!exists) {
+        recordTasteEvent({
+          type: "wishlist",
+          customerId: currentUser.id,
+          productId: product.id ?? product.product_id ?? product._id ?? product.name,
+          name: product.name,
+          category: product.category,
+          subcategory: product.subcategory,
+          color: product.color ?? product.colors?.[0],
+          shop: product.shop,
+          price: product.price ?? product.offerPrice,
+          location: customerLocation,
+        });
+      }
+
       setLikedProducts((currentLikes) =>
         next.some((item) => item.name === product.name)
           ? (currentLikes.includes(product.name) ? currentLikes : [...currentLikes, product.name])
@@ -2257,6 +2406,7 @@ return () => window.clearInterval(timer);
     setProfileTab("orders");
     setOrderFilter("all");
     setSelectedOrder(null);
+    setSelectedTrackingOrder(null);
     setProfileOpen(true);
   };
 
@@ -2295,6 +2445,7 @@ return () => window.clearInterval(timer);
     if (!items.length) return;
     setCart(items.map((item) => ({ ...item, quantity: Math.max(1, Number(item.quantity) || 1) })));
     setSelectedOrder(null);
+    setSelectedTrackingOrder(null);
     setProfileOpen(false);
     setCartOpen(true);
   };
@@ -2890,41 +3041,119 @@ return () => window.clearInterval(timer);
       {cartOpen && (
         <div
           className="howdi-cart-overlay"
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 10000,
+            background: "rgba(10, 18, 30, .64)",
+            backdropFilter: "blur(5px)",
+            display: "flex",
+            justifyContent: "flex-end",
+          }}
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) setCartOpen(false);
           }}
         >
+          <style>{`
+            .howdi-cart-shell { --ink:#162033; --muted:#6b778c; --green:#315f49; --green2:#3f765b; --cream:#fbf7ee; --line:#e5e9e6; --soft:#f5f8f6; --danger:#c2413b; width:min(680px,96vw); height:100%; background:#fff; color:var(--ink); display:flex; flex-direction:column; min-height:0; box-shadow:-28px 0 80px rgba(8,18,30,.28); }
+            .howdi-cart-shell * { box-sizing:border-box; }
+            .howdi-cart-head { padding:22px 26px 20px; border-bottom:1px solid var(--line); background:linear-gradient(180deg,#ffffff 0%,#f9fbfa 100%); }
+            .howdi-cart-headrow { display:flex; align-items:flex-start; justify-content:space-between; gap:18px; }
+            .howdi-cart-kicker { color:#718096; font-size:11px; font-weight:900; letter-spacing:1.6px; text-transform:uppercase; }
+            .howdi-cart-title { margin:5px 0 0; color:var(--ink)!important; font-size:29px; line-height:1.1; font-weight:900; letter-spacing:-.5px; }
+            .howdi-cart-sub { margin:7px 0 0; color:var(--muted)!important; font-size:13px; line-height:1.45; }
+            .howdi-cart-close { width:42px; height:42px; flex:0 0 42px; border:1px solid #dfe5e1; border-radius:14px; background:#fff; color:#263447!important; font-size:22px; line-height:1; cursor:pointer; box-shadow:0 5px 16px rgba(15,23,42,.07); }
+            .howdi-cart-close:hover { background:#f4f7f5; transform:translateY(-1px); }
+            .howdi-cart-progress { margin-top:18px; display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+            .howdi-cart-progress > div { padding:9px 8px; border-radius:12px; background:#f3f6f4; color:#617083; text-align:center; font-size:10.5px; font-weight:900; }
+            .howdi-cart-progress > div:first-child { background:#e9f3ed; color:var(--green); }
+            .howdi-cart-scroll { flex:1; min-height:0; overflow-y:auto; padding:18px 24px 24px; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; }
+            .howdi-cart-scroll::-webkit-scrollbar { width:8px; }
+            .howdi-cart-scroll::-webkit-scrollbar-thumb { background:#d6ded9; border-radius:20px; }
+            .howdi-cart-section-title { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:0 0 12px; }
+            .howdi-cart-section-title strong { color:var(--ink)!important; font-size:14px; }
+            .howdi-cart-count { color:var(--green)!important; background:#edf6f0; border:1px solid #d7e8dc; padding:5px 9px; border-radius:999px; font-size:10px; font-weight:900; }
+            .howdi-cart-item { border:1px solid #dfe6e1; border-radius:20px; padding:14px; background:#fff; box-shadow:0 7px 24px rgba(18,38,28,.055); transition:.18s ease; }
+            .howdi-cart-item:hover { border-color:#c8d8ce; box-shadow:0 12px 30px rgba(18,38,28,.09); transform:translateY(-1px); }
+            .howdi-cart-item-top { display:grid; grid-template-columns:82px minmax(0,1fr) auto; gap:14px; align-items:start; }
+            .howdi-cart-thumb { width:82px; height:82px; border-radius:16px; background:linear-gradient(145deg,#f3eee3,#eaf4ee); border:1px solid #e3e8e2; display:flex; align-items:center; justify-content:center; overflow:hidden; font-size:40px; }
+            .howdi-cart-thumb img { width:100%; height:100%; object-fit:cover; display:block; }
+            .howdi-cart-shop { color:#a06e25!important; font-size:9.5px; letter-spacing:1.2px; text-transform:uppercase; font-weight:900; }
+            .howdi-cart-name { margin-top:3px; color:var(--ink)!important; font-size:16px; line-height:1.25; font-weight:900; }
+            .howdi-cart-price { margin-top:7px; color:var(--ink)!important; font-size:15px; font-weight:900; }
+            .howdi-cart-remove { border:0; background:transparent; color:#9a3d38!important; font-size:11px; font-weight:800; cursor:pointer; padding:5px; }
+            .howdi-cart-meta { margin-top:12px; padding:10px 11px; border-radius:13px; background:#f0f7f2; border:1px solid #d7e8dc; color:#315f49!important; font-size:11px; line-height:1.55; }
+            .howdi-cart-meta strong, .howdi-cart-meta div { color:#315f49!important; }
+            .howdi-cart-item-bottom { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:13px; padding-top:12px; border-top:1px solid #edf0ee; }
+            .howdi-cart-qty { display:flex; align-items:center; gap:5px; padding:4px; border:1px solid #dce4df; border-radius:12px; background:#f8faf9; }
+            .howdi-cart-qty button { width:29px; height:29px; border:0; border-radius:8px; background:#fff; color:#1d2939!important; font-size:17px; font-weight:900; cursor:pointer; }
+            .howdi-cart-qty button:hover { background:#eaf3ed; }
+            .howdi-cart-qty strong { min-width:25px; text-align:center; color:#162033!important; font-size:13px; }
+            .howdi-cart-save { border:0; background:transparent; color:#315f49!important; font-size:11px; font-weight:900; cursor:pointer; }
+            .howdi-cart-benefits { display:grid; grid-template-columns:repeat(3,1fr); gap:9px; margin-top:18px; }
+            .howdi-cart-benefit { min-height:78px; padding:11px; border:1px solid #dfe7e2; border-radius:15px; background:#f8faf9; }
+            .howdi-cart-benefit b { display:block; color:#243344!important; font-size:10.5px; }
+            .howdi-cart-benefit span { display:block; margin-top:5px; color:#718096!important; font-size:9.5px; line-height:1.35; }
+            .howdi-cart-panel { margin-top:12px; padding:14px; border:1px solid #e1e7e3; border-radius:17px; background:#fff; }
+            .howdi-cart-panel-title { color:#263447!important; font-size:11px; font-weight:900; }
+            .howdi-cart-inputrow { display:flex; gap:8px; margin-top:9px; }
+            .howdi-cart-input { min-width:0; flex:1; width:100%; padding:11px 12px; border:1px solid #ccd7d0; border-radius:11px; background:#fff!important; color:#162033!important; font-size:12px; outline:none; }
+            .howdi-cart-input:focus { border-color:#315f49; box-shadow:0 0 0 3px rgba(49,95,73,.10); }
+            .howdi-cart-input::placeholder { color:#8a96a5!important; opacity:1; }
+            .howdi-cart-action { padding:10px 14px; border:0; border-radius:11px; background:#315f49; color:#fff!important; font-size:11px; font-weight:900; cursor:pointer; white-space:nowrap; }
+            .howdi-cart-action:hover { background:#274d3b; }
+            .howdi-cart-check { padding:10px 14px; border:1px solid #cfdad3; border-radius:11px; background:#fff; color:#315f49!important; font-size:11px; font-weight:900; cursor:pointer; white-space:nowrap; }
+            .howdi-cart-notice { margin-top:7px; color:#47705a!important; font-size:10px; font-weight:800; }
+            .howdi-cart-note { margin-top:13px; padding:12px 13px; border:1px solid #eadfca; border-radius:15px; background:#fffaf0; color:#74582a!important; font-size:10.5px; line-height:1.5; }
+            .howdi-cart-note strong { color:#60471f!important; }
+            .howdi-cart-gift { display:flex; align-items:center; gap:9px; margin-top:12px; padding:12px 13px; border:1px solid #dfe6e1; border-radius:14px; color:#334155!important; font-size:11px; font-weight:800; cursor:pointer; }
+            .howdi-cart-gift input { accent-color:#315f49; }
+            .howdi-cart-empty { min-height:470px; display:flex; align-items:center; justify-content:center; text-align:center; padding:40px 20px; }
+            .howdi-cart-empty-card { max-width:390px; padding:35px 28px; border:1px solid #dfe7e2; border-radius:24px; background:linear-gradient(145deg,#f9fbfa,#fffaf0); }
+            .howdi-cart-empty-icon { font-size:58px; }
+            .howdi-cart-empty h3 { margin:13px 0 7px; color:#162033!important; font-size:23px; }
+            .howdi-cart-empty p { margin:0 0 20px; color:#6b778c!important; font-size:13px; line-height:1.55; }
+            .howdi-cart-footer { flex:0 0 auto; padding:14px 24px 18px; border-top:1px solid #dfe6e1; background:rgba(250,252,251,.98); box-shadow:0 -12px 30px rgba(15,23,42,.08); }
+            .howdi-cart-totalrow { display:flex; align-items:center; justify-content:space-between; gap:12px; color:#162033!important; }
+            .howdi-cart-totalrow span { color:#657286!important; font-size:12px; font-weight:800; }
+            .howdi-cart-totalrow strong { color:#162033!important; font-size:22px; }
+            .howdi-cart-footer-note { margin:5px 0 12px; color:#778397!important; font-size:10.5px; line-height:1.4; }
+            .howdi-cart-checkout { width:100%; padding:14px 16px; border:0; border-radius:14px; background:linear-gradient(135deg,#162033,#24374c); color:#fff!important; font-size:15px; font-weight:900; cursor:pointer; box-shadow:0 8px 20px rgba(22,32,51,.18); }
+            .howdi-cart-checkout:hover { transform:translateY(-1px); box-shadow:0 11px 24px rgba(22,32,51,.24); }
+            @media (max-width:620px) { .howdi-cart-shell{width:100%;} .howdi-cart-head{padding:18px 16px;} .howdi-cart-scroll{padding:15px 14px 20px;} .howdi-cart-footer{padding:12px 14px 15px;} .howdi-cart-item-top{grid-template-columns:68px minmax(0,1fr);}.howdi-cart-thumb{width:68px;height:68px;font-size:32px;}.howdi-cart-remove{grid-column:2;justify-self:end;margin-top:-28px;}.howdi-cart-benefits{grid-template-columns:1fr;}.howdi-cart-progress{gap:5px;} .howdi-cart-title{font-size:25px;} }
+          `}</style>
+
           <div className="howdi-cart-shell">
-            <header className="howdi-cart-head">
+            <div className="howdi-cart-head">
               <div className="howdi-cart-headrow">
                 <div>
                   <div className="howdi-cart-kicker">HOWDI SHOPPING</div>
-                  <div className="howdi-cart-title-row">
-                    <h2 className="howdi-cart-title">Your Cart</h2>
-                    <span className="howdi-cart-item-badge">
-                      {cart.reduce((sum, item) => sum + (item.quantity || 1), 0)} item{cart.reduce((sum, item) => sum + (item.quantity || 1), 0) === 1 ? "" : "s"}
-                    </span>
-                  </div>
-                  <p className="howdi-cart-sub">Everything you selected, ready for checkout.</p>
+                  <h2 className="howdi-cart-title">🛒 Your Cart</h2>
+                  <p className="howdi-cart-sub">
+                    Review your handmade finds before checkout.
+                    {savedForLater.length > 0 ? ` ${savedForLater.length} item${savedForLater.length === 1 ? "" : "s"} saved for later.` : ""}
+                  </p>
                 </div>
                 <button type="button" className="howdi-cart-close" onClick={() => setCartOpen(false)} aria-label="Close cart">×</button>
               </div>
-              {cart.length > 0 && (
-                <div className="howdi-cart-ready">
-                  <span className="howdi-cart-ready-line"><i /></span>
-                  <span>Ready to checkout</span>
-                </div>
-              )}
-            </header>
+              <div className="howdi-cart-progress">
+                <div>✓ ITEMS SELECTED</div>
+                <div>🔒 SECURE CHECKOUT</div>
+                <div>🧶 HANDMADE CARE</div>
+              </div>
+            </div>
 
-            <div className="howdi-cart-scroll">
+            <div
+              className="howdi-cart-scroll"
+              ref={(node) => { if (node && cartOpen && node.scrollTop !== 0) node.scrollTop = 0; }}
+            >
               {cart.length === 0 ? (
                 <div className="howdi-cart-empty">
                   <div className="howdi-cart-empty-card">
                     <div className="howdi-cart-empty-icon">🛍️</div>
-                    <h3>Your cart is empty</h3>
-                    <p>Add something you love from HOWDI local shops.</p>
-                    <button type="button" className="howdi-cart-action" onClick={() => { setCartOpen(false); navigate("shop"); }}>
+                    <h3>Your cart is waiting</h3>
+                    <p>Add something you love from HOWDI local shops. Your selected products will appear here.</p>
+                    <button type="button" className="howdi-cart-action" onClick={() => { setCartOpen(false); navigate("shop"); }} style={{ padding: "12px 18px", fontSize: "12px" }}>
                       Continue Shopping →
                     </button>
                   </div>
@@ -2932,134 +3161,165 @@ return () => window.clearInterval(timer);
               ) : (
                 <>
                   <div className="howdi-cart-section-title">
-                    <div>
-                      <strong>Selected items</strong>
-                      <span>Review quantity and product details</span>
-                    </div>
+                    <strong>Your selected items</strong>
+                    <span className="howdi-cart-count">{cart.reduce((sum, item) => sum + (item.quantity || 1), 0)} ITEM{cart.reduce((sum, item) => sum + (item.quantity || 1), 0) === 1 ? "" : "S"}</span>
                   </div>
 
-                  <div className="howdi-cart-items">
+                  <div style={{ display: "grid", gap: "12px" }}>
                     {cart.map((item) => (
                       <article key={item.name} className="howdi-cart-item">
-                        <div className="howdi-cart-product">
+                        <div className="howdi-cart-item-top">
                           <div className="howdi-cart-thumb">
-                            {item.image ? <img src={item.image} alt={item.name} /> : <span>{item.icon || "🛍️"}</span>}
+                            {item.image ? <img src={item.image} alt={item.name} /> : item.icon}
                           </div>
-
-                          <div className="howdi-cart-product-main">
+                          <div style={{ minWidth: 0 }}>
                             <div className="howdi-cart-shop">{item.shop || "HOWDI SHOP"}</div>
                             <div className="howdi-cart-name">{item.name}</div>
-                            <div className="howdi-cart-product-meta">
-                              {item.makingTime ? `🧵 Made to order · ${item.makingTime}` : "Local seller · Ready to prepare"}
-                            </div>
-                            {(item.selectedSize || item.size || item.selectedColor || item.color || item.customMeasurements || item.fitSizeResult) && (
-                              <div className="howdi-cart-details">
-                                {item.selectedSize || item.size ? <span>Size: {item.selectedSize || item.size}</span> : null}
-                                {item.selectedColor || item.color ? <span>Colour: {item.selectedColor || item.color}</span> : null}
-                                {item.fitSizeResult ? <span>Fit: {item.fitSizeResult}</span> : null}
-                                {item.customMeasurements ? <span>📏 Custom fit saved</span> : null}
-                              </div>
-                            )}
+                            <div className="howdi-cart-price">{item.price}</div>
                           </div>
-
-                          <div className="howdi-cart-price-block">
-                            <strong>{item.price}</strong>
-                            {item.oldPrice ? <del>{item.oldPrice}</del> : null}
-                          </div>
+                          <button type="button" className="howdi-cart-remove" onClick={(event) => { event.stopPropagation(); removeFromCart(item.name); }}>Remove</button>
                         </div>
 
-                        <div className="howdi-cart-product-actions">
+                        {(item.selectedSize || item.size || item.selectedColor || item.color || item.customMeasurements || item.fitSizeResult || item.fitPhotoPermission) && (
+                          <div className="howdi-cart-meta">
+                            <strong>🧶 Your product details</strong>
+                            {item.selectedSize || item.size ? <div>Size: {item.selectedSize || item.size}</div> : null}
+                            {item.selectedColor || item.color ? <div>Colour: {item.selectedColor || item.color}</div> : null}
+                            {item.fitSizeResult ? <div>Fit recommendation: {item.fitSizeResult}</div> : null}
+                            {item.customMeasurements ? <div>📏 Custom measurements saved</div> : null}
+                            {item.fitPhotoPermission ? <div>🔒 Fit reference permission saved · photo stays protected</div> : null}
+                          </div>
+                        )}
+
+                        {item.makingTime && <div style={{ marginTop: "9px", color: "#68768a", fontSize: "10.5px", fontWeight: 700 }}>🧵 Making time: {item.makingTime}</div>}
+
+                        <div className="howdi-cart-item-bottom">
                           <div className="howdi-cart-qty" aria-label={`Quantity for ${item.name}`}>
-                            <button type="button" aria-label="Decrease quantity" onClick={(event) => { event.stopPropagation(); updateCartQuantity(item.name, -1); }}>−</button>
+                            <button type="button" onClick={(event) => { event.stopPropagation(); updateCartQuantity(item.name, -1); }}>−</button>
                             <strong>{item.quantity || 1}</strong>
-                            <button type="button" aria-label="Increase quantity" onClick={(event) => { event.stopPropagation(); updateCartQuantity(item.name, 1); }}>+</button>
+                            <button type="button" onClick={(event) => { event.stopPropagation(); updateCartQuantity(item.name, 1); }}>+</button>
                           </div>
-                          <div className="howdi-cart-actions-right">
-                            <button type="button" className="howdi-cart-save" onClick={(event) => { event.stopPropagation(); saveCartItemForLater(item); }}>♡ Save for later</button>
-                            <button type="button" className="howdi-cart-remove" onClick={(event) => { event.stopPropagation(); removeFromCart(item.name); }}>Remove</button>
-                          </div>
+                          <button type="button" className="howdi-cart-save" onClick={(event) => { event.stopPropagation(); saveCartItemForLater(item); }}>♡ Save for later</button>
                         </div>
                       </article>
                     ))}
                   </div>
 
-                  {savedForLater.length > 0 && (
-                    <section className="howdi-saved-section">
-                      <div className="howdi-cart-section-title saved-title">
+                  <div className="howdi-smart-offer-card">
+                    <div className="howdi-smart-offer-head">
+                      <div>
+                        <div className="howdi-smart-offer-kicker">HOWDI SMART SAVINGS</div>
+                        <strong>{cartPromotion.label}</strong>
+                      </div>
+                      <span className="howdi-smart-offer-badge">{cartPromotion.discount > 0 ? `SAVE ₹${cartPromotion.discount.toLocaleString("en-IN")}` : "UNLOCK"}</span>
+                    </div>
+                    <div className="howdi-smart-offer-copy">{cartPromotion.message}</div>
+                    {cartPromotion.next ? (
+                      <div className="howdi-smart-offer-progress">
+                        <span>Progress to next reward</span>
+                        <strong>{cartCount} / {cartPromotion.tier === "ONE" ? 2 : 4} items</strong>
+                      </div>
+                    ) : null}
+                    <div className="howdi-smart-offer-tiers">
+                      <span className={cartCount >= 2 ? "is-on" : ""}>🛍️ 2 items · 5%</span>
+                      <span className={cartCount >= 3 ? "is-on" : ""}>🔥 3 items · 10%</span>
+                      <span className={cartCount >= 4 ? "is-on" : ""}>🎁 4 items · FREE</span>
+                    </div>
+                  </div>
+
+                  {cartRecommendations.length > 0 && (
+                    <div className="howdi-cart-recommendations">
+                      <div className="howdi-cart-recommend-head">
                         <div>
-                          <strong>Saved for later</strong>
-                          <span>Keep favourites here without losing them.</span>
+                          <div className="howdi-smart-offer-kicker">MATCHED FOR YOU</div>
+                          <strong>✨ Complete your cart</strong>
+                          <span>Relevant products chosen from your taste, cart and price range.</span>
                         </div>
-                        <span className="howdi-cart-count">{savedForLater.length}</span>
+                        <span className="howdi-recommend-budget">Fit ≤ ₹{recommendationBudget.toLocaleString("en-IN")}</span>
                       </div>
-                      <div className="howdi-saved-list">
-                        {savedForLater.map((item) => (
-                          <div key={item.name} className="howdi-saved-item">
-                            <div className="howdi-saved-thumb">{item.image ? <img src={item.image} alt="" /> : item.icon || "🛍️"}</div>
-                            <div className="howdi-saved-copy"><strong>{item.name}</strong><span>{item.price}</span></div>
-                            <button type="button" onClick={() => moveSavedToCart(item)}>Move to cart</button>
-                          </div>
-                        ))}
+                      <div className="howdi-recommend-grid">
+                        {cartRecommendations.map(({ product, reasons }) => {
+                          const price = Number(String(product?.price || product?.offerPrice || "").replace(/[^0-9.]/g, "")) || 0;
+                          const withinBudget = price <= recommendationBudget;
+                          return (
+                            <article key={product.name} className="howdi-recommend-card">
+                              <div className="howdi-recommend-thumb">{product.image ? <img src={product.image} alt={product.name} /> : (product.icon || "🛍️")}</div>
+                              <div className="howdi-recommend-body">
+                                <div className="howdi-recommend-shop">{product.shop || "HOWDI SHOP"}</div>
+                                <strong>{product.name}</strong>
+                                <div className="howdi-recommend-price">{product.price}</div>
+                                <div className="howdi-recommend-reason">{reasons?.length ? `💡 ${reasons.join(" · ")}` : "💡 Picked to complement your cart"}</div>
+                                <button type="button" className="howdi-recommend-add" onClick={() => addToCart(product, 1)}>
+                                  + Add {withinBudget ? "to cart" : "for more choice"}
+                                </button>
+                              </div>
+                            </article>
+                          );
+                        })}
                       </div>
-                    </section>
+                    </div>
                   )}
 
-                  <div className="howdi-cart-trust-row">
-                    <div><b>🧶 Handmade</b><span>Maker time shown</span></div>
-                    <div><b>🔒 Fit privacy</b><span>Your photo stays protected</span></div>
-                    <div><b>📦 Careful dispatch</b><span>Prepared after confirmation</span></div>
+                  <div className="howdi-cart-benefits">
+                    <div className="howdi-cart-benefit"><b>🧶 Handmade</b><span>Making time shown per item</span></div>
+                    <div className="howdi-cart-benefit"><b>🔒 Fit privacy</b><span>Your fit photo isn't shown to the seller</span></div>
+                    <div className="howdi-cart-benefit"><b>📦 Careful dispatch</b><span>Prepared after order confirmation</span></div>
                   </div>
 
-                  <div className="howdi-cart-utilities">
-                    <div className="howdi-cart-utility">
-                      <div className="howdi-cart-utility-head"><span>🏷️ Have a coupon?</span><small>Save on this order</small></div>
-                      <div className="howdi-cart-inputrow">
-                        <input className="howdi-cart-input" value={cartCoupon} onChange={(e) => setCartCoupon(e.target.value.toUpperCase())} placeholder="Enter coupon code" />
-                        <button type="button" className="howdi-cart-action" onClick={applyCartCoupon}>Apply</button>
-                      </div>
+                  <div className="howdi-cart-panel">
+                    <div className="howdi-cart-panel-title">🏷️ Have a HOWDI coupon?</div>
+                    <div className="howdi-cart-inputrow">
+                      <input className="howdi-cart-input" value={cartCoupon} onChange={(e) => setCartCoupon(e.target.value.toUpperCase())} placeholder="Enter coupon code" />
+                      <button type="button" className="howdi-cart-action" onClick={applyCartCoupon}>Apply</button>
                     </div>
-
-                    <div className="howdi-cart-utility">
-                      <div className="howdi-cart-utility-head"><span>📍 Check delivery</span><small>Confirm your pincode</small></div>
-                      <div className="howdi-cart-inputrow">
-                        <input className="howdi-cart-input" value={cartPincode} onChange={(e) => { setCartPincode(e.target.value.replace(/\D/g, "").slice(0, 6)); setCartPincodeChecked(false); }} placeholder="6-digit pincode" inputMode="numeric" />
-                        <button type="button" className="howdi-cart-check" onClick={checkCartPincode}>Check</button>
-                      </div>
-                    </div>
+                    {cartNotice && <div className="howdi-cart-notice">{cartNotice}</div>}
                   </div>
 
-                  {cartNotice && <div className="howdi-cart-notice">{cartNotice}</div>}
+                  <div className="howdi-cart-panel">
+                    <div className="howdi-cart-panel-title">📍 Check delivery availability</div>
+                    <div className="howdi-cart-inputrow">
+                      <input className="howdi-cart-input" value={cartPincode} onChange={(e) => { setCartPincode(e.target.value.replace(/\D/g, "").slice(0, 6)); setCartPincodeChecked(false); }} placeholder="Enter 6-digit pincode" inputMode="numeric" />
+                      <button type="button" className="howdi-cart-check" onClick={checkCartPincode}>Check</button>
+                    </div>
+                    {cartPincodeChecked && <div className="howdi-cart-notice">✓ Pincode accepted for the frontend estimate.</div>}
+                  </div>
 
                   <label className="howdi-cart-gift">
                     <input type="checkbox" checked={giftWrap} onChange={(e) => { setGiftWrap(e.target.checked); if (!e.target.checked) setGiftMessageSaved(false); }} />
-                    <span><b>🎁 Add handmade gift wrapping</b><small>+₹49 · A thoughtful finish for your order</small></span>
+                    <span>🎁 Add handmade gift wrapping <strong>(+₹49)</strong></span>
                   </label>
 
                   {giftWrap && (
-                    <div className="howdi-cart-gift-message">
-                      <textarea value={giftMessage} onChange={(e) => { setGiftMessage(e.target.value); setGiftMessageSaved(false); }} rows={2} placeholder="Write a short optional gift message" />
-                      <button type="button" onClick={() => { setGiftMessageSaved(true); setCartNotice("🎁 Gift message saved."); }} disabled={!giftMessage.trim()}>{giftMessageSaved ? "Saved ✓" : "Save message"}</button>
+                    <div className="howdi-cart-panel">
+                      <div className="howdi-cart-panel-title">💌 Gift message</div>
+                      <textarea value={giftMessage} onChange={(e) => { setGiftMessage(e.target.value); setGiftMessageSaved(false); }} rows={2} placeholder="Write a short optional message" className="howdi-cart-input" style={{ marginTop: "9px", resize: "vertical" }} />
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", marginTop: "8px" }}>
+                        <span style={{ color: giftMessageSaved ? "#47705a" : "#778397", fontSize: "10px", fontWeight: 700 }}>{giftMessageSaved ? "✓ Gift message saved." : "Save your message before checkout."}</span>
+                        <button type="button" onClick={() => { setGiftMessageSaved(true); setCartNotice("🎁 Gift message saved."); }} disabled={!giftMessage.trim()} className="howdi-cart-action" style={{ opacity: giftMessage.trim() ? 1 : .5, cursor: giftMessage.trim() ? "pointer" : "not-allowed" }}>Save message</button>
+                      </div>
                     </div>
                   )}
 
                   <div className="howdi-cart-note">
-                    <b>👵 Made-to-order care</b>
-                    <span>Please confirm size, colour and custom-fit details before checkout. Preparation begins after your order is confirmed.</span>
+                    👵 <strong>Before checkout:</strong> please confirm your size, colour and custom-fit details. Made-to-order pieces begin preparation after your order is confirmed.
                   </div>
                 </>
               )}
             </div>
 
             {cart.length > 0 && (
-              <footer className="howdi-cart-footer">
+              <div className="howdi-cart-footer">
                 <div className="howdi-cart-totalrow">
-                  <div><span>Cart total</span><small>Final delivery charges are confirmed at checkout.</small></div>
-                  <strong>₹{Math.max(0, cartSubtotal - (cartCouponApplied ? Math.min(Math.round(cartSubtotal * 0.10), 500) : 0) + (giftWrap ? 49 : 0)).toLocaleString("en-IN")}</strong>
+                  <span>Cart total</span>
+                  <strong>₹{Math.max(0, cartSubtotal - cartPromotion.discount - (cartCouponApplied ? Math.min(Math.round(cartSubtotal * 0.10), 500) : 0) + (giftWrap ? 49 : 0)).toLocaleString("en-IN")}</strong>
+                </div>
+                <div className="howdi-cart-footer-note">
+                  {cartPromotion.discount > 0 ? `${cartPromotion.label}. ` : ""}{cartCouponApplied ? "Coupon discount applied. " : ""}{giftWrap ? "Gift wrapping included. " : ""}Delivery and payment details are confirmed at checkout.
                 </div>
                 <button type="button" className="howdi-cart-checkout" onClick={() => { setNotificationOpen(false); openCheckout(); }}>
-                  Proceed to Checkout <span>→</span>
+                  Proceed to Secure Checkout →
                 </button>
-              </footer>
+              </div>
             )}
           </div>
         </div>
@@ -3085,6 +3345,7 @@ return () => window.clearInterval(timer);
               <div>
                 <div style={{ fontSize: "12px", letterSpacing: "1.2px", fontWeight: 900, color: "#64748b" }}>HOWDI CHECKOUT</div>
                 <h2 style={{ margin: "5px 0 0", fontSize: "28px" }}>🛍️ Complete your order</h2>
+                <div style={{ marginTop: "6px", color: "#365947", fontSize: "12px", fontWeight: 800 }}>{cartPromotion.label} · {cartCount} item{cartCount === 1 ? "" : "s"}</div>
               </div>
               <button type="button" onClick={() => setCheckoutOpen(false)} style={{ width: "42px", height: "42px", borderRadius: "50%", border: "1px solid #e2e8f0", background: "#f8fafc", cursor: "pointer", fontSize: "20px" }}>×</button>
             </div>
@@ -3143,6 +3404,7 @@ return () => window.clearInterval(timer);
                     <h3 style={{ margin: "0 0 8px", fontSize: "22px" }}>✅ Review & place order</h3>
                     <div style={{ padding: "15px", borderRadius: "16px", background: "#f8fafc", marginBottom: "12px" }}><strong>Deliver to</strong><div style={{ color: "#475569", marginTop: "5px", lineHeight: 1.5 }}>{selectedCheckoutAddress?.full_name}<br />{selectedCheckoutAddress?.address_line1}, {selectedCheckoutAddress?.city}, {selectedCheckoutAddress?.state} - {selectedCheckoutAddress?.pincode}</div></div>
                     <div style={{ padding: "15px", borderRadius: "16px", background: "#f8fafc", marginBottom: "12px" }}><strong>Payment</strong><div style={{ color: "#475569", marginTop: "5px" }}>{checkoutPayment === "COD" ? "Cash on Delivery" : checkoutPayment === "UPI" ? "UPI" : checkoutPayment === "CARD" ? "Debit / Credit Card" : "Saved payment method"}</div></div>
+                    {giftWrap && <div style={{ padding: "15px", borderRadius: "16px", background: "#fffaf0", border: "1px solid #eadfca", marginBottom: "12px" }}><strong>🎁 Gift wrapping</strong><div style={{ color: "#74582a", marginTop: "5px" }}>{giftMessageSaved && giftMessage.trim() ? `Message: ${giftMessage.trim()}` : "Handmade gift wrapping selected"}</div></div>}
                     <div style={{
                       marginTop: "14px",
                       padding: "12px 14px",
@@ -3210,7 +3472,9 @@ return () => window.clearInterval(timer);
                 <div style={{ marginTop: "16px", paddingTop: "14px", borderTop: "1px solid #e2e8f0", display: "grid", gap: "9px", fontSize: "14px" }}>
                   <div style={{ display: "flex", justifyContent: "space-between" }}><span>Subtotal</span><strong>₹{cartSubtotal.toLocaleString("en-IN")}</strong></div>
                   <div style={{ display: "flex", justifyContent: "space-between" }}><span>Delivery</span><strong>{checkoutDelivery ? `₹${checkoutDelivery}` : "FREE"}</strong></div>
-                  {checkoutDiscount > 0 && <div style={{ display: "flex", justifyContent: "space-between", color: "#16803c" }}><span>HOWDI10</span><strong>-₹{checkoutDiscount}</strong></div>}
+                  {checkoutGiftWrap > 0 && <div style={{ display: "flex", justifyContent: "space-between" }}><span>Gift wrapping</span><strong>₹{checkoutGiftWrap}</strong></div>}
+                  {cartPromotion.discount > 0 && <div style={{ display: "flex", justifyContent: "space-between", color: "#16803c" }}><span>Smart Cart Offer</span><strong>-₹{cartPromotion.discount.toLocaleString("en-IN")}</strong></div>}
+                  {checkoutCouponDiscount > 0 && <div style={{ display: "flex", justifyContent: "space-between", color: "#16803c" }}><span>HOWDI10</span><strong>-₹{checkoutCouponDiscount.toLocaleString("en-IN")}</strong></div>}
                   <div style={{ display: "flex", justifyContent: "space-between", fontSize: "20px", paddingTop: "8px", borderTop: "1px solid #e2e8f0" }}><strong>Total</strong><strong>₹{checkoutTotal.toLocaleString("en-IN")}</strong></div>
                 </div>
                 <div style={{ display: "flex", gap: "8px", marginTop: "16px" }}>
@@ -3274,6 +3538,7 @@ return () => window.clearInterval(timer);
               borderRadius: "28px",
               overflow: "hidden",
               boxShadow: "0 30px 80px rgba(15,23,42,.25)",
+              height: "min(820px, calc(100vh - 48px))",
               minHeight: "620px",
             }}
           >
@@ -3325,7 +3590,9 @@ return () => window.clearInterval(timer);
               style={{
                 display: "grid",
                 gridTemplateColumns: "240px 1fr",
-                minHeight: "540px",
+                height: "calc(100% - 96px)",
+                minHeight: 0,
+                overflow: "hidden",
               }}
             >
               <aside
@@ -3333,6 +3600,8 @@ return () => window.clearInterval(timer);
                   background: "#f8fafc",
                   padding: "22px 16px",
                   borderRight: "1px solid #e5e7eb",
+                  overflowY: "auto",
+                  minHeight: 0,
                 }}
               >
                 {[
@@ -3386,7 +3655,15 @@ return () => window.clearInterval(timer);
                 ))}
               </aside>
 
-              <section style={{ padding: "30px", background: "#fff" }}>
+              <section
+                style={{
+                  padding: "30px",
+                  background: "#fff",
+                  overflowY: "auto",
+                  minHeight: 0,
+                  minWidth: 0,
+                }}
+              >
                 {profileTab === "overview" && (
                   <>
                     <div style={{ marginBottom: "24px" }}>
@@ -3990,7 +4267,16 @@ return () => window.clearInterval(timer);
                                 <span style={{ color: "#64748b", fontSize: "13px" }}>{status === "Delivered" ? "Delivered successfully." : status === "Cancelled" ? "Order cancelled." : "Your order is being processed."}</span>
                                 <button type="button" onClick={() => setSelectedOrder(order)} style={{ border: "1px solid #cbd5e1", background: "#fff", borderRadius: "10px", padding: "9px 13px", fontWeight: 800, cursor: "pointer" }}>View details →</button>
                                 {order.status !== "delivered" && !["cancelled", "canceled"].includes(String(order.status || "").toLowerCase()) && (
-                                  <button type="button" onClick={() => setSelectedOrder(order)} style={{ border: "1px solid #365947", background: "#f1f8f3", color: "#365947", borderRadius: "10px", padding: "9px 13px", fontWeight: 800, cursor: "pointer" }}>🚚 Track</button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedOrder(null);
+                                      setSelectedTrackingOrder(order);
+                                    }}
+                                    style={{ border: "1px solid #365947", background: "#f1f8f3", color: "#365947", borderRadius: "10px", padding: "9px 13px", fontWeight: 800, cursor: "pointer" }}
+                                  >
+                                    🚚 Track
+                                  </button>
                                 )}
                               </div>
                             </article>
@@ -4062,27 +4348,62 @@ return () => window.clearInterval(timer);
                             <div style={{ marginTop: "7px", color: "#64748b" }}>{selectedOrder.item_count || 1} {(selectedOrder.item_count || 1) === 1 ? "item" : "items"} · Total {selectedOrder.total || `₹${selectedOrder.amount || 0}`}</div>
                           </div>
 
-                          {selectedOrder.status !== "cancelled" && selectedOrder.status !== "canceled" && (
-                            <div style={{ marginTop: "20px", padding: "18px", border: "1px solid #e2e8f0", borderRadius: "18px" }}>
-                              <div style={{ display: "flex", justifyContent: "space-between", gap: "10px", alignItems: "center", marginBottom: "16px" }}>
-                                <strong>🚚 Track your handmade order</strong>
-                                <span style={{ fontSize: "12px", color: "#64748b" }}>ETA: {selectedOrder.estimated_delivery || "3–6 days"}</span>
-                              </div>
-                              <div>
-                                {getOrderTimeline(selectedOrder).map((step, index) => (
-                                  <div key={step.key} style={{ display: "grid", gridTemplateColumns: "34px 1fr", gap: "10px", minHeight: index === 4 ? "42px" : "58px" }}>
-                                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
-                                      <div style={{ width: "28px", height: "28px", borderRadius: "50%", display: "grid", placeItems: "center", background: step.active ? "#365947" : "#e2e8f0", color: step.active ? "#fff" : "#94a3b8", fontSize: "13px", fontWeight: 900 }}>{step.icon}</div>
-                                      {index < 4 && <div style={{ width: "2px", flex: 1, background: step.active ? "#cfe2d5" : "#e2e8f0", margin: "4px 0" }} />}
+                          {Array.isArray(selectedOrder.items) && selectedOrder.items.length > 0 && (
+                            <div style={{ marginTop: "14px", border: "1px solid #e2e8f0", borderRadius: "16px", overflow: "hidden" }}>
+                              <div style={{ padding: "12px 14px", background: "#f8fafc", fontWeight: 900, fontSize: "13px" }}>🛍️ Items in this order</div>
+                              <div style={{ display: "grid" }}>
+                                {selectedOrder.items.map((item, index) => (
+                                  <div key={`${item.name || "item"}-${index}`} style={{ display: "flex", justifyContent: "space-between", gap: "12px", padding: "13px 14px", borderTop: index ? "1px solid #f1f5f9" : 0 }}>
+                                    <div style={{ minWidth: 0 }}>
+                                      <strong style={{ fontSize: "13px" }}>{item.name || "HOWDI item"}</strong>
+                                      <div style={{ marginTop: "4px", color: "#64748b", fontSize: "11px" }}>
+                                        Qty {item.quantity || 1}
+                                        {item.selectedSize || item.size ? ` · Size ${item.selectedSize || item.size}` : ""}
+                                        {item.selectedColor || item.color ? ` · ${item.selectedColor || item.color}` : ""}
+                                      </div>
                                     </div>
-                                    <div style={{ paddingBottom: "10px" }}>
-                                      <div style={{ fontWeight: step.current ? 900 : 800, color: step.active ? "#1f2937" : "#94a3b8" }}>{step.title}{step.current ? " · Current" : ""}</div>
-                                      <div style={{ color: step.active ? "#64748b" : "#a1a1aa", fontSize: "12px", marginTop: "3px" }}>{step.text}</div>
-                                    </div>
+                                    <strong style={{ whiteSpace: "nowrap", fontSize: "13px" }}>{item.price || "₹0"}</strong>
                                   </div>
                                 ))}
                               </div>
-                              {selectedOrder.tracking_number && <div style={{ marginTop: "8px", fontSize: "12px", color: "#64748b" }}>Tracking reference: <strong>{selectedOrder.tracking_number}</strong></div>}
+                            </div>
+                          )}
+
+                          <div style={{ marginTop: "14px", display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(190px,1fr))", gap: "10px" }}>
+                            <div style={{ padding: "13px 14px", borderRadius: "14px", background: "#f8fafc" }}>
+                              <div style={{ fontSize: "11px", color: "#64748b", fontWeight: 800 }}>PAYMENT</div>
+                              <div style={{ marginTop: "4px", fontWeight: 900, fontSize: "13px" }}>
+                                {selectedOrder.payment_method === "COD" ? "Cash on Delivery" : selectedOrder.payment_method || "Payment method not recorded"}
+                              </div>
+                            </div>
+                            <div style={{ padding: "13px 14px", borderRadius: "14px", background: "#f8fafc" }}>
+                              <div style={{ fontSize: "11px", color: "#64748b", fontWeight: 800 }}>TRACKING REFERENCE</div>
+                              <div style={{ marginTop: "4px", fontWeight: 900, fontSize: "13px" }}>
+                                {selectedOrder.tracking_number || "Generated after dispatch"}
+                              </div>
+                            </div>
+                          </div>
+
+                          {selectedOrder.status !== "cancelled" && selectedOrder.status !== "canceled" && (
+                            <div style={{ marginTop: "18px", padding: "14px 16px", borderRadius: "15px", background: "#f1f8f3", border: "1px solid #d7e7dc" }}>
+                              <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>
+                                <div>
+                                  <strong style={{ color: "#315f49" }}>🚚 Delivery status</strong>
+                                  <div style={{ marginTop: "4px", color: "#64748b", fontSize: "12px" }}>
+                                    {orderStatusLabel(selectedOrder.status)} · ETA {selectedOrder.estimated_delivery || "3–6 days"}
+                                  </div>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedTrackingOrder(selectedOrder);
+                                    setSelectedOrder(null);
+                                  }}
+                                  style={{ border: 0, borderRadius: "10px", padding: "9px 12px", background: "#315f49", color: "#fff", fontWeight: 900, cursor: "pointer" }}
+                                >
+                                  Open tracking →
+                                </button>
+                              </div>
                             </div>
                           )}
 
@@ -4153,6 +4474,71 @@ return () => window.clearInterval(timer);
                       </div>
                     )}
                   </>
+                )}
+
+                {selectedTrackingOrder && (
+                  <div
+                    style={{ position: "fixed", inset: 0, zIndex: 10003, background: "rgba(15,23,42,.62)", padding: "20px", overflowY: "auto" }}
+                    onMouseDown={(e) => e.target === e.currentTarget && setSelectedTrackingOrder(null)}
+                  >
+                    <div style={{ maxWidth: "680px", margin: "35px auto", background: "#fff", borderRadius: "24px", padding: "26px", boxShadow: "0 30px 80px rgba(15,23,42,.28)" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "16px" }}>
+                        <div>
+                          <div style={{ fontSize: "12px", fontWeight: 900, letterSpacing: "1px", color: "#315f49" }}>HOWDI ORDER TRACKING</div>
+                          <h3 style={{ margin: "6px 0", fontSize: "25px", color: "#172033" }}>🚚 Track #{selectedTrackingOrder.order_number || selectedTrackingOrder.id || "—"}</h3>
+                          <div style={{ color: "#64748b", fontSize: "13px" }}>
+                            {selectedTrackingOrder.title || selectedTrackingOrder.shop || "HOWDI Order"} · ETA {selectedTrackingOrder.estimated_delivery || "3–6 days"}
+                          </div>
+                        </div>
+                        <button type="button" onClick={() => setSelectedTrackingOrder(null)} style={{ width: "40px", height: "40px", borderRadius: "50%", border: "1px solid #e2e8f0", background: "#f8fafc", cursor: "pointer", fontSize: "18px" }}>×</button>
+                      </div>
+
+                      <div style={{ marginTop: "18px", padding: "15px", borderRadius: "16px", background: "#f1f8f3", border: "1px solid #d7e7dc" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: "10px", flexWrap: "wrap" }}>
+                          <div>
+                            <div style={{ fontSize: "11px", color: "#64748b", fontWeight: 800 }}>CURRENT STATUS</div>
+                            <strong style={{ display: "block", marginTop: "3px", color: "#315f49", fontSize: "17px" }}>{orderStatusLabel(selectedTrackingOrder.status)}</strong>
+                          </div>
+                          <div style={{ textAlign: "right" }}>
+                            <div style={{ fontSize: "11px", color: "#64748b", fontWeight: 800 }}>TRACKING REFERENCE</div>
+                            <strong style={{ display: "block", marginTop: "3px", color: "#172033", fontSize: "13px" }}>{selectedTrackingOrder.tracking_number || "Pending dispatch"}</strong>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div style={{ marginTop: "20px", padding: "18px", border: "1px solid #e2e8f0", borderRadius: "18px" }}>
+                        {getOrderTimeline(selectedTrackingOrder).map((step, index) => (
+                          <div key={step.key} style={{ display: "grid", gridTemplateColumns: "34px 1fr", gap: "10px", minHeight: index === 4 ? "42px" : "62px" }}>
+                            <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+                              <div style={{ width: "28px", height: "28px", borderRadius: "50%", display: "grid", placeItems: "center", background: step.active ? "#365947" : "#e2e8f0", color: step.active ? "#fff" : "#94a3b8", fontSize: "13px", fontWeight: 900 }}>{step.icon}</div>
+                              {index < 4 && <div style={{ width: "2px", flex: 1, background: step.active ? "#cfe2d5" : "#e2e8f0", margin: "4px 0" }} />}
+                            </div>
+                            <div style={{ paddingBottom: "10px" }}>
+                              <div style={{ fontWeight: step.current ? 900 : 800, color: step.active ? "#1f2937" : "#94a3b8" }}>{step.title}{step.current ? " · Current" : ""}</div>
+                              <div style={{ color: step.active ? "#64748b" : "#a1a1aa", fontSize: "12px", marginTop: "3px" }}>{step.text}</div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div style={{ marginTop: "14px", display: "flex", gap: "10px", justifyContent: "flex-end", flexWrap: "wrap" }}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const order = selectedTrackingOrder;
+                            setSelectedTrackingOrder(null);
+                            setSelectedOrder(order);
+                          }}
+                          style={{ border: "1px solid #cbd5e1", background: "#fff", color: "#172033", borderRadius: "11px", padding: "11px 15px", fontWeight: 900, cursor: "pointer" }}
+                        >
+                          View order details
+                        </button>
+                        <button type="button" onClick={() => setSelectedTrackingOrder(null)} style={{ border: 0, background: "#365947", color: "#fff", borderRadius: "11px", padding: "11px 15px", fontWeight: 900, cursor: "pointer" }}>
+                          Done
+                        </button>
+                      </div>
+                    </div>
+                  </div>
                 )}
 
                 {profileTab === "wishlist" && (
@@ -6060,6 +6446,195 @@ return () => window.clearInterval(timer);
             </div>
           </div>
         )}
+
+        {/* ====================================
+            HOWDI KNOWS YOUR TASTE
+        ==================================== */}
+        {(() => {
+          const personalized = getPersonalizedProducts(products, {
+            customerId: currentUser?.id,
+            location: customerLocation,
+            cart,
+            wishlist,
+            recentlyViewed: recentlyViewed
+              .map((name) => products.find((item) => item.name === name))
+              .filter(Boolean),
+          });
+
+          const visible = personalized
+            .filter(({ product }) => !cart.some((item) => item.name === product.name))
+            .slice(0, 6);
+
+          if (!visible.length) return null;
+
+          return (
+            <section
+              id="howdi-for-you"
+              style={{
+                padding: "38px 24px",
+                background: "linear-gradient(135deg,#f4faf6 0%,#fffdf8 100%)",
+                borderTop: "1px solid #e4eee7",
+                borderBottom: "1px solid #e4eee7",
+              }}
+            >
+              <div style={{ maxWidth: "1180px", margin: "0 auto" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "flex-end",
+                    gap: "18px",
+                    flexWrap: "wrap",
+                    marginBottom: "18px",
+                  }}
+                >
+                  <div>
+                    <div
+                      style={{
+                        fontSize: "11px",
+                        fontWeight: 900,
+                        letterSpacing: ".12em",
+                        color: "#a36a2a",
+                      }}
+                    >
+                      🧠 HOWDI KNOWS YOUR TASTE
+                    </div>
+                    <h2
+                      style={{
+                        margin: "6px 0 5px",
+                        color: "#24362d",
+                        fontSize: "28px",
+                      }}
+                    >
+                      Picked for you
+                    </h2>
+                    <p
+                      style={{
+                        margin: 0,
+                        color: "#64748b",
+                        fontSize: "13px",
+                        maxWidth: "650px",
+                      }}
+                    >
+                      {getTasteSummary({ customerId: currentUser?.id })}
+                    </p>
+                  </div>
+
+                  <span
+                    style={{
+                      padding: "8px 12px",
+                      borderRadius: "999px",
+                      background: "#e7f3eb",
+                      color: "#365947",
+                      fontSize: "11px",
+                      fontWeight: 900,
+                    }}
+                  >
+                    View · Like · Cart · Buy
+                  </span>
+                </div>
+
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))",
+                    gap: "13px",
+                  }}
+                >
+                  {visible.map(({ product, reasons }, index) => (
+                    <article
+                      key={`taste-${product.name}`}
+                      onClick={() => openProductDetails(product)}
+                      style={{
+                        position: "relative",
+                        border: "1px solid #dce9df",
+                        borderRadius: "18px",
+                        padding: "11px",
+                        background: "rgba(255,255,255,.92)",
+                        cursor: "pointer",
+                        boxShadow: "0 8px 22px rgba(36,54,45,.06)",
+                      }}
+                    >
+                      <div
+                        style={{
+                          position: "absolute",
+                          top: "10px",
+                          left: "10px",
+                          zIndex: 2,
+                          padding: "5px 8px",
+                          borderRadius: "999px",
+                          background: "#365947",
+                          color: "#fff",
+                          fontSize: "9px",
+                          fontWeight: 900,
+                        }}
+                      >
+                        {index === 0 ? "BEST MATCH" : "FOR YOU"}
+                      </div>
+
+                      <div
+                        style={{
+                          height: "112px",
+                          borderRadius: "13px",
+                          background: "linear-gradient(145deg,#f8f5ed,#edf5ef)",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          fontSize: "52px",
+                        }}
+                      >
+                        {product.icon}
+                      </div>
+
+                      <div
+                        style={{
+                          marginTop: "9px",
+                          fontWeight: 900,
+                          color: "#24362d",
+                          fontSize: "13px",
+                          lineHeight: 1.3,
+                        }}
+                      >
+                        {product.name}
+                      </div>
+
+                      <div
+                        style={{
+                          marginTop: "5px",
+                          display: "flex",
+                          justifyContent: "space-between",
+                          gap: "8px",
+                          alignItems: "center",
+                        }}
+                      >
+                        <strong style={{ color: "#365947", fontSize: "13px" }}>
+                          {product.price}
+                        </strong>
+                        <span style={{ color: "#64748b", fontSize: "10px" }}>
+                          ⭐ {product.rating}
+                        </span>
+                      </div>
+
+                      <div
+                        style={{
+                          marginTop: "7px",
+                          minHeight: "28px",
+                          color: "#64748b",
+                          fontSize: "10px",
+                          lineHeight: 1.4,
+                        }}
+                      >
+                        {reasons.length
+                          ? `Because you like ${reasons.join(" · ")}`
+                          : "A HOWDI pick based on your activity"}
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </div>
+            </section>
+          );
+        })()}
 
         {/* ====================================
             MOST PURCHASED
