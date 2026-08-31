@@ -2100,3 +2100,59 @@ input {
   .howdi-recommend-grid { grid-template-columns:1fr; }
   .howdi-cart-recommend-head { flex-direction:column; }
 }
+
+/* ============================================================
+   HOWDI HOME DISCOVERY — additive styles only
+   ============================================================ */
+.home-discovery{padding:34px 24px 46px;background:#f7faf8;border-top:1px solid #e8eee9;border-bottom:1px solid #e8eee9}
+.home-discovery-inner{max-width:1180px;margin:0 auto}
+.home-section-head{display:flex;justify-content:space-between;align-items:flex-end;gap:20px;flex-wrap:wrap}
+.home-section-head.compact{align-items:center}
+.home-kicker{font-size:11px;font-weight:900;letter-spacing:.11em;color:#9a5b1f}
+.home-section-head h2{margin:6px 0 5px;color:#172033;font-size:27px;line-height:1.15}
+.home-section-head p{margin:0;color:#64748b;font-size:13px;max-width:690px;line-height:1.55}
+.home-view-all{border:1px solid #b7cdbf;border-radius:11px;background:#fff;color:#365947;padding:10px 14px;font-weight:900;cursor:pointer}
+.home-category-strip{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:22px}
+.home-category-pill{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:10px;text-align:left;padding:13px;border:1px solid #dfe8e2;border-radius:14px;background:#fff;color:#172033;cursor:pointer;transition:transform .18s ease,box-shadow .18s ease}
+.home-category-pill:hover,.home-mini-product:hover,.home-deal-card:hover,.home-recent-card:hover{transform:translateY(-2px);box-shadow:0 10px 25px rgba(23,32,25,.08)}
+.home-category-pill span{font-size:24px}.home-category-pill strong{font-size:13px}.home-category-pill small{font-size:10px;color:#64748b}
+.home-feature-grid{display:grid;grid-template-columns:1.35fr 1fr 1fr;gap:12px;margin-top:14px}
+.home-feature-card{display:flex;gap:13px;padding:18px;border:1px solid #e1e8e3;border-radius:17px;background:#fff;min-height:125px;box-sizing:border-box}
+.home-feature-primary{background:linear-gradient(135deg,#f0f7f2,#fff)}
+.home-feature-icon{width:44px;height:44px;display:grid;place-items:center;border-radius:13px;background:#eef5ef;font-size:23px;flex:0 0 44px}
+.home-feature-card span{font-size:10px;font-weight:900;letter-spacing:.08em;color:#9a5b1f}.home-feature-card h3{margin:5px 0 5px;color:#172033;font-size:17px}.home-feature-card p{margin:0;color:#64748b;font-size:12px;line-height:1.5}
+.home-product-block{margin-top:30px}.home-product-row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:14px}
+.home-mini-product{display:grid;grid-template-columns:82px 1fr;grid-template-rows:1fr auto;gap:11px;padding:12px;border:1px solid #e0e7e2;border-radius:16px;background:#fff;transition:transform .18s ease,box-shadow .18s ease}
+.home-mini-image{grid-row:1 / span 2;width:82px;height:108px;border:0;border-radius:13px;background:linear-gradient(145deg,#f7f2e8,#edf5ef);font-size:48px;cursor:pointer}
+.home-mini-copy{min-width:0}.home-mini-copy>span{font-size:10px;color:#9a5b1f;font-weight:900}.home-mini-copy h3{margin:4px 0 6px;font-size:14px;line-height:1.3;color:#172033}.home-mini-copy strong{font-size:17px;color:#153b2b}.home-mini-copy del{font-size:11px;color:#94a3b8}.home-mini-copy small{display:block;margin-top:6px;color:#64748b;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.home-mini-add{grid-column:2;border:1px solid #b8c9bd;border-radius:9px;background:#f5faf6;color:#365947;padding:8px;font-weight:900;cursor:pointer}
+.home-deals-block{padding:20px;border-radius:18px;background:#fff;border:1px solid #e2e9e4}.home-deal-row{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:14px}.home-deal-card{position:relative;display:flex;flex-direction:column;align-items:flex-start;gap:5px;text-align:left;padding:14px;border:1px solid #eadfca;border-radius:15px;background:#fffaf0;color:#172033;cursor:pointer;transition:transform .18s ease,box-shadow .18s ease}.home-deal-icon{font-size:38px}.home-deal-badge{position:absolute;top:10px;right:10px;padding:5px 7px;border-radius:999px;background:#e8f2e9;color:#24613d;font-size:9px;font-weight:900}.home-deal-card strong{font-size:13px;line-height:1.3}.home-deal-card>span:last-child{font-size:12px;font-weight:900;color:#153b2b}.home-deal-card del{color:#94a3b8;font-weight:600;margin-left:3px}
+.home-recent-row{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:14px}.home-recent-card{display:flex;align-items:center;gap:10px;text-align:left;border:1px solid #e2e8e3;border-radius:13px;background:#fff;padding:11px;color:#365947;cursor:pointer;transition:transform .18s ease,box-shadow .18s ease}.home-recent-card>span{font-size:28px}.home-recent-card div{min-width:0;flex:1}.home-recent-card strong{display:block;color:#172033;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.home-recent-card small{display:block;margin-top:4px;color:#64748b;font-size:10px}
+@media(max-width:900px){.home-category-strip{grid-template-columns:repeat(2,minmax(0,1fr))}.home-feature-grid{grid-template-columns:1fr}.home-product-row{grid-template-columns:repeat(2,minmax(0,1fr))}.home-deal-row{grid-template-columns:repeat(2,minmax(0,1fr))}.home-recent-row{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:600px){.home-discovery{padding:26px 15px 34px}.home-category-strip,.home-product-row,.home-deal-row,.home-recent-row{grid-template-columns:1fr}.home-section-head h2{font-size:23px}.home-mini-product{grid-template-columns:74px 1fr}.home-mini-image{width:74px;height:98px}.home-mini-add{grid-column:2}}
+
+/* HOME DISCOVERY FILTERS + LIVE OFFER CLOCK */
+.home-discovery-actions{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.home-filter-button{border:1px solid #365947;background:#f4faf6;color:#365947;border-radius:12px;padding:12px 16px;font-weight:900}
+.home-filter-panel{margin:-22px 0 28px;padding:18px;border:1px solid #dbe6de;border-radius:18px;background:#fffdf8;box-shadow:0 12px 30px rgba(36,54,45,.07)}
+.home-filter-panel-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:15px}
+.home-filter-panel-head strong,.home-filter-panel-head span{display:block}
+.home-filter-panel-head strong{color:#24362d;font-size:16px}
+.home-filter-panel-head span{margin-top:3px;color:#718078;font-size:12px}
+.home-filter-reset{border:0;background:#f3eee2;color:#7a531d;border-radius:10px;padding:9px 12px;font-weight:900}
+.home-filter-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:11px}
+.home-filter-grid label{display:flex;flex-direction:column;gap:6px;color:#52635a;font-size:11px;font-weight:900}
+.home-filter-grid select,.home-filter-grid input{width:100%;min-height:40px;border:1px solid #d5ded8;border-radius:10px;background:#fff;color:#24362d;padding:8px 10px;font-size:12px;font-weight:700}
+.home-filter-check{justify-content:flex-end;flex-direction:row!important;align-items:center;min-height:40px;padding:0 4px}
+.home-filter-check input{width:17px;min-height:17px;accent-color:#365947}
+.home-result-count{color:#718078;font-size:12px;font-weight:800}
+.home-empty-filter,.home-no-live-offers{width:100%;padding:22px;border:1px dashed #cfdad2;border-radius:15px;background:#fff;color:#68756d;text-align:center}
+.home-empty-filter span{display:block;font-size:28px}
+.home-empty-filter strong{display:block;margin:6px 0 10px;color:#24362d}
+.home-empty-filter button{border:0;border-radius:10px;padding:9px 13px;background:#365947;color:#fff;font-weight:900}
+.home-timed-deal-card{min-height:245px}
+.home-offer-status{display:inline-block;margin-top:5px;color:#9a5b1f;font-size:10px;font-weight:900;letter-spacing:.04em}
+.home-timed-deal-card small{margin-top:5px;color:#365947;font-size:11px;font-weight:900}
+@media(max-width:1050px){.home-filter-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:700px){.home-filter-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.home-filter-panel{margin-top:-10px}}
+@media(max-width:480px){.home-filter-grid{grid-template-columns:1fr}.home-discovery-actions{width:100%}.home-filter-button,.home-discovery-actions .home-view-all{flex:1}}

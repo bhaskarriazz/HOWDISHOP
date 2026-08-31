@@ -1,5 +1,2627 @@
 [
   {
+    "id": "d32606ed-120e-464e-9830-27f9e8234f58",
+    "order_number": "HD52340866",
+    "customer_id": "e6795c6d-aae9-4cb1-a056-72f9075ab8e2",
+    "title": "Grandma's Crochet Table Runner + 1 more",
+    "shop": "HOWDI Grandma's Collection",
+    "amount": 2088,
+    "total": "₹2,088",
+    "item_count": 2,
+    "items": [
+      {
+        "icon": "🌸",
+        "name": "Grandma's Crochet Table Runner",
+        "shop": "HOWDI Grandma's Collection",
+        "price": "₹899",
+        "oldPrice": "₹1,199",
+        "category": "Handmade Home Decor",
+        "handmade": true,
+        "stock": 9,
+        "rating": "4.9",
+        "reviews": 112,
+        "sizes": [
+          "Standard",
+          "Custom"
+        ],
+        "colors": [
+          "Cream",
+          "Red",
+          "Mustard",
+          "Green"
+        ],
+        "material": "100% cotton yarn",
+        "dimensions": "150 × 35 cm",
+        "makingTime": "5–7 hours",
+        "artisan": "Anasuya Amma",
+        "offerText": "Festival special",
+        "offerEndsAt": "2026-09-01T23:59:59+05:30",
+        "badges": [
+          "HANDMADE",
+          "POPULAR"
+        ],
+        "story": "A classic floral crochet runner made to bring a little old-home warmth to today's dining table.",
+        "selectedSize": "Standard",
+        "selectedColor": "Cream",
+        "customMeasurements": "",
+        "quantity": 1
+      },
+      {
+        "icon": "👜",
+        "name": "Grandma's Crochet Flower Tote",
+        "shop": "HOWDI Grandma's Collection",
+        "price": "₹1,299",
+        "oldPrice": "₹1,699",
+        "category": "Handmade Crochet",
+        "handmade": true,
+        "stock": 7,
+        "rating": "4.9",
+        "reviews": 86,
+        "sizes": [
+          "One Size"
+        ],
+        "colors": [
+          "Sky Blue",
+          "Rose Pink",
+          "Cream",
+          "Lavender"
+        ],
+        "material": "100% cotton yarn",
+        "dimensions": "32 × 28 cm",
+        "makingTime": "6–8 hours",
+        "artisan": "Lakshmi Amma",
+        "offerText": "Handmade week · Extra 10% off",
+        "offerEndsAt": "2026-08-30T23:59:59+05:30",
+        "badges": [
+          "HANDMADE",
+          "LIMITED"
+        ],
+        "story": "A one-of-a-kind crochet piece inspired by the little bags our grandmothers lovingly made by hand.",
+        "likes": 1284,
+        "recentReviews": [
+          {
+            "name": "Priya",
+            "city": "Hyderabad",
+            "rating": 5,
+            "text": "Beautifully made. You can actually see the handwork.",
+            "time": "2 days ago",
+            "verified": true,
+            "helpful": 24,
+            "photo": "👜"
+          },
+          {
+            "name": "Anjali",
+            "city": "Bengaluru",
+            "rating": 5,
+            "text": "The colours and finishing are lovely. Feels special, not mass produced.",
+            "time": "5 days ago",
+            "verified": true,
+            "helpful": 18,
+            "photo": "🌸"
+          },
+          {
+            "name": "Meena",
+            "city": "Chennai",
+            "rating": 4,
+            "text": "Very cute and sturdy. Delivery was also quick.",
+            "time": "1 week ago",
+            "verified": true,
+            "helpful": 11,
+            "photo": "🧶"
+          }
+        ],
+        "makerExperience": "38 years of crochet",
+        "makerPieces": "1,240+ pieces crafted",
+        "deliveryDays": "3–5 days",
+        "weight": "280 g",
+        "questions": [
+          {
+            "q": "Is this really handmade?",
+            "a": "Yes. Each piece is individually crocheted and finished by hand."
+          },
+          {
+            "q": "Can I request another colour?",
+            "a": "Yes, if the yarn is available. Add your request at checkout or contact the maker."
+          }
+        ],
+        "customerPhotos": [
+          "👜",
+          "🌸",
+          "🧶",
+          "👩‍🦰"
+        ],
+        "shippingNote": "Ships from the maker after final quality check.",
+        "returnPolicy": "7-day easy return on eligible ready-stock items.",
+        "quantity": 1
+      }
+    ],
+    "status": "confirmed",
+    "created_at": "2026-08-31T04:59:01.187Z",
+    "updated_at": "2026-08-31T04:59:01.187Z",
+    "payment_method": "SAVED",
+    "payment_status": "pending",
+    "address": {
+      "id": "addr_1787940374204",
+      "label": "Home",
+      "full_name": "bhaskar badavath",
+      "phone": "9966977763",
+      "address_line1": "Aradhana Nest, No. 13,",
+      "address_line2": "banglore",
+      "city": "Hyderabad",
+      "state": "telangana",
+      "pincode": "506381",
+      "updated_at": "2026-08-28T18:06:14.204Z",
+      "is_default": true
+    },
+    "delivery_option": "STANDARD",
+    "estimated_delivery": "3–6 days",
+    "tracking_number": "HOWDI8152340866",
+    "coupon": "",
+    "subtotal": 2198,
+    "discount": 110,
+    "delivery_charge": 0,
+    "tax": 0,
+    "wallet_used": 0,
+    "rewards_used": 0,
+    "maker_note": "Your piece will receive a final handmade quality check before dispatch.",
+    "cancellation": null,
+    "timeline": [
+      {
+        "label": "Order confirmed",
+        "date": "2026-08-31T04:59:01.187Z",
+        "note": "Your order has been received."
+      }
+    ]
+  },
+  {
+    "id": "e214023f-099e-4d53-bde8-a2395704b189",
+    "order_number": "HD47995863",
+    "customer_id": "e6795c6d-aae9-4cb1-a056-72f9075ab8e2",
+    "title": "Grandma's Crochet Flower Tote",
+    "shop": "HOWDI Grandma's Collection",
+    "amount": 1299,
+    "total": "₹1,299",
+    "item_count": 1,
+    "items": [
+      {
+        "icon": "👜",
+        "name": "Grandma's Crochet Flower Tote",
+        "shop": "HOWDI Grandma's Collection",
+        "price": "₹1,299",
+        "oldPrice": "₹1,699",
+        "category": "Handmade Crochet",
+        "handmade": true,
+        "stock": 7,
+        "rating": "4.9",
+        "reviews": 86,
+        "sizes": [
+          "One Size"
+        ],
+        "colors": [
+          "Sky Blue",
+          "Rose Pink",
+          "Cream",
+          "Lavender"
+        ],
+        "material": "100% cotton yarn",
+        "dimensions": "32 × 28 cm",
+        "makingTime": "6–8 hours",
+        "artisan": "Lakshmi Amma",
+        "offerText": "Handmade week · Extra 10% off",
+        "offerEndsAt": "2026-08-30T23:59:59+05:30",
+        "badges": [
+          "HANDMADE",
+          "LIMITED"
+        ],
+        "story": "A one-of-a-kind crochet piece inspired by the little bags our grandmothers lovingly made by hand.",
+        "likes": 1284,
+        "recentReviews": [
+          {
+            "name": "Priya",
+            "city": "Hyderabad",
+            "rating": 5,
+            "text": "Beautifully made. You can actually see the handwork.",
+            "time": "2 days ago",
+            "verified": true,
+            "helpful": 24,
+            "photo": "👜"
+          },
+          {
+            "name": "Anjali",
+            "city": "Bengaluru",
+            "rating": 5,
+            "text": "The colours and finishing are lovely. Feels special, not mass produced.",
+            "time": "5 days ago",
+            "verified": true,
+            "helpful": 18,
+            "photo": "🌸"
+          },
+          {
+            "name": "Meena",
+            "city": "Chennai",
+            "rating": 4,
+            "text": "Very cute and sturdy. Delivery was also quick.",
+            "time": "1 week ago",
+            "verified": true,
+            "helpful": 11,
+            "photo": "🧶"
+          }
+        ],
+        "makerExperience": "38 years of crochet",
+        "makerPieces": "1,240+ pieces crafted",
+        "deliveryDays": "3–5 days",
+        "weight": "280 g",
+        "questions": [
+          {
+            "q": "Is this really handmade?",
+            "a": "Yes. Each piece is individually crocheted and finished by hand."
+          },
+          {
+            "q": "Can I request another colour?",
+            "a": "Yes, if the yarn is available. Add your request at checkout or contact the maker."
+          }
+        ],
+        "customerPhotos": [
+          "👜",
+          "🌸",
+          "🧶",
+          "👩‍🦰"
+        ],
+        "shippingNote": "Ships from the maker after final quality check.",
+        "returnPolicy": "7-day easy return on eligible ready-stock items.",
+        "quantity": 1
+      }
+    ],
+    "status": "confirmed",
+    "created_at": "2026-08-31T03:46:36.176Z",
+    "updated_at": "2026-08-31T03:46:36.176Z",
+    "payment_method": "SAVED",
+    "payment_status": "pending",
+    "address": {
+      "id": "addr_1787940374204",
+      "label": "Home",
+      "full_name": "bhaskar badavath",
+      "phone": "9966977763",
+      "address_line1": "Aradhana Nest, No. 13,",
+      "address_line2": "banglore",
+      "city": "Hyderabad",
+      "state": "telangana",
+      "pincode": "506381",
+      "updated_at": "2026-08-28T18:06:14.204Z",
+      "is_default": true
+    },
+    "delivery_option": "STANDARD",
+    "estimated_delivery": "3–6 days",
+    "tracking_number": "HOWDI8147995863",
+    "coupon": "",
+    "subtotal": 1299,
+    "discount": 0,
+    "delivery_charge": 0,
+    "tax": 0,
+    "wallet_used": 0,
+    "rewards_used": 0,
+    "maker_note": "Your piece will receive a final handmade quality check before dispatch.",
+    "cancellation": null,
+    "timeline": [
+      {
+        "label": "Order confirmed",
+        "date": "2026-08-31T03:46:36.176Z",
+        "note": "Your order has been received."
+      }
+    ]
+  },
+  {
+    "id": "8cefffba-eb14-4863-a758-2e36d82c9c2a",
+    "order_number": "HD45599437",
+    "customer_id": "e6795c6d-aae9-4cb1-a056-72f9075ab8e2",
+    "title": "LED Smart Light + 2 more",
+    "shop": "Sri Lakshmi Electricals",
+    "amount": 3347,
+    "total": "₹3,347",
+    "item_count": 3,
+    "items": [
+      {
+        "icon": "💡",
+        "name": "LED Smart Light",
+        "shop": "Sri Lakshmi Electricals",
+        "price": "₹549",
+        "oldPrice": "₹699",
+        "quantity": 1
+      },
+      {
+        "icon": "👚",
+        "name": "Grandma's Crochet Summer Top",
+        "shop": "HOWDI Grandma's Collection",
+        "price": "₹1,899",
+        "oldPrice": "₹2,399",
+        "category": "Handmade Crochet Clothing",
+        "handmade": true,
+        "stock": 4,
+        "rating": "4.8",
+        "reviews": 54,
+        "sizes": [
+          "XS",
+          "S",
+          "M",
+          "L",
+          "XL",
+          "XXL",
+          "Custom"
+        ],
+        "colors": [
+          "Ivory",
+          "Peach",
+          "Mint",
+          "Sky Blue",
+          "Maroon"
+        ],
+        "material": "Soft cotton blend yarn",
+        "dimensions": "Custom fit available",
+        "makingTime": "10–14 hours",
+        "artisan": "Savitri Amma",
+        "offerText": "Limited handmade offer",
+        "offerEndsAt": "2026-08-31T20:00:00+05:30",
+        "badges": [
+          "HANDMADE",
+          "MADE TO ORDER"
+        ],
+        "story": "Every loop is made slowly and carefully, keeping the warmth and character of traditional hand-crochet alive.",
+        "quantity": 1
+      },
+      {
+        "icon": "🌸",
+        "name": "Grandma's Crochet Table Runner",
+        "shop": "HOWDI Grandma's Collection",
+        "price": "₹899",
+        "oldPrice": "₹1,199",
+        "category": "Handmade Home Decor",
+        "handmade": true,
+        "stock": 9,
+        "rating": "4.9",
+        "reviews": 112,
+        "sizes": [
+          "Standard",
+          "Custom"
+        ],
+        "colors": [
+          "Cream",
+          "Red",
+          "Mustard",
+          "Green"
+        ],
+        "material": "100% cotton yarn",
+        "dimensions": "150 × 35 cm",
+        "makingTime": "5–7 hours",
+        "artisan": "Anasuya Amma",
+        "offerText": "Festival special",
+        "offerEndsAt": "2026-09-01T23:59:59+05:30",
+        "badges": [
+          "HANDMADE",
+          "POPULAR"
+        ],
+        "story": "A classic floral crochet runner made to bring a little old-home warmth to today's dining table.",
+        "quantity": 1
+      }
+    ],
+    "status": "confirmed",
+    "created_at": "2026-08-31T03:06:39.442Z",
+    "updated_at": "2026-08-31T03:06:39.442Z",
+    "payment_method": "SAVED",
+    "payment_status": "pending",
+    "address": {
+      "id": "addr_1787940374204",
+      "label": "Home",
+      "full_name": "bhaskar badavath",
+      "phone": "9966977763",
+      "address_line1": "Aradhana Nest, No. 13,",
+      "address_line2": "banglore",
+      "city": "Hyderabad",
+      "state": "telangana",
+      "pincode": "506381",
+      "updated_at": "2026-08-28T18:06:14.204Z",
+      "is_default": true
+    },
+    "delivery_option": "STANDARD",
+    "estimated_delivery": "3–6 days",
+    "tracking_number": "HOWDI8145599437",
+    "coupon": "",
+    "subtotal": 3347,
+    "discount": 0,
+    "delivery_charge": 0,
+    "tax": 0,
+    "wallet_used": 0,
+    "rewards_used": 0,
+    "maker_note": "Your piece will receive a final handmade quality check before dispatch.",
+    "cancellation": null,
+    "timeline": [
+      {
+        "label": "Order confirmed",
+        "date": "2026-08-31T03:06:39.442Z",
+        "note": "Your order has been received."
+      }
+    ]
+  },
+  {
+    "id": "58a466f8-4cbd-40c3-bb0e-3f585600c8d8",
+    "order_number": "HD42197754",
+    "customer_id": "e6795c6d-aae9-4cb1-a056-72f9075ab8e2",
+    "title": "Grandma's Crochet Flower Tote + 2 more",
+    "shop": "HOWDI Grandma's Collection",
+    "amount": 4097,
+    "total": "₹4,097",
+    "item_count": 3,
+    "items": [
+      {
+        "icon": "👜",
+        "name": "Grandma's Crochet Flower Tote",
+        "shop": "HOWDI Grandma's Collection",
+        "price": "₹1,299",
+        "oldPrice": "₹1,699",
+        "category": "Handmade Crochet",
+        "handmade": true,
+        "stock": 7,
+        "rating": "4.9",
+        "reviews": 86,
+        "sizes": [
+          "One Size"
+        ],
+        "colors": [
+          "Sky Blue",
+          "Rose Pink",
+          "Cream",
+          "Lavender"
+        ],
+        "material": "100% cotton yarn",
+        "dimensions": "32 × 28 cm",
+        "makingTime": "6–8 hours",
+        "artisan": "Lakshmi Amma",
+        "offerText": "Handmade week · Extra 10% off",
+        "offerEndsAt": "2026-08-30T23:59:59+05:30",
+        "badges": [
+          "HANDMADE",
+          "LIMITED"
+        ],
+        "story": "A one-of-a-kind crochet piece inspired by the little bags our grandmothers lovingly made by hand.",
+        "likes": 1284,
+        "recentReviews": [
+          {
+            "name": "Priya",
+            "city": "Hyderabad",
+            "rating": 5,
+            "text": "Beautifully made. You can actually see the handwork.",
+            "time": "2 days ago",
+            "verified": true,
+            "helpful": 24,
+            "photo": "👜"
+          },
+          {
+            "name": "Anjali",
+            "city": "Bengaluru",
+            "rating": 5,
+            "text": "The colours and finishing are lovely. Feels special, not mass produced.",
+            "time": "5 days ago",
+            "verified": true,
+            "helpful": 18,
+            "photo": "🌸"
+          },
+          {
+            "name": "Meena",
+            "city": "Chennai",
+            "rating": 4,
+            "text": "Very cute and sturdy. Delivery was also quick.",
+            "time": "1 week ago",
+            "verified": true,
+            "helpful": 11,
+            "photo": "🧶"
+          }
+        ],
+        "makerExperience": "38 years of crochet",
+        "makerPieces": "1,240+ pieces crafted",
+        "deliveryDays": "3–5 days",
+        "weight": "280 g",
+        "questions": [
+          {
+            "q": "Is this really handmade?",
+            "a": "Yes. Each piece is individually crocheted and finished by hand."
+          },
+          {
+            "q": "Can I request another colour?",
+            "a": "Yes, if the yarn is available. Add your request at checkout or contact the maker."
+          }
+        ],
+        "customerPhotos": [
+          "👜",
+          "🌸",
+          "🧶",
+          "👩‍🦰"
+        ],
+        "shippingNote": "Ships from the maker after final quality check.",
+        "returnPolicy": "7-day easy return on eligible ready-stock items.",
+        "quantity": 1
+      },
+      {
+        "icon": "👚",
+        "name": "Grandma's Crochet Summer Top",
+        "shop": "HOWDI Grandma's Collection",
+        "price": "₹1,899",
+        "oldPrice": "₹2,399",
+        "category": "Handmade Crochet Clothing",
+        "handmade": true,
+        "stock": 4,
+        "rating": "4.8",
+        "reviews": 54,
+        "sizes": [
+          "XS",
+          "S",
+          "M",
+          "L",
+          "XL",
+          "XXL",
+          "Custom"
+        ],
+        "colors": [
+          "Ivory",
+          "Peach",
+          "Mint",
+          "Sky Blue",
+          "Maroon"
+        ],
+        "material": "Soft cotton blend yarn",
+        "dimensions": "Custom fit available",
+        "makingTime": "10–14 hours",
+        "artisan": "Savitri Amma",
+        "offerText": "Limited handmade offer",
+        "offerEndsAt": "2026-08-31T20:00:00+05:30",
+        "badges": [
+          "HANDMADE",
+          "MADE TO ORDER"
+        ],
+        "story": "Every loop is made slowly and carefully, keeping the warmth and character of traditional hand-crochet alive.",
+        "quantity": 1
+      },
+      {
+        "icon": "🌸",
+        "name": "Grandma's Crochet Table Runner",
+        "shop": "HOWDI Grandma's Collection",
+        "price": "₹899",
+        "oldPrice": "₹1,199",
+        "category": "Handmade Home Decor",
+        "handmade": true,
+        "stock": 9,
+        "rating": "4.9",
+        "reviews": 112,
+        "sizes": [
+          "Standard",
+          "Custom"
+        ],
+        "colors": [
+          "Cream",
+          "Red",
+          "Mustard",
+          "Green"
+        ],
+        "material": "100% cotton yarn",
+        "dimensions": "150 × 35 cm",
+        "makingTime": "5–7 hours",
+        "artisan": "Anasuya Amma",
+        "offerText": "Festival special",
+        "offerEndsAt": "2026-09-01T23:59:59+05:30",
+        "badges": [
+          "HANDMADE",
+          "POPULAR"
+        ],
+        "story": "A classic floral crochet runner made to bring a little old-home warmth to today's dining table.",
+        "quantity": 1
+      }
+    ],
+    "status": "confirmed",
+    "created_at": "2026-08-31T02:09:57.763Z",
+    "updated_at": "2026-08-31T02:09:57.763Z",
+    "payment_method": "SAVED",
+    "payment_status": "pending",
+    "address": {
+      "id": "addr_1787940374204",
+      "label": "Home",
+      "full_name": "bhaskar badavath",
+      "phone": "9966977763",
+      "address_line1": "Aradhana Nest, No. 13,",
+      "address_line2": "banglore",
+      "city": "Hyderabad",
+      "state": "telangana",
+      "pincode": "506381",
+      "updated_at": "2026-08-28T18:06:14.204Z",
+      "is_default": true
+    },
+    "delivery_option": "STANDARD",
+    "estimated_delivery": "3–6 days",
+    "tracking_number": "HOWDI8142197754",
+    "coupon": "",
+    "subtotal": 4097,
+    "discount": 0,
+    "delivery_charge": 0,
+    "tax": 0,
+    "wallet_used": 0,
+    "rewards_used": 0,
+    "maker_note": "Your piece will receive a final handmade quality check before dispatch.",
+    "cancellation": null,
+    "timeline": [
+      {
+        "label": "Order confirmed",
+        "date": "2026-08-31T02:09:57.763Z",
+        "note": "Your order has been received."
+      }
+    ]
+  },
+  {
+    "id": "aac52341-2a5a-42f4-8e00-dc98adbab701",
+    "order_number": "HD41733716",
+    "customer_id": "e6795c6d-aae9-4cb1-a056-72f9075ab8e2",
+    "title": "Grandma's Crochet Flower Tote + 5 more",
+    "shop": "HOWDI Grandma's Collection",
+    "amount": 7143,
+    "total": "₹7,143",
+    "item_count": 7,
+    "items": [
+      {
+        "icon": "👜",
+        "name": "Grandma's Crochet Flower Tote",
+        "shop": "HOWDI Grandma's Collection",
+        "price": "₹1,299",
+        "oldPrice": "₹1,699",
+        "category": "Handmade Crochet",
+        "handmade": true,
+        "stock": 7,
+        "rating": "4.9",
+        "reviews": 86,
+        "sizes": [
+          "One Size"
+        ],
+        "colors": [
+          "Sky Blue",
+          "Rose Pink",
+          "Cream",
+          "Lavender"
+        ],
+        "material": "100% cotton yarn",
+        "dimensions": "32 × 28 cm",
+        "makingTime": "6–8 hours",
+        "artisan": "Lakshmi Amma",
+        "offerText": "Handmade week · Extra 10% off",
+        "offerEndsAt": "2026-08-30T23:59:59+05:30",
+        "badges": [
+          "HANDMADE",
+          "LIMITED"
+        ],
+        "story": "A one-of-a-kind crochet piece inspired by the little bags our grandmothers lovingly made by hand.",
+        "likes": 1284,
+        "recentReviews": [
+          {
+            "name": "Priya",
+            "city": "Hyderabad",
+            "rating": 5,
+            "text": "Beautifully made. You can actually see the handwork.",
+            "time": "2 days ago",
+            "verified": true,
+            "helpful": 24,
+            "photo": "👜"
+          },
+          {
+            "name": "Anjali",
+            "city": "Bengaluru",
+            "rating": 5,
+            "text": "The colours and finishing are lovely. Feels special, not mass produced.",
+            "time": "5 days ago",
+            "verified": true,
+            "helpful": 18,
+            "photo": "🌸"
+          },
+          {
+            "name": "Meena",
+            "city": "Chennai",
+            "rating": 4,
+            "text": "Very cute and sturdy. Delivery was also quick.",
+            "time": "1 week ago",
+            "verified": true,
+            "helpful": 11,
+            "photo": "🧶"
+          }
+        ],
+        "makerExperience": "38 years of crochet",
+        "makerPieces": "1,240+ pieces crafted",
+        "deliveryDays": "3–5 days",
+        "weight": "280 g",
+        "questions": [
+          {
+            "q": "Is this really handmade?",
+            "a": "Yes. Each piece is individually crocheted and finished by hand."
+          },
+          {
+            "q": "Can I request another colour?",
+            "a": "Yes, if the yarn is available. Add your request at checkout or contact the maker."
+          }
+        ],
+        "customerPhotos": [
+          "👜",
+          "🌸",
+          "🧶",
+          "👩‍🦰"
+        ],
+        "shippingNote": "Ships from the maker after final quality check.",
+        "returnPolicy": "7-day easy return on eligible ready-stock items.",
+        "quantity": 2
+      },
+      {
+        "icon": "👚",
+        "name": "Grandma's Crochet Summer Top",
+        "shop": "HOWDI Grandma's Collection",
+        "price": "₹1,899",
+        "oldPrice": "₹2,399",
+        "category": "Handmade Crochet Clothing",
+        "handmade": true,
+        "stock": 4,
+        "rating": "4.8",
+        "reviews": 54,
+        "sizes": [
+          "XS",
+          "S",
+          "M",
+          "L",
+          "XL",
+          "XXL",
+          "Custom"
+        ],
+        "colors": [
+          "Ivory",
+          "Peach",
+          "Mint",
+          "Sky Blue",
+          "Maroon"
+        ],
+        "material": "Soft cotton blend yarn",
+        "dimensions": "Custom fit available",
+        "makingTime": "10–14 hours",
+        "artisan": "Savitri Amma",
+        "offerText": "Limited handmade offer",
+        "offerEndsAt": "2026-08-31T20:00:00+05:30",
+        "badges": [
+          "HANDMADE",
+          "MADE TO ORDER"
+        ],
+        "story": "Every loop is made slowly and carefully, keeping the warmth and character of traditional hand-crochet alive.",
+        "quantity": 1
+      },
+      {
+        "icon": "🪴",
+        "name": "Indoor Plant",
+        "shop": "Green Home Store",
+        "price": "₹299",
+        "oldPrice": "₹399",
+        "category": "Home & Garden",
+        "stock": 12,
+        "rating": "4.8",
+        "reviews": 124,
+        "sizes": [
+          "One Size"
+        ],
+        "colors": [
+          "Natural"
+        ],
+        "material": "Live indoor plant",
+        "dimensions": "Approx. 20–25 cm",
+        "makingTime": "Ready to ship",
+        "artisan": "Green Home Store",
+        "offerText": "Local store offer",
+        "offerEndsAt": "2026-08-30T18:00:00+05:30",
+        "badges": [
+          "BEST SELLER"
+        ],
+        "story": "A simple local favourite from a trusted nearby shop.",
+        "quantity": 1
+      },
+      {
+        "icon": "🌸",
+        "name": "Grandma's Crochet Table Runner",
+        "shop": "HOWDI Grandma's Collection",
+        "price": "₹899",
+        "oldPrice": "₹1,199",
+        "category": "Handmade Home Decor",
+        "handmade": true,
+        "stock": 9,
+        "rating": "4.9",
+        "reviews": 112,
+        "sizes": [
+          "Standard",
+          "Custom"
+        ],
+        "colors": [
+          "Cream",
+          "Red",
+          "Mustard",
+          "Green"
+        ],
+        "material": "100% cotton yarn",
+        "dimensions": "150 × 35 cm",
+        "makingTime": "5–7 hours",
+        "artisan": "Anasuya Amma",
+        "offerText": "Festival special",
+        "offerEndsAt": "2026-09-01T23:59:59+05:30",
+        "badges": [
+          "HANDMADE",
+          "POPULAR"
+        ],
+        "story": "A classic floral crochet runner made to bring a little old-home warmth to today's dining table.",
+        "quantity": 1
+      },
+      {
+        "icon": "🪑",
+        "name": "Wooden Stool",
+        "shop": "Local Wood Works",
+        "price": "₹899",
+        "oldPrice": "₹1,199",
+        "category": "Furniture",
+        "stock": 5,
+        "rating": "4.9",
+        "reviews": 47,
+        "sizes": [
+          "Standard",
+          "Custom"
+        ],
+        "colors": [
+          "Natural Wood",
+          "Walnut"
+        ],
+        "material": "Solid wood",
+        "dimensions": "40 × 30 × 45 cm",
+        "makingTime": "2–3 days",
+        "artisan": "Local Wood Works",
+        "offerText": "Value pick",
+        "offerEndsAt": "2026-09-02T23:59:59+05:30",
+        "badges": [
+          "POPULAR"
+        ],
+        "story": "A sturdy locally made piece designed for everyday use.",
+        "quantity": 1
+      },
+      {
+        "icon": "💡",
+        "name": "LED Smart Light",
+        "shop": "Sri Lakshmi Electricals",
+        "price": "₹549",
+        "oldPrice": "₹699",
+        "category": "Electronics",
+        "stock": 18,
+        "rating": "4.7",
+        "reviews": 67,
+        "sizes": [
+          "Standard"
+        ],
+        "colors": [
+          "White"
+        ],
+        "material": "ABS + LED",
+        "dimensions": "Standard",
+        "makingTime": "Ready to ship",
+        "artisan": "Sri Lakshmi Electricals",
+        "offerText": "20% off",
+        "offerEndsAt": "2026-08-30T20:00:00+05:30",
+        "badges": [
+          "20% OFF"
+        ],
+        "story": "A practical local product with transparent offer pricing.",
+        "quantity": 1
+      }
+    ],
+    "status": "confirmed",
+    "created_at": "2026-08-31T02:02:14.023Z",
+    "updated_at": "2026-08-31T02:02:14.023Z",
+    "payment_method": "SAVED",
+    "payment_status": "pending",
+    "address": {
+      "id": "addr_1787940374204",
+      "label": "Home",
+      "full_name": "bhaskar badavath",
+      "phone": "9966977763",
+      "address_line1": "Aradhana Nest, No. 13,",
+      "address_line2": "banglore",
+      "city": "Hyderabad",
+      "state": "telangana",
+      "pincode": "506381",
+      "updated_at": "2026-08-28T18:06:14.204Z",
+      "is_default": true
+    },
+    "delivery_option": "STANDARD",
+    "estimated_delivery": "3–6 days",
+    "tracking_number": "HOWDI8141733716",
+    "coupon": "",
+    "subtotal": 7143,
+    "discount": 0,
+    "delivery_charge": 0,
+    "tax": 0,
+    "wallet_used": 0,
+    "rewards_used": 0,
+    "maker_note": "Your piece will receive a final handmade quality check before dispatch.",
+    "cancellation": null,
+    "timeline": [
+      {
+        "label": "Order confirmed",
+        "date": "2026-08-31T02:02:14.023Z",
+        "note": "Your order has been received."
+      }
+    ]
+  },
+  {
+    "id": "1c96bad1-42e8-471f-8bc6-1827172421f4",
+    "order_number": "HD41017884",
+    "customer_id": "e6795c6d-aae9-4cb1-a056-72f9075ab8e2",
+    "title": "Grandma's Crochet Flower Tote + 1 more",
+    "shop": "HOWDI Grandma's Collection",
+    "amount": 3198,
+    "total": "₹3,198",
+    "item_count": 2,
+    "items": [
+      {
+        "icon": "👜",
+        "name": "Grandma's Crochet Flower Tote",
+        "shop": "HOWDI Grandma's Collection",
+        "price": "₹1,299",
+        "oldPrice": "₹1,699",
+        "category": "Handmade Crochet",
+        "handmade": true,
+        "stock": 7,
+        "rating": "4.9",
+        "reviews": 86,
+        "sizes": [
+          "One Size"
+        ],
+        "colors": [
+          "Sky Blue",
+          "Rose Pink",
+          "Cream",
+          "Lavender"
+        ],
+        "material": "100% cotton yarn",
+        "dimensions": "32 × 28 cm",
+        "makingTime": "6–8 hours",
+        "artisan": "Lakshmi Amma",
+        "offerText": "Handmade week · Extra 10% off",
+        "offerEndsAt": "2026-08-30T23:59:59+05:30",
+        "badges": [
+          "HANDMADE",
+          "LIMITED"
+        ],
+        "story": "A one-of-a-kind crochet piece inspired by the little bags our grandmothers lovingly made by hand.",
+        "likes": 1284,
+        "recentReviews": [
+          {
+            "name": "Priya",
+            "city": "Hyderabad",
+            "rating": 5,
+            "text": "Beautifully made. You can actually see the handwork.",
+            "time": "2 days ago",
+            "verified": true,
+            "helpful": 24,
+            "photo": "👜"
+          },
+          {
+            "name": "Anjali",
+            "city": "Bengaluru",
+            "rating": 5,
+            "text": "The colours and finishing are lovely. Feels special, not mass produced.",
+            "time": "5 days ago",
+            "verified": true,
+            "helpful": 18,
+            "photo": "🌸"
+          },
+          {
+            "name": "Meena",
+            "city": "Chennai",
+            "rating": 4,
+            "text": "Very cute and sturdy. Delivery was also quick.",
+            "time": "1 week ago",
+            "verified": true,
+            "helpful": 11,
+            "photo": "🧶"
+          }
+        ],
+        "makerExperience": "38 years of crochet",
+        "makerPieces": "1,240+ pieces crafted",
+        "deliveryDays": "3–5 days",
+        "weight": "280 g",
+        "questions": [
+          {
+            "q": "Is this really handmade?",
+            "a": "Yes. Each piece is individually crocheted and finished by hand."
+          },
+          {
+            "q": "Can I request another colour?",
+            "a": "Yes, if the yarn is available. Add your request at checkout or contact the maker."
+          }
+        ],
+        "customerPhotos": [
+          "👜",
+          "🌸",
+          "🧶",
+          "👩‍🦰"
+        ],
+        "shippingNote": "Ships from the maker after final quality check.",
+        "returnPolicy": "7-day easy return on eligible ready-stock items.",
+        "quantity": 1
+      },
+      {
+        "icon": "👚",
+        "name": "Grandma's Crochet Summer Top",
+        "shop": "HOWDI Grandma's Collection",
+        "price": "₹1,899",
+        "oldPrice": "₹2,399",
+        "category": "Handmade Crochet Clothing",
+        "handmade": true,
+        "stock": 4,
+        "rating": "4.8",
+        "reviews": 54,
+        "sizes": [
+          "XS",
+          "S",
+          "M",
+          "L",
+          "XL",
+          "XXL",
+          "Custom"
+        ],
+        "colors": [
+          "Ivory",
+          "Peach",
+          "Mint",
+          "Sky Blue",
+          "Maroon"
+        ],
+        "material": "Soft cotton blend yarn",
+        "dimensions": "Custom fit available",
+        "makingTime": "10–14 hours",
+        "artisan": "Savitri Amma",
+        "offerText": "Limited handmade offer",
+        "offerEndsAt": "2026-08-31T20:00:00+05:30",
+        "badges": [
+          "HANDMADE",
+          "MADE TO ORDER"
+        ],
+        "story": "Every loop is made slowly and carefully, keeping the warmth and character of traditional hand-crochet alive.",
+        "quantity": 1
+      }
+    ],
+    "status": "confirmed",
+    "created_at": "2026-08-31T01:50:18.198Z",
+    "updated_at": "2026-08-31T01:50:18.198Z",
+    "payment_method": "SAVED",
+    "payment_status": "pending",
+    "address": {
+      "id": "addr_1787940374204",
+      "label": "Home",
+      "full_name": "bhaskar badavath",
+      "phone": "9966977763",
+      "address_line1": "Aradhana Nest, No. 13,",
+      "address_line2": "banglore",
+      "city": "Hyderabad",
+      "state": "telangana",
+      "pincode": "506381",
+      "updated_at": "2026-08-28T18:06:14.204Z",
+      "is_default": true
+    },
+    "delivery_option": "STANDARD",
+    "estimated_delivery": "3–6 days",
+    "tracking_number": "HOWDI8141017884",
+    "coupon": "",
+    "subtotal": 3198,
+    "discount": 0,
+    "delivery_charge": 0,
+    "tax": 0,
+    "wallet_used": 0,
+    "rewards_used": 0,
+    "maker_note": "Your piece will receive a final handmade quality check before dispatch.",
+    "cancellation": null,
+    "timeline": [
+      {
+        "label": "Order confirmed",
+        "date": "2026-08-31T01:50:18.198Z",
+        "note": "Your order has been received."
+      }
+    ]
+  },
+  {
+    "id": "530df3dc-af18-4fac-bb47-aae656471c6e",
+    "order_number": "HD40291762",
+    "customer_id": "e6795c6d-aae9-4cb1-a056-72f9075ab8e2",
+    "title": "Indoor Plant + 2 more",
+    "shop": "Green Home Store",
+    "amount": 2147,
+    "total": "₹2,147",
+    "item_count": 3,
+    "items": [
+      {
+        "icon": "🪴",
+        "name": "Indoor Plant",
+        "shop": "Green Home Store",
+        "price": "₹299",
+        "oldPrice": "₹399",
+        "category": "Home & Garden",
+        "stock": 12,
+        "rating": "4.8",
+        "reviews": 124,
+        "sizes": [
+          "One Size"
+        ],
+        "colors": [
+          "Natural"
+        ],
+        "material": "Live indoor plant",
+        "dimensions": "Approx. 20–25 cm",
+        "makingTime": "Ready to ship",
+        "artisan": "Green Home Store",
+        "offerText": "Local store offer",
+        "offerEndsAt": "2026-08-30T18:00:00+05:30",
+        "badges": [
+          "BEST SELLER"
+        ],
+        "story": "A simple local favourite from a trusted nearby shop.",
+        "quantity": 1
+      },
+      {
+        "icon": "💡",
+        "name": "LED Smart Light",
+        "shop": "Sri Lakshmi Electricals",
+        "price": "₹549",
+        "oldPrice": "₹699",
+        "category": "Electronics",
+        "stock": 18,
+        "rating": "4.7",
+        "reviews": 67,
+        "sizes": [
+          "Standard"
+        ],
+        "colors": [
+          "White"
+        ],
+        "material": "ABS + LED",
+        "dimensions": "Standard",
+        "makingTime": "Ready to ship",
+        "artisan": "Sri Lakshmi Electricals",
+        "offerText": "20% off",
+        "offerEndsAt": "2026-08-30T20:00:00+05:30",
+        "badges": [
+          "20% OFF"
+        ],
+        "story": "A practical local product with transparent offer pricing.",
+        "quantity": 1
+      },
+      {
+        "icon": "👜",
+        "name": "Grandma's Crochet Flower Tote",
+        "shop": "HOWDI Grandma's Collection",
+        "price": "₹1,299",
+        "oldPrice": "₹1,699",
+        "category": "Handmade Crochet",
+        "handmade": true,
+        "stock": 7,
+        "rating": "4.9",
+        "reviews": 86,
+        "sizes": [
+          "One Size"
+        ],
+        "colors": [
+          "Sky Blue",
+          "Rose Pink",
+          "Cream",
+          "Lavender"
+        ],
+        "material": "100% cotton yarn",
+        "dimensions": "32 × 28 cm",
+        "makingTime": "6–8 hours",
+        "artisan": "Lakshmi Amma",
+        "offerText": "Handmade week · Extra 10% off",
+        "offerEndsAt": "2026-08-30T23:59:59+05:30",
+        "badges": [
+          "HANDMADE",
+          "LIMITED"
+        ],
+        "story": "A one-of-a-kind crochet piece inspired by the little bags our grandmothers lovingly made by hand.",
+        "likes": 1284,
+        "recentReviews": [
+          {
+            "name": "Priya",
+            "city": "Hyderabad",
+            "rating": 5,
+            "text": "Beautifully made. You can actually see the handwork.",
+            "time": "2 days ago",
+            "verified": true,
+            "helpful": 24,
+            "photo": "👜"
+          },
+          {
+            "name": "Anjali",
+            "city": "Bengaluru",
+            "rating": 5,
+            "text": "The colours and finishing are lovely. Feels special, not mass produced.",
+            "time": "5 days ago",
+            "verified": true,
+            "helpful": 18,
+            "photo": "🌸"
+          },
+          {
+            "name": "Meena",
+            "city": "Chennai",
+            "rating": 4,
+            "text": "Very cute and sturdy. Delivery was also quick.",
+            "time": "1 week ago",
+            "verified": true,
+            "helpful": 11,
+            "photo": "🧶"
+          }
+        ],
+        "makerExperience": "38 years of crochet",
+        "makerPieces": "1,240+ pieces crafted",
+        "deliveryDays": "3–5 days",
+        "weight": "280 g",
+        "questions": [
+          {
+            "q": "Is this really handmade?",
+            "a": "Yes. Each piece is individually crocheted and finished by hand."
+          },
+          {
+            "q": "Can I request another colour?",
+            "a": "Yes, if the yarn is available. Add your request at checkout or contact the maker."
+          }
+        ],
+        "customerPhotos": [
+          "👜",
+          "🌸",
+          "🧶",
+          "👩‍🦰"
+        ],
+        "shippingNote": "Ships from the maker after final quality check.",
+        "returnPolicy": "7-day easy return on eligible ready-stock items.",
+        "selectedSize": "One Size",
+        "selectedColor": "Sky Blue",
+        "customMeasurements": "",
+        "fitSizeResult": "",
+        "fitPhotoPermission": false,
+        "quantity": 1
+      }
+    ],
+    "status": "confirmed",
+    "created_at": "2026-08-31T01:38:12.084Z",
+    "updated_at": "2026-08-31T01:38:12.084Z",
+    "payment_method": "SAVED",
+    "payment_status": "pending",
+    "address": {
+      "id": "addr_1787940374204",
+      "label": "Home",
+      "full_name": "bhaskar badavath",
+      "phone": "9966977763",
+      "address_line1": "Aradhana Nest, No. 13,",
+      "address_line2": "banglore",
+      "city": "Hyderabad",
+      "state": "telangana",
+      "pincode": "506381",
+      "updated_at": "2026-08-28T18:06:14.204Z",
+      "is_default": true
+    },
+    "delivery_option": "STANDARD",
+    "estimated_delivery": "3–6 days",
+    "tracking_number": "HOWDI8140291762",
+    "coupon": "",
+    "subtotal": 2147,
+    "discount": 0,
+    "delivery_charge": 0,
+    "tax": 0,
+    "wallet_used": 0,
+    "rewards_used": 0,
+    "maker_note": "Your piece will receive a final handmade quality check before dispatch.",
+    "cancellation": null,
+    "timeline": [
+      {
+        "label": "Order confirmed",
+        "date": "2026-08-31T01:38:12.084Z",
+        "note": "Your order has been received."
+      }
+    ]
+  },
+  {
+    "id": "89143358-18c3-4aa3-b5c6-2399c1d89702",
+    "order_number": "HD38601387",
+    "customer_id": "e6795c6d-aae9-4cb1-a056-72f9075ab8e2",
+    "title": "Grandma's Crochet Summer Top + 1 more",
+    "shop": "HOWDI Grandma's Collection",
+    "amount": 6596,
+    "total": "₹6,596",
+    "item_count": 4,
+    "items": [
+      {
+        "icon": "👚",
+        "name": "Grandma's Crochet Summer Top",
+        "shop": "HOWDI Grandma's Collection",
+        "price": "₹1,899",
+        "oldPrice": "₹2,399",
+        "category": "Handmade Crochet Clothing",
+        "handmade": true,
+        "stock": 4,
+        "rating": "4.8",
+        "reviews": 54,
+        "sizes": [
+          "XS",
+          "S",
+          "M",
+          "L",
+          "XL",
+          "XXL",
+          "Custom"
+        ],
+        "colors": [
+          "Ivory",
+          "Peach",
+          "Mint",
+          "Sky Blue",
+          "Maroon"
+        ],
+        "material": "Soft cotton blend yarn",
+        "dimensions": "Custom fit available",
+        "makingTime": "10–14 hours",
+        "artisan": "Savitri Amma",
+        "offerText": "Limited handmade offer",
+        "offerEndsAt": "2026-08-31T20:00:00+05:30",
+        "badges": [
+          "HANDMADE",
+          "MADE TO ORDER"
+        ],
+        "story": "Every loop is made slowly and carefully, keeping the warmth and character of traditional hand-crochet alive.",
+        "quantity": 3
+      },
+      {
+        "icon": "🪑",
+        "name": "Wooden Stool",
+        "shop": "Local Wood Works",
+        "price": "₹899",
+        "oldPrice": "₹1,199",
+        "category": "Furniture",
+        "stock": 5,
+        "rating": "4.9",
+        "reviews": 47,
+        "sizes": [
+          "Standard",
+          "Custom"
+        ],
+        "colors": [
+          "Natural Wood",
+          "Walnut"
+        ],
+        "material": "Solid wood",
+        "dimensions": "40 × 30 × 45 cm",
+        "makingTime": "2–3 days",
+        "artisan": "Local Wood Works",
+        "offerText": "Value pick",
+        "offerEndsAt": "2026-09-02T23:59:59+05:30",
+        "badges": [
+          "POPULAR"
+        ],
+        "story": "A sturdy locally made piece designed for everyday use.",
+        "quantity": 1
+      }
+    ],
+    "status": "confirmed",
+    "created_at": "2026-08-31T01:10:01.393Z",
+    "updated_at": "2026-08-31T01:10:01.393Z",
+    "payment_method": "SAVED",
+    "payment_status": "pending",
+    "address": {
+      "id": "addr_1787940374204",
+      "label": "Home",
+      "full_name": "bhaskar badavath",
+      "phone": "9966977763",
+      "address_line1": "Aradhana Nest, No. 13,",
+      "address_line2": "banglore",
+      "city": "Hyderabad",
+      "state": "telangana",
+      "pincode": "506381",
+      "updated_at": "2026-08-28T18:06:14.204Z",
+      "is_default": true
+    },
+    "delivery_option": "STANDARD",
+    "estimated_delivery": "3–6 days",
+    "tracking_number": "HOWDI8138601387",
+    "coupon": "",
+    "subtotal": 6596,
+    "discount": 0,
+    "delivery_charge": 0,
+    "tax": 0,
+    "wallet_used": 0,
+    "rewards_used": 0,
+    "maker_note": "Your piece will receive a final handmade quality check before dispatch.",
+    "cancellation": null,
+    "timeline": [
+      {
+        "label": "Order confirmed",
+        "date": "2026-08-31T01:10:01.393Z",
+        "note": "Your order has been received."
+      }
+    ]
+  },
+  {
+    "id": "a6b5705d-07cb-410c-93da-b3b926c83d9e",
+    "order_number": "HD38306491",
+    "customer_id": "e6795c6d-aae9-4cb1-a056-72f9075ab8e2",
+    "title": "Grandma's Crochet Flower Tote",
+    "shop": "HOWDI Grandma's Collection",
+    "amount": 2598,
+    "total": "₹2,598",
+    "item_count": 2,
+    "items": [
+      {
+        "icon": "👜",
+        "name": "Grandma's Crochet Flower Tote",
+        "shop": "HOWDI Grandma's Collection",
+        "price": "₹1,299",
+        "oldPrice": "₹1,699",
+        "category": "Handmade Crochet",
+        "handmade": true,
+        "stock": 7,
+        "rating": "4.9",
+        "reviews": 86,
+        "sizes": [
+          "One Size"
+        ],
+        "colors": [
+          "Sky Blue",
+          "Rose Pink",
+          "Cream",
+          "Lavender"
+        ],
+        "material": "100% cotton yarn",
+        "dimensions": "32 × 28 cm",
+        "makingTime": "6–8 hours",
+        "artisan": "Lakshmi Amma",
+        "offerText": "Handmade week · Extra 10% off",
+        "offerEndsAt": "2026-08-30T23:59:59+05:30",
+        "badges": [
+          "HANDMADE",
+          "LIMITED"
+        ],
+        "story": "A one-of-a-kind crochet piece inspired by the little bags our grandmothers lovingly made by hand.",
+        "likes": 1284,
+        "recentReviews": [
+          {
+            "name": "Priya",
+            "city": "Hyderabad",
+            "rating": 5,
+            "text": "Beautifully made. You can actually see the handwork.",
+            "time": "2 days ago",
+            "verified": true,
+            "helpful": 24,
+            "photo": "👜"
+          },
+          {
+            "name": "Anjali",
+            "city": "Bengaluru",
+            "rating": 5,
+            "text": "The colours and finishing are lovely. Feels special, not mass produced.",
+            "time": "5 days ago",
+            "verified": true,
+            "helpful": 18,
+            "photo": "🌸"
+          },
+          {
+            "name": "Meena",
+            "city": "Chennai",
+            "rating": 4,
+            "text": "Very cute and sturdy. Delivery was also quick.",
+            "time": "1 week ago",
+            "verified": true,
+            "helpful": 11,
+            "photo": "🧶"
+          }
+        ],
+        "makerExperience": "38 years of crochet",
+        "makerPieces": "1,240+ pieces crafted",
+        "deliveryDays": "3–5 days",
+        "weight": "280 g",
+        "questions": [
+          {
+            "q": "Is this really handmade?",
+            "a": "Yes. Each piece is individually crocheted and finished by hand."
+          },
+          {
+            "q": "Can I request another colour?",
+            "a": "Yes, if the yarn is available. Add your request at checkout or contact the maker."
+          }
+        ],
+        "customerPhotos": [
+          "👜",
+          "🌸",
+          "🧶",
+          "👩‍🦰"
+        ],
+        "shippingNote": "Ships from the maker after final quality check.",
+        "returnPolicy": "7-day easy return on eligible ready-stock items.",
+        "selectedSize": "One Size",
+        "selectedColor": "Sky Blue",
+        "customMeasurements": "",
+        "quantity": 2
+      }
+    ],
+    "status": "confirmed",
+    "created_at": "2026-08-31T01:05:06.496Z",
+    "updated_at": "2026-08-31T01:05:06.496Z",
+    "payment_method": "SAVED",
+    "payment_status": "pending",
+    "address": {
+      "id": "addr_1787943170127",
+      "label": "Home",
+      "full_name": "bhaskar badavath",
+      "phone": "9966977763",
+      "address_line1": "5-37 pusalathanda chilukodu dornakal Warangal",
+      "address_line2": "warangal",
+      "city": "dornakal",
+      "state": "telangana",
+      "pincode": "506381",
+      "updated_at": "2026-08-28T18:52:50.127Z",
+      "is_default": false
+    },
+    "delivery_option": "STANDARD",
+    "estimated_delivery": "3–6 days",
+    "tracking_number": "HOWDI8138306491",
+    "coupon": "",
+    "subtotal": 2598,
+    "discount": 0,
+    "delivery_charge": 0,
+    "tax": 0,
+    "wallet_used": 0,
+    "rewards_used": 0,
+    "maker_note": "Your piece will receive a final handmade quality check before dispatch.",
+    "cancellation": null,
+    "timeline": [
+      {
+        "label": "Order confirmed",
+        "date": "2026-08-31T01:05:06.496Z",
+        "note": "Your order has been received."
+      }
+    ]
+  },
+  {
+    "id": "9c388e7e-fac9-4a67-a6df-2acd40e53af1",
+    "order_number": "HD31331714",
+    "customer_id": "e6795c6d-aae9-4cb1-a056-72f9075ab8e2",
+    "title": "Wooden Stool + 1 more",
+    "shop": "Local Wood Works",
+    "amount": 1448,
+    "total": "₹1,448",
+    "item_count": 2,
+    "items": [
+      {
+        "icon": "🪑",
+        "name": "Wooden Stool",
+        "shop": "Local Wood Works",
+        "price": "₹899",
+        "oldPrice": "₹1,199",
+        "category": "Furniture",
+        "stock": 5,
+        "rating": "4.9",
+        "reviews": 47,
+        "sizes": [
+          "Standard",
+          "Custom"
+        ],
+        "colors": [
+          "Natural Wood",
+          "Walnut"
+        ],
+        "material": "Solid wood",
+        "dimensions": "40 × 30 × 45 cm",
+        "makingTime": "2–3 days",
+        "artisan": "Local Wood Works",
+        "offerText": "Value pick",
+        "offerEndsAt": "2026-09-02T23:59:59+05:30",
+        "badges": [
+          "POPULAR"
+        ],
+        "story": "A sturdy locally made piece designed for everyday use.",
+        "quantity": 1
+      },
+      {
+        "icon": "💡",
+        "name": "LED Smart Light",
+        "shop": "Sri Lakshmi Electricals",
+        "price": "₹549",
+        "oldPrice": "₹699",
+        "category": "Electronics",
+        "stock": 18,
+        "rating": "4.7",
+        "reviews": 67,
+        "sizes": [
+          "Standard"
+        ],
+        "colors": [
+          "White"
+        ],
+        "material": "ABS + LED",
+        "dimensions": "Standard",
+        "makingTime": "Ready to ship",
+        "artisan": "Sri Lakshmi Electricals",
+        "offerText": "20% off",
+        "offerEndsAt": "2026-08-30T20:00:00+05:30",
+        "badges": [
+          "20% OFF"
+        ],
+        "story": "A practical local product with transparent offer pricing.",
+        "quantity": 1
+      }
+    ],
+    "status": "confirmed",
+    "created_at": "2026-08-30T23:08:52.030Z",
+    "updated_at": "2026-08-30T23:08:52.030Z",
+    "payment_method": "SAVED",
+    "payment_status": "pending",
+    "address": {
+      "id": "addr_1787940374204",
+      "label": "Home",
+      "full_name": "bhaskar badavath",
+      "phone": "9966977763",
+      "address_line1": "Aradhana Nest, No. 13,",
+      "address_line2": "banglore",
+      "city": "Hyderabad",
+      "state": "telangana",
+      "pincode": "506381",
+      "updated_at": "2026-08-28T18:06:14.204Z",
+      "is_default": true
+    },
+    "delivery_option": "STANDARD",
+    "estimated_delivery": "3–6 days",
+    "tracking_number": "HOWDI8131331714",
+    "coupon": "",
+    "subtotal": 1448,
+    "discount": 0,
+    "delivery_charge": 0,
+    "tax": 0,
+    "wallet_used": 0,
+    "rewards_used": 0,
+    "maker_note": "Your piece will receive a final handmade quality check before dispatch.",
+    "cancellation": null,
+    "timeline": [
+      {
+        "label": "Order confirmed",
+        "date": "2026-08-30T23:08:52.030Z",
+        "note": "Your order has been received."
+      }
+    ]
+  },
+  {
+    "id": "4b24e434-fcf1-49e1-b166-36c8ad312afb",
+    "order_number": "HD30428584",
+    "customer_id": "e6795c6d-aae9-4cb1-a056-72f9075ab8e2",
+    "title": "Grandma's Crochet Table Runner + 2 more",
+    "shop": "HOWDI Grandma's Collection",
+    "amount": 2497,
+    "total": "₹2,497",
+    "item_count": 3,
+    "items": [
+      {
+        "icon": "🌸",
+        "name": "Grandma's Crochet Table Runner",
+        "shop": "HOWDI Grandma's Collection",
+        "price": "₹899",
+        "oldPrice": "₹1,199",
+        "category": "Handmade Home Decor",
+        "handmade": true,
+        "stock": 9,
+        "rating": "4.9",
+        "reviews": 112,
+        "sizes": [
+          "Standard",
+          "Custom"
+        ],
+        "colors": [
+          "Cream",
+          "Red",
+          "Mustard",
+          "Green"
+        ],
+        "material": "100% cotton yarn",
+        "dimensions": "150 × 35 cm",
+        "makingTime": "5–7 hours",
+        "artisan": "Anasuya Amma",
+        "offerText": "Festival special",
+        "offerEndsAt": "2026-09-01T23:59:59+05:30",
+        "badges": [
+          "HANDMADE",
+          "POPULAR"
+        ],
+        "story": "A classic floral crochet runner made to bring a little old-home warmth to today's dining table.",
+        "quantity": 1
+      },
+      {
+        "icon": "🪴",
+        "name": "Indoor Plant",
+        "shop": "Green Home Store",
+        "price": "₹299",
+        "oldPrice": "₹399",
+        "category": "Home & Garden",
+        "stock": 12,
+        "rating": "4.8",
+        "reviews": 124,
+        "sizes": [
+          "One Size"
+        ],
+        "colors": [
+          "Natural"
+        ],
+        "material": "Live indoor plant",
+        "dimensions": "Approx. 20–25 cm",
+        "makingTime": "Ready to ship",
+        "artisan": "Green Home Store",
+        "offerText": "Local store offer",
+        "offerEndsAt": "2026-08-30T18:00:00+05:30",
+        "badges": [
+          "BEST SELLER"
+        ],
+        "story": "A simple local favourite from a trusted nearby shop.",
+        "quantity": 1
+      },
+      {
+        "icon": "👜",
+        "name": "Grandma's Crochet Flower Tote",
+        "shop": "HOWDI Grandma's Collection",
+        "price": "₹1,299",
+        "oldPrice": "₹1,699",
+        "category": "Handmade Crochet",
+        "handmade": true,
+        "stock": 7,
+        "rating": "4.9",
+        "reviews": 86,
+        "sizes": [
+          "One Size"
+        ],
+        "colors": [
+          "Sky Blue",
+          "Rose Pink",
+          "Cream",
+          "Lavender"
+        ],
+        "material": "100% cotton yarn",
+        "dimensions": "32 × 28 cm",
+        "makingTime": "6–8 hours",
+        "artisan": "Lakshmi Amma",
+        "offerText": "Handmade week · Extra 10% off",
+        "offerEndsAt": "2026-08-30T23:59:59+05:30",
+        "badges": [
+          "HANDMADE",
+          "LIMITED"
+        ],
+        "story": "A one-of-a-kind crochet piece inspired by the little bags our grandmothers lovingly made by hand.",
+        "likes": 1284,
+        "recentReviews": [
+          {
+            "name": "Priya",
+            "city": "Hyderabad",
+            "rating": 5,
+            "text": "Beautifully made. You can actually see the handwork.",
+            "time": "2 days ago",
+            "verified": true,
+            "helpful": 24,
+            "photo": "👜"
+          },
+          {
+            "name": "Anjali",
+            "city": "Bengaluru",
+            "rating": 5,
+            "text": "The colours and finishing are lovely. Feels special, not mass produced.",
+            "time": "5 days ago",
+            "verified": true,
+            "helpful": 18,
+            "photo": "🌸"
+          },
+          {
+            "name": "Meena",
+            "city": "Chennai",
+            "rating": 4,
+            "text": "Very cute and sturdy. Delivery was also quick.",
+            "time": "1 week ago",
+            "verified": true,
+            "helpful": 11,
+            "photo": "🧶"
+          }
+        ],
+        "makerExperience": "38 years of crochet",
+        "makerPieces": "1,240+ pieces crafted",
+        "deliveryDays": "3–5 days",
+        "weight": "280 g",
+        "questions": [
+          {
+            "q": "Is this really handmade?",
+            "a": "Yes. Each piece is individually crocheted and finished by hand."
+          },
+          {
+            "q": "Can I request another colour?",
+            "a": "Yes, if the yarn is available. Add your request at checkout or contact the maker."
+          }
+        ],
+        "customerPhotos": [
+          "👜",
+          "🌸",
+          "🧶",
+          "👩‍🦰"
+        ],
+        "shippingNote": "Ships from the maker after final quality check.",
+        "returnPolicy": "7-day easy return on eligible ready-stock items.",
+        "quantity": 1
+      }
+    ],
+    "status": "confirmed",
+    "created_at": "2026-08-30T22:53:48.906Z",
+    "updated_at": "2026-08-30T22:53:48.906Z",
+    "payment_method": "SAVED",
+    "payment_status": "pending",
+    "address": {
+      "id": "addr_1787940374204",
+      "label": "Home",
+      "full_name": "bhaskar badavath",
+      "phone": "9966977763",
+      "address_line1": "Aradhana Nest, No. 13,",
+      "address_line2": "banglore",
+      "city": "Hyderabad",
+      "state": "telangana",
+      "pincode": "506381",
+      "updated_at": "2026-08-28T18:06:14.204Z",
+      "is_default": true
+    },
+    "delivery_option": "STANDARD",
+    "estimated_delivery": "3–6 days",
+    "tracking_number": "HOWDI8130428584",
+    "coupon": "",
+    "subtotal": 2497,
+    "discount": 0,
+    "delivery_charge": 0,
+    "tax": 0,
+    "wallet_used": 0,
+    "rewards_used": 0,
+    "maker_note": "Your piece will receive a final handmade quality check before dispatch.",
+    "cancellation": null,
+    "timeline": [
+      {
+        "label": "Order confirmed",
+        "date": "2026-08-30T22:53:48.906Z",
+        "note": "Your order has been received."
+      }
+    ]
+  },
+  {
+    "id": "92c0de1b-7ae0-4755-b54c-3c79463a4193",
+    "order_number": "HD29574680",
+    "customer_id": "e6795c6d-aae9-4cb1-a056-72f9075ab8e2",
+    "title": "Grandma's Crochet Table Runner",
+    "shop": "HOWDI Grandma's Collection",
+    "amount": 948,
+    "total": "₹948",
+    "item_count": 1,
+    "items": [
+      {
+        "icon": "🌸",
+        "name": "Grandma's Crochet Table Runner",
+        "shop": "HOWDI Grandma's Collection",
+        "price": "₹899",
+        "oldPrice": "₹1,199",
+        "category": "Handmade Home Decor",
+        "handmade": true,
+        "stock": 9,
+        "rating": "4.9",
+        "reviews": 112,
+        "sizes": [
+          "Standard",
+          "Custom"
+        ],
+        "colors": [
+          "Cream",
+          "Red",
+          "Mustard",
+          "Green"
+        ],
+        "material": "100% cotton yarn",
+        "dimensions": "150 × 35 cm",
+        "makingTime": "5–7 hours",
+        "artisan": "Anasuya Amma",
+        "offerText": "Festival special",
+        "offerEndsAt": "2026-09-01T23:59:59+05:30",
+        "badges": [
+          "HANDMADE",
+          "POPULAR"
+        ],
+        "story": "A classic floral crochet runner made to bring a little old-home warmth to today's dining table.",
+        "quantity": 1
+      }
+    ],
+    "status": "confirmed",
+    "created_at": "2026-08-30T22:39:34.685Z",
+    "updated_at": "2026-08-30T22:39:34.685Z",
+    "payment_method": "SAVED",
+    "payment_status": "pending",
+    "address": {
+      "id": "addr_1787940374204",
+      "label": "Home",
+      "full_name": "bhaskar badavath",
+      "phone": "9966977763",
+      "address_line1": "Aradhana Nest, No. 13,",
+      "address_line2": "banglore",
+      "city": "Hyderabad",
+      "state": "telangana",
+      "pincode": "506381",
+      "updated_at": "2026-08-28T18:06:14.204Z",
+      "is_default": true
+    },
+    "delivery_option": "STANDARD",
+    "estimated_delivery": "3–6 days",
+    "tracking_number": "HOWDI8129574680",
+    "coupon": "",
+    "subtotal": 899,
+    "discount": 0,
+    "delivery_charge": 49,
+    "tax": 0,
+    "wallet_used": 0,
+    "rewards_used": 0,
+    "maker_note": "Your piece will receive a final handmade quality check before dispatch.",
+    "cancellation": null,
+    "timeline": [
+      {
+        "label": "Order confirmed",
+        "date": "2026-08-30T22:39:34.685Z",
+        "note": "Your order has been received."
+      }
+    ]
+  },
+  {
+    "id": "b9bdbadd-f45a-498e-8e85-c53e28847199",
+    "order_number": "HD28885788",
+    "customer_id": "e6795c6d-aae9-4cb1-a056-72f9075ab8e2",
+    "title": "Grandma's Crochet Flower Tote + 1 more",
+    "shop": "HOWDI Grandma's Collection",
+    "amount": 1598,
+    "total": "₹1,598",
+    "item_count": 2,
+    "items": [
+      {
+        "icon": "👜",
+        "name": "Grandma's Crochet Flower Tote",
+        "shop": "HOWDI Grandma's Collection",
+        "price": "₹1,299",
+        "oldPrice": "₹1,699",
+        "category": "Handmade Crochet",
+        "handmade": true,
+        "stock": 7,
+        "rating": "4.9",
+        "reviews": 86,
+        "sizes": [
+          "One Size"
+        ],
+        "colors": [
+          "Sky Blue",
+          "Rose Pink",
+          "Cream",
+          "Lavender"
+        ],
+        "material": "100% cotton yarn",
+        "dimensions": "32 × 28 cm",
+        "makingTime": "6–8 hours",
+        "artisan": "Lakshmi Amma",
+        "offerText": "Handmade week · Extra 10% off",
+        "offerEndsAt": "2026-08-30T23:59:59+05:30",
+        "badges": [
+          "HANDMADE",
+          "LIMITED"
+        ],
+        "story": "A one-of-a-kind crochet piece inspired by the little bags our grandmothers lovingly made by hand.",
+        "likes": 1284,
+        "recentReviews": [
+          {
+            "name": "Priya",
+            "city": "Hyderabad",
+            "rating": 5,
+            "text": "Beautifully made. You can actually see the handwork.",
+            "time": "2 days ago",
+            "verified": true,
+            "helpful": 24,
+            "photo": "👜"
+          },
+          {
+            "name": "Anjali",
+            "city": "Bengaluru",
+            "rating": 5,
+            "text": "The colours and finishing are lovely. Feels special, not mass produced.",
+            "time": "5 days ago",
+            "verified": true,
+            "helpful": 18,
+            "photo": "🌸"
+          },
+          {
+            "name": "Meena",
+            "city": "Chennai",
+            "rating": 4,
+            "text": "Very cute and sturdy. Delivery was also quick.",
+            "time": "1 week ago",
+            "verified": true,
+            "helpful": 11,
+            "photo": "🧶"
+          }
+        ],
+        "makerExperience": "38 years of crochet",
+        "makerPieces": "1,240+ pieces crafted",
+        "deliveryDays": "3–5 days",
+        "weight": "280 g",
+        "questions": [
+          {
+            "q": "Is this really handmade?",
+            "a": "Yes. Each piece is individually crocheted and finished by hand."
+          },
+          {
+            "q": "Can I request another colour?",
+            "a": "Yes, if the yarn is available. Add your request at checkout or contact the maker."
+          }
+        ],
+        "customerPhotos": [
+          "👜",
+          "🌸",
+          "🧶",
+          "👩‍🦰"
+        ],
+        "shippingNote": "Ships from the maker after final quality check.",
+        "returnPolicy": "7-day easy return on eligible ready-stock items.",
+        "quantity": 1
+      },
+      {
+        "icon": "🪴",
+        "name": "Indoor Plant",
+        "shop": "Green Home Store",
+        "price": "₹299",
+        "oldPrice": "₹399",
+        "category": "Home & Garden",
+        "stock": 12,
+        "rating": "4.8",
+        "reviews": 124,
+        "sizes": [
+          "One Size"
+        ],
+        "colors": [
+          "Natural"
+        ],
+        "material": "Live indoor plant",
+        "dimensions": "Approx. 20–25 cm",
+        "makingTime": "Ready to ship",
+        "artisan": "Green Home Store",
+        "offerText": "Local store offer",
+        "offerEndsAt": "2026-08-30T18:00:00+05:30",
+        "badges": [
+          "BEST SELLER"
+        ],
+        "story": "A simple local favourite from a trusted nearby shop.",
+        "quantity": 1
+      }
+    ],
+    "status": "confirmed",
+    "created_at": "2026-08-30T22:28:06.108Z",
+    "updated_at": "2026-08-30T22:28:06.108Z",
+    "payment_method": "SAVED",
+    "payment_status": "pending",
+    "address": {
+      "id": "addr_1787940374204",
+      "label": "Home",
+      "full_name": "bhaskar badavath",
+      "phone": "9966977763",
+      "address_line1": "Aradhana Nest, No. 13,",
+      "address_line2": "banglore",
+      "city": "Hyderabad",
+      "state": "telangana",
+      "pincode": "506381",
+      "updated_at": "2026-08-28T18:06:14.204Z",
+      "is_default": true
+    },
+    "delivery_option": "STANDARD",
+    "estimated_delivery": "3–6 days",
+    "tracking_number": "HOWDI8128885788",
+    "coupon": "",
+    "subtotal": 1598,
+    "discount": 0,
+    "delivery_charge": 0,
+    "tax": 0,
+    "wallet_used": 0,
+    "rewards_used": 0,
+    "maker_note": "Your piece will receive a final handmade quality check before dispatch.",
+    "cancellation": null,
+    "timeline": [
+      {
+        "label": "Order confirmed",
+        "date": "2026-08-30T22:28:06.108Z",
+        "note": "Your order has been received."
+      }
+    ]
+  },
+  {
+    "id": "9bfb4ef7-3716-43c8-b104-a08cd656f445",
+    "order_number": "HD26441314",
+    "customer_id": "e6795c6d-aae9-4cb1-a056-72f9075ab8e2",
+    "title": "Grandma's Crochet Summer Top",
+    "shop": "HOWDI Grandma's Collection",
+    "amount": 9495,
+    "total": "₹9,495",
+    "item_count": 5,
+    "items": [
+      {
+        "icon": "👚",
+        "name": "Grandma's Crochet Summer Top",
+        "shop": "HOWDI Grandma's Collection",
+        "price": "₹1,899",
+        "oldPrice": "₹2,399",
+        "category": "Handmade Crochet Clothing",
+        "handmade": true,
+        "stock": 4,
+        "rating": "4.8",
+        "reviews": 54,
+        "sizes": [
+          "XS",
+          "S",
+          "M",
+          "L",
+          "XL",
+          "XXL",
+          "Custom"
+        ],
+        "colors": [
+          "Ivory",
+          "Peach",
+          "Mint",
+          "Sky Blue",
+          "Maroon"
+        ],
+        "material": "Soft cotton blend yarn",
+        "dimensions": "Custom fit available",
+        "makingTime": "10–14 hours",
+        "artisan": "Savitri Amma",
+        "offerText": "Limited handmade offer",
+        "offerEndsAt": "2026-08-31T20:00:00+05:30",
+        "badges": [
+          "HANDMADE",
+          "MADE TO ORDER"
+        ],
+        "story": "Every loop is made slowly and carefully, keeping the warmth and character of traditional hand-crochet alive.",
+        "quantity": 5
+      }
+    ],
+    "status": "confirmed",
+    "created_at": "2026-08-30T21:47:21.319Z",
+    "updated_at": "2026-08-30T21:47:21.319Z",
+    "payment_method": "SAVED",
+    "payment_status": "pending",
+    "address": {
+      "id": "addr_1787943170127",
+      "label": "Home",
+      "full_name": "bhaskar badavath",
+      "phone": "9966977763",
+      "address_line1": "5-37 pusalathanda chilukodu dornakal Warangal",
+      "address_line2": "warangal",
+      "city": "dornakal",
+      "state": "telangana",
+      "pincode": "506381",
+      "updated_at": "2026-08-28T18:52:50.127Z",
+      "is_default": false
+    },
+    "delivery_option": "STANDARD",
+    "estimated_delivery": "3–6 days",
+    "tracking_number": "HOWDI8126441314",
+    "coupon": "",
+    "subtotal": 9495,
+    "discount": 0,
+    "delivery_charge": 0,
+    "tax": 0,
+    "wallet_used": 0,
+    "rewards_used": 0,
+    "maker_note": "Your piece will receive a final handmade quality check before dispatch.",
+    "cancellation": null,
+    "timeline": [
+      {
+        "label": "Order confirmed",
+        "date": "2026-08-30T21:47:21.319Z",
+        "note": "Your order has been received."
+      }
+    ]
+  },
+  {
+    "id": "3a709f61-4ceb-4432-9177-c943ec6dbde5",
+    "order_number": "HD25919236",
+    "customer_id": "e6795c6d-aae9-4cb1-a056-72f9075ab8e2",
+    "title": "Indoor Plant",
+    "shop": "Green Home Store",
+    "amount": 647,
+    "total": "₹647",
+    "item_count": 2,
+    "items": [
+      {
+        "icon": "🪴",
+        "name": "Indoor Plant",
+        "shop": "Green Home Store",
+        "price": "₹299",
+        "oldPrice": "₹399",
+        "category": "Home & Garden",
+        "stock": 12,
+        "rating": "4.8",
+        "reviews": 124,
+        "sizes": [
+          "One Size"
+        ],
+        "colors": [
+          "Natural"
+        ],
+        "material": "Live indoor plant",
+        "dimensions": "Approx. 20–25 cm",
+        "makingTime": "Ready to ship",
+        "artisan": "Green Home Store",
+        "offerText": "Local store offer",
+        "offerEndsAt": "2026-08-30T18:00:00+05:30",
+        "badges": [
+          "BEST SELLER"
+        ],
+        "story": "A simple local favourite from a trusted nearby shop.",
+        "quantity": 2
+      }
+    ],
+    "status": "confirmed",
+    "created_at": "2026-08-30T21:38:39.548Z",
+    "updated_at": "2026-08-30T21:38:39.548Z",
+    "payment_method": "SAVED",
+    "payment_status": "pending",
+    "address": {
+      "id": "addr_1787940374204",
+      "label": "Home",
+      "full_name": "bhaskar badavath",
+      "phone": "9966977763",
+      "address_line1": "Aradhana Nest, No. 13,",
+      "address_line2": "banglore",
+      "city": "Hyderabad",
+      "state": "telangana",
+      "pincode": "506381",
+      "updated_at": "2026-08-28T18:06:14.204Z",
+      "is_default": true
+    },
+    "delivery_option": "STANDARD",
+    "estimated_delivery": "3–6 days",
+    "tracking_number": "HOWDI8125919236",
+    "coupon": "",
+    "subtotal": 598,
+    "discount": 0,
+    "delivery_charge": 49,
+    "tax": 0,
+    "wallet_used": 0,
+    "rewards_used": 0,
+    "maker_note": "Your piece will receive a final handmade quality check before dispatch.",
+    "cancellation": null,
+    "timeline": [
+      {
+        "label": "Order confirmed",
+        "date": "2026-08-30T21:38:39.548Z",
+        "note": "Your order has been received."
+      }
+    ]
+  },
+  {
+    "id": "aec44f06-443b-4475-9b78-225b797ae6e1",
+    "order_number": "HD25733551",
+    "customer_id": "e6795c6d-aae9-4cb1-a056-72f9075ab8e2",
+    "title": "Grandma's Crochet Summer Top",
+    "shop": "HOWDI Grandma's Collection",
+    "amount": 3798,
+    "total": "₹3,798",
+    "item_count": 2,
+    "items": [
+      {
+        "icon": "👚",
+        "name": "Grandma's Crochet Summer Top",
+        "shop": "HOWDI Grandma's Collection",
+        "price": "₹1,899",
+        "oldPrice": "₹2,399",
+        "category": "Handmade Crochet Clothing",
+        "handmade": true,
+        "stock": 4,
+        "rating": "4.8",
+        "reviews": 54,
+        "sizes": [
+          "XS",
+          "S",
+          "M",
+          "L",
+          "XL",
+          "XXL",
+          "Custom"
+        ],
+        "colors": [
+          "Ivory",
+          "Peach",
+          "Mint",
+          "Sky Blue",
+          "Maroon"
+        ],
+        "material": "Soft cotton blend yarn",
+        "dimensions": "Custom fit available",
+        "makingTime": "10–14 hours",
+        "artisan": "Savitri Amma",
+        "offerText": "Limited handmade offer",
+        "offerEndsAt": "2026-08-31T20:00:00+05:30",
+        "badges": [
+          "HANDMADE",
+          "MADE TO ORDER"
+        ],
+        "story": "Every loop is made slowly and carefully, keeping the warmth and character of traditional hand-crochet alive.",
+        "quantity": 2
+      }
+    ],
+    "status": "confirmed",
+    "created_at": "2026-08-30T21:35:33.552Z",
+    "updated_at": "2026-08-30T21:35:33.552Z",
+    "payment_method": "SAVED",
+    "payment_status": "pending",
+    "address": {
+      "id": "addr_1787940374204",
+      "label": "Home",
+      "full_name": "bhaskar badavath",
+      "phone": "9966977763",
+      "address_line1": "Aradhana Nest, No. 13,",
+      "address_line2": "banglore",
+      "city": "Hyderabad",
+      "state": "telangana",
+      "pincode": "506381",
+      "updated_at": "2026-08-28T18:06:14.204Z",
+      "is_default": true
+    },
+    "delivery_option": "STANDARD",
+    "estimated_delivery": "3–6 days",
+    "tracking_number": "HOWDI8125733551",
+    "coupon": "",
+    "subtotal": 3798,
+    "discount": 0,
+    "delivery_charge": 0,
+    "tax": 0,
+    "wallet_used": 0,
+    "rewards_used": 0,
+    "maker_note": "Your piece will receive a final handmade quality check before dispatch.",
+    "cancellation": null,
+    "timeline": [
+      {
+        "label": "Order confirmed",
+        "date": "2026-08-30T21:35:33.552Z",
+        "note": "Your order has been received."
+      }
+    ]
+  },
+  {
+    "id": "5a4355c9-86fe-49c6-b7ab-62caac55186b",
+    "order_number": "HD25703825",
+    "customer_id": "e6795c6d-aae9-4cb1-a056-72f9075ab8e2",
+    "title": "Grandma's Crochet Summer Top",
+    "shop": "HOWDI Grandma's Collection",
+    "amount": 3798,
+    "total": "₹3,798",
+    "item_count": 2,
+    "items": [
+      {
+        "icon": "👚",
+        "name": "Grandma's Crochet Summer Top",
+        "shop": "HOWDI Grandma's Collection",
+        "price": "₹1,899",
+        "oldPrice": "₹2,399",
+        "category": "Handmade Crochet Clothing",
+        "handmade": true,
+        "stock": 4,
+        "rating": "4.8",
+        "reviews": 54,
+        "sizes": [
+          "XS",
+          "S",
+          "M",
+          "L",
+          "XL",
+          "XXL",
+          "Custom"
+        ],
+        "colors": [
+          "Ivory",
+          "Peach",
+          "Mint",
+          "Sky Blue",
+          "Maroon"
+        ],
+        "material": "Soft cotton blend yarn",
+        "dimensions": "Custom fit available",
+        "makingTime": "10–14 hours",
+        "artisan": "Savitri Amma",
+        "offerText": "Limited handmade offer",
+        "offerEndsAt": "2026-08-31T20:00:00+05:30",
+        "badges": [
+          "HANDMADE",
+          "MADE TO ORDER"
+        ],
+        "story": "Every loop is made slowly and carefully, keeping the warmth and character of traditional hand-crochet alive.",
+        "quantity": 2
+      }
+    ],
+    "status": "confirmed",
+    "created_at": "2026-08-30T21:35:04.151Z",
+    "updated_at": "2026-08-30T21:35:04.151Z",
+    "payment_method": "SAVED",
+    "payment_status": "pending",
+    "address": {
+      "id": "addr_1787940374204",
+      "label": "Home",
+      "full_name": "bhaskar badavath",
+      "phone": "9966977763",
+      "address_line1": "Aradhana Nest, No. 13,",
+      "address_line2": "banglore",
+      "city": "Hyderabad",
+      "state": "telangana",
+      "pincode": "506381",
+      "updated_at": "2026-08-28T18:06:14.204Z",
+      "is_default": true
+    },
+    "delivery_option": "STANDARD",
+    "estimated_delivery": "3–6 days",
+    "tracking_number": "HOWDI8125703825",
+    "coupon": "",
+    "subtotal": 3798,
+    "discount": 0,
+    "delivery_charge": 0,
+    "tax": 0,
+    "wallet_used": 0,
+    "rewards_used": 0,
+    "maker_note": "Your piece will receive a final handmade quality check before dispatch.",
+    "cancellation": null,
+    "timeline": [
+      {
+        "label": "Order confirmed",
+        "date": "2026-08-30T21:35:04.151Z",
+        "note": "Your order has been received."
+      }
+    ]
+  },
+  {
+    "id": "ad97169c-50f5-47c0-963b-cc5bbba17fe5",
+    "order_number": "HD25680510",
+    "customer_id": "e6795c6d-aae9-4cb1-a056-72f9075ab8e2",
+    "title": "Grandma's Crochet Flower Tote",
+    "shop": "HOWDI Grandma's Collection",
+    "amount": 1299,
+    "total": "₹1,299",
+    "item_count": 1,
+    "items": [
+      {
+        "icon": "👜",
+        "name": "Grandma's Crochet Flower Tote",
+        "shop": "HOWDI Grandma's Collection",
+        "price": "₹1,299",
+        "oldPrice": "₹1,699",
+        "category": "Handmade Crochet",
+        "handmade": true,
+        "stock": 7,
+        "rating": "4.9",
+        "reviews": 86,
+        "sizes": [
+          "One Size"
+        ],
+        "colors": [
+          "Sky Blue",
+          "Rose Pink",
+          "Cream",
+          "Lavender"
+        ],
+        "material": "100% cotton yarn",
+        "dimensions": "32 × 28 cm",
+        "makingTime": "6–8 hours",
+        "artisan": "Lakshmi Amma",
+        "offerText": "Handmade week · Extra 10% off",
+        "offerEndsAt": "2026-08-30T23:59:59+05:30",
+        "badges": [
+          "HANDMADE",
+          "LIMITED"
+        ],
+        "story": "A one-of-a-kind crochet piece inspired by the little bags our grandmothers lovingly made by hand.",
+        "likes": 1284,
+        "recentReviews": [
+          {
+            "name": "Priya",
+            "city": "Hyderabad",
+            "rating": 5,
+            "text": "Beautifully made. You can actually see the handwork.",
+            "time": "2 days ago",
+            "verified": true,
+            "helpful": 24,
+            "photo": "👜"
+          },
+          {
+            "name": "Anjali",
+            "city": "Bengaluru",
+            "rating": 5,
+            "text": "The colours and finishing are lovely. Feels special, not mass produced.",
+            "time": "5 days ago",
+            "verified": true,
+            "helpful": 18,
+            "photo": "🌸"
+          },
+          {
+            "name": "Meena",
+            "city": "Chennai",
+            "rating": 4,
+            "text": "Very cute and sturdy. Delivery was also quick.",
+            "time": "1 week ago",
+            "verified": true,
+            "helpful": 11,
+            "photo": "🧶"
+          }
+        ],
+        "makerExperience": "38 years of crochet",
+        "makerPieces": "1,240+ pieces crafted",
+        "deliveryDays": "3–5 days",
+        "weight": "280 g",
+        "questions": [
+          {
+            "q": "Is this really handmade?",
+            "a": "Yes. Each piece is individually crocheted and finished by hand."
+          },
+          {
+            "q": "Can I request another colour?",
+            "a": "Yes, if the yarn is available. Add your request at checkout or contact the maker."
+          }
+        ],
+        "customerPhotos": [
+          "👜",
+          "🌸",
+          "🧶",
+          "👩‍🦰"
+        ],
+        "shippingNote": "Ships from the maker after final quality check.",
+        "returnPolicy": "7-day easy return on eligible ready-stock items.",
+        "selectedSize": "One Size",
+        "selectedColor": "Sky Blue",
+        "customMeasurements": "",
+        "quantity": 1
+      }
+    ],
+    "status": "confirmed",
+    "created_at": "2026-08-30T21:34:40.520Z",
+    "updated_at": "2026-08-30T21:34:40.520Z",
+    "payment_method": "SAVED",
+    "payment_status": "pending",
+    "address": {
+      "id": "addr_1787940374204",
+      "label": "Home",
+      "full_name": "bhaskar badavath",
+      "phone": "9966977763",
+      "address_line1": "Aradhana Nest, No. 13,",
+      "address_line2": "banglore",
+      "city": "Hyderabad",
+      "state": "telangana",
+      "pincode": "506381",
+      "updated_at": "2026-08-28T18:06:14.204Z",
+      "is_default": true
+    },
+    "delivery_option": "STANDARD",
+    "estimated_delivery": "3–6 days",
+    "tracking_number": "HOWDI8125680510",
+    "coupon": "",
+    "subtotal": 1299,
+    "discount": 0,
+    "delivery_charge": 0,
+    "tax": 0,
+    "wallet_used": 0,
+    "rewards_used": 0,
+    "maker_note": "Your piece will receive a final handmade quality check before dispatch.",
+    "cancellation": null,
+    "timeline": [
+      {
+        "label": "Order confirmed",
+        "date": "2026-08-30T21:34:40.520Z",
+        "note": "Your order has been received."
+      }
+    ]
+  },
+  {
     "id": "dc2eea01-0dd3-4670-a569-f4b97bbb141c",
     "order_number": "HD89387693",
     "customer_id": "fb660bea-6117-4964-8845-f9412f7cb5c3",

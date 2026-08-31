@@ -1,14 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import "./App.css";
-import {
-  recordTasteEvent,
-  rememberRecentlyViewed,
-  getPersonalizedProducts,
-  getCartRecommendations,
-  getWishlistRecommendations,
-  getPersonalizedOffers,
-  getTasteSummary,
-} from "./howdiPersonalization";
 
 const slides = {
   home: [
@@ -292,18 +283,6 @@ function App() {
   const [searchType, setSearchType] = useState("all");
   const [searchCategory, setSearchCategory] = useState("All");
   const [searchSort, setSearchSort] = useState("relevance");
-  const [homeFiltersOpen, setHomeFiltersOpen] = useState(false);
-  const [homeFilterCategory, setHomeFilterCategory] = useState("All");
-  const [homeFilterSubcategory, setHomeFilterSubcategory] = useState("All");
-  const [homeFilterRating, setHomeFilterRating] = useState("All");
-  const [homeFilterColor, setHomeFilterColor] = useState("All");
-  const [homeFilterSize, setHomeFilterSize] = useState("All");
-  const [homeFilterBrand, setHomeFilterBrand] = useState("All");
-  const [homeFilterOffers, setHomeFilterOffers] = useState(false);
-  const [homeFilterMinPrice, setHomeFilterMinPrice] = useState("");
-  const [homeFilterMaxPrice, setHomeFilterMaxPrice] = useState("");
-  const [homeFilterSort, setHomeFilterSort] = useState("relevance");
-  const [homeOfferTick, setHomeOfferTick] = useState(Date.now());
   const [locationPickerOpen, setLocationPickerOpen] = useState(false);
   const [locationQuery, setLocationQuery] = useState("");
   const [customerLocation, setCustomerLocation] = useState(() => {
@@ -915,7 +894,6 @@ const [showCancellationModal, setShowCancellationModal] = useState(false);
 const [selectedCancellationOrder, setSelectedCancellationOrder] = useState(null);
   const [orderFilter, setOrderFilter] = useState("all");
   const [selectedOrder, setSelectedOrder] = useState(null);
-  const [selectedTrackingOrder, setSelectedTrackingOrder] = useState(null);
   const [savedForLater, setSavedForLater] = useState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem("howdiSavedForLater") || "[]");
@@ -953,11 +931,6 @@ const [selectedCancellationOrder, setSelectedCancellationOrder] = useState(null)
   const [checkoutCoupon, setCheckoutCoupon] = useState("");
   const [checkoutCouponApplied, setCheckoutCouponApplied] = useState(false);
   const [checkoutMessage, setCheckoutMessage] = useState("");
-  const [checkoutTax] = useState(0);
-  const [checkoutWalletCredit] = useState(0);
-  const [checkoutRewardsCredit] = useState(0);
-  const [checkoutDeliveryOption] = useState("STANDARD");
-  const [placingOrder, setPlacingOrder] = useState(false);
 
   const [giftWrap, setGiftWrap] = useState(false);
   const [giftMessage, setGiftMessage] = useState("");
@@ -967,7 +940,6 @@ const [selectedCancellationOrder, setSelectedCancellationOrder] = useState(null)
   const [cartPincode, setCartPincode] = useState("");
   const [cartPincodeChecked, setCartPincodeChecked] = useState(false);
   const [cartNotice, setCartNotice] = useState("");
-  const [cartToast, setCartToast] = useState(null);
 
   // Lock the page behind the cart/checkout drawer so only the drawer scrolls.
   useEffect(() => {
@@ -992,15 +964,6 @@ const [selectedCancellationOrder, setSelectedCancellationOrder] = useState(null)
       document.body.style.overscrollBehavior = previousOverscroll;
     };
   }, [cartOpen, checkoutOpen]);
-
-  useEffect(() => {
-    if (!cartOpen) return;
-    const timer = window.setTimeout(() => {
-      const el = document.querySelector(".howdi-cart-scroll");
-      if (el) el.scrollTop = 0;
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, [cartOpen]);
 
   const [orderSuccess, setOrderSuccess] = useState(null);
   const [selectedQuantities, setSelectedQuantities] = useState({});
@@ -1050,15 +1013,6 @@ const [selectedCancellationOrder, setSelectedCancellationOrder] = useState(null)
     }
   });
 
-  // HOWDI Taste Engine refresh signal.
-  const [tasteVersion, setTasteVersion] = useState(0);
-
-  useEffect(() => {
-    const handleTasteUpdate = () => setTasteVersion((value) => value + 1);
-    window.addEventListener("howdi:taste-updated", handleTasteUpdate);
-    return () => window.removeEventListener("howdi:taste-updated", handleTasteUpdate);
-  }, []);
-
   useEffect(() => {
     localStorage.setItem("howdiProductLikes", JSON.stringify(likedProducts));
   }, [likedProducts]);
@@ -1075,65 +1029,8 @@ const [selectedCancellationOrder, setSelectedCancellationOrder] = useState(null)
     localStorage.setItem("howdiRecentlyViewed", JSON.stringify(recentlyViewed));
   }, [recentlyViewed]);
 
-  // ==============================
-  // MOST PURCHASED
-  // ==============================
-  const [mostPurchased, setMostPurchased] = useState([]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const loadMostPurchased = async () => {
-      try {
-        const response = await fetch("http://localhost:5000/api/products/most-purchased", { cache: "no-store" });
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok || data.status !== "success") return;
-        if (!cancelled) setMostPurchased(Array.isArray(data.products) ? data.products : []);
-      } catch (error) {
-        console.error("HOWDI MOST PURCHASED ERROR:", error);
-      }
-    };
-
-    loadMostPurchased();
-    return () => { cancelled = true; };
-  }, []);
-
-  const mostPurchasedProducts = mostPurchased
-    .map((item) => {
-      const product = products.find((candidate) => candidate.name === item.name);
-      return product ? { ...product, purchasedCount: Number(item.purchasedCount) || 0 } : null;
-    })
-    .filter(Boolean)
-    .slice(0, 6);
-
-  const activeOfferProducts = products
-    .filter((product) => product?.offerText && product?.offerEndsAt && new Date(product.offerEndsAt).getTime() > Date.now())
-    .sort((a, b) => {
-      const discount = (product) => (Number(String(product.oldPrice || "").replace(/[^0-9.]/g, "")) || 0) - (Number(String(product.price || "").replace(/[^0-9.]/g, "")) || 0);
-      return discount(b) - discount(a);
-    })
-    .slice(0, 6);
-
   const addToCart = (product, quantity = 1) => {
     const qty = Math.max(1, Number(quantity) || 1);
-    setProductDetailOpen(false);
-    setFitStudioOpen(false);
-    setCustomerPhotoOpen(false);
-
-    recordTasteEvent({
-      type: "cart",
-      customerId: currentUser?.id,
-      productId: product.id ?? product.product_id ?? product._id ?? product.name,
-      name: product.name,
-      category: product.category,
-      subcategory: product.subcategory,
-      color: product.color ?? product.colors?.[0],
-      shop: product.shop,
-      price: product.price ?? product.offerPrice,
-      location: customerLocation,
-      weight: Math.max(1, qty),
-    });
-
     setCart((current) => {
       const exists = current.find((item) => item.name === product.name);
       if (exists) {
@@ -1146,10 +1043,7 @@ const [selectedCancellationOrder, setSelectedCancellationOrder] = useState(null)
       return [...current, { ...product, quantity: qty }];
     });
     setNotificationOpen(false);
-    setCartNotice(`✓ ${product.name} added to your cart.`);
-    setCartToast({ name: product.name, icon: product.icon || "🛒" });
-    window.clearTimeout(window.__howdiCartToastTimer);
-    window.__howdiCartToastTimer = window.setTimeout(() => setCartToast(null), 3200);
+    setCartOpen(true);
   };
 
   const buyNow = (product, quantity = 1) => {
@@ -1165,19 +1059,6 @@ const [selectedCancellationOrder, setSelectedCancellationOrder] = useState(null)
   };
 
   const openProductDetails = (product) => {
-    rememberRecentlyViewed(product, currentUser?.id || "");
-    recordTasteEvent({
-      type: "view",
-      customerId: currentUser?.id,
-      productId: product.id ?? product.product_id ?? product._id ?? product.name,
-      name: product.name,
-      category: product.category,
-      subcategory: product.subcategory,
-      color: product.color ?? product.colors?.[0],
-      shop: product.shop,
-      price: product.price ?? product.offerPrice,
-      location: customerLocation,
-    });
     setSelectedProduct(product);
     setSelectedProductSize(product.sizes?.[0] || "");
     setSelectedProductColor(product.colors?.[0] || "");
@@ -1314,6 +1195,7 @@ return () => window.clearInterval(timer);
 
   const addWishlistItemToCart = (product) => {
     addToCart(product, 1);
+    setCartOpen(true);
   };
 
   const checkDelivery = () => {
@@ -1436,16 +1318,12 @@ return () => window.clearInterval(timer);
       return !best || score < best.score ? { ...row, score } : best;
     }, null);
     const beyond = bust > 42 || waist > 36 || hip > 45;
-    const recommendation = beyond ? "Custom fit recommended — your measurements are outside the standard chart." : `Suggested size: ${closest.size}. We recommend confirming the maker's size chart before ordering.`;
-    setFitSizeResult(recommendation);
-    setCustomMeasurements(`Height: ${fitMeasurements.height || "—"} in, Bust: ${fitMeasurements.bust} in, Waist: ${fitMeasurements.waist} in, Hip: ${fitMeasurements.hip} in`);
+    setFitSizeResult(beyond ? "Custom fit recommended — your measurements are outside the standard chart." : `Suggested size: ${closest.size}. We recommend confirming the maker's size chart before ordering.`);
     if (!beyond && selectedProduct?.sizes?.includes(closest.size)) setSelectedProductSize(closest.size);
     if (beyond && selectedProduct?.sizes?.includes("Custom")) setSelectedProductSize("Custom");
   };
 
   const openFitStudio = () => {
-    setFitCaptureConsentOpen(false);
-    setFitCaptureAllowed(false);
     setFitStudioOpen(true);
     setFitCameraMessage("");
     setFitSizeResult("");
@@ -1475,22 +1353,11 @@ return () => window.clearInterval(timer);
 
   const addSelectedProductToCart = () => {
     if (!selectedProduct) return;
-    if (selectedProductSize === "Custom" && !customMeasurements.trim() && !fitSizeResult) {
-      setProductDetailOpen(true);
-      setCartNotice("Please add custom measurements or use Custom Fit Studio before adding this item.");
-      return;
-    }
-    const fitMeasurementText = Object.entries(fitMeasurements)
-      .filter(([, value]) => String(value || "").trim())
-      .map(([key, value]) => `${key}: ${value} in`)
-      .join(", ");
     const configuredProduct = {
       ...selectedProduct,
       selectedSize: selectedProductSize,
       selectedColor: selectedProductColor,
-      customMeasurements: selectedProductSize === "Custom" ? (customMeasurements.trim() || fitMeasurementText) : "",
-      fitSizeResult: fitSizeResult || "",
-      fitPhotoPermission: Boolean(fitPhoto),
+      customMeasurements: selectedProductSize === "Custom" ? customMeasurements : "",
     };
     addToCart(configuredProduct, productQuantity);
     setProductDetailOpen(false);
@@ -1537,74 +1404,24 @@ return () => window.clearInterval(timer);
     return total + price * (item.quantity || 1);
   }, 0);
 
-  // ============================================================
-  // SMART CART OFFER ENGINE — Cart/Checkout scope only
-  // Buy 2 → 5% off | Buy 3 → 10% off | Buy 4+ → cheapest unit free
-  // ============================================================
-  const cartPromotion = (() => {
-    const units = cart.reduce((sum, item) => sum + Math.max(1, Number(item?.quantity) || 1), 0);
-    const unitPrices = cart.flatMap((item) => {
-      const price = Number(String(item?.price || item?.offerPrice || "").replace(/[^0-9.]/g, "")) || 0;
-      return Array(Math.max(1, Number(item?.quantity) || 1)).fill(price);
-    }).filter((price) => price > 0).sort((a, b) => a - b);
-
-    if (units >= 4 && unitPrices.length >= 4) {
-      return {
-        tier: "FREE_ITEM",
-        discount: Math.round(unitPrices[0]),
-        label: "Buy 3, get the 4th item FREE",
-        message: "🎁 You unlocked a FREE item — your lowest-priced eligible item is free.",
-        next: null,
-      };
-    }
-
-    if (units === 3) {
-      return {
-        tier: "THREE",
-        discount: Math.round(cartSubtotal * 0.10),
-        label: "Buy 3 → extra 10% OFF",
-        message: "🔥 3 items unlocked 10% OFF. Add 1 more item to unlock a FREE item.",
-        next: 1,
-      };
-    }
-
-    if (units === 2) {
-      return {
-        tier: "TWO",
-        discount: Math.round(cartSubtotal * 0.05),
-        label: "Buy 2 → extra 5% OFF",
-        message: "✨ 2 items unlocked extra 5% OFF. Add 1 more item for 10% OFF.",
-        next: 1,
-      };
-    }
-
-    return {
-      tier: "ONE",
-      discount: 0,
-      label: "Add 1 more item → unlock 5% OFF",
-      message: "💡 Add 1 more item to unlock extra 5% OFF.",
-      next: 1,
-    };
-  })();
-
-  const checkoutCouponDiscount = checkoutCouponApplied ? Math.min(Math.round(cartSubtotal * 0.10), 500) : 0;
-  const checkoutDiscount = Math.max(0, cartPromotion.discount + checkoutCouponDiscount);
-  const checkoutGiftWrap = giftWrap ? 49 : 0;
+  // Checkout totals — keep every value used by Place Order defined in one place.
+  const checkoutDiscount = checkoutCouponApplied
+    ? Math.min(Math.round(cartSubtotal * 0.10), 500)
+    : 0;
   const checkoutDelivery = cartSubtotal - checkoutDiscount >= 999 ? 0 : 49;
-  const checkoutTotal = Math.max(0, cartSubtotal - checkoutDiscount + checkoutDelivery + checkoutGiftWrap);
-
-  const cartRecommendations = getCartRecommendations(cart, products, {
-    customerId: currentUser?.id,
-    location: customerLocation,
-    wishlist,
-    recentlyViewed,
-  }).slice(0, 4);
-
-  const recommendationBudget = cartPromotion.tier === "ONE"
-    ? 1500
-    : cartPromotion.tier === "TWO"
-      ? 1800
-      : 2500;
+  const checkoutTax = 0;
+  const checkoutWalletCredit = 0;
+  const checkoutRewardsCredit = 0;
+  const checkoutDeliveryOption = "STANDARD";
+  const checkoutTotal = Math.max(
+    0,
+    cartSubtotal -
+      checkoutDiscount +
+      checkoutDelivery +
+      checkoutTax -
+      checkoutWalletCredit -
+      checkoutRewardsCredit
+  );
 
 
   const applyCartCoupon = () => {
@@ -1635,7 +1452,9 @@ return () => window.clearInterval(timer);
     }
     const defaultAddress = addresses.find((item) => item.is_default) || addresses[0] || null;
     setSelectedCheckoutAddress(defaultAddress);
-    setCheckoutStep(defaultAddress ? 2 : 1);
+    // Always show Delivery first. A default address may be preselected,
+    // but the customer must still see and be able to change it.
+    setCheckoutStep(1);
     setCheckoutPayment(paymentMethods.length ? "SAVED" : "COD");
     setCheckoutCoupon("");
     setCheckoutCouponApplied(false);
@@ -1657,7 +1476,6 @@ return () => window.clearInterval(timer);
   };
 
   const placeCheckoutOrder = async () => {
-    if (placingOrder) return;
     if (!cart.length) {
       setCheckoutMessage("Your cart is empty.");
       return;
@@ -1705,12 +1523,7 @@ return () => window.clearInterval(timer);
       amount: Number(checkoutTotal) || 0,
       subtotal: Number(cartSubtotal) || 0,
       discount: Number(checkoutDiscount) || 0,
-      smart_cart_discount: Number(cartPromotion.discount) || 0,
-      coupon_discount: Number(checkoutCouponDiscount) || 0,
       delivery_charge: Number(checkoutDelivery) || 0,
-      gift_wrap: Boolean(giftWrap),
-      gift_wrap_charge: Number(checkoutGiftWrap) || 0,
-      gift_message: giftWrap && giftMessageSaved ? giftMessage.trim() : "",
       tax: Number(checkoutTax) || 0,
       wallet_used: walletUsed,
       rewards_used: rewardPointsUsed,
@@ -1728,7 +1541,6 @@ return () => window.clearInterval(timer);
     };
 
     try {
-      setPlacingOrder(true);
       setCheckoutMessage("Creating your HOWDI order...");
 
       const response = await fetch("http://localhost:5000/api/orders", {
@@ -1741,17 +1553,11 @@ return () => window.clearInterval(timer);
 
       const data = await response.json().catch(() => ({}));
 
-      if (!response.ok || data.status !== "success") {
-        throw new Error(data.message || `Unable to create order (HTTP ${response.status}).`);
+      if (!response.ok || data.status !== "success" || !data.order) {
+        throw new Error(data.message || "Unable to create order.");
       }
 
-      const createdOrder = data.order || {
-        ...orderPayload,
-        id: `local_${Date.now()}`,
-        order_id: `HOWDI-${Date.now()}`,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
+      const createdOrder = data.order;
 
       // Update wallet/rewards only after the backend has successfully created the order.
       if (walletUsed > 0) {
@@ -1806,23 +1612,6 @@ return () => window.clearInterval(timer);
         );
       } catch {}
 
-      // 🧠 HOWDI Taste Engine: a completed purchase is the strongest signal.
-      cart.forEach((item) => {
-        recordTasteEvent({
-          type: "purchase",
-          customerId: currentUser.id,
-          productId: item.id ?? item.product_id ?? item._id ?? item.name,
-          name: item.name,
-          category: item.category,
-          subcategory: item.subcategory,
-          color: item.color ?? item.colors?.[0],
-          shop: item.shop,
-          price: item.price ?? item.offerPrice,
-          location: selectedCheckoutAddress?.city || customerLocation,
-          weight: Math.max(1, Number(item.quantity) || 1),
-        });
-      });
-
       setCart([]);
       localStorage.setItem("howdiCart", "[]");
       setCheckoutOpen(false);
@@ -1834,8 +1623,6 @@ return () => window.clearInterval(timer);
         error?.message ||
         "Unable to place the order. Please try again."
       );
-    } finally {
-      setPlacingOrder(false);
     }
   };
 
@@ -2204,108 +1991,6 @@ return () => window.clearInterval(timer);
   }, [activeSection]);
 
   // ==============================
-  // HOME OFFER CLOCK + DISCOVERY FILTERS
-  // ==============================
-  useEffect(() => {
-    const timer = window.setInterval(() => setHomeOfferTick(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
-
-  const getOfferRemaining = (product) => {
-    if (!product?.offerEndsAt) return 0;
-    return Math.max(0, new Date(product.offerEndsAt).getTime() - homeOfferTick);
-  };
-
-  const getOfferLabel = (product) => {
-    const remaining = getOfferRemaining(product);
-    if (!remaining) return "OFFER ENDED";
-    if (remaining <= 6 * 60 * 60 * 1000) return "🔥 ENDING SOON";
-    if (remaining <= 24 * 60 * 60 * 1000) return "⏳ TODAY";
-    return "🟢 LIVE";
-  };
-
-  const getOfferCountdown = (product) => {
-    const remaining = getOfferRemaining(product);
-    return remaining ? formatOfferTime(remaining) : "Offer ended";
-  };
-
-  const homeFilterOptions = (() => {
-    const scoped = homeFilterCategory === "All"
-      ? products
-      : products.filter((product) => product.category === homeFilterCategory);
-    return {
-      categories: ["All", ...new Set(products.map((p) => p.category).filter(Boolean))],
-      subcategories: ["All", ...new Set(scoped.map((p) => p.subcategory || "General"))],
-      colors: ["All", ...new Set(products.flatMap((p) => Array.isArray(p.colors) ? p.colors : []).filter(Boolean))],
-      sizes: ["All", ...new Set(products.flatMap((p) => Array.isArray(p.sizes) ? p.sizes : []).filter(Boolean))],
-      brands: ["All", ...new Set(products.map((p) => p.brand || p.shop).filter(Boolean))],
-    };
-  })();
-
-  const homeFilteredProducts = (() => {
-    const min = Number(homeFilterMinPrice);
-    const max = Number(homeFilterMaxPrice);
-    const priceOf = (p) => Number(String(p.price || p.offerPrice || "").replace(/[^0-9.]/g, "")) || 0;
-    const discountOf = (p) => (Number(String(p.oldPrice || "").replace(/[^0-9.]/g, "")) || 0) - priceOf(p);
-
-    return products.filter((product) => {
-      const subcategory = product.subcategory || "General";
-      const brand = product.brand || product.shop || "";
-      return (homeFilterCategory === "All" || product.category === homeFilterCategory)
-        && (homeFilterSubcategory === "All" || subcategory === homeFilterSubcategory)
-        && (homeFilterRating === "All" || Number(product.rating || 0) >= Number(homeFilterRating))
-        && (homeFilterColor === "All" || (product.colors || []).includes(homeFilterColor))
-        && (homeFilterSize === "All" || (product.sizes || []).includes(homeFilterSize))
-        && (homeFilterBrand === "All" || brand === homeFilterBrand)
-        && (!homeFilterOffers || Boolean(product.offerText && product.offerEndsAt && getOfferRemaining(product) > 0))
-        && (!homeFilterMinPrice || priceOf(product) >= min)
-        && (!homeFilterMaxPrice || priceOf(product) <= max);
-    }).sort((a, b) => {
-      if (homeFilterSort === "rating") return Number(b.rating || 0) - Number(a.rating || 0);
-      if (homeFilterSort === "price-low") return priceOf(a) - priceOf(b);
-      if (homeFilterSort === "price-high") return priceOf(b) - priceOf(a);
-      if (homeFilterSort === "discount") return discountOf(b) - discountOf(a);
-      return 0;
-    });
-  })();
-
-  const resetHomeFilters = () => {
-    setHomeFilterCategory("All");
-    setHomeFilterSubcategory("All");
-    setHomeFilterRating("All");
-    setHomeFilterColor("All");
-    setHomeFilterSize("All");
-    setHomeFilterBrand("All");
-    setHomeFilterOffers(false);
-    setHomeFilterMinPrice("");
-    setHomeFilterMaxPrice("");
-    setHomeFilterSort("relevance");
-  };
-
-  // ==============================
-  // HOME PAGE DISCOVERY INTELLIGENCE
-  // ==============================
-  const homePersonalizedProducts = getPersonalizedProducts(products, {
-    customerId: currentUser?.id,
-    location: customerLocation,
-    cart,
-    wishlist,
-    recentlyViewed,
-  }).map((entry) => entry.product).filter(Boolean).slice(0, 6);
-
-  const homeDealProducts = [...activeOfferProducts]
-    .filter((product) => Number(String(product.oldPrice || "").replace(/[^0-9.]/g, "")) > Number(String(product.price || "").replace(/[^0-9.]/g, "")))
-    .sort((a, b) => getOfferRemaining(a) - getOfferRemaining(b))
-    .slice(0, 4);
-
-  const homeCategoryCards = [...new Map(products.map((product) => [product.category, product])).values()].slice(0, 8);
-
-  const homeRecentProducts = recentlyViewed
-    .map((recent) => products.find((product) => product.name === recent.name))
-    .filter(Boolean)
-    .slice(0, 4);
-
-  // ==============================
   // NAVIGATION
   // ==============================
 
@@ -2360,32 +2045,198 @@ return () => window.clearInterval(timer);
 
   // ==============================
   // ADDRESS BOOK HELPERS
+  // Backend is the source of truth. LocalStorage is kept only as a temporary offline cache.
   // ==============================
 
+  const ADDRESS_API = "http://localhost:5000/api/addresses";
+
   useEffect(() => {
+    let cancelled = false;
+
+    const loadCustomerAddresses = async () => {
+      if (!currentUser?.id) {
+        setAddresses([]);
+        setSelectedCheckoutAddress(null);
+        return;
+      }
+
+      const cacheKey = `howdiAddresses_${currentUser.id}`;
+      let cachedAddresses = [];
+      try {
+        const saved = JSON.parse(localStorage.getItem(cacheKey) || "[]");
+        cachedAddresses = Array.isArray(saved) ? saved : [];
+      } catch {}
+
+      try {
+        const response = await fetch(
+          `${ADDRESS_API}?customer_id=${encodeURIComponent(currentUser.id)}`,
+          { cache: "no-store" }
+        );
+        const data = await response.json().catch(() => ({}));
+
+        if (!response.ok || data.status !== "success") {
+          throw new Error(data.message || "Unable to load addresses.");
+        }
+
+        let backendAddresses = Array.isArray(data.addresses) ? data.addresses : [];
+
+        // One-time migration of addresses created by the earlier local-only version.
+        if (!backendAddresses.length && cachedAddresses.length) {
+          for (const cachedAddress of cachedAddresses) {
+            try {
+              const migrationResponse = await fetch(ADDRESS_API, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  customer_id: currentUser.id,
+                  ...cachedAddress,
+                }),
+              });
+              const migrationData = await migrationResponse.json().catch(() => ({}));
+              if (migrationResponse.ok && migrationData.address) {
+                backendAddresses.push(migrationData.address);
+              }
+            } catch {}
+          }
+        }
+
+        if (cancelled) return;
+        setAddresses(backendAddresses);
+        localStorage.setItem(cacheKey, JSON.stringify(backendAddresses));
+
+        const defaultAddress = backendAddresses.find((item) => item.is_default) || backendAddresses[0] || null;
+        setSelectedCheckoutAddress((current) => current && backendAddresses.some((item) => item.id === current.id) ? current : defaultAddress);
+      } catch (error) {
+        console.error("HOWDI LOAD ADDRESSES ERROR:", error);
+        if (!cancelled) {
+          setAddresses(cachedAddresses);
+          setSelectedCheckoutAddress(cachedAddresses.find((item) => item.is_default) || cachedAddresses[0] || null);
+        }
+      }
+    };
+
+    loadCustomerAddresses();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser]);
+
+  const cacheAddresses = (nextAddresses) => {
+    setAddresses(nextAddresses);
+    if (currentUser?.id) {
+      localStorage.setItem(`howdiAddresses_${currentUser.id}`, JSON.stringify(nextAddresses));
+    }
+    const defaultAddress = nextAddresses.find((item) => item.is_default) || nextAddresses[0] || null;
+    setSelectedCheckoutAddress((current) => current && nextAddresses.some((item) => item.id === current.id) ? { ...current, ...nextAddresses.find((item) => item.id === current.id) } : defaultAddress);
+  };
+
+  const saveAddress = async (event) => {
+    event.preventDefault();
+
     if (!currentUser?.id) {
-      setAddresses([]);
+      openLogin();
       return;
     }
 
-    try {
-      const saved = JSON.parse(
-        localStorage.getItem(`howdiAddresses_${currentUser.id}`) || "[]"
-      );
-      setAddresses(Array.isArray(saved) ? saved : []);
-    } catch {
-      setAddresses([]);
+    const pincode = String(addressForm.pincode ?? "").replace(/\D/g, "").slice(0, 6);
+    const phone = String(addressForm.phone ?? "").replace(/\D/g, "").slice(0, 10);
+
+    if (!/^[1-9][0-9]{5}$/.test(pincode)) {
+      alert("Please enter a valid 6-digit pincode.");
+      return;
     }
-  }, [currentUser]);
 
-  const persistAddresses = (nextAddresses) => {
-    setAddresses(nextAddresses);
+    if (phone.length !== 10) {
+      alert("Please enter a valid 10-digit mobile number.");
+      return;
+    }
 
-    if (currentUser?.id) {
-      localStorage.setItem(
-        `howdiAddresses_${currentUser.id}`,
-        JSON.stringify(nextAddresses)
+    if (!addressForm.full_name.trim() || !addressForm.address_line1.trim() || !addressForm.city.trim() || !addressForm.state.trim()) {
+      alert("Please complete all required address fields.");
+      return;
+    }
+
+    const payload = {
+      customer_id: currentUser.id,
+      label: addressForm.label.trim() || "Other",
+      full_name: addressForm.full_name.trim(),
+      phone,
+      address_line1: addressForm.address_line1.trim(),
+      address_line2: addressForm.address_line2.trim(),
+      city: addressForm.city.trim(),
+      state: addressForm.state.trim(),
+      pincode,
+      is_default: !editingAddressId && addresses.length === 0,
+    };
+
+    try {
+      const response = await fetch(
+        editingAddressId ? `${ADDRESS_API}/${encodeURIComponent(editingAddressId)}` : ADDRESS_API,
+        {
+          method: editingAddressId ? "PUT" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }
       );
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok || !data.address) {
+        throw new Error(data.message || "Unable to save address.");
+      }
+
+      const savedAddress = data.address;
+      const nextAddresses = editingAddressId
+        ? addresses.map((item) => item.id === editingAddressId ? savedAddress : item)
+        : [savedAddress, ...addresses];
+
+      cacheAddresses(nextAddresses);
+      setAddressFormOpen(false);
+      setEditingAddressId(null);
+    } catch (error) {
+      console.error("HOWDI SAVE ADDRESS ERROR:", error);
+      alert(error?.message || "Unable to save address. Please try again.");
+    }
+  };
+
+  const deleteAddress = async (addressId) => {
+    const address = addresses.find((item) => item.id === addressId);
+    if (!address) return;
+    if (!window.confirm(`Delete your ${address.label || "address"}?`)) return;
+
+    try {
+      const response = await fetch(
+        `${ADDRESS_API}/${encodeURIComponent(addressId)}?customer_id=${encodeURIComponent(currentUser.id)}`,
+        { method: "DELETE" }
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.message || "Unable to delete address.");
+
+      const nextAddresses = addresses.filter((item) => item.id !== addressId);
+      cacheAddresses(nextAddresses);
+    } catch (error) {
+      console.error("HOWDI DELETE ADDRESS ERROR:", error);
+      alert(error?.message || "Unable to delete address. Please try again.");
+    }
+  };
+
+  const setDefaultAddress = async (addressId) => {
+    if (!currentUser?.id) return;
+
+    try {
+      const response = await fetch(`${ADDRESS_API}/${encodeURIComponent(addressId)}/default`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ customer_id: currentUser.id }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.message || "Unable to set default address.");
+
+      const nextAddresses = addresses.map((item) => ({ ...item, is_default: item.id === addressId }));
+      cacheAddresses(nextAddresses);
+    } catch (error) {
+      console.error("HOWDI DEFAULT ADDRESS ERROR:", error);
+      alert(error?.message || "Unable to set default address. Please try again.");
     }
   };
 
@@ -2425,21 +2276,6 @@ return () => window.clearInterval(timer);
         `howdiWishlist_${currentUser.id}`,
         JSON.stringify(next)
       );
-
-      if (!exists) {
-        recordTasteEvent({
-          type: "wishlist",
-          customerId: currentUser.id,
-          productId: product.id ?? product.product_id ?? product._id ?? product.name,
-          name: product.name,
-          category: product.category,
-          subcategory: product.subcategory,
-          color: product.color ?? product.colors?.[0],
-          shop: product.shop,
-          price: product.price ?? product.offerPrice,
-          location: customerLocation,
-        });
-      }
 
       setLikedProducts((currentLikes) =>
         next.some((item) => item.name === product.name)
@@ -2520,7 +2356,6 @@ return () => window.clearInterval(timer);
     setProfileTab("orders");
     setOrderFilter("all");
     setSelectedOrder(null);
-    setSelectedTrackingOrder(null);
     setProfileOpen(true);
   };
 
@@ -2559,7 +2394,6 @@ return () => window.clearInterval(timer);
     if (!items.length) return;
     setCart(items.map((item) => ({ ...item, quantity: Math.max(1, Number(item.quantity) || 1) })));
     setSelectedOrder(null);
-    setSelectedTrackingOrder(null);
     setProfileOpen(false);
     setCartOpen(true);
   };
@@ -2678,100 +2512,6 @@ return () => window.clearInterval(timer);
       pincode: address.pincode || "",
     });
     setAddressFormOpen(true);
-  };
-
-  const saveAddress = (event) => {
-    event.preventDefault();
-
-    // Normalize the pincode before validating it.
-    // This prevents spaces/formatting from causing a false validation error.
-    const pincode = String(addressForm.pincode ?? "")
-      .replace(/\D/g, "")
-      .slice(0, 6);
-
-    if (pincode.length !== 6) {
-      alert("Please enter a valid 6-digit pincode.");
-      return;
-    }
-
-    if (
-      !addressForm.full_name.trim() ||
-      !addressForm.phone.trim() ||
-      !addressForm.address_line1.trim() ||
-      !addressForm.city.trim() ||
-      !addressForm.state.trim()
-    ) {
-      alert("Please complete all required address fields.");
-      return;
-    }
-
-    const newAddress = {
-      id: editingAddressId || `addr_${Date.now()}`,
-      ...addressForm,
-      label: addressForm.label.trim() || "Other",
-      full_name: addressForm.full_name.trim(),
-      phone: addressForm.phone.trim(),
-      address_line1: addressForm.address_line1.trim(),
-      address_line2: addressForm.address_line2.trim(),
-      city: addressForm.city.trim(),
-      state: addressForm.state.trim(),
-      pincode,
-      updated_at: new Date().toISOString(),
-    };
-
-    let nextAddresses;
-
-    if (editingAddressId) {
-      nextAddresses = addresses.map((item) =>
-        item.id === editingAddressId ? newAddress : item
-      );
-    } else {
-      nextAddresses = [
-        ...addresses,
-        {
-          ...newAddress,
-          is_default: addresses.length === 0,
-        },
-      ];
-    }
-
-    persistAddresses(nextAddresses);
-    setAddressFormOpen(false);
-    setEditingAddressId(null);
-  };
-
-  const deleteAddress = (addressId) => {
-    const address = addresses.find((item) => item.id === addressId);
-    if (!address) return;
-
-    if (!window.confirm(`Delete your ${address.label || "address"}?`)) {
-      return;
-    }
-
-    let nextAddresses = addresses.filter(
-      (item) => item.id !== addressId
-    );
-
-    if (
-      address.is_default &&
-      nextAddresses.length > 0
-    ) {
-      nextAddresses = nextAddresses.map((item, index) => ({
-        ...item,
-        is_default: index === 0,
-      }));
-    }
-
-    persistAddresses(nextAddresses);
-  };
-
-  const setDefaultAddress = (addressId) => {
-    persistAddresses(
-      addresses.map((item) => ({
-        ...item,
-        is_default: item.id === addressId,
-      }))
-    );
   };
 
   const closeProfile = () => {
@@ -3136,31 +2876,17 @@ return () => window.clearInterval(timer);
       )}
 
 
-      {cartToast && (
-        <div role="status" aria-live="polite" style={{ position: "fixed", top: "88px", right: "22px", zIndex: 10030, width: "min(390px, calc(100vw - 32px))", padding: "14px 16px", borderRadius: "16px", background: "#ffffff", color: "#172033", border: "1px solid #d5e5d9", boxShadow: "0 18px 50px rgba(15,23,42,.20)", display: "flex", alignItems: "center", gap: "12px" }}>
-          <div style={{ width: "42px", height: "42px", borderRadius: "12px", background: "#f1f8f3", display: "grid", placeItems: "center", fontSize: "22px", flex: "0 0 auto" }}>{cartToast.icon}</div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <strong style={{ display: "block", color: "#172033", fontSize: "14px" }}>✓ Added to cart</strong>
-            <div style={{ marginTop: "3px", color: "#64748b", fontSize: "12px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cartToast.name}</div>
-          </div>
-          <button type="button" onClick={() => { setCartToast(null); setCartOpen(true); }} style={{ border: 0, borderRadius: "10px", padding: "9px 11px", background: "#365947", color: "#ffffff", fontWeight: 900, cursor: "pointer", whiteSpace: "nowrap" }}>View Cart</button>
-          <button type="button" aria-label="Dismiss" onClick={() => setCartToast(null)} style={{ border: 0, background: "transparent", color: "#64748b", fontSize: "18px", cursor: "pointer", padding: "2px 4px" }}>×</button>
-        </div>
-      )}
-
       {/* ======================================
-          SHOPPING CART — premium drawer
-          NOTE: cart state/actions are unchanged.
+          SHOPPING CART
       ====================================== */}
       {cartOpen && (
         <div
-          className="howdi-cart-overlay"
           style={{
             position: "fixed",
             inset: 0,
             zIndex: 10000,
-            background: "rgba(10, 18, 30, .64)",
-            backdropFilter: "blur(5px)",
+            background: "rgba(18, 27, 24, 0.46)",
+            backdropFilter: "blur(6px)",
             display: "flex",
             justifyContent: "flex-end",
           }}
@@ -3168,271 +2894,445 @@ return () => window.clearInterval(timer);
             if (event.target === event.currentTarget) setCartOpen(false);
           }}
         >
-          <style>{`
-            .howdi-cart-shell { --ink:#162033; --muted:#6b778c; --green:#315f49; --green2:#3f765b; --cream:#fbf7ee; --line:#e5e9e6; --soft:#f5f8f6; --danger:#c2413b; width:min(680px,96vw); height:100%; background:#fff; color:var(--ink); display:flex; flex-direction:column; min-height:0; box-shadow:-28px 0 80px rgba(8,18,30,.28); }
-            .howdi-cart-shell * { box-sizing:border-box; }
-            .howdi-cart-head { padding:22px 26px 20px; border-bottom:1px solid var(--line); background:linear-gradient(180deg,#ffffff 0%,#f9fbfa 100%); }
-            .howdi-cart-headrow { display:flex; align-items:flex-start; justify-content:space-between; gap:18px; }
-            .howdi-cart-kicker { color:#718096; font-size:11px; font-weight:900; letter-spacing:1.6px; text-transform:uppercase; }
-            .howdi-cart-title { margin:5px 0 0; color:var(--ink)!important; font-size:29px; line-height:1.1; font-weight:900; letter-spacing:-.5px; }
-            .howdi-cart-sub { margin:7px 0 0; color:var(--muted)!important; font-size:13px; line-height:1.45; }
-            .howdi-cart-close { width:42px; height:42px; flex:0 0 42px; border:1px solid #dfe5e1; border-radius:14px; background:#fff; color:#263447!important; font-size:22px; line-height:1; cursor:pointer; box-shadow:0 5px 16px rgba(15,23,42,.07); }
-            .howdi-cart-close:hover { background:#f4f7f5; transform:translateY(-1px); }
-            .howdi-cart-progress { margin-top:18px; display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
-            .howdi-cart-progress > div { padding:9px 8px; border-radius:12px; background:#f3f6f4; color:#617083; text-align:center; font-size:10.5px; font-weight:900; }
-            .howdi-cart-progress > div:first-child { background:#e9f3ed; color:var(--green); }
-            .howdi-cart-scroll { flex:1; min-height:0; overflow-y:auto; padding:18px 24px 24px; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; }
-            .howdi-cart-scroll::-webkit-scrollbar { width:8px; }
-            .howdi-cart-scroll::-webkit-scrollbar-thumb { background:#d6ded9; border-radius:20px; }
-            .howdi-cart-section-title { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:0 0 12px; }
-            .howdi-cart-section-title strong { color:var(--ink)!important; font-size:14px; }
-            .howdi-cart-count { color:var(--green)!important; background:#edf6f0; border:1px solid #d7e8dc; padding:5px 9px; border-radius:999px; font-size:10px; font-weight:900; }
-            .howdi-cart-item { border:1px solid #dfe6e1; border-radius:20px; padding:14px; background:#fff; box-shadow:0 7px 24px rgba(18,38,28,.055); transition:.18s ease; }
-            .howdi-cart-item:hover { border-color:#c8d8ce; box-shadow:0 12px 30px rgba(18,38,28,.09); transform:translateY(-1px); }
-            .howdi-cart-item-top { display:grid; grid-template-columns:82px minmax(0,1fr) auto; gap:14px; align-items:start; }
-            .howdi-cart-thumb { width:82px; height:82px; border-radius:16px; background:linear-gradient(145deg,#f3eee3,#eaf4ee); border:1px solid #e3e8e2; display:flex; align-items:center; justify-content:center; overflow:hidden; font-size:40px; }
-            .howdi-cart-thumb img { width:100%; height:100%; object-fit:cover; display:block; }
-            .howdi-cart-shop { color:#a06e25!important; font-size:9.5px; letter-spacing:1.2px; text-transform:uppercase; font-weight:900; }
-            .howdi-cart-name { margin-top:3px; color:var(--ink)!important; font-size:16px; line-height:1.25; font-weight:900; }
-            .howdi-cart-price { margin-top:7px; color:var(--ink)!important; font-size:15px; font-weight:900; }
-            .howdi-cart-remove { border:0; background:transparent; color:#9a3d38!important; font-size:11px; font-weight:800; cursor:pointer; padding:5px; }
-            .howdi-cart-meta { margin-top:12px; padding:10px 11px; border-radius:13px; background:#f0f7f2; border:1px solid #d7e8dc; color:#315f49!important; font-size:11px; line-height:1.55; }
-            .howdi-cart-meta strong, .howdi-cart-meta div { color:#315f49!important; }
-            .howdi-cart-item-bottom { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:13px; padding-top:12px; border-top:1px solid #edf0ee; }
-            .howdi-cart-qty { display:flex; align-items:center; gap:5px; padding:4px; border:1px solid #dce4df; border-radius:12px; background:#f8faf9; }
-            .howdi-cart-qty button { width:29px; height:29px; border:0; border-radius:8px; background:#fff; color:#1d2939!important; font-size:17px; font-weight:900; cursor:pointer; }
-            .howdi-cart-qty button:hover { background:#eaf3ed; }
-            .howdi-cart-qty strong { min-width:25px; text-align:center; color:#162033!important; font-size:13px; }
-            .howdi-cart-save { border:0; background:transparent; color:#315f49!important; font-size:11px; font-weight:900; cursor:pointer; }
-            .howdi-cart-benefits { display:grid; grid-template-columns:repeat(3,1fr); gap:9px; margin-top:18px; }
-            .howdi-cart-benefit { min-height:78px; padding:11px; border:1px solid #dfe7e2; border-radius:15px; background:#f8faf9; }
-            .howdi-cart-benefit b { display:block; color:#243344!important; font-size:10.5px; }
-            .howdi-cart-benefit span { display:block; margin-top:5px; color:#718096!important; font-size:9.5px; line-height:1.35; }
-            .howdi-cart-panel { margin-top:12px; padding:14px; border:1px solid #e1e7e3; border-radius:17px; background:#fff; }
-            .howdi-cart-panel-title { color:#263447!important; font-size:11px; font-weight:900; }
-            .howdi-cart-inputrow { display:flex; gap:8px; margin-top:9px; }
-            .howdi-cart-input { min-width:0; flex:1; width:100%; padding:11px 12px; border:1px solid #ccd7d0; border-radius:11px; background:#fff!important; color:#162033!important; font-size:12px; outline:none; }
-            .howdi-cart-input:focus { border-color:#315f49; box-shadow:0 0 0 3px rgba(49,95,73,.10); }
-            .howdi-cart-input::placeholder { color:#8a96a5!important; opacity:1; }
-            .howdi-cart-action { padding:10px 14px; border:0; border-radius:11px; background:#315f49; color:#fff!important; font-size:11px; font-weight:900; cursor:pointer; white-space:nowrap; }
-            .howdi-cart-action:hover { background:#274d3b; }
-            .howdi-cart-check { padding:10px 14px; border:1px solid #cfdad3; border-radius:11px; background:#fff; color:#315f49!important; font-size:11px; font-weight:900; cursor:pointer; white-space:nowrap; }
-            .howdi-cart-notice { margin-top:7px; color:#47705a!important; font-size:10px; font-weight:800; }
-            .howdi-cart-note { margin-top:13px; padding:12px 13px; border:1px solid #eadfca; border-radius:15px; background:#fffaf0; color:#74582a!important; font-size:10.5px; line-height:1.5; }
-            .howdi-cart-note strong { color:#60471f!important; }
-            .howdi-cart-gift { display:flex; align-items:center; gap:9px; margin-top:12px; padding:12px 13px; border:1px solid #dfe6e1; border-radius:14px; color:#334155!important; font-size:11px; font-weight:800; cursor:pointer; }
-            .howdi-cart-gift input { accent-color:#315f49; }
-            .howdi-cart-empty { min-height:470px; display:flex; align-items:center; justify-content:center; text-align:center; padding:40px 20px; }
-            .howdi-cart-empty-card { max-width:390px; padding:35px 28px; border:1px solid #dfe7e2; border-radius:24px; background:linear-gradient(145deg,#f9fbfa,#fffaf0); }
-            .howdi-cart-empty-icon { font-size:58px; }
-            .howdi-cart-empty h3 { margin:13px 0 7px; color:#162033!important; font-size:23px; }
-            .howdi-cart-empty p { margin:0 0 20px; color:#6b778c!important; font-size:13px; line-height:1.55; }
-            .howdi-cart-footer { flex:0 0 auto; padding:14px 24px 18px; border-top:1px solid #dfe6e1; background:rgba(250,252,251,.98); box-shadow:0 -12px 30px rgba(15,23,42,.08); }
-            .howdi-cart-totalrow { display:flex; align-items:center; justify-content:space-between; gap:12px; color:#162033!important; }
-            .howdi-cart-totalrow span { color:#657286!important; font-size:12px; font-weight:800; }
-            .howdi-cart-totalrow strong { color:#162033!important; font-size:22px; }
-            .howdi-cart-footer-note { margin:5px 0 12px; color:#778397!important; font-size:10.5px; line-height:1.4; }
-            .howdi-cart-checkout { width:100%; padding:14px 16px; border:0; border-radius:14px; background:linear-gradient(135deg,#162033,#24374c); color:#fff!important; font-size:15px; font-weight:900; cursor:pointer; box-shadow:0 8px 20px rgba(22,32,51,.18); }
-            .howdi-cart-checkout:hover { transform:translateY(-1px); box-shadow:0 11px 24px rgba(22,32,51,.24); }
-            @media (max-width:620px) { .howdi-cart-shell{width:100%;} .howdi-cart-head{padding:18px 16px;} .howdi-cart-scroll{padding:15px 14px 20px;} .howdi-cart-footer{padding:12px 14px 15px;} .howdi-cart-item-top{grid-template-columns:68px minmax(0,1fr);}.howdi-cart-thumb{width:68px;height:68px;font-size:32px;}.howdi-cart-remove{grid-column:2;justify-self:end;margin-top:-28px;}.howdi-cart-benefits{grid-template-columns:1fr;}.howdi-cart-progress{gap:5px;} .howdi-cart-title{font-size:25px;} }
-          `}</style>
-
-          <div className="howdi-cart-shell">
-            <div className="howdi-cart-head">
-              <div className="howdi-cart-headrow">
+          <div
+            style={{
+              width: "min(720px, 100vw)",
+              height: "100%",
+              background: "#f7f8f5",
+              display: "flex",
+              flexDirection: "column",
+              minHeight: 0,
+              boxShadow: "-30px 0 80px rgba(0,0,0,.18)",
+            }}
+          >
+            {/* Premium cart header */}
+            <div
+              style={{
+                padding: "22px 26px 18px",
+                background: "#ffffff",
+                borderBottom: "1px solid #e7ebe5",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "16px" }}>
                 <div>
-                  <div className="howdi-cart-kicker">HOWDI SHOPPING</div>
-                  <h2 className="howdi-cart-title">🛒 Your Cart</h2>
-                  <p className="howdi-cart-sub">
-                    Review your handmade finds before checkout.
-                    {savedForLater.length > 0 ? ` ${savedForLater.length} item${savedForLater.length === 1 ? "" : "s"} saved for later.` : ""}
-                  </p>
+                  <div style={{ color: "#6b7b70", fontSize: "10px", fontWeight: 900, letterSpacing: "1.7px", textTransform: "uppercase" }}>
+                    HOWDI SHOPPING
+                  </div>
+                  <div style={{ display: "flex", alignItems: "baseline", gap: "9px", marginTop: "5px" }}>
+                    <h2 style={{ margin: 0, color: "#17221d", fontSize: "29px", lineHeight: 1.05, fontWeight: 900, letterSpacing: "-.7px", WebkitTextFillColor: "#17221d" }}>
+                      Your Cart
+                    </h2>
+                    <span style={{ color: "#6b7b70", fontSize: "13px", fontWeight: 800 }}>
+                      {cart.length} {cart.length === 1 ? "item" : "items"}
+                    </span>
+                  </div>
                 </div>
-                <button type="button" className="howdi-cart-close" onClick={() => setCartOpen(false)} aria-label="Close cart">×</button>
+
+                <button
+                  type="button"
+                  aria-label="Close cart"
+                  onClick={() => setCartOpen(false)}
+                  style={{
+                    width: "42px",
+                    height: "42px",
+                    borderRadius: "50%",
+                    border: "1px solid #dfe6df",
+                    background: "#f8faf8",
+                    color: "#314139",
+                    fontSize: "21px",
+                    cursor: "pointer",
+                    flex: "0 0 auto",
+                  }}
+                >
+                  ×
+                </button>
               </div>
-              <div className="howdi-cart-progress">
-                <div>✓ ITEMS SELECTED</div>
-                <div>🔒 SECURE CHECKOUT</div>
-                <div>🧶 HANDMADE CARE</div>
-              </div>
+
+              {cart.length > 0 && (
+                <div style={{ marginTop: "16px", display: "flex", alignItems: "center", gap: "10px" }}>
+                  <div style={{ flex: 1, height: "5px", borderRadius: "99px", background: "#e9eee9", overflow: "hidden" }}>
+                    <div style={{ width: "68%", height: "100%", borderRadius: "99px", background: "#365947" }} />
+                  </div>
+                  <span style={{ color: "#64746b", fontSize: "11px", fontWeight: 800 }}>Ready to checkout</span>
+                </div>
+              )}
             </div>
 
             <div
-              className="howdi-cart-scroll"
-              ref={(node) => { if (node && cartOpen && node.scrollTop !== 0) node.scrollTop = 0; }}
+              style={{
+                flex: 1,
+                minHeight: 0,
+                overflowY: "auto",
+                padding: "18px 20px 170px",
+                WebkitOverflowScrolling: "touch",
+              }}
             >
               {cart.length === 0 ? (
-                <div className="howdi-cart-empty">
-                  <div className="howdi-cart-empty-card">
-                    <div className="howdi-cart-empty-icon">🛍️</div>
-                    <h3>Your cart is waiting</h3>
-                    <p>Add something you love from HOWDI local shops. Your selected products will appear here.</p>
-                    <button type="button" className="howdi-cart-action" onClick={() => { setCartOpen(false); navigate("shop"); }} style={{ padding: "12px 18px", fontSize: "12px" }}>
+                <div
+                  style={{
+                    minHeight: "430px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    textAlign: "center",
+                  }}
+                >
+                  <div style={{ maxWidth: "360px" }}>
+                    <div style={{ width: "82px", height: "82px", margin: "0 auto", borderRadius: "28px", background: "#eaf0ea", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "38px" }}>
+                      🛒
+                    </div>
+                    <h3 style={{ color: "#17221d", fontSize: "24px", margin: "18px 0 8px", fontWeight: 900 }}>
+                      Your cart is empty
+                    </h3>
+                    <p style={{ color: "#718078", fontSize: "14px", lineHeight: 1.6, margin: "0 0 20px" }}>
+                      Discover products from local businesses and add something you love.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCartOpen(false);
+                        navigate("shop");
+                      }}
+                      style={{
+                        border: 0,
+                        borderRadius: "14px",
+                        padding: "13px 20px",
+                        background: "#365947",
+                        color: "#fff",
+                        fontWeight: 900,
+                        cursor: "pointer",
+                      }}
+                    >
                       Continue Shopping →
                     </button>
                   </div>
                 </div>
               ) : (
                 <>
-                  <div className="howdi-cart-section-title">
-                    <strong>Your selected items</strong>
-                    <span className="howdi-cart-count">{cart.reduce((sum, item) => sum + (item.quantity || 1), 0)} ITEM{cart.reduce((sum, item) => sum + (item.quantity || 1), 0) === 1 ? "" : "S"}</span>
-                  </div>
-
                   <div style={{ display: "grid", gap: "12px" }}>
                     {cart.map((item) => (
-                      <article key={item.name} className="howdi-cart-item">
-                        <div className="howdi-cart-item-top">
-                          <div className="howdi-cart-thumb">
-                            {item.image ? <img src={item.image} alt={item.name} /> : item.icon}
+                      <div
+                        key={item.name}
+                        style={{
+                          background: "#ffffff",
+                          border: "1px solid #e4e9e4",
+                          borderRadius: "22px",
+                          padding: "13px",
+                          boxShadow: "0 8px 26px rgba(35,54,44,.055)",
+                        }}
+                      >
+                        <div style={{ display: "grid", gridTemplateColumns: "94px minmax(0,1fr)", gap: "14px" }}>
+                          <div
+                            style={{
+                              width: "94px",
+                              height: "94px",
+                              borderRadius: "18px",
+                              background: "linear-gradient(145deg,#f0eadc,#e5ddcb)",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              fontSize: "36px",
+                              overflow: "hidden",
+                            }}
+                          >
+                            {item.icon}
                           </div>
+
                           <div style={{ minWidth: 0 }}>
-                            <div className="howdi-cart-shop">{item.shop || "HOWDI SHOP"}</div>
-                            <div className="howdi-cart-name">{item.name}</div>
-                            <div className="howdi-cart-price">{item.price}</div>
+                            <div style={{ display: "flex", justifyContent: "space-between", gap: "10px", alignItems: "flex-start" }}>
+                              <div style={{ minWidth: 0 }}>
+                                <div style={{ color: "#9b6b25", fontSize: "9.5px", letterSpacing: "1.2px", textTransform: "uppercase", fontWeight: 900 }}>
+                                  {item.shop}
+                                </div>
+                                <div style={{ color: "#17221d", fontSize: "17px", fontWeight: 900, lineHeight: 1.25, marginTop: "4px" }}>
+                                  {item.name}
+                                </div>
+                              </div>
+                              <div style={{ color: "#17221d", fontSize: "17px", fontWeight: 900, whiteSpace: "nowrap" }}>
+                                {item.price}
+                              </div>
+                            </div>
+
+                            {(item.selectedSize || item.size || item.selectedColor || item.color || item.customMeasurements || item.fitSizeResult) && (
+                              <div
+                                style={{
+                                  marginTop: "9px",
+                                  display: "flex",
+                                  flexWrap: "wrap",
+                                  gap: "6px",
+                                }}
+                              >
+                                {(item.selectedSize || item.size) && (
+                                  <span style={{ padding: "5px 8px", borderRadius: "99px", background: "#f0f5f1", color: "#365947", fontSize: "10px", fontWeight: 800 }}>
+                                    Size · {item.selectedSize || item.size}
+                                  </span>
+                                )}
+                                {(item.selectedColor || item.color) && (
+                                  <span style={{ padding: "5px 8px", borderRadius: "99px", background: "#f8f2e8", color: "#785a2c", fontSize: "10px", fontWeight: 800 }}>
+                                    Colour · {item.selectedColor || item.color}
+                                  </span>
+                                )}
+                                {item.fitSizeResult && (
+                                  <span style={{ padding: "5px 8px", borderRadius: "99px", background: "#eef3f7", color: "#4d6272", fontSize: "10px", fontWeight: 800 }}>
+                                    Fit · {item.fitSizeResult}
+                                  </span>
+                                )}
+                                {item.customMeasurements && (
+                                  <span style={{ padding: "5px 8px", borderRadius: "99px", background: "#f4eff7", color: "#6b5275", fontSize: "10px", fontWeight: 800 }}>
+                                    📏 Custom fit
+                                  </span>
+                                )}
+                              </div>
+                            )}
+
+                            {item.makingTime && (
+                              <div style={{ marginTop: "8px", color: "#78857e", fontSize: "10.5px", fontWeight: 700 }}>
+                                🧵 Made to order · {item.makingTime}
+                              </div>
+                            )}
                           </div>
-                          <button type="button" className="howdi-cart-remove" onClick={(event) => { event.stopPropagation(); removeFromCart(item.name); }}>Remove</button>
                         </div>
 
-                        {(item.selectedSize || item.size || item.selectedColor || item.color || item.customMeasurements || item.fitSizeResult || item.fitPhotoPermission) && (
-                          <div className="howdi-cart-meta">
-                            <strong>🧶 Your product details</strong>
-                            {item.selectedSize || item.size ? <div>Size: {item.selectedSize || item.size}</div> : null}
-                            {item.selectedColor || item.color ? <div>Colour: {item.selectedColor || item.color}</div> : null}
-                            {item.fitSizeResult ? <div>Fit recommendation: {item.fitSizeResult}</div> : null}
-                            {item.customMeasurements ? <div>📏 Custom measurements saved</div> : null}
-                            {item.fitPhotoPermission ? <div>🔒 Fit reference permission saved · photo stays protected</div> : null}
+                        {/* Dedicated action row — no overlap */}
+                        <div
+                          style={{
+                            marginTop: "12px",
+                            paddingTop: "11px",
+                            borderTop: "1px solid #edf0ec",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: "10px",
+                            flexWrap: "wrap",
+                          }}
+                        >
+                          <div style={{ display: "inline-flex", alignItems: "center", gap: "2px", padding: "3px", borderRadius: "12px", background: "#f2f5f2", border: "1px solid #e1e7e1" }}>
+                            <button
+                              type="button"
+                              aria-label="Decrease quantity"
+                              onClick={() => updateCartQuantity(item.name, -1)}
+                              style={{ width: "30px", height: "30px", border: 0, borderRadius: "9px", background: "#fff", color: "#365947", fontSize: "17px", fontWeight: 900, cursor: "pointer" }}
+                            >
+                              −
+                            </button>
+                            <span style={{ minWidth: "30px", textAlign: "center", color: "#17221d", fontSize: "12px", fontWeight: 900 }}>
+                              {item.quantity || 1}
+                            </span>
+                            <button
+                              type="button"
+                              aria-label="Increase quantity"
+                              onClick={() => updateCartQuantity(item.name, 1)}
+                              style={{ width: "30px", height: "30px", border: 0, borderRadius: "9px", background: "#365947", color: "#fff", fontSize: "17px", fontWeight: 900, cursor: "pointer" }}
+                            >
+                              +
+                            </button>
                           </div>
-                        )}
 
-                        {item.makingTime && <div style={{ marginTop: "9px", color: "#68768a", fontSize: "10.5px", fontWeight: 700 }}>🧵 Making time: {item.makingTime}</div>}
-
-                        <div className="howdi-cart-item-bottom">
-                          <div className="howdi-cart-qty" aria-label={`Quantity for ${item.name}`}>
-                            <button type="button" onClick={(event) => { event.stopPropagation(); updateCartQuantity(item.name, -1); }}>−</button>
-                            <strong>{item.quantity || 1}</strong>
-                            <button type="button" onClick={(event) => { event.stopPropagation(); updateCartQuantity(item.name, 1); }}>+</button>
+                          <div style={{ display: "flex", alignItems: "center", gap: "7px", flexWrap: "wrap" }}>
+                            <button
+                              type="button"
+                              onClick={() => saveForLater(item)}
+                              style={{ border: "1px solid #dfe6df", borderRadius: "11px", padding: "8px 11px", background: "#fff", color: "#365947", fontSize: "10.5px", fontWeight: 900, cursor: "pointer" }}
+                            >
+                              ♡ Save for later
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => removeFromCart(item.name)}
+                              style={{ border: "1px solid #f0d7d7", borderRadius: "11px", padding: "8px 11px", background: "#fffafa", color: "#a14b4b", fontSize: "10.5px", fontWeight: 900, cursor: "pointer" }}
+                            >
+                              Remove
+                            </button>
                           </div>
-                          <button type="button" className="howdi-cart-save" onClick={(event) => { event.stopPropagation(); saveCartItemForLater(item); }}>♡ Save for later</button>
                         </div>
-                      </article>
+                      </div>
                     ))}
                   </div>
 
-                  <div className="howdi-smart-offer-card">
-                    <div className="howdi-smart-offer-head">
-                      <div>
-                        <div className="howdi-smart-offer-kicker">HOWDI SMART SAVINGS</div>
-                        <strong>{cartPromotion.label}</strong>
-                      </div>
-                      <span className="howdi-smart-offer-badge">{cartPromotion.discount > 0 ? `SAVE ₹${cartPromotion.discount.toLocaleString("en-IN")}` : "UNLOCK"}</span>
-                    </div>
-                    <div className="howdi-smart-offer-copy">{cartPromotion.message}</div>
-                    {cartPromotion.next ? (
-                      <div className="howdi-smart-offer-progress">
-                        <span>Progress to next reward</span>
-                        <strong>{cartCount} / {cartPromotion.tier === "ONE" ? 2 : 4} items</strong>
-                      </div>
-                    ) : null}
-                    <div className="howdi-smart-offer-tiers">
-                      <span className={cartCount >= 2 ? "is-on" : ""}>🛍️ 2 items · 5%</span>
-                      <span className={cartCount >= 3 ? "is-on" : ""}>🔥 3 items · 10%</span>
-                      <span className={cartCount >= 4 ? "is-on" : ""}>🎁 4 items · FREE</span>
-                    </div>
-                  </div>
-
-                  {cartRecommendations.length > 0 && (
-                    <div className="howdi-cart-recommendations">
-                      <div className="howdi-cart-recommend-head">
+                  {savedForLater.length > 0 && (
+                    <section style={{ marginTop: "18px" }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "10px" }}>
                         <div>
-                          <div className="howdi-smart-offer-kicker">MATCHED FOR YOU</div>
-                          <strong>✨ Complete your cart</strong>
-                          <span>Relevant products chosen from your taste, cart and price range.</span>
+                          <div style={{ color: "#17221d", fontSize: "16px", fontWeight: 900 }}>Saved for later</div>
+                          <div style={{ color: "#78857e", fontSize: "11px", marginTop: "2px" }}>Keep favourites here without losing them.</div>
                         </div>
-                        <span className="howdi-recommend-budget">Fit ≤ ₹{recommendationBudget.toLocaleString("en-IN")}</span>
+                        <span style={{ minWidth: "28px", height: "28px", padding: "0 8px", borderRadius: "99px", background: "#edf3ee", color: "#365947", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: "11px", fontWeight: 900 }}>
+                          {savedForLater.length}
+                        </span>
                       </div>
-                      <div className="howdi-recommend-grid">
-                        {cartRecommendations.map(({ product, reasons }) => {
-                          const price = Number(String(product?.price || product?.offerPrice || "").replace(/[^0-9.]/g, "")) || 0;
-                          const withinBudget = price <= recommendationBudget;
-                          return (
-                            <article key={product.name} className="howdi-recommend-card">
-                              <div className="howdi-recommend-thumb">{product.image ? <img src={product.image} alt={product.name} /> : (product.icon || "🛍️")}</div>
-                              <div className="howdi-recommend-body">
-                                <div className="howdi-recommend-shop">{product.shop || "HOWDI SHOP"}</div>
-                                <strong>{product.name}</strong>
-                                <div className="howdi-recommend-price">{product.price}</div>
-                                <div className="howdi-recommend-reason">{reasons?.length ? `💡 ${reasons.join(" · ")}` : "💡 Picked to complement your cart"}</div>
-                                <button type="button" className="howdi-recommend-add" onClick={() => addToCart(product, 1)}>
-                                  + Add {withinBudget ? "to cart" : "for more choice"}
-                                </button>
-                              </div>
-                            </article>
-                          );
-                        })}
+
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(240px,1fr))", gap: "9px" }}>
+                        {savedForLater.map((item) => (
+                          <div
+                            key={item.name}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "10px",
+                              padding: "10px",
+                              borderRadius: "16px",
+                              background: "#fff",
+                              border: "1px solid #e6e9e4",
+                            }}
+                          >
+                            <div style={{ width: "46px", height: "46px", flex: "0 0 46px", borderRadius: "13px", background: "#f0eadc", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "22px" }}>
+                              {item.icon}
+                            </div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ color: "#26342d", fontSize: "12px", fontWeight: 900, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{item.name}</div>
+                              <div style={{ color: "#718078", fontSize: "11px", marginTop: "2px" }}>{item.price}</div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => moveSavedToCart(item)}
+                              style={{ border: 0, borderRadius: "10px", padding: "8px 10px", background: "#365947", color: "#fff", fontSize: "10px", fontWeight: 900, cursor: "pointer", whiteSpace: "nowrap" }}
+                            >
+                              Move to cart
+                            </button>
+                          </div>
+                        ))}
                       </div>
-                    </div>
+                    </section>
                   )}
 
-                  <div className="howdi-cart-benefits">
-                    <div className="howdi-cart-benefit"><b>🧶 Handmade</b><span>Making time shown per item</span></div>
-                    <div className="howdi-cart-benefit"><b>🔒 Fit privacy</b><span>Your fit photo isn't shown to the seller</span></div>
-                    <div className="howdi-cart-benefit"><b>📦 Careful dispatch</b><span>Prepared after order confirmation</span></div>
-                  </div>
-
-                  <div className="howdi-cart-panel">
-                    <div className="howdi-cart-panel-title">🏷️ Have a HOWDI coupon?</div>
-                    <div className="howdi-cart-inputrow">
-                      <input className="howdi-cart-input" value={cartCoupon} onChange={(e) => setCartCoupon(e.target.value.toUpperCase())} placeholder="Enter coupon code" />
-                      <button type="button" className="howdi-cart-action" onClick={applyCartCoupon}>Apply</button>
-                    </div>
-                    {cartNotice && <div className="howdi-cart-notice">{cartNotice}</div>}
-                  </div>
-
-                  <div className="howdi-cart-panel">
-                    <div className="howdi-cart-panel-title">📍 Check delivery availability</div>
-                    <div className="howdi-cart-inputrow">
-                      <input className="howdi-cart-input" value={cartPincode} onChange={(e) => { setCartPincode(e.target.value.replace(/\D/g, "").slice(0, 6)); setCartPincodeChecked(false); }} placeholder="Enter 6-digit pincode" inputMode="numeric" />
-                      <button type="button" className="howdi-cart-check" onClick={checkCartPincode}>Check</button>
-                    </div>
-                    {cartPincodeChecked && <div className="howdi-cart-notice">✓ Pincode accepted for the frontend estimate.</div>}
-                  </div>
-
-                  <label className="howdi-cart-gift">
-                    <input type="checkbox" checked={giftWrap} onChange={(e) => { setGiftWrap(e.target.checked); if (!e.target.checked) setGiftMessageSaved(false); }} />
-                    <span>🎁 Add handmade gift wrapping <strong>(+₹49)</strong></span>
-                  </label>
-
-                  {giftWrap && (
-                    <div className="howdi-cart-panel">
-                      <div className="howdi-cart-panel-title">💌 Gift message</div>
-                      <textarea value={giftMessage} onChange={(e) => { setGiftMessage(e.target.value); setGiftMessageSaved(false); }} rows={2} placeholder="Write a short optional message" className="howdi-cart-input" style={{ marginTop: "9px", resize: "vertical" }} />
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", marginTop: "8px" }}>
-                        <span style={{ color: giftMessageSaved ? "#47705a" : "#778397", fontSize: "10px", fontWeight: 700 }}>{giftMessageSaved ? "✓ Gift message saved." : "Save your message before checkout."}</span>
-                        <button type="button" onClick={() => { setGiftMessageSaved(true); setCartNotice("🎁 Gift message saved."); }} disabled={!giftMessage.trim()} className="howdi-cart-action" style={{ opacity: giftMessage.trim() ? 1 : .5, cursor: giftMessage.trim() ? "pointer" : "not-allowed" }}>Save message</button>
+                  {/* Optional extras are visually grouped, not mixed with product actions */}
+                  <section style={{ marginTop: "18px", display: "grid", gap: "9px" }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "9px" }}>
+                      <div style={{ padding: "12px", borderRadius: "16px", background: "#eef6f0", border: "1px solid #d7e7da" }}>
+                        <div style={{ color: "#365947", fontSize: "11px", fontWeight: 900 }}>🧶 Handmade</div>
+                        <div style={{ color: "#718078", fontSize: "10px", marginTop: "4px", lineHeight: 1.4 }}>Making time is shown per item.</div>
+                      </div>
+                      <div style={{ padding: "12px", borderRadius: "16px", background: "#f3f6f8", border: "1px solid #e1e7ea" }}>
+                        <div style={{ color: "#435865", fontSize: "11px", fontWeight: 900 }}>🔒 Fit privacy</div>
+                        <div style={{ color: "#718078", fontSize: "10px", marginTop: "4px", lineHeight: 1.4 }}>Your photo isn't shown to the seller.</div>
                       </div>
                     </div>
-                  )}
 
-                  <div className="howdi-cart-note">
-                    👵 <strong>Before checkout:</strong> please confirm your size, colour and custom-fit details. Made-to-order pieces begin preparation after your order is confirmed.
-                  </div>
+                    <div style={{ padding: "13px", borderRadius: "16px", background: "#fff", border: "1px solid #e4e9e4" }}>
+                      <div style={{ color: "#26342d", fontSize: "11px", fontWeight: 900 }}>🏷️ Have a coupon?</div>
+                      <div style={{ display: "flex", gap: "8px", marginTop: "8px" }}>
+                        <input
+                          value={cartCoupon}
+                          onChange={(e) => setCartCoupon(e.target.value.toUpperCase())}
+                          placeholder="Enter code"
+                          style={{ flex: 1, minWidth: 0, padding: "11px 12px", borderRadius: "11px", border: "1px solid #dce3dd", background: "#f8faf8", color: "#17221d", outline: "none" }}
+                        />
+                        <button
+                          type="button"
+                          onClick={applyCartCoupon}
+                          style={{ padding: "0 15px", border: 0, borderRadius: "11px", background: "#365947", color: "#fff", fontWeight: 900, cursor: "pointer" }}
+                        >
+                          Apply
+                        </button>
+                      </div>
+                      {cartNotice && <div style={{ marginTop: "6px", fontSize: "10px", color: cartCouponApplied ? "#166534" : "#64746b" }}>{cartNotice}</div>}
+                    </div>
+
+                    <div style={{ padding: "13px", borderRadius: "16px", background: "#fff", border: "1px solid #e4e9e4" }}>
+                      <div style={{ color: "#26342d", fontSize: "11px", fontWeight: 900 }}>📍 Check delivery</div>
+                      <div style={{ display: "flex", gap: "8px", marginTop: "8px" }}>
+                        <input
+                          value={cartPincode}
+                          onChange={(e) => { setCartPincode(e.target.value.replace(/\D/g, "").slice(0, 6)); setCartPincodeChecked(false); }}
+                          placeholder="6-digit pincode"
+                          inputMode="numeric"
+                          style={{ flex: 1, minWidth: 0, padding: "11px 12px", borderRadius: "11px", border: "1px solid #dce3dd", background: "#f8faf8", color: "#17221d", outline: "none" }}
+                        />
+                        <button
+                          type="button"
+                          onClick={checkCartPincode}
+                          style={{ padding: "0 14px", border: "1px solid #dce3dd", borderRadius: "11px", background: "#fff", color: "#365947", fontWeight: 900, cursor: "pointer" }}
+                        >
+                          Check
+                        </button>
+                      </div>
+                      {cartPincodeChecked && <div style={{ marginTop: "6px", fontSize: "10px", color: "#166534", fontWeight: 800 }}>✓ Delivery available for this pincode.</div>}
+                    </div>
+
+                    <label style={{ display: "flex", alignItems: "center", gap: "9px", padding: "4px 2px", color: "#46564d", fontSize: "11px", fontWeight: 700, cursor: "pointer" }}>
+                      <input type="checkbox" checked={giftWrap} onChange={(e) => { setGiftWrap(e.target.checked); if (!e.target.checked) setGiftMessageSaved(false); }} />
+                      🎁 Add handmade gift wrapping <strong>+₹49</strong>
+                    </label>
+
+                    {giftWrap && (
+                      <div style={{ padding: "12px", borderRadius: "16px", background: "#fff", border: "1px solid #e4e9e4" }}>
+                        <textarea
+                          value={giftMessage}
+                          onChange={(e) => { setGiftMessage(e.target.value); setGiftMessageSaved(false); }}
+                          rows={2}
+                          placeholder="Gift message (optional)"
+                          style={{ width: "100%", boxSizing: "border-box", padding: "10px 11px", borderRadius: "11px", border: "1px solid #dce3dd", background: "#f8faf8", resize: "vertical", color: "#17221d" }}
+                        />
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", marginTop: "8px" }}>
+                          <span style={{ color: giftMessageSaved ? "#166534" : "#718078", fontSize: "10px" }}>
+                            {giftMessageSaved ? "✓ Gift message saved." : "Save your message before checkout."}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => { setGiftMessageSaved(true); setCartNotice("🎁 Gift message saved."); }}
+                            disabled={!giftMessage.trim()}
+                            style={{ padding: "8px 12px", border: 0, borderRadius: "10px", background: giftMessage.trim() ? "#365947" : "#cbd5d0", color: "#fff", fontWeight: 900, cursor: giftMessage.trim() ? "pointer" : "not-allowed" }}
+                          >
+                            Save
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    <div style={{ padding: "12px 13px", borderRadius: "16px", background: "#fff8ec", border: "1px solid #f0dfbd", color: "#735727", fontSize: "10.5px", lineHeight: 1.55 }}>
+                      <strong>👵 Made-to-order note</strong><br />
+                      Please confirm size, colour and custom-fit details before checkout. Preparation begins after order confirmation.
+                    </div>
+                  </section>
                 </>
               )}
             </div>
 
+            {/* Premium sticky summary */}
             {cart.length > 0 && (
-              <div className="howdi-cart-footer">
-                <div className="howdi-cart-totalrow">
-                  <span>Cart total</span>
-                  <strong>₹{Math.max(0, cartSubtotal - cartPromotion.discount - (cartCouponApplied ? Math.min(Math.round(cartSubtotal * 0.10), 500) : 0) + (giftWrap ? 49 : 0)).toLocaleString("en-IN")}</strong>
+              <div
+                style={{
+                  position: "absolute",
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  padding: "15px 20px 18px",
+                  background: "rgba(255,255,255,.97)",
+                  borderTop: "1px solid #e2e8e2",
+                  boxShadow: "0 -18px 42px rgba(31,48,39,.12)",
+                  backdropFilter: "blur(14px)",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px" }}>
+                  <div>
+                    <div style={{ color: "#718078", fontSize: "10px", fontWeight: 800 }}>CART TOTAL</div>
+                    <div style={{ color: "#17221d", fontSize: "24px", lineHeight: 1.1, fontWeight: 900, marginTop: "2px" }}>
+                      ₹{Math.max(0, cartSubtotal - (cartCouponApplied ? Math.min(Math.round(cartSubtotal * 0.10), 500) : 0) + (giftWrap ? 49 : 0)).toLocaleString("en-IN")}
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => { setNotificationOpen(false); openCheckout(); }}
+                    style={{
+                      minWidth: "230px",
+                      border: 0,
+                      borderRadius: "15px",
+                      padding: "15px 20px",
+                      background: "#17221d",
+                      color: "#fff",
+                      fontWeight: 900,
+                      fontSize: "14px",
+                      cursor: "pointer",
+                      boxShadow: "0 9px 22px rgba(23,34,29,.20)",
+                    }}
+                  >
+                    Proceed to Checkout →
+                  </button>
                 </div>
-                <div className="howdi-cart-footer-note">
-                  {cartPromotion.discount > 0 ? `${cartPromotion.label}. ` : ""}{cartCouponApplied ? "Coupon discount applied. " : ""}{giftWrap ? "Gift wrapping included. " : ""}Delivery and payment details are confirmed at checkout.
+                <div style={{ marginTop: "7px", color: "#7b887f", fontSize: "10px", lineHeight: 1.4 }}>
+                  Final delivery charges and payment details are confirmed at checkout.
                 </div>
-                <button type="button" className="howdi-cart-checkout" onClick={() => { setNotificationOpen(false); openCheckout(); }}>
-                  Proceed to Secure Checkout →
-                </button>
               </div>
             )}
           </div>
@@ -3441,25 +3341,14 @@ return () => window.clearInterval(timer);
 
       {checkoutOpen && currentUser && (
         <div
-          className="howdi-checkout-overlay"
           style={{ position: "fixed", inset: 0, zIndex: 10010, background: "rgba(15,23,42,.62)", padding: "18px", overflowY: "auto" }}
-          onMouseDown={(event) => { if (event.target === event.currentTarget) setCheckoutOpen(false); }}
+          onMouseDown={(event) => event.target === event.currentTarget && setCheckoutOpen(false)}
         >
-          <div className="howdi-checkout-shell howdi-checkout-scope" style={{ maxWidth: "980px", margin: "28px auto", background: "#fff", color: "#172033", borderRadius: "26px", boxShadow: "0 30px 90px rgba(15,23,42,.28)", overflow: "hidden" }}>
-            <style>{`
-              .howdi-checkout-shell h1, .howdi-checkout-shell h2, .howdi-checkout-shell h3, .howdi-checkout-shell h4, .howdi-checkout-shell strong, .howdi-checkout-shell label { color: #172033 !important; }
-              .howdi-checkout-shell p { color: #64748b !important; }
-              .howdi-checkout-shell button { color: #172033 !important; opacity: 1 !important; visibility: visible !important; }
-              .howdi-checkout-shell .howdi-primary, .howdi-checkout-shell .howdi-white-button { color: #ffffff !important; }
-              .howdi-checkout-shell .howdi-step-active { color: #ffffff !important; }
-              .howdi-checkout-shell input { color: #172033 !important; background: #ffffff !important; }
-              .howdi-checkout-shell input::placeholder { color: #64748b !important; opacity: 1; }
-            `}</style>
+          <div style={{ maxWidth: "980px", margin: "28px auto", background: "#fff", borderRadius: "26px", boxShadow: "0 30px 90px rgba(15,23,42,.28)", overflow: "hidden" }}>
             <div style={{ padding: "22px 26px", borderBottom: "1px solid #e5e7eb", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "16px" }}>
               <div>
                 <div style={{ fontSize: "12px", letterSpacing: "1.2px", fontWeight: 900, color: "#64748b" }}>HOWDI CHECKOUT</div>
                 <h2 style={{ margin: "5px 0 0", fontSize: "28px" }}>🛍️ Complete your order</h2>
-                <div style={{ marginTop: "6px", color: "#365947", fontSize: "12px", fontWeight: 800 }}>{cartPromotion.label} · {cartCount} item{cartCount === 1 ? "" : "s"}</div>
               </div>
               <button type="button" onClick={() => setCheckoutOpen(false)} style={{ width: "42px", height: "42px", borderRadius: "50%", border: "1px solid #e2e8f0", background: "#f8fafc", cursor: "pointer", fontSize: "20px" }}>×</button>
             </div>
@@ -3467,11 +3356,11 @@ return () => window.clearInterval(timer);
             <div style={{ padding: "18px 26px", background: "#f8fafc", display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: "10px" }}>
               {["Delivery", "Payment", "Review"].map((label, index) => {
                 const step = index + 1;
-                return <div key={label} className={checkoutStep === step ? "howdi-step-active" : "howdi-step"} style={{ padding: "11px 12px", borderRadius: "12px", background: checkoutStep === step ? "#365947" : "#fff", color: checkoutStep === step ? "#fff" : "#64748b", textAlign: "center", fontWeight: 900, fontSize: "13px" }}>{step}. {label}</div>;
+                return <div key={label} style={{ padding: "11px 12px", borderRadius: "12px", background: checkoutStep === step ? "#365947" : "#fff", color: checkoutStep === step ? "#fff" : "#64748b", textAlign: "center", fontWeight: 900, fontSize: "13px" }}>{step}. {label}</div>;
               })}
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1.5fr) minmax(300px,.8fr)", gap: "24px", padding: "26px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1.5fr) minmax(300px,.8fr)", gap: "24px", padding: "28px" }}>
               <div>
                 {checkoutStep === 1 && (
                   <div>
@@ -3486,7 +3375,7 @@ return () => window.clearInterval(timer);
                       ))}
                     </div>
                     <button type="button" onClick={openNewAddress} style={{ marginTop: "14px", width: "100%", padding: "13px", borderRadius: "13px", border: "1px dashed #365947", background: "#fff", color: "#365947", fontWeight: 900, cursor: "pointer" }}>＋ Add new address</button>
-                    <button className="howdi-primary" type="button" disabled={!selectedCheckoutAddress} onClick={() => setCheckoutStep(2)} style={{ marginTop: "18px", width: "100%", padding: "15px", borderRadius: "13px", border: 0, background: selectedCheckoutAddress ? "#0f172a" : "#cbd5e1", color: "#fff", fontWeight: 900, cursor: selectedCheckoutAddress ? "pointer" : "not-allowed" }}>Continue to Payment →</button>
+                    <button type="button" disabled={!selectedCheckoutAddress} onClick={() => setCheckoutStep(2)} style={{ marginTop: "18px", width: "100%", padding: "15px", borderRadius: "13px", border: 0, background: selectedCheckoutAddress ? "#0f172a" : "#cbd5e1", color: "#fff", fontWeight: 900, cursor: selectedCheckoutAddress ? "pointer" : "not-allowed" }}>Continue to Payment →</button>
                   </div>
                 )}
 
@@ -3508,7 +3397,7 @@ return () => window.clearInterval(timer);
                     </div>
                     <div style={{ display: "flex", gap: "10px", marginTop: "18px" }}>
                       <button type="button" onClick={() => setCheckoutStep(1)} style={{ flex: 1, padding: "14px", borderRadius: "13px", border: "1px solid #cbd5e1", background: "#fff", fontWeight: 900, cursor: "pointer" }}>← Back</button>
-                      <button className="howdi-primary" type="button" onClick={() => setCheckoutStep(3)} style={{ flex: 2, padding: "14px", borderRadius: "13px", border: 0, background: "#0f172a", color: "#fff", fontWeight: 900, cursor: "pointer" }}>Review Order →</button>
+                      <button type="button" onClick={() => setCheckoutStep(3)} style={{ flex: 2, padding: "14px", borderRadius: "13px", border: 0, background: "#0f172a", color: "#fff", fontWeight: 900, cursor: "pointer" }}>Review Order →</button>
                     </div>
                   </div>
                 )}
@@ -3518,7 +3407,6 @@ return () => window.clearInterval(timer);
                     <h3 style={{ margin: "0 0 8px", fontSize: "22px" }}>✅ Review & place order</h3>
                     <div style={{ padding: "15px", borderRadius: "16px", background: "#f8fafc", marginBottom: "12px" }}><strong>Deliver to</strong><div style={{ color: "#475569", marginTop: "5px", lineHeight: 1.5 }}>{selectedCheckoutAddress?.full_name}<br />{selectedCheckoutAddress?.address_line1}, {selectedCheckoutAddress?.city}, {selectedCheckoutAddress?.state} - {selectedCheckoutAddress?.pincode}</div></div>
                     <div style={{ padding: "15px", borderRadius: "16px", background: "#f8fafc", marginBottom: "12px" }}><strong>Payment</strong><div style={{ color: "#475569", marginTop: "5px" }}>{checkoutPayment === "COD" ? "Cash on Delivery" : checkoutPayment === "UPI" ? "UPI" : checkoutPayment === "CARD" ? "Debit / Credit Card" : "Saved payment method"}</div></div>
-                    {giftWrap && <div style={{ padding: "15px", borderRadius: "16px", background: "#fffaf0", border: "1px solid #eadfca", marginBottom: "12px" }}><strong>🎁 Gift wrapping</strong><div style={{ color: "#74582a", marginTop: "5px" }}>{giftMessageSaved && giftMessage.trim() ? `Message: ${giftMessage.trim()}` : "Handmade gift wrapping selected"}</div></div>}
                     <div style={{
                       marginTop: "14px",
                       padding: "12px 14px",
@@ -3534,7 +3422,7 @@ return () => window.clearInterval(timer);
 
                     <div style={{ display: "flex", gap: "10px", marginTop: "18px" }}>
                       <button type="button" onClick={() => setCheckoutStep(2)} style={{ flex: 1, padding: "14px", borderRadius: "13px", border: "1px solid #cbd5e1", background: "#fff", fontWeight: 900, cursor: "pointer" }}>← Back</button>
-                      <button className="howdi-primary" type="button" disabled={placingOrder} onClick={(event) => { event.preventDefault(); event.stopPropagation(); placeCheckoutOrder(); }} style={{ flex: 2, padding: "14px", borderRadius: "13px", border: 0, background: placingOrder ? "#94a3b8" : "#365947", color: "#fff", fontWeight: 900, cursor: placingOrder ? "wait" : "pointer" }}>{placingOrder ? "⏳ Placing order…" : `🎉 Place Order · ₹${checkoutTotal.toLocaleString("en-IN")}`}</button>
+                      <button type="button" onClick={placeCheckoutOrder} style={{ flex: 2, padding: "14px", borderRadius: "13px", border: 0, background: "#365947", color: "#fff", fontWeight: 900, cursor: "pointer" }}>🎉 Place Order · ₹{checkoutTotal.toLocaleString("en-IN")}</button>
                     </div>
                   </div>
                 )}
@@ -3586,9 +3474,7 @@ return () => window.clearInterval(timer);
                 <div style={{ marginTop: "16px", paddingTop: "14px", borderTop: "1px solid #e2e8f0", display: "grid", gap: "9px", fontSize: "14px" }}>
                   <div style={{ display: "flex", justifyContent: "space-between" }}><span>Subtotal</span><strong>₹{cartSubtotal.toLocaleString("en-IN")}</strong></div>
                   <div style={{ display: "flex", justifyContent: "space-between" }}><span>Delivery</span><strong>{checkoutDelivery ? `₹${checkoutDelivery}` : "FREE"}</strong></div>
-                  {checkoutGiftWrap > 0 && <div style={{ display: "flex", justifyContent: "space-between" }}><span>Gift wrapping</span><strong>₹{checkoutGiftWrap}</strong></div>}
-                  {cartPromotion.discount > 0 && <div style={{ display: "flex", justifyContent: "space-between", color: "#16803c" }}><span>Smart Cart Offer</span><strong>-₹{cartPromotion.discount.toLocaleString("en-IN")}</strong></div>}
-                  {checkoutCouponDiscount > 0 && <div style={{ display: "flex", justifyContent: "space-between", color: "#16803c" }}><span>HOWDI10</span><strong>-₹{checkoutCouponDiscount.toLocaleString("en-IN")}</strong></div>}
+                  {checkoutDiscount > 0 && <div style={{ display: "flex", justifyContent: "space-between", color: "#16803c" }}><span>HOWDI10</span><strong>-₹{checkoutDiscount}</strong></div>}
                   <div style={{ display: "flex", justifyContent: "space-between", fontSize: "20px", paddingTop: "8px", borderTop: "1px solid #e2e8f0" }}><strong>Total</strong><strong>₹{checkoutTotal.toLocaleString("en-IN")}</strong></div>
                 </div>
                 <div style={{ display: "flex", gap: "8px", marginTop: "16px" }}>
@@ -3603,21 +3489,16 @@ return () => window.clearInterval(timer);
       )}
 
       {orderSuccess && (
-        <div className="howdi-order-success-overlay" style={{ position: "fixed", inset: 0, zIndex: 10020, background: "rgba(15,23,42,.62)", display: "grid", placeItems: "center", padding: "20px" }}>
-          <div className="howdi-order-success-shell howdi-success-scope" style={{ width: "min(520px, 100%)", background: "#fff", color: "#172033", borderRadius: "26px", padding: "34px", textAlign: "center", boxShadow: "0 30px 90px rgba(15,23,42,.3)" }}>
-            <style>{`
-              .howdi-order-success-shell h2, .howdi-order-success-shell p, .howdi-order-success-shell strong { color: #172033 !important; }
-              .howdi-order-success-shell .howdi-success-button { color: #ffffff !important; }
-              .howdi-order-success-shell .howdi-orders-button { color: #172033 !important; }
-            `}</style>
+        <div style={{ position: "fixed", inset: 0, zIndex: 10020, background: "rgba(15,23,42,.62)", display: "grid", placeItems: "center", padding: "20px" }}>
+          <div style={{ width: "min(520px, 100%)", background: "#fff", borderRadius: "26px", padding: "34px", textAlign: "center", boxShadow: "0 30px 90px rgba(15,23,42,.3)" }}>
             <div style={{ fontSize: "64px" }}>🎉</div>
             <div style={{ fontSize: "12px", letterSpacing: "1.2px", fontWeight: 900, color: "#365947" }}>ORDER CONFIRMED</div>
             <h2 style={{ margin: "8px 0", fontSize: "30px" }}>Thank you for supporting handmade. ❤️</h2>
             <p style={{ color: "#64748b", lineHeight: 1.6 }}>Your HOWDI order <strong>#{orderSuccess.order_number}</strong> has been placed. The maker's hands are now part of your story.</p>
             <div style={{ padding: "14px", borderRadius: "15px", background: "#f1f8f3", color: "#365947", fontWeight: 900, margin: "18px 0" }}>Total paid / payable: {orderSuccess.total}</div>
             <div style={{ display: "flex", gap: "10px" }}>
-              <button className="howdi-orders-button" type="button" onClick={() => { setOrderSuccess(null); openOrders(); }} style={{ flex: 1, padding: "13px", borderRadius: "12px", border: "1px solid #cbd5e1", background: "#fff", fontWeight: 900, cursor: "pointer" }}>View Orders</button>
-              <button className="howdi-success-button" type="button" onClick={() => { setOrderSuccess(null); navigate("shop"); }} style={{ flex: 1, padding: "13px", borderRadius: "12px", border: 0, background: "#365947", color: "#fff", fontWeight: 900, cursor: "pointer" }}>Continue Shopping</button>
+              <button type="button" onClick={() => { setOrderSuccess(null); openOrders(); }} style={{ flex: 1, padding: "13px", borderRadius: "12px", border: "1px solid #cbd5e1", background: "#fff", fontWeight: 900, cursor: "pointer" }}>View Orders</button>
+              <button type="button" onClick={() => { setOrderSuccess(null); navigate("shop"); }} style={{ flex: 1, padding: "13px", borderRadius: "12px", border: 0, background: "#365947", color: "#fff", fontWeight: 900, cursor: "pointer" }}>Continue Shopping</button>
             </div>
           </div>
         </div>
@@ -3652,7 +3533,6 @@ return () => window.clearInterval(timer);
               borderRadius: "28px",
               overflow: "hidden",
               boxShadow: "0 30px 80px rgba(15,23,42,.25)",
-              height: "min(820px, calc(100vh - 48px))",
               minHeight: "620px",
             }}
           >
@@ -3704,9 +3584,7 @@ return () => window.clearInterval(timer);
               style={{
                 display: "grid",
                 gridTemplateColumns: "240px 1fr",
-                height: "calc(100% - 96px)",
-                minHeight: 0,
-                overflow: "hidden",
+                minHeight: "540px",
               }}
             >
               <aside
@@ -3714,8 +3592,6 @@ return () => window.clearInterval(timer);
                   background: "#f8fafc",
                   padding: "22px 16px",
                   borderRight: "1px solid #e5e7eb",
-                  overflowY: "auto",
-                  minHeight: 0,
                 }}
               >
                 {[
@@ -3769,15 +3645,7 @@ return () => window.clearInterval(timer);
                 ))}
               </aside>
 
-              <section
-                style={{
-                  padding: "30px",
-                  background: "#fff",
-                  overflowY: "auto",
-                  minHeight: 0,
-                  minWidth: 0,
-                }}
-              >
+              <section style={{ padding: "30px", background: "#fff" }}>
                 {profileTab === "overview" && (
                   <>
                     <div style={{ marginBottom: "24px" }}>
@@ -4381,16 +4249,7 @@ return () => window.clearInterval(timer);
                                 <span style={{ color: "#64748b", fontSize: "13px" }}>{status === "Delivered" ? "Delivered successfully." : status === "Cancelled" ? "Order cancelled." : "Your order is being processed."}</span>
                                 <button type="button" onClick={() => setSelectedOrder(order)} style={{ border: "1px solid #cbd5e1", background: "#fff", borderRadius: "10px", padding: "9px 13px", fontWeight: 800, cursor: "pointer" }}>View details →</button>
                                 {order.status !== "delivered" && !["cancelled", "canceled"].includes(String(order.status || "").toLowerCase()) && (
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setSelectedOrder(null);
-                                      setSelectedTrackingOrder(order);
-                                    }}
-                                    style={{ border: "1px solid #365947", background: "#f1f8f3", color: "#365947", borderRadius: "10px", padding: "9px 13px", fontWeight: 800, cursor: "pointer" }}
-                                  >
-                                    🚚 Track
-                                  </button>
+                                  <button type="button" onClick={() => setSelectedOrder(order)} style={{ border: "1px solid #365947", background: "#f1f8f3", color: "#365947", borderRadius: "10px", padding: "9px 13px", fontWeight: 800, cursor: "pointer" }}>🚚 Track</button>
                                 )}
                               </div>
                             </article>
@@ -4462,62 +4321,27 @@ return () => window.clearInterval(timer);
                             <div style={{ marginTop: "7px", color: "#64748b" }}>{selectedOrder.item_count || 1} {(selectedOrder.item_count || 1) === 1 ? "item" : "items"} · Total {selectedOrder.total || `₹${selectedOrder.amount || 0}`}</div>
                           </div>
 
-                          {Array.isArray(selectedOrder.items) && selectedOrder.items.length > 0 && (
-                            <div style={{ marginTop: "14px", border: "1px solid #e2e8f0", borderRadius: "16px", overflow: "hidden" }}>
-                              <div style={{ padding: "12px 14px", background: "#f8fafc", fontWeight: 900, fontSize: "13px" }}>🛍️ Items in this order</div>
-                              <div style={{ display: "grid" }}>
-                                {selectedOrder.items.map((item, index) => (
-                                  <div key={`${item.name || "item"}-${index}`} style={{ display: "flex", justifyContent: "space-between", gap: "12px", padding: "13px 14px", borderTop: index ? "1px solid #f1f5f9" : 0 }}>
-                                    <div style={{ minWidth: 0 }}>
-                                      <strong style={{ fontSize: "13px" }}>{item.name || "HOWDI item"}</strong>
-                                      <div style={{ marginTop: "4px", color: "#64748b", fontSize: "11px" }}>
-                                        Qty {item.quantity || 1}
-                                        {item.selectedSize || item.size ? ` · Size ${item.selectedSize || item.size}` : ""}
-                                        {item.selectedColor || item.color ? ` · ${item.selectedColor || item.color}` : ""}
-                                      </div>
+                          {selectedOrder.status !== "cancelled" && selectedOrder.status !== "canceled" && (
+                            <div style={{ marginTop: "20px", padding: "18px", border: "1px solid #e2e8f0", borderRadius: "18px" }}>
+                              <div style={{ display: "flex", justifyContent: "space-between", gap: "10px", alignItems: "center", marginBottom: "16px" }}>
+                                <strong>🚚 Track your handmade order</strong>
+                                <span style={{ fontSize: "12px", color: "#64748b" }}>ETA: {selectedOrder.estimated_delivery || "3–6 days"}</span>
+                              </div>
+                              <div>
+                                {getOrderTimeline(selectedOrder).map((step, index) => (
+                                  <div key={step.key} style={{ display: "grid", gridTemplateColumns: "34px 1fr", gap: "10px", minHeight: index === 4 ? "42px" : "58px" }}>
+                                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+                                      <div style={{ width: "28px", height: "28px", borderRadius: "50%", display: "grid", placeItems: "center", background: step.active ? "#365947" : "#e2e8f0", color: step.active ? "#fff" : "#94a3b8", fontSize: "13px", fontWeight: 900 }}>{step.icon}</div>
+                                      {index < 4 && <div style={{ width: "2px", flex: 1, background: step.active ? "#cfe2d5" : "#e2e8f0", margin: "4px 0" }} />}
                                     </div>
-                                    <strong style={{ whiteSpace: "nowrap", fontSize: "13px" }}>{item.price || "₹0"}</strong>
+                                    <div style={{ paddingBottom: "10px" }}>
+                                      <div style={{ fontWeight: step.current ? 900 : 800, color: step.active ? "#1f2937" : "#94a3b8" }}>{step.title}{step.current ? " · Current" : ""}</div>
+                                      <div style={{ color: step.active ? "#64748b" : "#a1a1aa", fontSize: "12px", marginTop: "3px" }}>{step.text}</div>
+                                    </div>
                                   </div>
                                 ))}
                               </div>
-                            </div>
-                          )}
-
-                          <div style={{ marginTop: "14px", display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(190px,1fr))", gap: "10px" }}>
-                            <div style={{ padding: "13px 14px", borderRadius: "14px", background: "#f8fafc" }}>
-                              <div style={{ fontSize: "11px", color: "#64748b", fontWeight: 800 }}>PAYMENT</div>
-                              <div style={{ marginTop: "4px", fontWeight: 900, fontSize: "13px" }}>
-                                {selectedOrder.payment_method === "COD" ? "Cash on Delivery" : selectedOrder.payment_method || "Payment method not recorded"}
-                              </div>
-                            </div>
-                            <div style={{ padding: "13px 14px", borderRadius: "14px", background: "#f8fafc" }}>
-                              <div style={{ fontSize: "11px", color: "#64748b", fontWeight: 800 }}>TRACKING REFERENCE</div>
-                              <div style={{ marginTop: "4px", fontWeight: 900, fontSize: "13px" }}>
-                                {selectedOrder.tracking_number || "Generated after dispatch"}
-                              </div>
-                            </div>
-                          </div>
-
-                          {selectedOrder.status !== "cancelled" && selectedOrder.status !== "canceled" && (
-                            <div style={{ marginTop: "18px", padding: "14px 16px", borderRadius: "15px", background: "#f1f8f3", border: "1px solid #d7e7dc" }}>
-                              <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>
-                                <div>
-                                  <strong style={{ color: "#315f49" }}>🚚 Delivery status</strong>
-                                  <div style={{ marginTop: "4px", color: "#64748b", fontSize: "12px" }}>
-                                    {orderStatusLabel(selectedOrder.status)} · ETA {selectedOrder.estimated_delivery || "3–6 days"}
-                                  </div>
-                                </div>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setSelectedTrackingOrder(selectedOrder);
-                                    setSelectedOrder(null);
-                                  }}
-                                  style={{ border: 0, borderRadius: "10px", padding: "9px 12px", background: "#315f49", color: "#fff", fontWeight: 900, cursor: "pointer" }}
-                                >
-                                  Open tracking →
-                                </button>
-                              </div>
+                              {selectedOrder.tracking_number && <div style={{ marginTop: "8px", fontSize: "12px", color: "#64748b" }}>Tracking reference: <strong>{selectedOrder.tracking_number}</strong></div>}
                             </div>
                           )}
 
@@ -4588,71 +4412,6 @@ return () => window.clearInterval(timer);
                       </div>
                     )}
                   </>
-                )}
-
-                {selectedTrackingOrder && (
-                  <div
-                    style={{ position: "fixed", inset: 0, zIndex: 10003, background: "rgba(15,23,42,.62)", padding: "20px", overflowY: "auto" }}
-                    onMouseDown={(e) => e.target === e.currentTarget && setSelectedTrackingOrder(null)}
-                  >
-                    <div style={{ maxWidth: "680px", margin: "35px auto", background: "#fff", borderRadius: "24px", padding: "26px", boxShadow: "0 30px 80px rgba(15,23,42,.28)" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "16px" }}>
-                        <div>
-                          <div style={{ fontSize: "12px", fontWeight: 900, letterSpacing: "1px", color: "#315f49" }}>HOWDI ORDER TRACKING</div>
-                          <h3 style={{ margin: "6px 0", fontSize: "25px", color: "#172033" }}>🚚 Track #{selectedTrackingOrder.order_number || selectedTrackingOrder.id || "—"}</h3>
-                          <div style={{ color: "#64748b", fontSize: "13px" }}>
-                            {selectedTrackingOrder.title || selectedTrackingOrder.shop || "HOWDI Order"} · ETA {selectedTrackingOrder.estimated_delivery || "3–6 days"}
-                          </div>
-                        </div>
-                        <button type="button" onClick={() => setSelectedTrackingOrder(null)} style={{ width: "40px", height: "40px", borderRadius: "50%", border: "1px solid #e2e8f0", background: "#f8fafc", cursor: "pointer", fontSize: "18px" }}>×</button>
-                      </div>
-
-                      <div style={{ marginTop: "18px", padding: "15px", borderRadius: "16px", background: "#f1f8f3", border: "1px solid #d7e7dc" }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", gap: "10px", flexWrap: "wrap" }}>
-                          <div>
-                            <div style={{ fontSize: "11px", color: "#64748b", fontWeight: 800 }}>CURRENT STATUS</div>
-                            <strong style={{ display: "block", marginTop: "3px", color: "#315f49", fontSize: "17px" }}>{orderStatusLabel(selectedTrackingOrder.status)}</strong>
-                          </div>
-                          <div style={{ textAlign: "right" }}>
-                            <div style={{ fontSize: "11px", color: "#64748b", fontWeight: 800 }}>TRACKING REFERENCE</div>
-                            <strong style={{ display: "block", marginTop: "3px", color: "#172033", fontSize: "13px" }}>{selectedTrackingOrder.tracking_number || "Pending dispatch"}</strong>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div style={{ marginTop: "20px", padding: "18px", border: "1px solid #e2e8f0", borderRadius: "18px" }}>
-                        {getOrderTimeline(selectedTrackingOrder).map((step, index) => (
-                          <div key={step.key} style={{ display: "grid", gridTemplateColumns: "34px 1fr", gap: "10px", minHeight: index === 4 ? "42px" : "62px" }}>
-                            <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
-                              <div style={{ width: "28px", height: "28px", borderRadius: "50%", display: "grid", placeItems: "center", background: step.active ? "#365947" : "#e2e8f0", color: step.active ? "#fff" : "#94a3b8", fontSize: "13px", fontWeight: 900 }}>{step.icon}</div>
-                              {index < 4 && <div style={{ width: "2px", flex: 1, background: step.active ? "#cfe2d5" : "#e2e8f0", margin: "4px 0" }} />}
-                            </div>
-                            <div style={{ paddingBottom: "10px" }}>
-                              <div style={{ fontWeight: step.current ? 900 : 800, color: step.active ? "#1f2937" : "#94a3b8" }}>{step.title}{step.current ? " · Current" : ""}</div>
-                              <div style={{ color: step.active ? "#64748b" : "#a1a1aa", fontSize: "12px", marginTop: "3px" }}>{step.text}</div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-
-                      <div style={{ marginTop: "14px", display: "flex", gap: "10px", justifyContent: "flex-end", flexWrap: "wrap" }}>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const order = selectedTrackingOrder;
-                            setSelectedTrackingOrder(null);
-                            setSelectedOrder(order);
-                          }}
-                          style={{ border: "1px solid #cbd5e1", background: "#fff", color: "#172033", borderRadius: "11px", padding: "11px 15px", fontWeight: 900, cursor: "pointer" }}
-                        >
-                          View order details
-                        </button>
-                        <button type="button" onClick={() => setSelectedTrackingOrder(null)} style={{ border: 0, background: "#365947", color: "#fff", borderRadius: "11px", padding: "11px 15px", fontWeight: 900, cursor: "pointer" }}>
-                          Done
-                        </button>
-                      </div>
-                    </div>
-                  </div>
                 )}
 
                 {profileTab === "wishlist" && (
@@ -5753,101 +5512,6 @@ return () => window.clearInterval(timer);
         )}
 
         {/* ====================================
-            HOME DISCOVERY LAYER
-        ==================================== */}
-        <section className="home-discovery" aria-label="HOWDI home discovery">
-          <div className="home-discovery-inner">
-            <div className="home-section-head">
-              <div>
-                <span className="home-kicker">DISCOVER • SHOP SMARTER</span>
-                <h2>Everything useful, one scroll away.</h2>
-                <p>Find products, compare value and discover offers that fit your needs.</p>
-              </div>
-              <div className="home-discovery-actions">
-                <button type="button" className="home-filter-button" onClick={() => setHomeFiltersOpen((v) => !v)}>⚙️ {homeFiltersOpen ? "Hide filters" : "Filter products"}</button>
-                <button type="button" className="home-view-all" onClick={() => navigate("shop")}>Explore Shop →</button>
-              </div>
-            </div>
-
-            {homeFiltersOpen && (
-              <div className="home-filter-panel">
-                <div className="home-filter-panel-head">
-                  <div><strong>Shop smarter</strong><span>{homeFilteredProducts.length} matching product{homeFilteredProducts.length === 1 ? "" : "s"}</span></div>
-                  <button type="button" className="home-filter-reset" onClick={resetHomeFilters}>Reset all</button>
-                </div>
-                <div className="home-filter-grid">
-                  <label>Category<select value={homeFilterCategory} onChange={(e) => { setHomeFilterCategory(e.target.value); setHomeFilterSubcategory("All"); }}>{homeFilterOptions.categories.map((v) => <option key={v}>{v}</option>)}</select></label>
-                  <label>Subcategory<select value={homeFilterSubcategory} onChange={(e) => setHomeFilterSubcategory(e.target.value)}>{homeFilterOptions.subcategories.map((v) => <option key={v}>{v}</option>)}</select></label>
-                  <label>Rating<select value={homeFilterRating} onChange={(e) => setHomeFilterRating(e.target.value)}><option value="All">All ratings</option><option value="4">⭐ 4.0+</option><option value="4.5">⭐ 4.5+</option><option value="4.8">⭐ 4.8+</option></select></label>
-                  <label>Brand / Shop<select value={homeFilterBrand} onChange={(e) => setHomeFilterBrand(e.target.value)}>{homeFilterOptions.brands.map((v) => <option key={v}>{v}</option>)}</select></label>
-                  <label>Color<select value={homeFilterColor} onChange={(e) => setHomeFilterColor(e.target.value)}>{homeFilterOptions.colors.map((v) => <option key={v}>{v}</option>)}</select></label>
-                  <label>Size<select value={homeFilterSize} onChange={(e) => setHomeFilterSize(e.target.value)}>{homeFilterOptions.sizes.map((v) => <option key={v}>{v}</option>)}</select></label>
-                  <label>Min price<input type="number" min="0" value={homeFilterMinPrice} onChange={(e) => setHomeFilterMinPrice(e.target.value)} placeholder="₹ 0" /></label>
-                  <label>Max price<input type="number" min="0" value={homeFilterMaxPrice} onChange={(e) => setHomeFilterMaxPrice(e.target.value)} placeholder="₹ 10,000" /></label>
-                  <label>Sort<select value={homeFilterSort} onChange={(e) => setHomeFilterSort(e.target.value)}><option value="relevance">Recommended</option><option value="rating">Top rated</option><option value="price-low">Price: low to high</option><option value="price-high">Price: high to low</option><option value="discount">Biggest savings</option></select></label>
-                  <label className="home-filter-check"><input type="checkbox" checked={homeFilterOffers} onChange={(e) => setHomeFilterOffers(e.target.checked)} /><span>🎁 Live offers only</span></label>
-                </div>
-              </div>
-            )}
-
-            <div className="home-category-strip">
-              {homeCategoryCards.map((product) => (
-                <button key={product.category} type="button" className="home-category-pill" onClick={() => { setHomeFilterCategory(product.category); setHomeFilterSubcategory("All"); setHomeFiltersOpen(true); }}>
-                  <span>{product.icon}</span><strong>{product.category}</strong><small>{products.filter((item) => item.category === product.category).length} items</small>
-                </button>
-              ))}
-            </div>
-
-            <div className="home-product-block">
-              <div className="home-section-head compact"><div><span className="home-kicker">{currentUser ? "FOR YOU" : "POPULAR NOW"}</span><h2>{currentUser ? "Picked for you" : "Popular around HOWDI"}</h2></div></div>
-              <div className="home-product-row">
-                {(homePersonalizedProducts.length ? homePersonalizedProducts : products.slice(0, 6)).map((product) => (
-                  <article key={`home-pick-${product.name}`} className="home-mini-product">
-                    <button type="button" className="home-mini-image" onClick={() => openProductDetails(product)} aria-label={`View ${product.name}`}>{product.icon}</button>
-                    <div className="home-mini-copy"><span>{product.category}</span><h3>{product.name}</h3><div><strong>{product.price}</strong> <del>{product.oldPrice}</del></div><small>⭐ {product.rating} · {product.shop}</small></div>
-                    <button type="button" className="home-mini-add" onClick={() => addToCart(product, 1)}>+ Add</button>
-                  </article>
-                ))}
-              </div>
-            </div>
-
-            <div className="home-product-block home-filter-results-block">
-              <div className="home-section-head compact"><div><span className="home-kicker">DISCOVERY RESULTS</span><h2>Shop by what you need</h2></div><span className="home-result-count">{homeFilteredProducts.length} products</span></div>
-              {homeFilteredProducts.length ? (
-                <div className="home-product-row home-filter-result-row">
-                  {homeFilteredProducts.slice(0, 6).map((product) => (
-                    <article key={`home-filter-${product.name}`} className="home-mini-product">
-                      <button type="button" className="home-mini-image" onClick={() => openProductDetails(product)} aria-label={`View ${product.name}`}>{product.icon}</button>
-                      <div className="home-mini-copy"><span>{product.category}{product.subcategory ? ` · ${product.subcategory}` : ""}</span><h3>{product.name}</h3><div><strong>{product.price}</strong> <del>{product.oldPrice}</del></div><small>⭐ {product.rating} · {product.shop}</small></div>
-                      <button type="button" className="home-mini-add" onClick={() => addToCart(product, 1)}>+ Add</button>
-                    </article>
-                  ))}
-                </div>
-              ) : <div className="home-empty-filter"><span>🔎</span><strong>No products match these filters.</strong><button type="button" onClick={resetHomeFilters}>Reset filters</button></div>}
-            </div>
-
-            <div className="home-product-block home-deals-block">
-              <div className="home-section-head compact"><div><span className="home-kicker">LIVE OFFERS • ADMIN CONTROLLED</span><h2>Live offers & savings 🔥</h2></div><button type="button" className="home-view-all" onClick={() => { setShopSearch(""); navigate("shop"); }}>See all deals →</button></div>
-              <div className="home-deal-row">
-                {homeDealProducts.length ? homeDealProducts.map((product) => {
-                  const save = Number(String(product.oldPrice || "").replace(/[^0-9.]/g, "")) - Number(String(product.price || "").replace(/[^0-9.]/g, ""));
-                  return <button type="button" key={`deal-${product.name}`} className="home-deal-card home-timed-deal-card" onClick={() => openProductDetails(product)}>
-                    <span className="home-deal-icon">{product.icon}</span><span className="home-deal-badge">SAVE ₹{save}</span><span className="home-offer-status">{getOfferLabel(product)}</span><strong>{product.name}</strong><span>{product.price} <del>{product.oldPrice}</del></span><small>⏳ {getOfferCountdown(product)}</small>
-                  </button>;
-                }) : <div className="home-no-live-offers">🎁 No live offers right now. Check back for the next scheduled deal.</div>}
-              </div>
-            </div>
-
-            {homeRecentProducts.length > 0 && (
-              <div className="home-product-block">
-                <div className="home-section-head compact"><div><span className="home-kicker">CONTINUE EXPLORING</span><h2>Recently viewed</h2></div></div>
-                <div className="home-recent-row">{homeRecentProducts.map((product) => <button type="button" key={`recent-${product.name}`} className="home-recent-card" onClick={() => openProductDetails(product)}><span>{product.icon}</span><div><strong>{product.name}</strong><small>{product.price} · ⭐ {product.rating}</small></div>→</button>)}</div>
-              </div>
-            )}
-          </div>
-        </section>
-
-        {/* ====================================
             SEARCH & DISCOVERY
         ==================================== */}
 
@@ -6407,7 +6071,7 @@ return () => window.clearInterval(timer);
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px", marginTop: "10px" }}>
                     <div style={{ fontSize: "11px", color: "#64748b" }}>Auto-rotates every few seconds</div>
-                    <button type="button" onClick={(event) => { event.stopPropagation(); setCustomerPhotoOpen(true); }} style={{ border: 0, background: "transparent", color: "#365947", fontWeight: 900, cursor: "pointer" }}>📸 Customer photos</button>
+                    <button type="button" onClick={() => setCustomerPhotoOpen(true)} style={{ border: 0, background: "transparent", color: "#365947", fontWeight: 900, cursor: "pointer" }}>📸 Customer photos</button>
                   </div>
                   <div style={{ marginTop: "14px", padding: "14px", borderRadius: "16px", background: "#fffaf0", border: "1px solid #eee2c5" }}>
                     <div style={{ fontWeight: 900, color: "#7a531d" }}>❤️ The hands behind your product</div>
@@ -6448,9 +6112,9 @@ return () => window.clearInterval(timer);
                     </div>
                     <div style={{ marginTop: "9px", display: "flex", gap: "6px" }}>
                       {(selectedProduct.customerPhotos || []).slice(0, 4).map((photo, index) => (
-                        <button key={`left-photo-${photo}-${index}`} type="button" onClick={(event) => { event.stopPropagation(); setCustomerPhotoOpen(true); }} aria-label="View customer photo" style={{ width: "48px", height: "48px", borderRadius: "11px", border: "1px solid #dbe4de", background: index % 2 ? "#fffaf0" : "#eef6f0", fontSize: "22px", cursor: "pointer" }}>{photo}</button>
+                        <button key={`left-photo-${photo}-${index}`} type="button" onClick={() => setCustomerPhotoOpen(true)} aria-label="View customer photo" style={{ width: "48px", height: "48px", borderRadius: "11px", border: "1px solid #dbe4de", background: index % 2 ? "#fffaf0" : "#eef6f0", fontSize: "22px", cursor: "pointer" }}>{photo}</button>
                       ))}
-                      <button type="button" onClick={(event) => { event.stopPropagation(); setCustomerPhotoOpen(true); }} style={{ flex: 1, borderRadius: "11px", border: "1px solid #dbe4de", background: "#fff", color: "#365947", fontWeight: 900, fontSize: "11px", cursor: "pointer" }}>View customer photos →</button>
+                      <button type="button" onClick={() => setCustomerPhotoOpen(true)} style={{ flex: 1, borderRadius: "11px", border: "1px solid #dbe4de", background: "#fff", color: "#365947", fontWeight: 900, fontSize: "11px", cursor: "pointer" }}>View customer photos →</button>
                     </div>
                   </div>
                 </div>
@@ -6593,8 +6257,8 @@ return () => window.clearInterval(timer);
                     ))}
                     {selectedProduct.customerPhotos?.length > 0 && (
                       <div style={{ marginTop: "10px", padding: "11px", borderRadius: "13px", background: "#fffaf0", border: "1px solid #eee2c5" }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "7px" }}><strong style={{ color: "#7a531d" }}>📸 Loved by customers</strong><button type="button" onClick={(event) => { event.stopPropagation(); setCustomerPhotoOpen(true); }} style={{ border: 0, background: "transparent", color: "#365947", fontWeight: 900, cursor: "pointer", fontSize: "11px" }}>View all →</button></div>
-                        <div style={{ display: "flex", gap: "7px" }}>{selectedProduct.customerPhotos.map((photo, index) => <button key={`${photo}-${index}`} type="button" onClick={(event) => { event.stopPropagation(); setCustomerPhotoOpen(true); }} style={{ width: "58px", height: "58px", borderRadius: "11px", border: "1px solid #e4d7bb", background: index % 2 ? "#f4efe5" : "#eef6f0", fontSize: "24px", cursor: "pointer" }}>{photo}</button>)}</div>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "7px" }}><strong style={{ color: "#7a531d" }}>📸 Loved by customers</strong><button type="button" onClick={() => setCustomerPhotoOpen(true)} style={{ border: 0, background: "transparent", color: "#365947", fontWeight: 900, cursor: "pointer", fontSize: "11px" }}>View all →</button></div>
+                        <div style={{ display: "flex", gap: "7px" }}>{selectedProduct.customerPhotos.map((photo, index) => <button key={`${photo}-${index}`} type="button" onClick={() => setCustomerPhotoOpen(true)} style={{ width: "58px", height: "58px", borderRadius: "11px", border: "1px solid #e4d7bb", background: index % 2 ? "#f4efe5" : "#eef6f0", fontSize: "24px", cursor: "pointer" }}>{photo}</button>)}</div>
                       </div>
                     )}
                   </div>
@@ -6622,7 +6286,7 @@ return () => window.clearInterval(timer);
         )}
 
         {customerPhotoOpen && selectedProduct && (
-          <div role="dialog" aria-modal="true" className="howdi-product-detail-overlay" onClick={() => setCustomerPhotoOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 2147483500, background: "rgba(15,23,42,.58)", display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+          <div role="dialog" aria-modal="true" onClick={() => setCustomerPhotoOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 2250, background: "rgba(15,23,42,.58)", display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
             <div onClick={(event) => event.stopPropagation()} style={{ width: "min(620px,100%)", background: "#fff", borderRadius: "22px", padding: "22px", boxShadow: "0 25px 70px rgba(0,0,0,.25)" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}><div><div style={{ fontSize: "11px", fontWeight: 900, letterSpacing: ".1em", color: "#a36a2a" }}>CUSTOMER COMMUNITY</div><h3 style={{ margin: "5px 0", color: "#24362d" }}>📸 Customers with their HOWDI pieces</h3></div><button type="button" onClick={() => setCustomerPhotoOpen(false)} style={{ border: 0, background: "#f4f6f4", borderRadius: "50%", width: "36px", height: "36px", cursor: "pointer" }}>×</button></div>
               <p style={{ color: "#64748b", fontSize: "13px" }}>Real customer photos can be connected to verified reviews from the HOWDI backend.</p>
@@ -6654,389 +6318,6 @@ return () => window.clearInterval(timer);
               <button type="button" onClick={() => setMakerStoryOpen(false)} style={{ marginTop: "16px", width: "100%", minHeight: "46px", border: 0, borderRadius: "12px", background: "#365947", color: "#fff", fontWeight: 900, cursor: "pointer" }}>Back to product</button>
             </div>
           </div>
-        )}
-
-        {/* ====================================
-            HOWDI KNOWS YOUR TASTE
-        ==================================== */}
-        {(() => {
-          const personalized = getPersonalizedProducts(products, {
-            customerId: currentUser?.id,
-            location: customerLocation,
-            cart,
-            wishlist,
-            recentlyViewed: recentlyViewed
-              .map((name) => products.find((item) => item.name === name))
-              .filter(Boolean),
-          });
-
-          const visible = personalized
-            .filter(({ product }) => !cart.some((item) => item.name === product.name))
-            .slice(0, 6);
-
-          if (!visible.length) return null;
-
-          return (
-            <section
-              id="howdi-for-you"
-              style={{
-                padding: "38px 24px",
-                background: "linear-gradient(135deg,#f4faf6 0%,#fffdf8 100%)",
-                borderTop: "1px solid #e4eee7",
-                borderBottom: "1px solid #e4eee7",
-              }}
-            >
-              <div style={{ maxWidth: "1180px", margin: "0 auto" }}>
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "flex-end",
-                    gap: "18px",
-                    flexWrap: "wrap",
-                    marginBottom: "18px",
-                  }}
-                >
-                  <div>
-                    <div
-                      style={{
-                        fontSize: "11px",
-                        fontWeight: 900,
-                        letterSpacing: ".12em",
-                        color: "#a36a2a",
-                      }}
-                    >
-                      🧠 HOWDI KNOWS YOUR TASTE
-                    </div>
-                    <h2
-                      style={{
-                        margin: "6px 0 5px",
-                        color: "#24362d",
-                        fontSize: "28px",
-                      }}
-                    >
-                      More picked for you
-                    </h2>
-                    <p
-                      style={{
-                        margin: 0,
-                        color: "#64748b",
-                        fontSize: "13px",
-                        maxWidth: "650px",
-                      }}
-                    >
-                      {getTasteSummary({ customerId: currentUser?.id })}
-                    </p>
-                  </div>
-
-                  <span
-                    style={{
-                      padding: "8px 12px",
-                      borderRadius: "999px",
-                      background: "#e7f3eb",
-                      color: "#365947",
-                      fontSize: "11px",
-                      fontWeight: 900,
-                    }}
-                  >
-                    View · Like · Cart · Buy
-                  </span>
-                </div>
-
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))",
-                    gap: "13px",
-                  }}
-                >
-                  {visible.map(({ product, reasons }, index) => (
-                    <article
-                      key={`taste-${product.name}`}
-                      onClick={() => openProductDetails(product)}
-                      style={{
-                        position: "relative",
-                        border: "1px solid #dce9df",
-                        borderRadius: "18px",
-                        padding: "11px",
-                        background: "rgba(255,255,255,.92)",
-                        cursor: "pointer",
-                        boxShadow: "0 8px 22px rgba(36,54,45,.06)",
-                      }}
-                    >
-                      <div
-                        style={{
-                          position: "absolute",
-                          top: "10px",
-                          left: "10px",
-                          zIndex: 2,
-                          padding: "5px 8px",
-                          borderRadius: "999px",
-                          background: "#365947",
-                          color: "#fff",
-                          fontSize: "9px",
-                          fontWeight: 900,
-                        }}
-                      >
-                        {index === 0 ? "BEST MATCH" : "FOR YOU"}
-                      </div>
-
-                      <div
-                        style={{
-                          height: "112px",
-                          borderRadius: "13px",
-                          background: "linear-gradient(145deg,#f8f5ed,#edf5ef)",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          fontSize: "52px",
-                        }}
-                      >
-                        {product.icon}
-                      </div>
-
-                      <div
-                        style={{
-                          marginTop: "9px",
-                          fontWeight: 900,
-                          color: "#24362d",
-                          fontSize: "13px",
-                          lineHeight: 1.3,
-                        }}
-                      >
-                        {product.name}
-                      </div>
-
-                      <div
-                        style={{
-                          marginTop: "5px",
-                          display: "flex",
-                          justifyContent: "space-between",
-                          gap: "8px",
-                          alignItems: "center",
-                        }}
-                      >
-                        <strong style={{ color: "#365947", fontSize: "13px" }}>
-                          {product.price}
-                        </strong>
-                        <span style={{ color: "#64748b", fontSize: "10px" }}>
-                          ⭐ {product.rating}
-                        </span>
-                      </div>
-
-                      <div
-                        style={{
-                          marginTop: "7px",
-                          minHeight: "28px",
-                          color: "#64748b",
-                          fontSize: "10px",
-                          lineHeight: 1.4,
-                        }}
-                      >
-                        {reasons.length
-                          ? `Because you like ${reasons.join(" · ")}`
-                          : "A HOWDI pick based on your activity"}
-                      </div>
-                    </article>
-                  ))}
-                </div>
-              </div>
-            </section>
-          );
-        })()}
-
-        {/* ====================================
-            MOST PURCHASED
-        ==================================== */}
-        {mostPurchasedProducts.length > 0 && (
-          <section
-            id="most-purchased"
-            style={{
-              padding: "34px 24px",
-              background: "#f8faf9",
-              borderTop: "1px solid #edf1ee",
-              borderBottom: "1px solid #edf1ee",
-            }}
-          >
-            <div style={{ maxWidth: "1180px", margin: "0 auto" }}>
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "flex-end",
-                  gap: "16px",
-                  flexWrap: "wrap",
-                  marginBottom: "16px",
-                }}
-              >
-                <div>
-                  <div style={{ fontSize: "11px", fontWeight: 900, letterSpacing: ".1em", color: "#a36a2a" }}>
-                    LOVED BY HOWDI CUSTOMERS
-                  </div>
-                  <h2 style={{ margin: "5px 0 4px", color: "#24362d", fontSize: "26px" }}>
-                    🔥 Most purchased
-                  </h2>
-                  <p style={{ margin: 0, color: "#64748b", fontSize: "13px" }}>
-                    Popular products customers are buying again and again.
-                  </p>
-                </div>
-                <span style={{ fontSize: "12px", fontWeight: 800, color: "#365947", padding: "8px 11px", borderRadius: "999px", background: "#e9f3ec" }}>
-                  Based on HOWDI orders
-                </span>
-              </div>
-
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
-                  gap: "12px",
-                }}
-              >
-                {mostPurchasedProducts.map((product, index) => (
-                  <article
-                    key={product.name}
-                    onClick={() => openProductDetails(product)}
-                    style={{
-                      position: "relative",
-                      border: "1px solid #e1e8e3",
-                      borderRadius: "15px",
-                      padding: "10px",
-                      background: "#fff",
-                      cursor: "pointer",
-                      minWidth: 0,
-                      boxShadow: "0 4px 14px rgba(36,54,45,.05)",
-                    }}
-                  >
-                    <div style={{ position: "absolute", top: "9px", left: "9px", zIndex: 2, padding: "5px 8px", borderRadius: "999px", background: "#24362d", color: "#fff", fontSize: "10px", fontWeight: 900 }}>
-                      #{index + 1}
-                    </div>
-                    <div style={{ height: "108px", borderRadius: "11px", background: "linear-gradient(145deg,#f8f5ed,#edf5ef)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "48px" }}>
-                      {product.icon}
-                    </div>
-                    <div style={{ marginTop: "8px", fontWeight: 900, color: "#24362d", fontSize: "12px", lineHeight: 1.3 }}>
-                      {product.name}
-                    </div>
-                    <div style={{ marginTop: "4px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "5px" }}>
-                      <span style={{ color: "#365947", fontSize: "12px", fontWeight: 900 }}>{product.price}</span>
-                      <span style={{ color: "#64748b", fontSize: "10px", fontWeight: 800 }}>🛍️ {product.purchasedCount} sold</span>
-                    </div>
-                    <div style={{ marginTop: "4px", color: "#64748b", fontSize: "10px" }}>
-                      ⭐ {product.rating} · View product →
-                    </div>
-                  </article>
-                ))}
-              </div>
-            </div>
-          </section>
-        )}
-
-        {/* ====================================
-            RECENTLY VIEWED
-        ==================================== */}
-        {recentlyViewed.length > 0 && (
-          <section
-            id="recently-viewed"
-            style={{
-              padding: "34px 24px",
-              background: "#fff",
-              borderTop: "1px solid #edf1ee",
-              borderBottom: "1px solid #edf1ee",
-            }}
-          >
-            <div
-              style={{
-                maxWidth: "1180px",
-                margin: "0 auto",
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "flex-end",
-                  gap: "16px",
-                  flexWrap: "wrap",
-                  marginBottom: "16px",
-                }}
-              >
-                <div>
-                  <div style={{ fontSize: "11px", fontWeight: 900, letterSpacing: ".1em", color: "#a36a2a" }}>
-                    PICK UP WHERE YOU LEFT OFF
-                  </div>
-                  <h2 style={{ margin: "5px 0 4px", color: "#24362d", fontSize: "26px" }}>
-                    👀 Recently viewed
-                  </h2>
-                  <p style={{ margin: 0, color: "#64748b", fontSize: "13px" }}>
-                    Products you opened recently, ready to explore again.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setRecentlyViewed([])}
-                  style={{
-                    border: "1px solid #dbe3dc",
-                    borderRadius: "10px",
-                    padding: "9px 12px",
-                    background: "#fff",
-                    color: "#475569",
-                    fontWeight: 800,
-                    cursor: "pointer",
-                  }}
-                >
-                  Clear history
-                </button>
-              </div>
-
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(6, minmax(0, 1fr))",
-                  gap: "12px",
-                }}
-              >
-                {recentlyViewed
-                  .map((name) => products.find((product) => product.name === name))
-                  .filter(Boolean)
-                  .map((product) => (
-                    <article
-                      key={product.name}
-                      onClick={() => openProductDetails(product)}
-                      style={{
-                        border: "1px solid #e1e8e3",
-                        borderRadius: "15px",
-                        padding: "10px",
-                        background: "#fff",
-                        cursor: "pointer",
-                        minWidth: 0,
-                      }}
-                    >
-                      <div
-                        style={{
-                          height: "92px",
-                          borderRadius: "11px",
-                          background: "linear-gradient(145deg,#f8f5ed,#edf5ef)",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          fontSize: "42px",
-                        }}
-                      >
-                        {product.icon}
-                      </div>
-                      <div style={{ marginTop: "8px", fontWeight: 900, color: "#24362d", fontSize: "12px", lineHeight: 1.3 }}>
-                        {product.name}
-                      </div>
-                      <div style={{ marginTop: "4px", color: "#365947", fontSize: "12px", fontWeight: 900 }}>
-                        {product.price}
-                      </div>
-                      <div style={{ marginTop: "3px", color: "#64748b", fontSize: "10px" }}>
-                        ⭐ {product.rating} · View again →
-                      </div>
-                    </article>
-                  ))}
-              </div>
-            </div>
-          </section>
         )}
 
         {/* ====================================
@@ -7111,32 +6392,54 @@ return () => window.clearInterval(timer);
         {/* ====================================
             OFFERS
         ==================================== */}
-        <section className="offers-section" id="offers">
+
+        <section className="offers-section">
+
           <div>
-            <span className="section-label">SPECIAL OFFERS</span>
-            <h2>Good deals.<br />Better locally.</h2>
-            <p>Live product offers from<br />participating HOWDI shops and makers.</p>
+
+            <span className="section-label">
+              SPECIAL OFFERS
+            </span>
+
+            <h2>
+              Good deals.
+              <br />
+              Better locally.
+            </h2>
+
+            <p>
+              Exclusive offers from
+              participating HOWDI
+              <br />
+              workers and vendors.
+            </p>
+
           </div>
-          <div className="offer-ticket" style={{ minWidth: 0 }}>
-            <span>HOWDI OFFERS</span>
-            {activeOfferProducts.length ? (
-              <div style={{ display: "grid", gap: "10px", marginTop: "10px" }}>
-                {activeOfferProducts.slice(0, 3).map((product) => (
-                  <button key={product.name} type="button" onClick={() => openProductDetails(product)}
-                    style={{ display: "grid", gridTemplateColumns: "42px minmax(0,1fr) auto", alignItems: "center", gap: "10px", width: "100%", textAlign: "left", padding: "9px 10px", border: "1px solid rgba(54,89,71,.18)", borderRadius: "12px", background: "#fff", color: "#24362d", cursor: "pointer" }}>
-                    <span style={{ fontSize: "26px" }}>{product.icon}</span>
-                    <span style={{ minWidth: 0 }}>
-                      <strong style={{ display: "block", fontSize: "12px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{product.name}</strong>
-                      <small style={{ display: "block", marginTop: "2px", color: "#64748b" }}>{product.offerText}</small>
-                    </span>
-                    <strong style={{ color: "#365947", fontSize: "12px" }}>{product.price}</strong>
-                  </button>
-                ))}
-              </div>
-            ) : <small>No live product offers right now.</small>}
-            <button type="button" onClick={() => navigate("shop")} style={{ marginTop: "12px" }}>Explore all offers →</button>
+
+
+          <div className="offer-ticket">
+
+            <span>
+              HOWDI OFFER
+            </span>
+
+            <strong>
+              WELCOME20
+            </strong>
+
+            <small>
+              Get special savings on
+              your first order.
+            </small>
+
+            <button>
+              Explore offers →
+            </button>
+
           </div>
+
         </section>
+
 
         {/* ====================================
             FOOTER
@@ -7498,12 +6801,12 @@ return () => window.clearInterval(timer);
 
 
       {fitStudioOpen && selectedProduct && (
-        <div role="dialog" aria-modal="true" className="howdi-fit-scope" style={{ position: "fixed", inset: 0, zIndex: 2147483000, isolation: "isolate", background: "rgba(15,23,42,.62)", color: "#172033", display: "flex", alignItems: "center", justifyContent: "center", padding: 18 }} onClick={closeFitStudio}>
-          <div onClick={(event) => event.stopPropagation()} style={{ width: "min(980px,100%)", maxHeight: "92vh", overflowY: "auto", background: "#fff", color: "#172033", borderRadius: 22, padding: 20, boxShadow: "0 28px 90px rgba(0,0,0,.28)" }}>
+        <div role="dialog" aria-modal="true" style={{ position: "fixed", inset: 0, zIndex: 6000, background: "rgba(15,23,42,.62)", display: "flex", alignItems: "center", justifyContent: "center", padding: 18 }} onClick={closeFitStudio}>
+          <div onClick={(event) => event.stopPropagation()} style={{ width: "min(980px,100%)", maxHeight: "92vh", overflowY: "auto", background: "#fff", borderRadius: 22, padding: 20, boxShadow: "0 28px 90px rgba(0,0,0,.28)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
               <div>
                 <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: ".08em", color: "#a36a2a" }}>HOWDI FIT STUDIO</div>
-                <h2 style={{ margin: "5px 0", color: "#172033", fontSize: 27, lineHeight: 1.2 }}>Custom fit for {selectedProduct.name}</h2>
+                <h2 style={{ margin: "5px 0" }}>Custom fit for {selectedProduct.name}</h2>
                 <p style={{ margin: 0, color: "#64748b", fontSize: 13 }}>Capture a fitting reference, enter measurements and get a suggested size. 📏</p>
               </div>
               <button type="button" onClick={closeFitStudio} style={{ width: 38, height: 38, border: 0, borderRadius: 11, background: "#f1f5f9", cursor: "pointer", fontSize: 18 }}>×</button>
@@ -7573,9 +6876,8 @@ return () => window.clearInterval(timer);
           style={{
             position: "fixed",
             inset: 0,
-            zIndex: 2147483600,
-            isolation: "isolate",
-            background: "rgba(15,23,42,.78)",
+            zIndex: 7000,
+            background: "rgba(15,23,42,.72)",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -7589,8 +6891,7 @@ return () => window.clearInterval(timer);
               background: "#fff",
               borderRadius: 20,
               padding: 22,
-              boxShadow: "0 30px 100px rgba(0,0,0,.35)",
-              color: "#172033"
+              boxShadow: "0 30px 100px rgba(0,0,0,.35)"
             }}
           >
             <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: ".08em", color: "#a36a2a" }}>

@@ -49,5 +49,25 @@
     "sortOrder": 5,
     "visible": true,
     "showOnHome": true
+  },
+  {
+    "id": "d4ca3997-ab94-4353-acb8-7e80232d2b4b",
+    "name": "test",
+    "icon": "🧶test",
+    "description": "testtttt",
+    "visible": true,
+    "showOnHome": true,
+    "updatedAt": "2026-08-31T11:51:11.641Z",
+    "createdAt": "2026-08-31T11:51:11.641Z"
+  },
+  {
+    "id": "17cae03b-1ee2-4a03-a264-b7b06e77c370",
+    "name": "croch",
+    "icon": "🧶",
+    "description": "cro",
+    "visible": true,
+    "showOnHome": true,
+    "updatedAt": "2026-08-31T11:51:39.842Z",
+    "createdAt": "2026-08-31T11:51:39.842Z"
   }
 ]

@@ -295,5 +295,14 @@
     "visible": true,
     "createdAt": "2026-08-30T00:00:00.000Z",
     "updatedAt": "2026-08-30T00:00:00.000Z"
+  },
+  {
+    "id": "ebe6169a-a1a3-45c4-814c-9782b60fc8a5",
+    "categoryId": "8c9c4456-112f-4703-bc0a-3e13ba1f3dc8",
+    "name": "cat",
+    "icon": "🧶",
+    "visible": true,
+    "updatedAt": "2026-08-31T11:51:57.970Z",
+    "createdAt": "2026-08-31T11:51:57.970Z"
   }
 ]
