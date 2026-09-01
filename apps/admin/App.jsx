@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 const API = '';
 
@@ -51,6 +51,66 @@ function AdminApp() {
   const [subcategoryForm, setSubcategoryForm] = useState({ categoryId:'', name:'', icon:'🧶', visible:true });
   const [editingCategory, setEditingCategory] = useState(null);
   const [editingSubcategory, setEditingSubcategory] = useState(null);
+
+  // PRODUCT STUDIO — structured, media-first product creation.
+  const mediaInputRef = useRef(null);
+  const blankProductForm = () => ({
+    icon:'🧶',
+    name:'',
+    summary:'',
+    description:'',
+    brand:'',
+    productType:'',
+    sku:'',
+    barcode:'',
+    hsnCode:'',
+    categoryId:'',
+    subcategoryId:'',
+    tags:'',
+    media:[],
+    specifications:[],
+    usage:'',
+    care:'',
+    material:'',
+    sizeType:'standard',
+    freeSize:false,
+    washable:false,
+    washType:'',
+    ironable:false,
+    ironTemperature:'',
+    unit:'piece',
+    netWeight:'',
+    packageLength:'',
+    packageWidth:'',
+    packageHeight:'',
+    stock:'',
+    lowStockThreshold:'5',
+    inventoryType:'simple',
+    mrp:'',
+    sellingPrice:'',
+    offerPrice:'',
+    costPrice:'',
+    gstPercent:'',
+    platformChargePercent:'',
+    appliedOfferCode:'',
+    deliveryMode:'platform',
+    deliveryCharge:'',
+    freeDeliveryAbove:'',
+    returnable:true,
+    returnDays:'7',
+    customizationAvailable:false,
+    customizationNote:'',
+    status:'active',
+    visible:true,
+    featured:false,
+    newArrival:false,
+    bestSeller:false,
+    offerProduct:false
+  });
+  const [productStudioOpen, setProductStudioOpen] = useState(false);
+  const [editingProduct, setEditingProduct] = useState(null);
+  const [productForm, setProductForm] = useState(blankProductForm);
+  const [productStudioSection, setProductStudioSection] = useState('media');
 
   const [coupons, setCoupons] = useState(() => { try { const saved = JSON.parse(localStorage.getItem('howdiAdminCoupons') || '[]'); return Array.isArray(saved) ? saved : []; } catch { return []; } });
   const [couponSearch, setCouponSearch] = useState('');
@@ -252,6 +312,150 @@ function AdminApp() {
   function deleteVariant(v){if(!window.confirm(`Delete variant ${v.sku}?`))return;persistVariants(variants.filter(item=>item.id!==v.id));setNotice('Variant deleted.');}
   const filteredVariants=variants.filter(v=>{const q=variantSearch.trim().toLowerCase();return !q||[v.sku,v.color,v.size,variantProductName(v.productId)].filter(Boolean).join(' ').toLowerCase().includes(q);});
 
+
+  function openProductStudio(product=null){
+    if(product){
+      setEditingProduct(product);
+      setProductForm({
+        ...blankProductForm(),
+        ...product,
+        tags:Array.isArray(product.tags)?product.tags.join(', '):String(product.tags||''),
+        media:Array.isArray(product.media)?product.media:[],
+        specifications:Array.isArray(product.specifications)?product.specifications:[],
+        summary:product.summary||product.shortSummary||'',
+        usage:product.usage||'',
+        care:product.care||'',
+        unit:product.unit||'piece',
+        inventoryType:product.inventoryType||'simple',
+        sizeType:product.sizeType||'standard',
+        freeSize:Boolean(product.freeSize),
+        washable:Boolean(product.washable),
+        ironable:Boolean(product.ironable),
+        returnable:product.returnable!==false,
+        customizationAvailable:Boolean(product.customizationAvailable),
+        visible:product.visible!==false,
+      });
+    }else{
+      setEditingProduct(null);
+      setProductForm(blankProductForm());
+    }
+    setProductStudioSection('media');
+    setProductStudioOpen(true);
+    setTab('products');
+    window.scrollTo({top:0,behavior:'smooth'});
+  }
+
+  function closeProductStudio(){
+    setProductStudioOpen(false);
+    setEditingProduct(null);
+    setProductForm(blankProductForm());
+  }
+
+  function setProductField(key,value){
+    setProductForm(current=>({...current,[key]:value}));
+  }
+
+  function addSpecification(){
+    setProductForm(current=>({...current,specifications:[...(current.specifications||[]),{label:'',value:''}]}));
+  }
+
+  function updateSpecification(index,key,value){
+    setProductForm(current=>({...current,specifications:(current.specifications||[]).map((item,i)=>i===index?{...item,[key]:value}:item)}));
+  }
+
+  function removeSpecification(index){
+    setProductForm(current=>({...current,specifications:(current.specifications||[]).filter((_,i)=>i!==index)}));
+  }
+
+  function generateProductSku(){
+    const base=String(productForm.name||productForm.brand||'HOWDI').replace(/[^a-z0-9]/gi,'').slice(0,10).toUpperCase()||'HOWDI';
+    let sku='';
+    do { sku=`HOWDI-${base}-${Math.random().toString(36).slice(2,8).toUpperCase()}`; }
+    while(products.some(item=>String(item.sku||'').toUpperCase()===sku && item.id!==editingProduct?.id));
+    setProductField('sku',sku);
+  }
+
+  async function readAndCompressImage(file){
+    const source=await new Promise((resolve,reject)=>{
+      const reader=new FileReader();
+      reader.onload=()=>resolve(reader.result);
+      reader.onerror=reject;
+      reader.readAsDataURL(file);
+    });
+    if(!String(file.type||'').startsWith('image/')) return {id:`media-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,url:source,name:file.name,type:file.type,size:file.size};
+    const image=await new Promise((resolve,reject)=>{
+      const img=new Image();
+      img.onload=()=>resolve(img);
+      img.onerror=reject;
+      img.src=source;
+    });
+    const max=1400;
+    const scale=Math.min(1,max/Math.max(image.width,image.height));
+    const canvas=document.createElement('canvas');
+    canvas.width=Math.max(1,Math.round(image.width*scale));
+    canvas.height=Math.max(1,Math.round(image.height*scale));
+    const ctx=canvas.getContext('2d');
+    ctx.drawImage(image,0,0,canvas.width,canvas.height);
+    const url=canvas.toDataURL('image/jpeg',0.84);
+    return {id:`media-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,url,name:file.name,type:'image/jpeg',size:file.size};
+  }
+
+  async function addProductMedia(files){
+    const selected=Array.from(files||[]).slice(0,8);
+    if(!selected.length) return;
+    try{
+      const next=await Promise.all(selected.map(readAndCompressImage));
+      setProductForm(current=>({...current,media:[...(current.media||[]),...next].slice(0,8)}));
+      setNotice(`${next.length} product photo${next.length>1?'s':''} added.`);
+    }catch(error){ setNotice('One or more images could not be processed.'); }
+  }
+
+  function removeProductMedia(id){
+    setProductForm(current=>({...current,media:(current.media||[]).filter(item=>item.id!==id)}));
+  }
+
+  function aiAssistProduct(){
+    const category=categories.find(c=>String(c.id)===String(productForm.categoryId))?.name||'';
+    const subcategory=subcategories.find(c=>String(c.id)===String(productForm.subcategoryId))?.name||'';
+    const seed=[productForm.name,productForm.brand,category,subcategory,productForm.material].filter(Boolean).join(' ');
+    if(!seed.trim()){ setNotice('Enter a product name or choose a category before using AI Assist.'); return; }
+    const words=seed.trim().split(/\s+/).slice(0,10).join(' ');
+    const suggestedSummary=productForm.summary || `A carefully selected ${words.toLowerCase()} for everyday use and gifting.`;
+    const suggestedDescription=productForm.description || `${words}.\n\nKey highlights\n• Carefully prepared for HOWDI customers\n• Product details can be reviewed before publishing\n• Please confirm material, size and care information before going live`;
+    const suggestedUsage=productForm.usage || 'Daily use\nGifting\nPersonal use';
+    const nextTags=productForm.tags || [category,subcategory,productForm.brand,productForm.productType].filter(Boolean).join(', ');
+    setProductForm(current=>({...current,summary:suggestedSummary,description:suggestedDescription,usage:suggestedUsage,tags:nextTags}));
+    setNotice('AI Assist suggestions added. Review them before publishing. Photo-vision AI can be connected next with a provider key.');
+  }
+
+  async function saveProduct(e){
+    e.preventDefault();
+    setNotice('');
+    if(!productForm.name.trim()){ setNotice('Product name is required.'); return; }
+    if(!productForm.categoryId){ setNotice('Select a product category.'); return; }
+    if(productForm.sellingPrice!=='' && Number(productForm.sellingPrice)<0){ setNotice('Selling price cannot be negative.'); return; }
+    if(productForm.mrp!=='' && productForm.sellingPrice!=='' && Number(productForm.sellingPrice)>Number(productForm.mrp)){ setNotice('Selling price cannot be greater than MRP.'); return; }
+    if(productForm.media.some(item=>String(item.url||'').length>2500000)){ setNotice('One image is too large. Please use a smaller photo.'); return; }
+    const payload={
+      ...productForm,
+      name:productForm.name.trim(),
+      summary:productForm.summary.trim(),
+      description:productForm.description.trim(),
+      brand:productForm.brand.trim(),
+      productType:productForm.productType.trim(),
+      sku:productForm.sku.trim(),
+      tags:productForm.tags.split(',').map(item=>item.trim()).filter(Boolean),
+      specifications:(productForm.specifications||[]).filter(item=>String(item.label||'').trim()||String(item.value||'').trim())
+    };
+    try{
+      const path=editingProduct?`/api/admin/products/${editingProduct.id}`:'/api/admin/products';
+      const data=await api(path,{method:editingProduct?'PUT':'POST',body:JSON.stringify(payload)});
+      setProducts(items=>editingProduct?items.map(item=>item.id===data.product.id?data.product:item):[data.product,...items]);
+      setNotice(editingProduct?'Product updated successfully.':'Product published successfully.');
+      closeProductStudio();
+    }catch(error){ setNotice(error.message); }
+  }
+
   const categoryName = id => categories.find(c=>String(c.id)===String(id))?.name || '—';
   const visibleCategories = categories.filter(x => x.visible !== false).length;
   const visibleSubcategories = subcategories.filter(x => x.visible !== false).length;
@@ -386,9 +590,169 @@ function AdminApp() {
         )}
 
         {tab==='products' && (
-          <div className="page"><section className="panel list full"><div className="list-head"><div><span className="eyebrow">CATALOGUE PRODUCTS</span><h3>{filteredProducts.length} of {products.length} products</h3></div><input className="search" placeholder="Search product, brand, category..." value={search} onChange={e=>setSearch(e.target.value)}/></div>{filteredProducts.map(p=><div className="item product-row" key={p.id}><div className="icon">{p.icon||'🧶'}</div><div className="grow"><strong>{p.name}</strong><span>{categoryName(p.categoryId)} · {p.subcategory||'—'} · ₹{Number(p.price||0).toLocaleString('en-IN')}</span></div><span className="stock">{Number(p.stock ?? 0)} stock</span><span className={p.visible?'pill on':'pill off'}>{p.visible?'VISIBLE':'HIDDEN'}</span><button onClick={()=>toggleProduct(p)}>{p.visible?'Hide':'Show'}</button></div>)}{filteredProducts.length===0&&<div className="empty-state">No matching products found.</div>}</section></div>
-        )}
+          <div className="page">
+            {productStudioOpen ? (
+              <form className="product-studio" onSubmit={saveProduct}>
+                <div className="studio-hero">
+                  <div>
+                    <span className="eyebrow">HOWDI PRODUCT STUDIO</span>
+                    <h2>{editingProduct?'Edit product':'Create a marketplace-ready product'}</h2>
+                    <p>Media first, structured information, inventory, offers and delivery controls in one guided workspace.</p>
+                  </div>
+                  <div className="studio-actions">
+                    <button type="button" onClick={aiAssistProduct}>✨ HOWDI AI Assist</button>
+                    <button type="button" onClick={closeProductStudio}>← Back to products</button>
+                    <button className="primary">{editingProduct?'Save changes':'Publish product'}</button>
+                  </div>
+                </div>
 
+                <div className="studio-nav">
+                  {[
+                    ['media','📸 Media & AI'],
+                    ['basic','📝 Product information'],
+                    ['details','📖 Details & care'],
+                    ['specs','⚙️ Specifications'],
+                    ['commerce','💰 Price & offers'],
+                    ['inventory','📦 Inventory'],
+                    ['delivery','🚚 Delivery & publish']
+                  ].map(([id,label])=><button type="button" key={id} className={productStudioSection===id?'active':''} onClick={()=>setProductStudioSection(id)}>{label}</button>)}
+                </div>
+
+                <section className="studio-panel">
+                  <div className="studio-section-title"><span>01</span><div><h3>Product media studio</h3><p>Upload up to 8 photos. The first image becomes the main customer image.</p></div></div>
+                  <div className="media-drop" onClick={()=>mediaInputRef.current?.click()}>
+                    <div className="media-drop-icon">📷</div>
+                    <strong>Upload or capture product photos</strong>
+                    <small>JPG, PNG or WebP · photos are resized for faster catalogue loading</small>
+                    <button type="button">Choose photos</button>
+                    <input ref={mediaInputRef} type="file" accept="image/*" capture="environment" multiple hidden onChange={e=>addProductMedia(e.target.files)}/>
+                  </div>
+                  <div className="media-grid">
+                    {(productForm.media||[]).map((item,index)=><div className="media-card" key={item.id}>
+                      <img src={item.url} alt={item.name||`Product ${index+1}`}/>
+                      {index===0&&<span>MAIN PHOTO</span>}
+                      <button type="button" onClick={()=>removeProductMedia(item.id)}>×</button>
+                    </div>)}
+                  </div>
+                  <div className="ai-note"><strong>🤖 AI Photo & Detail Assist</strong><p>Use AI Assist to generate starter copy from the information entered. Real photo-vision/background AI will be connected as the next integration so the product itself is never silently changed.</p><button type="button" onClick={aiAssistProduct}>Generate suggestions</button></div>
+                </section>
+
+                <section className="studio-panel">
+                  <div className="studio-section-title"><span>02</span><div><h3>Product identity</h3><p>Required fields are marked with *</p></div></div>
+                  <div className="studio-form-grid">
+                    <label className="wide">Product name *<input value={productForm.name} onChange={e=>setProductField('name',e.target.value)} placeholder="Example: Handmade Crochet Shoulder Bag" required/></label>
+                    <label className="wide">Product summary<input value={productForm.summary} onChange={e=>setProductField('summary',e.target.value)} placeholder="Short customer-friendly summary"/></label>
+                    <label>Category *<select value={productForm.categoryId} onChange={e=>setProductForm(current=>({...current,categoryId:e.target.value,subcategoryId:''}))} required><option value="">Select category</option>{categories.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+                    <label>Subcategory<select value={productForm.subcategoryId} onChange={e=>setProductField('subcategoryId',e.target.value)}><option value="">Select subcategory</option>{subcategories.filter(item=>String(item.categoryId)===String(productForm.categoryId)).map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+                    <label>Brand name<input value={productForm.brand} onChange={e=>setProductField('brand',e.target.value)} placeholder="Optional"/></label>
+                    <label>Product type<input value={productForm.productType} onChange={e=>setProductField('productType',e.target.value)} placeholder="Bag, Top, Table Runner..."/></label>
+                    <label>SKU<input value={productForm.sku} onChange={e=>setProductField('sku',e.target.value)} placeholder="Unique seller SKU"/></label>
+                    <div className="inline-field"><label>Generate SKU</label><button type="button" onClick={generateProductSku}>Generate unique SKU</button></div>
+                    <label>Barcode<input value={productForm.barcode} onChange={e=>setProductField('barcode',e.target.value)} placeholder="Optional"/></label>
+                    <label>HSN code<input value={productForm.hsnCode} onChange={e=>setProductField('hsnCode',e.target.value)} placeholder="Optional"/></label>
+                    <label className="wide">Search tags<input value={productForm.tags} onChange={e=>setProductField('tags',e.target.value)} placeholder="handmade, crochet, gift, local business"/></label>
+                  </div>
+                </section>
+
+                <section className="studio-panel">
+                  <div className="studio-section-title"><span>03</span><div><h3>Description, usage & care</h3><p>Keep the important information structured so customers can scan it quickly.</p></div></div>
+                  <div className="studio-form-grid">
+                    <label className="wide">Full product description<textarea rows="7" value={productForm.description} onChange={e=>setProductField('description',e.target.value)} placeholder="Tell the customer what makes this product useful and special..."/></label>
+                    <label>Material<input value={productForm.material} onChange={e=>setProductField('material',e.target.value)} placeholder="Cotton yarn, iron, wood..."/></label>
+                    <label>Size type<select value={productForm.sizeType} onChange={e=>setProductField('sizeType',e.target.value)}><option value="standard">Standard sizes</option><option value="free">Free size</option><option value="custom">Custom size</option></select></label>
+                    <label className="wide">Usage<textarea rows="4" value={productForm.usage} onChange={e=>setProductField('usage',e.target.value)} placeholder="Daily use, gifting, travel..."/></label>
+                    <label className="wide">Care instructions<textarea rows="4" value={productForm.care} onChange={e=>setProductField('care',e.target.value)} placeholder="Wash, storage and maintenance instructions"/></label>
+                  </div>
+                  <div className="check-grid">
+                    <label className="check"><input type="checkbox" checked={productForm.freeSize} onChange={e=>setProductField('freeSize',e.target.checked)}/> Free size</label>
+                    <label className="check"><input type="checkbox" checked={productForm.washable} onChange={e=>setProductField('washable',e.target.checked)}/> Washable</label>
+                    <label>Wash type<select value={productForm.washType} onChange={e=>setProductField('washType',e.target.value)}><option value="">Not specified</option><option>Hand wash</option><option>Machine wash</option><option>Dry clean only</option></select></label>
+                    <label className="check"><input type="checkbox" checked={productForm.ironable} onChange={e=>setProductField('ironable',e.target.checked)}/> Ironable</label>
+                    <label>Iron temperature<select value={productForm.ironTemperature} onChange={e=>setProductField('ironTemperature',e.target.value)}><option value="">Not specified</option><option>Low</option><option>Medium</option><option>High</option></select></label>
+                  </div>
+                </section>
+
+                <section className="studio-panel">
+                  <div className="studio-section-title"><span>04</span><div><h3>Specifications</h3><p>Add only the attributes relevant to this product. This keeps one product system flexible across categories.</p></div><button type="button" onClick={addSpecification}>+ Add specification</button></div>
+                  <div className="spec-list">
+                    {(productForm.specifications||[]).map((item,index)=><div className="spec-row" key={index}><input value={item.label||''} onChange={e=>updateSpecification(index,'label',e.target.value)} placeholder="Specification (e.g. Dimensions)"/><input value={item.value||''} onChange={e=>updateSpecification(index,'value',e.target.value)} placeholder="Value (e.g. 30 × 20 cm)"/><button type="button" onClick={()=>removeSpecification(index)}>Remove</button></div>)}
+                    {!(productForm.specifications||[]).length&&<div className="empty-state">No specifications yet. Add material, dimensions, capacity, compatibility or other product-specific details.</div>}
+                  </div>
+                </section>
+
+                <section className="studio-panel">
+                  <div className="studio-section-title"><span>05</span><div><h3>Price & offer application</h3><p>The product price stays separate from campaigns so offers can be enabled only when eligible.</p></div></div>
+                  <div className="studio-form-grid">
+                    <label>MRP ₹<input type="number" min="0" step="0.01" value={productForm.mrp} onChange={e=>setProductField('mrp',e.target.value)}/></label>
+                    <label>Selling price ₹<input type="number" min="0" step="0.01" value={productForm.sellingPrice} onChange={e=>setProductField('sellingPrice',e.target.value)} required/></label>
+                    <label>Direct offer price ₹<input type="number" min="0" step="0.01" value={productForm.offerPrice} onChange={e=>setProductField('offerPrice',e.target.value)}/></label>
+                    <label>Cost price ₹<input type="number" min="0" step="0.01" value={productForm.costPrice} onChange={e=>setProductField('costPrice',e.target.value)}/></label>
+                    <label>GST %<input type="number" min="0" step="0.01" value={productForm.gstPercent} onChange={e=>setProductField('gstPercent',e.target.value)}/></label>
+                    <label>Platform charge %<input type="number" min="0" step="0.01" value={productForm.platformChargePercent} onChange={e=>setProductField('platformChargePercent',e.target.value)}/></label>
+                    <label className="wide">Apply existing HOWDI offer<select value={productForm.appliedOfferCode} onChange={e=>setProductField('appliedOfferCode',e.target.value)}><option value="">No campaign linked</option>{coupons.filter(item=>item.active!==false).map(item=><option key={item.id} value={item.code}>{item.code} — {item.campaignName||'HOWDI offer'}</option>)}</select></label>
+                  </div>
+                  <div className="check-grid">
+                    <label className="check"><input type="checkbox" checked={productForm.featured} onChange={e=>setProductField('featured',e.target.checked)}/> Featured</label>
+                    <label className="check"><input type="checkbox" checked={productForm.newArrival} onChange={e=>setProductField('newArrival',e.target.checked)}/> New arrival</label>
+                    <label className="check"><input type="checkbox" checked={productForm.bestSeller} onChange={e=>setProductField('bestSeller',e.target.checked)}/> Best seller</label>
+                    <label className="check"><input type="checkbox" checked={productForm.offerProduct} onChange={e=>setProductField('offerProduct',e.target.checked)}/> Offer product</label>
+                  </div>
+                </section>
+
+                <section className="studio-panel">
+                  <div className="studio-section-title"><span>06</span><div><h3>Inventory, weight & availability</h3><p>Stock is automatically unavailable to customers when quantity reaches zero.</p></div></div>
+                  <div className="studio-form-grid">
+                    <label>Inventory type<select value={productForm.inventoryType} onChange={e=>setProductField('inventoryType',e.target.value)}><option value="simple">Simple stock</option><option value="variant">Variant stock</option><option value="bulk">Bulk / weight stock</option></select></label>
+                    <label>Current stock<input type="number" min="0" step="0.001" value={productForm.stock} onChange={e=>setProductField('stock',e.target.value)} required/></label>
+                    <label>Low stock alert<input type="number" min="0" step="0.001" value={productForm.lowStockThreshold} onChange={e=>setProductField('lowStockThreshold',e.target.value)}/></label>
+                    <label>Selling unit<select value={productForm.unit} onChange={e=>setProductField('unit',e.target.value)}>{['piece','kg','gram','litre','ml','pack','box','set','bundle','metre','dozen'].map(unit=><option key={unit} value={unit}>{unit}</option>)}</select></label>
+                    <label>Net weight<input type="number" min="0" step="0.001" value={productForm.netWeight} onChange={e=>setProductField('netWeight',e.target.value)} placeholder="Number only"/></label>
+                  </div>
+                  <div className="availability-preview"><strong>{Number(productForm.stock||0)>0?'🟢 In stock':'🔴 Out of stock'}</strong><span>{Number(productForm.stock||0)>0?'Customer can add this product to cart.':'Customer Add to Cart should automatically be disabled.'}</span></div>
+                </section>
+
+                <section className="studio-panel">
+                  <div className="studio-section-title"><span>07</span><div><h3>Delivery, returns & publishing</h3><p>Product rules sit on top of the platform’s existing location and delivery rules.</p></div></div>
+                  <div className="studio-form-grid">
+                    <label>Delivery pricing<select value={productForm.deliveryMode} onChange={e=>setProductField('deliveryMode',e.target.value)}><option value="platform">Use platform rules</option><option value="free">Free delivery</option><option value="paid">Seller-defined charge</option><option value="conditional">Free above order value</option></select></label>
+                    <label>Delivery charge ₹<input type="number" min="0" step="0.01" value={productForm.deliveryCharge} onChange={e=>setProductField('deliveryCharge',e.target.value)}/></label>
+                    <label>Free delivery above ₹<input type="number" min="0" step="0.01" value={productForm.freeDeliveryAbove} onChange={e=>setProductField('freeDeliveryAbove',e.target.value)}/></label>
+                    <label>Net weight / shipping weight<input type="number" min="0" step="0.001" value={productForm.netWeight} onChange={e=>setProductField('netWeight',e.target.value)}/></label>
+                    <label>Package length<input type="number" min="0" step="0.1" value={productForm.packageLength} onChange={e=>setProductField('packageLength',e.target.value)}/></label>
+                    <label>Package width<input type="number" min="0" step="0.1" value={productForm.packageWidth} onChange={e=>setProductField('packageWidth',e.target.value)}/></label>
+                    <label>Package height<input type="number" min="0" step="0.1" value={productForm.packageHeight} onChange={e=>setProductField('packageHeight',e.target.value)}/></label>
+                    <label>Status<select value={productForm.status} onChange={e=>setProductField('status',e.target.value)}><option value="draft">Draft</option><option value="active">Active</option><option value="inactive">Inactive</option><option value="archived">Archived</option></select></label>
+                    <label>Return window (days)<input type="number" min="0" value={productForm.returnDays} onChange={e=>setProductField('returnDays',e.target.value)}/></label>
+                  </div>
+                  <div className="check-grid">
+                    <label className="check"><input type="checkbox" checked={productForm.visible} onChange={e=>setProductField('visible',e.target.checked)}/> Visible to customers</label>
+                    <label className="check"><input type="checkbox" checked={productForm.returnable} onChange={e=>setProductField('returnable',e.target.checked)}/> Returnable</label>
+                    <label className="check"><input type="checkbox" checked={productForm.customizationAvailable} onChange={e=>setProductField('customizationAvailable',e.target.checked)}/> Customisation available</label>
+                  </div>
+                  {productForm.customizationAvailable&&<label className="wide">Customisation note<textarea rows="3" value={productForm.customizationNote} onChange={e=>setProductField('customizationNote',e.target.value)} placeholder="Customer can choose colour, size, add a name or share a reference image..."/></label>}
+                  <div className="publish-bar"><div><strong>Ready to publish?</strong><span>Review media, pricing and stock before saving.</span></div><div><button type="button" onClick={closeProductStudio}>Cancel</button><button className="primary">{editingProduct?'Save product':'Publish product'}</button></div></div>
+                </section>
+              </form>
+            ) : (
+              <section className="panel list full">
+                <div className="list-head">
+                  <div><span className="eyebrow">CATALOGUE PRODUCTS</span><h3>{filteredProducts.length} of {products.length} products</h3></div>
+                  <div className="product-list-actions"><input className="search" placeholder="Search product, brand, category..." value={search} onChange={e=>setSearch(e.target.value)}/><button className="primary" onClick={()=>openProductStudio()}>+ Create product</button></div>
+                </div>
+                {filteredProducts.map(p=><div className="item product-row" key={p.id}>
+                  <div className="icon">{p.media?.[0]?.url?<img src={p.media[0].url} alt=""/>:p.icon||'🧶'}</div>
+                  <div className="grow"><strong>{p.name}</strong><span>{categoryName(p.categoryId)} · {p.brand||p.subcategory||'—'} · ₹{Number(p.price||p.sellingPrice||0).toLocaleString('en-IN')} · {p.unit||'piece'}</span></div>
+                  <span className="stock">{Number(p.stock ?? 0)} {p.unit||'stock'}</span>
+                  <span className={Number(p.stock||0)>0?'pill on':'pill off'}>{Number(p.stock||0)>0?'IN STOCK':'OUT OF STOCK'}</span>
+                  <span className={p.visible?'pill on':'pill off'}>{p.visible?'VISIBLE':'HIDDEN'}</span>
+                  <button onClick={()=>openProductStudio(p)}>Edit</button>
+                  <button onClick={()=>toggleProduct(p)}>{p.visible?'Hide':'Show'}</button>
+                </div>)}
+                {filteredProducts.length===0&&<div className="empty-state">No matching products found. Create your first product from Product Studio.</div>}
+              </section>
+            )}
+          </div>
+        )}
 
         {tab==='variants' && (
           <div className="page">

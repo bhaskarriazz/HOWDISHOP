@@ -66,5 +66,35 @@
     "is_default": true,
     "created_at": "2026-08-30T03:59:25.772Z",
     "updated_at": "2026-08-30T03:59:25.772Z"
+  },
+  {
+    "id": "70019a30-e78a-4185-b887-bd46ae189551",
+    "customer_id": "e6795c6d-aae9-4cb1-a056-72f9075ab8e2",
+    "label": "Home",
+    "full_name": "bhaskar badavath",
+    "phone": "9966977763",
+    "address_line1": "Aradhana Nest, No. 13,",
+    "address_line2": "banglore",
+    "city": "Hyderabad",
+    "state": "telangana",
+    "pincode": "506381",
+    "updated_at": "2026-08-31T16:00:11.384Z",
+    "is_default": true,
+    "created_at": "2026-08-31T16:00:11.384Z"
+  },
+  {
+    "id": "0dca66be-cab0-443e-bbeb-d9478e9cbfb7",
+    "customer_id": "e6795c6d-aae9-4cb1-a056-72f9075ab8e2",
+    "label": "Home",
+    "full_name": "bhaskar badavath",
+    "phone": "9966977763",
+    "address_line1": "5-37 pusalathanda chilukodu dornakal Warangal",
+    "address_line2": "warangal",
+    "city": "dornakal",
+    "state": "telangana",
+    "pincode": "506381",
+    "updated_at": "2026-08-31T16:00:11.603Z",
+    "is_default": false,
+    "created_at": "2026-08-31T16:00:11.603Z"
   }
 ]

@@ -69,5 +69,15 @@
     "showOnHome": true,
     "updatedAt": "2026-08-31T11:51:39.842Z",
     "createdAt": "2026-08-31T11:51:39.842Z"
+  },
+  {
+    "id": "3154c548-a3d0-4ed1-8544-aee9d3aee171",
+    "name": "Advaith croch",
+    "icon": "🧶",
+    "description": "kid",
+    "visible": true,
+    "showOnHome": true,
+    "updatedAt": "2026-08-31T12:02:31.846Z",
+    "createdAt": "2026-08-31T12:02:31.846Z"
   }
 ]

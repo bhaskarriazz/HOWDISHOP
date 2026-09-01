@@ -2583,5 +2583,19 @@
     ],
     "story": "Made carefully by hand in the spirit of Grandma’s traditional craft.",
     "created_at": "2026-08-30T00:00:00.000Z"
+  },
+  {
+    "id": "9b916ca7-5e96-4eb2-894e-31208fb91ee9",
+    "name": "krishna radha",
+    "brand": "god",
+    "categoryId": "3154c548-a3d0-4ed1-8544-aee9d3aee171",
+    "subcategoryId": "d267771a-f77b-4215-803f-240b258c2db5",
+    "subcategory": "",
+    "icon": "🧶",
+    "price": 0,
+    "stock": 40,
+    "visible": true,
+    "updatedAt": "2026-08-31T16:09:17.147Z",
+    "createdAt": "2026-08-31T15:02:40.039Z"
   }
 ]

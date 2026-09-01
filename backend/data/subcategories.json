@@ -304,5 +304,14 @@
     "visible": true,
     "updatedAt": "2026-08-31T11:51:57.970Z",
     "createdAt": "2026-08-31T11:51:57.970Z"
+  },
+  {
+    "id": "d267771a-f77b-4215-803f-240b258c2db5",
+    "categoryId": "3154c548-a3d0-4ed1-8544-aee9d3aee171",
+    "name": "kids",
+    "icon": "🧶",
+    "visible": true,
+    "updatedAt": "2026-08-31T12:02:48.211Z",
+    "createdAt": "2026-08-31T12:02:48.211Z"
   }
 ]
