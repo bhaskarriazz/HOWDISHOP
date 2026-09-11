@@ -1,0 +1,53 @@
+name: HOWDI latest source sync
+
+on:
+  push:
+    branches:
+      - sync-2026-09-11-latest
+    paths:
+      - '.howdi-sync/READY'
+
+permissions:
+  contents: write
+
+jobs:
+  assemble:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Assemble latest HOWDI files
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f .howdi-sync/READY ]; then
+            echo 'READY marker absent; nothing to assemble.'
+            exit 0
+          fi
+          python3 - <<'PY'
+          import json, base64
+          from pathlib import Path
+          manifest=json.loads(Path('.howdi-sync/manifest.json').read_text())
+          for item in manifest:
+              target=Path(item['path'])
+              src=Path('.howdi-sync/files')/item['key']
+              parts=sorted(src.glob('*.part'))
+              if len(parts)!=item['parts']:
+                  raise SystemExit(f"Missing chunks for {item['path']}: expected {item['parts']}, found {len(parts)}")
+              target.parent.mkdir(parents=True,exist_ok=True)
+              joined=''.join(p.read_text(encoding='utf-8') for p in parts)
+              if item['encoding']=='base64':
+                  target.write_bytes(base64.b64decode(joined))
+              else:
+                  target.write_text(joined,encoding='utf-8')
+              print('assembled',target)
+          PY
+          node --check backend/server.js
+          git diff --check
+          git config user.name 'HOWDI Sync Bot'
+          git config user.email 'howdi-sync@users.noreply.github.com'
+          git add README.md backend apps docs
+          git rm -r .howdi-sync
+          git commit -m 'sync: update HOWDI project to V19.0 Learn & Earn foundation'
+          git push origin HEAD:sync-2026-09-11-latest
