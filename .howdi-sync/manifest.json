@@ -1,0 +1,15 @@
+[
+  {"path":"README.md","key":"README_md","parts":1,"encoding":"text","bytes":1248},
+  {"path":"apps/admin/App.css","key":"apps__admin__App_css","parts":2,"encoding":"text","bytes":196806},
+  {"path":"apps/admin/App.jsx","key":"apps__admin__App_jsx","parts":3,"encoding":"text","bytes":470405},
+  {"path":"apps/customer/src/App.css","key":"apps__customer__src__App_css","parts":2,"encoding":"text","bytes":294195},
+  {"path":"apps/customer/src/App.jsx","key":"apps__customer__src__App_jsx","parts":5,"encoding":"text","bytes":890507},
+  {"path":"apps/vendor/src/App.css","key":"apps__vendor__src__App_css","parts":1,"encoding":"text","bytes":63584},
+  {"path":"apps/vendor/src/App.jsx","key":"apps__vendor__src__App_jsx","parts":1,"encoding":"text","bytes":136045},
+  {"path":"apps/worker/src/App.css","key":"apps__worker__src__App_css","parts":1,"encoding":"text","bytes":75406},
+  {"path":"apps/worker/src/App.jsx","key":"apps__worker__src__App_jsx","parts":1,"encoding":"text","bytes":57208},
+  {"path":"backend/server.js","key":"backend__server_js","parts":7,"encoding":"text","bytes":1114283},
+  {"path":"docs/CURRENT_BUILD_STATUS.md","key":"docs__CURRENT_BUILD_STATUS_md","parts":1,"encoding":"text","bytes":2778},
+  {"path":"docs/HOWDI_Learn_and_Earn_Fixed_Product_Vision.docx","key":"docs__HOWDI_Learn_and_Earn_Fixed_Product_Vision_docx","parts":1,"encoding":"base64","bytes":46624},
+  {"path":"docs/HOWDI_Learn_and_Earn_Fixed_Product_Vision.md","key":"docs__HOWDI_Learn_and_Earn_Fixed_Product_Vision_md","parts":1,"encoding":"text","bytes":18512}
+]
