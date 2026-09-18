@@ -31061,9 +31061,6 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             full_name: user.full_name,
             email: user.email,
             phone: user.phone,
-            howdi_id: user.howdi_id,
-            identity_uuid: user.identity_uuid,
-            master_id: user.master_id,
             account_type_id: user.account_type_id,
             account_status: user.account_status,
             role: user.role,
@@ -31071,13 +31068,6 @@ async function ensureVibeReleaseReadinessV140LSchema(){
           referral: {
             applied: Boolean(referralOwner),
             referral_code: referralOwner?.referral_code || null,
-          },
-          identity: {
-            identity_master_id: identityMaster.id,
-            identity_account_id: identityAccountResult.rows[0].id,
-            master_id: identityMaster.master_id,
-            identity_uuid: identityMaster.identity_uuid,
-            account_status: identityMaster.account_status,
           },
         });
 
@@ -31613,15 +31603,6 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
                 public_username:
                   publicUsername,
-
-                howdi_id:
-                  user.howdi_id,
-
-                identity_uuid:
-                  user.identity_uuid,
-
-                master_id:
-                  user.master_id,
 
                 account_type_id:
                   user.account_type_id,
@@ -43689,10 +43670,10 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                     p.created_at,
                     p.updated_at,
                     u.full_name,
-                    u.howdi_id,
+                    cp.public_username,
                     COALESCE(ps.profile_image, '') AS profile_image,
                     cu.full_name AS collaborator_name,
-                    cu.howdi_id AS collaborator_howdi_id,
+                    ccp.public_username AS collaborator_public_username,
                     0::int AS useful_count,
                     0::int AS not_useful_count,
                     0::int AS discovery_score,
@@ -43749,7 +43730,9 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                     ) THEN TRUE ELSE FALSE END AS author_followed_by_viewer
                   FROM howdi_community_posts p
                   JOIN users u ON u.id = p.user_id
+                  LEFT JOIN howdi_connect_profiles cp ON cp.user_id = p.user_id
                   LEFT JOIN users cu ON cu.id=p.collaborator_user_id
+                  LEFT JOIN howdi_connect_profiles ccp ON ccp.user_id = p.collaborator_user_id
                   LEFT JOIN user_profile_settings ps ON ps.user_id = p.user_id
                   LEFT JOIN howdi_community_reactions r ON r.post_id = p.id
                   LEFT JOIN howdi_community_comments c ON c.post_id = p.id
@@ -43773,7 +43756,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   GROUP BY
                     p.id, p.user_id, p.content, p.category, p.visibility, p.subscribers_only,
                     p.created_at, p.updated_at,
-                    u.full_name, u.howdi_id, ps.profile_image,cu.full_name,cu.howdi_id
+                    u.full_name, cp.public_username, ps.profile_image,cu.full_name,ccp.public_username
                   ORDER BY COALESCE(p.scheduled_for,p.created_at) DESC
                   LIMIT 100
                 `,
@@ -44002,10 +43985,11 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                     c.content,
                     c.created_at,
                     u.full_name,
-                    u.howdi_id,
+                    cp.public_username,
                     COALESCE(ps.profile_image, '') AS profile_image
                   FROM howdi_community_comments c
                   JOIN users u ON u.id = c.user_id
+                  LEFT JOIN howdi_connect_profiles cp ON cp.user_id = c.user_id
                   LEFT JOIN user_profile_settings ps ON ps.user_id = c.user_id
                   WHERE c.post_id = $1
                   ORDER BY c.created_at ASC
@@ -45417,10 +45401,10 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             if(req.method==="GET"&&pathname==="/api/connect/profile-studio"){
               const uid=Number(url.searchParams.get("userId")||0);
               if(!uid)return sendJSON(res,400,{status:"error",message:"Valid user required"});
-              const visits=(await pool.query(`SELECT v.*,u.full_name,u.howdi_id,COALESCE(cp.profession_title,'') profession_title,COALESCE(cp.professional_category,'GENERAL') professional_category FROM howdi_connect_profile_visits v JOIN users u ON u.id=v.viewer_user_id LEFT JOIN howdi_connect_profiles cp ON cp.user_id=u.id WHERE v.profile_user_id=$1 ORDER BY v.last_visited_at DESC LIMIT 100`,[uid])).rows;
-              const followRequests=(await pool.query(`SELECT fr.*,u.full_name,u.howdi_id,COALESCE(cp.profession_title,'') profession_title FROM howdi_connect_follow_requests fr JOIN users u ON u.id=fr.requester_user_id LEFT JOIN howdi_connect_profiles cp ON cp.user_id=u.id WHERE fr.target_user_id=$1 AND fr.status='PENDING' ORDER BY fr.created_at DESC`,[uid])).rows;
-              const blocks=(await pool.query(`SELECT b.blocked_user_id,u.full_name,u.howdi_id,b.created_at FROM howdi_connect_profile_blocks b JOIN users u ON u.id=b.blocked_user_id WHERE b.blocker_user_id=$1 ORDER BY b.created_at DESC`,[uid])).rows;
-              const closeFriends=(await pool.query(`SELECT cf.friend_user_id,u.full_name,u.howdi_id,cf.created_at FROM howdi_connect_close_friends cf JOIN users u ON u.id=cf.friend_user_id WHERE cf.user_id=$1 ORDER BY cf.created_at DESC`,[uid])).rows;
+              const visits=(await pool.query(`SELECT v.*,u.full_name,cp.public_username,COALESCE(cp.profession_title,'') profession_title,COALESCE(cp.professional_category,'GENERAL') professional_category FROM howdi_connect_profile_visits v JOIN users u ON u.id=v.viewer_user_id LEFT JOIN howdi_connect_profiles cp ON cp.user_id=u.id WHERE v.profile_user_id=$1 ORDER BY v.last_visited_at DESC LIMIT 100`,[uid])).rows;
+              const followRequests=(await pool.query(`SELECT fr.*,u.full_name,cp.public_username,COALESCE(cp.profession_title,'') profession_title FROM howdi_connect_follow_requests fr JOIN users u ON u.id=fr.requester_user_id LEFT JOIN howdi_connect_profiles cp ON cp.user_id=u.id WHERE fr.target_user_id=$1 AND fr.status='PENDING' ORDER BY fr.created_at DESC`,[uid])).rows;
+              const blocks=(await pool.query(`SELECT b.blocked_user_id,u.full_name,cp.public_username,b.created_at FROM howdi_connect_profile_blocks b JOIN users u ON u.id=b.blocked_user_id LEFT JOIN howdi_connect_profiles cp ON cp.user_id=u.id WHERE b.blocker_user_id=$1 ORDER BY b.created_at DESC`,[uid])).rows;
+              const closeFriends=(await pool.query(`SELECT cf.friend_user_id,u.full_name,cp.public_username,cf.created_at FROM howdi_connect_close_friends cf JOIN users u ON u.id=cf.friend_user_id LEFT JOIN howdi_connect_profiles cp ON cp.user_id=u.id WHERE cf.user_id=$1 ORDER BY cf.created_at DESC`,[uid])).rows;
               const projects=(await pool.query(`SELECT * FROM howdi_connect_profile_projects WHERE user_id=$1 ORDER BY created_at DESC`,[uid])).rows;
               const experience=(await pool.query(`SELECT * FROM howdi_connect_profile_experience WHERE user_id=$1 ORDER BY is_current DESC,start_date DESC NULLS LAST,id DESC`,[uid])).rows;
               const education=(await pool.query(`SELECT * FROM howdi_connect_profile_education WHERE user_id=$1 ORDER BY is_current DESC,end_year DESC NULLS LAST,id DESC`,[uid])).rows;
@@ -45516,7 +45500,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
             if(req.method==="GET"&&pathname==="/api/connect/follow-requests"){
               const uid=Number(url.searchParams.get("userId")||0);
-              const rows=(await pool.query(`SELECT fr.*,u.full_name,u.howdi_id,COALESCE(cp.profession_title,'') profession_title FROM howdi_connect_follow_requests fr JOIN users u ON u.id=fr.requester_user_id LEFT JOIN howdi_connect_profiles cp ON cp.user_id=u.id WHERE fr.target_user_id=$1 AND fr.status='PENDING' ORDER BY fr.created_at DESC`,[uid])).rows;
+              const rows=(await pool.query(`SELECT fr.*,u.full_name,cp.public_username,COALESCE(cp.profession_title,'') profession_title FROM howdi_connect_follow_requests fr JOIN users u ON u.id=fr.requester_user_id LEFT JOIN howdi_connect_profiles cp ON cp.user_id=u.id WHERE fr.target_user_id=$1 AND fr.status='PENDING' ORDER BY fr.created_at DESC`,[uid])).rows;
               return sendJSON(res,200,{status:"success",requests:rows});
             }
 
@@ -45554,7 +45538,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               const uid=Number(url.searchParams.get("userId")||0),category=clean(url.searchParams.get("category")||"").toUpperCase(),type=clean(url.searchParams.get("type")||"").toUpperCase();
               const me=(await pool.query(`SELECT professional_category,profile_type,interests FROM howdi_connect_profiles WHERE user_id=$1`,[uid])).rows[0]||{};
               const rows=(await pool.query(`
-                SELECT u.id,u.full_name,u.howdi_id,cp.profile_type,cp.professional_category,cp.profession_title,cp.organization_name,cp.creator_mode,cp.professional_mode,
+                SELECT u.id,u.full_name,cp.public_username,cp.profile_type,cp.professional_category,cp.profession_title,cp.organization_name,cp.creator_mode,cp.professional_mode,
                   COALESCE(cp.avatar_data,ps.profile_image,'') profile_image,
                   CASE WHEN COALESCE(cp.activity_visible,TRUE) THEN pr.presence_status ELSE 'HIDDEN' END presence_status,
                   EXISTS(SELECT 1 FROM howdi_connect_communities c WHERE c.owner_user_id=u.id AND c.community_type IN('LIVE','SPACE') AND c.session_status='LIVE') is_live_now,
@@ -45587,8 +45571,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             if(req.method==="GET"&&pathname==="/api/connect/profile-safety"){
               const uid=Number(url.searchParams.get("userId")||0);
               const profile=(await pool.query(`SELECT visitor_visibility,follower_list_visibility,mention_permission,tag_permission,contact_permission,private_profile,activity_visible,discoverable FROM howdi_connect_profiles WHERE user_id=$1`,[uid])).rows[0]||{};
-              const blocks=(await pool.query(`SELECT b.blocked_user_id,u.full_name,u.howdi_id,b.created_at FROM howdi_connect_profile_blocks b JOIN users u ON u.id=b.blocked_user_id WHERE b.blocker_user_id=$1 ORDER BY b.created_at DESC`,[uid])).rows;
-              const closeFriends=(await pool.query(`SELECT cf.friend_user_id,u.full_name,u.howdi_id,cf.created_at FROM howdi_connect_close_friends cf JOIN users u ON u.id=cf.friend_user_id WHERE cf.user_id=$1 ORDER BY cf.created_at DESC`,[uid])).rows;
+              const blocks=(await pool.query(`SELECT b.blocked_user_id,u.full_name,cp2.public_username,b.created_at FROM howdi_connect_profile_blocks b JOIN users u ON u.id=b.blocked_user_id LEFT JOIN howdi_connect_profiles cp2 ON cp2.user_id=u.id WHERE b.blocker_user_id=$1 ORDER BY b.created_at DESC`,[uid])).rows;
+              const closeFriends=(await pool.query(`SELECT cf.friend_user_id,u.full_name,cp2.public_username,cf.created_at FROM howdi_connect_close_friends cf JOIN users u ON u.id=cf.friend_user_id LEFT JOIN howdi_connect_profiles cp2 ON cp2.user_id=u.id WHERE cf.user_id=$1 ORDER BY cf.created_at DESC`,[uid])).rows;
               return sendJSON(res,200,{status:"success",profile,blocks,closeFriends});
             }
 
