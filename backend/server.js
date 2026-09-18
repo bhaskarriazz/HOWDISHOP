@@ -43742,7 +43742,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
             if (req.method === "POST" && pathname === "/api/connect/posts") {
               const body = await getBody(req);
-              const userId = Number(body.user_id ?? body.userId);
+              const sessionUser = await getSessionUserFromRequest(req);
+              const userId = Number(sessionUser?.id || body.user_id || body.userId || 0);
               const content = clean(body.content || "").trim();
               const mediaData = String(body.media_data ?? body.mediaData ?? "").trim();
               const mediaType = String(body.media_type ?? body.mediaType ?? "").trim().slice(0,80);
@@ -44147,7 +44148,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             }
 
             if(req.method==="POST"&&/^\/api\/connect\/users\/\d+\/follow\/?$/.test(pathname)){
-              const target=Number(pathname.match(/^\/api\/connect\/users\/(\d+)\/follow\/?$/)?.[1]);const body=await getBody(req);const userId=Number(body.user_id??body.userId);
+              const target=Number(pathname.match(/^\/api\/connect\/users\/(\d+)\/follow\/?$/)?.[1]);const sessionUser=await getSessionUserFromRequest(req);const body=await getBody(req);const userId=Number(sessionUser?.id||body.user_id||body.userId||0);
               if(!Number.isInteger(userId)||userId<=0||!Number.isInteger(target)||target<=0||userId===target)return sendJSON(res,400,{status:"error",message:"Valid follower and target are required"});
               const blocked=(await pool.query(`SELECT 1 FROM howdi_connect_profile_blocks WHERE (blocker_user_id=$1 AND blocked_user_id=$2) OR (blocker_user_id=$2 AND blocked_user_id=$1)`,[userId,target])).rows[0];
               if(blocked)return sendJSON(res,403,{status:"error",message:"Follow is unavailable for this profile"});
@@ -47079,7 +47080,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             if(req.method==="GET"&&pathname==="/api/connect/conversations"){
               const sessionUser=await getSessionUserFromRequest(req);if(!sessionUser)return sendJSON(res,401,{status:"error",message:"Login required"});
               const userId=Number(sessionUser.id);
-              const rows=(await pool.query(`SELECT c.id,c.updated_at,u.full_name,cp.public_username,COALESCE(ps.profile_image,'') profile_image,
+              const rows=(await pool.query(`SELECT c.id,c.updated_at,other.user_id other_user_id,u.full_name,cp.public_username,COALESCE(ps.profile_image,'') profile_image,
                 lm.message_text last_message,lm.created_at last_message_at,COALESCE(unread.n,0)::int unread_count
                 FROM howdi_connect_conversations c JOIN howdi_connect_conversation_members mine ON mine.conversation_id=c.id AND mine.user_id=$1
                 JOIN LATERAL(SELECT cm.user_id FROM howdi_connect_conversation_members cm WHERE cm.conversation_id=c.id AND cm.user_id<>$1 LIMIT 1) other ON TRUE
@@ -53035,8 +53036,831 @@ async function ensureVibeReleaseReadinessV140LSchema(){
     // START SERVER
     // =====================================================
 
+    // HOWDI V16.6K4 — minimal core identity tables, created before anything
+    // else in startHowdiServer() so a completely empty database can bootstrap.
+    // Additive only: CREATE TABLE IF NOT EXISTS is a no-op once the full
+    // definitions inside initializeDatabase() have run on a prior boot.
+    async function ensureHowdiCoreIdentityTables() {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS users (
+          id BIGSERIAL PRIMARY KEY,
+          full_name VARCHAR(150) NOT NULL,
+          email VARCHAR(255) UNIQUE,
+          phone VARCHAR(20) UNIQUE,
+          password_hash TEXT NOT NULL,
+          role VARCHAR(50) DEFAULT 'customer',
+          is_active BOOLEAN DEFAULT TRUE,
+          created_at TIMESTAMPTZ DEFAULT NOW(),
+          updated_at TIMESTAMPTZ DEFAULT NOW()
+        );
+      `);
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS vendor_profiles (
+          id BIGSERIAL PRIMARY KEY,
+          user_id BIGINT NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+          vendor_code VARCHAR(50) UNIQUE,
+          business_name VARCHAR(180) NOT NULL,
+          owner_name VARCHAR(150) NOT NULL,
+          category VARCHAR(120) NOT NULL DEFAULT 'Crochet & Handmade',
+          city VARCHAR(120),
+          state VARCHAR(120),
+          pincode VARCHAR(10),
+          business_type VARCHAR(80) DEFAULT 'Individual Creator',
+          gstin VARCHAR(30),
+          pan VARCHAR(20),
+          kyc_status VARCHAR(30) NOT NULL DEFAULT 'pending',
+          payout_status VARCHAR(30) NOT NULL DEFAULT 'not_connected',
+          store_status VARCHAR(30) NOT NULL DEFAULT 'offline',
+          status VARCHAR(30) NOT NULL DEFAULT 'active',
+          rating NUMERIC(3,2) NOT NULL DEFAULT 0,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+      `);
+      // vendor_settlements is referenced (ALTER TABLE ... ADD COLUMN
+      // payout_batch_id) a few statements before its own CREATE TABLE
+      // runs later in this same function — same self-referential
+      // ordering issue as vendor_profiles/users above.
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS vendor_settlements(
+          id BIGSERIAL PRIMARY KEY,
+          settlement_number VARCHAR(80) UNIQUE NOT NULL,
+          vendor_profile_id BIGINT NOT NULL REFERENCES vendor_profiles(id) ON DELETE RESTRICT,
+          order_id VARCHAR(180),
+          order_shipment_id UUID,
+          currency VARCHAR(10) NOT NULL DEFAULT 'INR',
+          gross_amount NUMERIC(14,2) NOT NULL DEFAULT 0,
+          commission_amount NUMERIC(14,2) NOT NULL DEFAULT 0,
+          gateway_fee_amount NUMERIC(14,2) NOT NULL DEFAULT 0,
+          delivery_deduction_amount NUMERIC(14,2) NOT NULL DEFAULT 0,
+          tax_withholding_amount NUMERIC(14,2) NOT NULL DEFAULT 0,
+          adjustment_amount NUMERIC(14,2) NOT NULL DEFAULT 0,
+          net_payable_amount NUMERIC(14,2) NOT NULL DEFAULT 0,
+          status VARCHAR(40) NOT NULL DEFAULT 'HOLD',
+          hold_until TIMESTAMPTZ,
+          eligible_at TIMESTAMPTZ,
+          approved_at TIMESTAMPTZ,
+          paid_at TIMESTAMPTZ,
+          payout_reference VARCHAR(180),
+          rule_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+          calculation_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+          admin_note TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+      `);
+      // vendor_payout_batches has no CREATE TABLE statement anywhere in
+      // the codebase — it is only ever INSERTed/SELECTed/UPDATEd, and
+      // vendor_payout_batch_items/events reference it via FK. This is a
+      // genuine pre-existing gap (not an ordering issue): on a database
+      // that already had it from some earlier, since-removed migration
+      // this was invisible. Columns below are inferred from every
+      // INSERT/UPDATE against this table found in the codebase.
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS vendor_payout_batches (
+          id BIGSERIAL PRIMARY KEY,
+          batch_number VARCHAR(80) UNIQUE NOT NULL,
+          status VARCHAR(30) NOT NULL DEFAULT 'DRAFT',
+          settlement_count INTEGER NOT NULL DEFAULT 0,
+          gross_settlement_amount NUMERIC(16,2) NOT NULL DEFAULT 0,
+          payout_amount NUMERIC(16,2) NOT NULL DEFAULT 0,
+          created_by VARCHAR(80),
+          admin_note TEXT,
+          approved_by VARCHAR(80),
+          approved_at TIMESTAMPTZ,
+          paid_at TIMESTAMPTZ,
+          payout_reference VARCHAR(180),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+      `);
+      // works_work_orders is the other table observed missing on a fresh
+      // database (referenced by the V16.1C Works reschedule bootstrap
+      // before its own definition runs later). Minimal shape only; the
+      // later Works schema code adds the remaining columns/indexes.
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS works_work_orders (
+          id BIGSERIAL PRIMARY KEY,
+          customer_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+          worker_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+          status VARCHAR(30) NOT NULL DEFAULT 'pending',
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+      `);
+      // HOWDI V16.6K4 — additional tables found (via automated forward-
+      // reference scan) to be used earlier in this same file than their own
+      // CREATE TABLE statement — the same pre-existing self-referential
+      // ordering issue as vendor_profiles/vendor_settlements above. Each block
+      // is copied verbatim from its original definition further down this
+      // file (line numbers as of the K3 baseline noted per block), which
+      // remains the single source of truth for its indexes and any later
+      // ALTER TABLE additions. Ordered so every REFERENCES target here is
+      // created earlier in this same list.
+      // --- user_addresses (source: original lines 2359-2378) ---
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS user_addresses (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            label VARCHAR(50) DEFAULT 'Home',
+            full_name VARCHAR(150) NOT NULL,
+            phone VARCHAR(20) NOT NULL,
+            address_line1 TEXT NOT NULL,
+            address_line2 TEXT,
+            landmark TEXT,
+            city VARCHAR(100) NOT NULL,
+            state VARCHAR(100) NOT NULL,
+            pincode VARCHAR(12) NOT NULL,
+            country VARCHAR(100) NOT NULL DEFAULT 'India',
+            address_type VARCHAR(30) DEFAULT 'HOME',
+            is_default BOOLEAN NOT NULL DEFAULT FALSE,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            updated_at TIMESTAMPTZ DEFAULT NOW()
+          );
+        `);
+      // --- howdi_warehouses (source: original lines 1923-1942) ---
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS howdi_warehouses (
+            id BIGSERIAL PRIMARY KEY,
+            code VARCHAR(60) NOT NULL UNIQUE,
+            name VARCHAR(150) NOT NULL,
+            contact_name VARCHAR(150),
+            phone VARCHAR(30),
+            address_line1 TEXT NOT NULL,
+            address_line2 TEXT,
+            landmark TEXT,
+            city VARCHAR(100) NOT NULL,
+            state VARCHAR(100) NOT NULL,
+            pincode VARCHAR(20) NOT NULL,
+            country VARCHAR(100) NOT NULL DEFAULT 'India',
+            shiprocket_pickup_code VARCHAR(150),
+            is_active BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          );
+        `);
+      // --- learning_courses (source: original lines 3737-3749) ---
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS learning_courses (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            title VARCHAR(255) NOT NULL,
+            description TEXT,
+            category VARCHAR(120),
+            level VARCHAR(50),
+            duration_minutes INTEGER,
+            is_active BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            updated_at TIMESTAMPTZ DEFAULT NOW()
+          );
+        `);
+      // --- learning_opportunities (source: original lines 4086-4115) ---
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS learning_opportunities(
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            opportunity_code VARCHAR(40) UNIQUE NOT NULL,
+            title VARCHAR(255) NOT NULL,
+            organization_name VARCHAR(255) NOT NULL DEFAULT 'HOWDI Opportunity Partner',
+            opportunity_type VARCHAR(40) NOT NULL DEFAULT 'PROJECT',
+            description TEXT,
+            location_mode VARCHAR(30) NOT NULL DEFAULT 'FLEXIBLE',
+            location_label VARCHAR(255),
+            required_skill_terms JSONB NOT NULL DEFAULT '[]'::jsonb,
+            required_course_id UUID REFERENCES learning_courses(id) ON DELETE SET NULL,
+            min_verified_evidence INTEGER NOT NULL DEFAULT 0,
+            min_verified_projects INTEGER NOT NULL DEFAULT 0,
+            min_readiness INTEGER NOT NULL DEFAULT 0,
+            slots INTEGER,
+            compensation_note VARCHAR(500),
+            application_note VARCHAR(1000),
+            status VARCHAR(30) NOT NULL DEFAULT 'DRAFT',
+            created_by VARCHAR(255),
+            published_at TIMESTAMPTZ,
+            closes_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CONSTRAINT learning_opportunities_type_chk CHECK(opportunity_type IN ('PROJECT','GIG','INTERNSHIP','APPRENTICESHIP','CREATOR_TASK','COMMUNITY_WORK','OTHER')),
+            CONSTRAINT learning_opportunities_location_chk CHECK(location_mode IN ('REMOTE','ONSITE','HYBRID','FLEXIBLE')),
+            CONSTRAINT learning_opportunities_status_chk CHECK(status IN ('DRAFT','PUBLISHED','CLOSED','ARCHIVED')),
+            CONSTRAINT learning_opportunities_readiness_chk CHECK(min_readiness BETWEEN 0 AND 100)
+          )
+        `);
+      // --- membership_plans (source: original lines 2911-2925) ---
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS membership_plans (
+            id BIGSERIAL PRIMARY KEY,
+            plan_code VARCHAR(40) UNIQUE NOT NULL,
+            name VARCHAR(120) NOT NULL,
+            description TEXT,
+            price NUMERIC(12,2) NOT NULL DEFAULT 0 CHECK (price >= 0),
+            billing_cycle VARCHAR(20) NOT NULL DEFAULT 'MONTHLY'
+              CHECK (billing_cycle IN ('MONTHLY','YEARLY')),
+            benefits JSONB NOT NULL DEFAULT '[]'::jsonb,
+            is_active BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          );
+        `);
+      // --- works_workers (source: original lines 12415-12421) ---
+      await pool.query(`CREATE TABLE IF NOT EXISTS works_workers (
+        id BIGSERIAL PRIMARY KEY, worker_code VARCHAR(60) UNIQUE NOT NULL, full_name VARCHAR(160) NOT NULL, phone VARCHAR(30) NOT NULL,
+        email VARCHAR(255), city VARCHAR(120), pincode VARCHAR(12), requested_skill VARCHAR(120), experience_years NUMERIC(6,2) DEFAULT 0,
+        service_radius_km NUMERIC(8,2) DEFAULT 0, starting_price NUMERIC(12,2) DEFAULT 0, kyc_status VARCHAR(30) DEFAULT 'pending',
+        skill_status VARCHAR(30) DEFAULT 'pending', account_status VARCHAR(30) DEFAULT 'registered', availability VARCHAR(30) DEFAULT 'offline',
+        rating NUMERIC(4,2) DEFAULT 0, completed_jobs INTEGER DEFAULT 0, active BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW())`);
+      // --- works_work_offers (source: original lines 12448-12460) ---
+      await pool.query(`CREATE TABLE IF NOT EXISTS works_work_offers (
+        id BIGSERIAL PRIMARY KEY,
+        offer_code VARCHAR(60) UNIQUE NOT NULL,
+        work_order_id BIGINT NOT NULL REFERENCES works_work_orders(id) ON DELETE CASCADE,
+        worker_id BIGINT NOT NULL REFERENCES works_workers(id) ON DELETE CASCADE,
+        status VARCHAR(30) NOT NULL DEFAULT 'offered',
+        offered_at TIMESTAMPTZ DEFAULT NOW(),
+        responded_at TIMESTAMPTZ,
+        response_reason TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(work_order_id, worker_id)
+      )`);
+      // --- howdi_connect_communities (source: original lines 6376-6387) ---
+        await pool.query(`CREATE TABLE IF NOT EXISTS howdi_connect_communities (
+          id BIGSERIAL PRIMARY KEY,
+          owner_user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          community_type VARCHAR(20) NOT NULL DEFAULT 'GROUP',
+          name VARCHAR(160) NOT NULL,
+          description TEXT NOT NULL DEFAULT '',
+          privacy VARCHAR(20) NOT NULL DEFAULT 'PUBLIC',
+          category VARCHAR(40) NOT NULL DEFAULT 'COMMUNITY',
+          status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );`);
+      // --- vendor_commercial_agreements (source: original lines 1203-1242) ---
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS vendor_commercial_agreements(
+          id BIGSERIAL PRIMARY KEY,
+          vendor_profile_id BIGINT NOT NULL REFERENCES vendor_profiles(id) ON DELETE CASCADE,
+          version INTEGER NOT NULL,
+          agreement_name VARCHAR(160) NOT NULL,
+          status VARCHAR(30) NOT NULL DEFAULT 'OFFERED',
+          commission_type VARCHAR(30) NOT NULL DEFAULT 'percentage',
+          commission_value NUMERIC(12,4) NOT NULL DEFAULT 0,
+          commission_min_amount NUMERIC(14,2),
+          commission_max_amount NUMERIC(14,2),
+          free_commission_days INTEGER NOT NULL DEFAULT 0,
+          settlement_cycle_days INTEGER NOT NULL DEFAULT 7,
+          negotiation_days INTEGER NOT NULL DEFAULT 7,
+          tier_1_max_products INTEGER NOT NULL DEFAULT 100,
+          tier_1_monthly_fee NUMERIC(14,2) NOT NULL DEFAULT 0,
+          tier_2_max_products INTEGER NOT NULL DEFAULT 1000,
+          tier_2_monthly_fee NUMERIC(14,2) NOT NULL DEFAULT 0,
+          tier_3_monthly_fee NUMERIC(14,2) NOT NULL DEFAULT 0,
+          vendor_discount_cap_percent NUMERIC(8,4) NOT NULL DEFAULT 0,
+          howdi_funded_discount_allowed BOOLEAN NOT NULL DEFAULT TRUE,
+          delivery_commission_excluded BOOLEAN NOT NULL DEFAULT TRUE,
+          effective_from TIMESTAMPTZ,
+          free_commission_until TIMESTAMPTZ,
+          negotiation_expires_at TIMESTAMPTZ,
+          offered_at TIMESTAMPTZ,
+          countered_at TIMESTAMPTZ,
+          accepted_at TIMESTAMPTZ,
+          rejected_at TIMESTAMPTZ,
+          superseded_at TIMESTAMPTZ,
+          offered_by VARCHAR(120),
+          vendor_counter_note TEXT,
+          admin_note TEXT,
+          terms_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+          terms_hash VARCHAR(128),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE(vendor_profile_id,version)
+        )
+      `);
+      // --- product_commercial_overrides (source: original lines 1259-1278) ---
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS product_commercial_overrides(
+          id BIGSERIAL PRIMARY KEY,
+          vendor_profile_id BIGINT NOT NULL REFERENCES vendor_profiles(id) ON DELETE CASCADE,
+          product_id VARCHAR(120) NOT NULL,
+          agreement_id BIGINT REFERENCES vendor_commercial_agreements(id) ON DELETE SET NULL,
+          commission_type VARCHAR(30) NOT NULL DEFAULT 'percentage',
+          commission_value NUMERIC(12,4) NOT NULL DEFAULT 0,
+          commission_min_amount NUMERIC(14,2),
+          commission_max_amount NUMERIC(14,2),
+          status VARCHAR(30) NOT NULL DEFAULT 'PENDING_ACCEPTANCE',
+          reason TEXT,
+          effective_from TIMESTAMPTZ,
+          offered_at TIMESTAMPTZ DEFAULT NOW(),
+          accepted_at TIMESTAMPTZ,
+          rejected_at TIMESTAMPTZ,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
+      // --- vendor_monthly_platform_charges (source: original lines 1281-1295) ---
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS vendor_monthly_platform_charges(
+          id BIGSERIAL PRIMARY KEY,
+          vendor_profile_id BIGINT NOT NULL REFERENCES vendor_profiles(id) ON DELETE CASCADE,
+          agreement_id BIGINT REFERENCES vendor_commercial_agreements(id) ON DELETE SET NULL,
+          charge_month DATE NOT NULL,
+          active_product_count INTEGER NOT NULL DEFAULT 0,
+          tier_code VARCHAR(30) NOT NULL,
+          amount NUMERIC(14,2) NOT NULL DEFAULT 0,
+          status VARCHAR(30) NOT NULL DEFAULT 'POSTED',
+          calculation_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE(vendor_profile_id,charge_month)
+        )
+      `);
+      // --- orders (source: original lines 2386-2416) ---
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS orders (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            order_number VARCHAR(80) UNIQUE NOT NULL,
+            user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+            address_id UUID REFERENCES user_addresses(id) ON DELETE SET NULL,
+            status VARCHAR(40) NOT NULL DEFAULT 'PLACED',
+            payment_status VARCHAR(40) NOT NULL DEFAULT 'PENDING',
+            payment_method VARCHAR(60),
+            subtotal NUMERIC(12,2) NOT NULL DEFAULT 0,
+            discount_total NUMERIC(12,2) NOT NULL DEFAULT 0,
+            shipping_total NUMERIC(12,2) NOT NULL DEFAULT 0,
+            tax_total NUMERIC(12,2) NOT NULL DEFAULT 0,
+            grand_total NUMERIC(12,2) NOT NULL DEFAULT 0,
+            currency VARCHAR(10) NOT NULL DEFAULT 'INR',
+            delivery_name VARCHAR(150),
+            delivery_phone VARCHAR(30),
+            delivery_address_line1 TEXT,
+            delivery_address_line2 TEXT,
+            delivery_landmark TEXT,
+            delivery_city VARCHAR(100),
+            delivery_state VARCHAR(100),
+            delivery_pincode VARCHAR(20),
+            delivery_country VARCHAR(100),
+            cancel_reason TEXT,
+            cancelled_at TIMESTAMPTZ,
+            delivered_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            updated_at TIMESTAMPTZ DEFAULT NOW()
+          );
+        `);
+      // --- order_items (source: original lines 2418-2433) ---
+      // --- payment_transactions (source: original lines 2444-2466) ---
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS payment_transactions (
+            id BIGSERIAL PRIMARY KEY,
+            transaction_code VARCHAR(120) NOT NULL UNIQUE,
+            order_id UUID REFERENCES orders(id) ON DELETE SET NULL,
+            customer_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+            provider VARCHAR(80) NOT NULL DEFAULT 'HOWDI',
+            provider_payment_id VARCHAR(180),
+            provider_event_id VARCHAR(180),
+            method VARCHAR(80),
+            amount NUMERIC(14,2) NOT NULL DEFAULT 0,
+            currency VARCHAR(10) NOT NULL DEFAULT 'INR',
+            status VARCHAR(40) NOT NULL DEFAULT 'PENDING',
+            source VARCHAR(60) NOT NULL DEFAULT 'ORDER_BACKFILL',
+            reference VARCHAR(220),
+            provider_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+            paid_at TIMESTAMPTZ,
+            failed_at TIMESTAMPTZ,
+            refunded_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          );
+        `);
+      // --- payment_refunds (source: original lines 2502-2529) ---
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS payment_refunds (
+            id BIGSERIAL PRIMARY KEY,
+            refund_code VARCHAR(120) NOT NULL UNIQUE,
+            transaction_id BIGINT NOT NULL REFERENCES payment_transactions(id) ON DELETE RESTRICT,
+            order_id UUID REFERENCES orders(id) ON DELETE SET NULL,
+            amount NUMERIC(14,2) NOT NULL,
+            currency VARCHAR(10) NOT NULL DEFAULT 'INR',
+            reason TEXT NOT NULL,
+            status VARCHAR(40) NOT NULL DEFAULT 'REQUESTED',
+            requested_by VARCHAR(180),
+            approved_by VARCHAR(180),
+            rejected_by VARCHAR(180),
+            processed_by VARCHAR(180),
+            failed_by VARCHAR(180),
+            external_refund_reference VARCHAR(220),
+            gateway_status VARCHAR(80),
+            admin_note TEXT,
+            requested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            approved_at TIMESTAMPTZ,
+            rejected_at TIMESTAMPTZ,
+            processed_at TIMESTAMPTZ,
+            failed_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CHECK(amount > 0)
+          )
+        `);
+
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS order_items (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+            product_id VARCHAR(120),
+            product_name VARCHAR(255) NOT NULL,
+            sku VARCHAR(120),
+            image_url TEXT,
+            variant_name VARCHAR(255),
+            quantity INTEGER NOT NULL CHECK (quantity > 0),
+            unit_price NUMERIC(12,2) NOT NULL DEFAULT 0,
+            discount_amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+            line_total NUMERIC(12,2) NOT NULL DEFAULT 0,
+            created_at TIMESTAMPTZ DEFAULT NOW()
+          );
+        `);
+      // --- order_shipments (source: original lines 1978-2003) ---
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS order_shipments (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+            dispatch_owner_type VARCHAR(20) NOT NULL,
+            vendor_profile_id BIGINT REFERENCES vendor_profiles(id) ON DELETE SET NULL,
+            warehouse_id BIGINT REFERENCES howdi_warehouses(id) ON DELETE SET NULL,
+            provider VARCHAR(30) NOT NULL DEFAULT 'shiprocket',
+            status VARCHAR(40) NOT NULL DEFAULT 'PENDING_ACCEPTANCE',
+            pickup_code VARCHAR(150),
+            shiprocket_order_id VARCHAR(120),
+            shiprocket_shipment_id VARCHAR(120),
+            awb_code VARCHAR(160),
+            courier_name VARCHAR(160),
+            tracking_url TEXT,
+            pickup_scheduled_at TIMESTAMPTZ,
+            shipped_at TIMESTAMPTZ,
+            delivered_at TIMESTAMPTZ,
+            weight_kg NUMERIC(10,3),
+            length_cm NUMERIC(10,2),
+            width_cm NUMERIC(10,2),
+            height_cm NUMERIC(10,2),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          );
+        `);
+      // --- order_shipments: full column set (ALTER TABLE ADD COLUMN IF NOT EXISTS, copied verbatim) ---
+      await pool.query(`ALTER TABLE order_shipments ADD COLUMN IF NOT EXISTS provider_reference VARCHAR(180)`);
+      await pool.query(`ALTER TABLE order_shipments ADD COLUMN IF NOT EXISTS provider_status VARCHAR(180)`);
+      await pool.query(`ALTER TABLE order_shipments ADD COLUMN IF NOT EXISTS provider_metadata JSONB NOT NULL DEFAULT '{}'::jsonb`);
+      await pool.query(`ALTER TABLE order_shipments ADD COLUMN IF NOT EXISTS logistics_zone_id BIGINT`);
+      await pool.query(`ALTER TABLE order_shipments ADD COLUMN IF NOT EXISTS logistics_hub_id BIGINT`);
+      await pool.query(`ALTER TABLE order_shipments ADD COLUMN IF NOT EXISTS assigned_rider_id BIGINT`);
+      await pool.query(`ALTER TABLE order_shipments ADD COLUMN IF NOT EXISTS provider_selected_at TIMESTAMPTZ`);
+      await pool.query(`ALTER TABLE order_shipments ADD COLUMN IF NOT EXISTS provider_selection_reason TEXT`);
+      await pool.query(`ALTER TABLE order_shipments ADD COLUMN IF NOT EXISTS length_cm NUMERIC(10,2)`);
+      await pool.query(`ALTER TABLE order_shipments ADD COLUMN IF NOT EXISTS width_cm NUMERIC(10,2)`);
+      await pool.query(`ALTER TABLE order_shipments ADD COLUMN IF NOT EXISTS height_cm NUMERIC(10,2)`);
+      await pool.query(`ALTER TABLE order_shipments ADD COLUMN IF NOT EXISTS own_courier_name VARCHAR(160);`);
+      await pool.query(`ALTER TABLE order_shipments ADD COLUMN IF NOT EXISTS own_tracking_number VARCHAR(180);`);
+      await pool.query(`ALTER TABLE order_shipments ADD COLUMN IF NOT EXISTS own_tracking_url TEXT;`);
+      await pool.query(`ALTER TABLE order_shipments ADD COLUMN IF NOT EXISTS accepted_at TIMESTAMPTZ;`);
+      await pool.query(`ALTER TABLE order_shipments ADD COLUMN IF NOT EXISTS packed_at TIMESTAMPTZ;`);
+      await pool.query(`ALTER TABLE order_shipments ADD COLUMN IF NOT EXISTS shipped_at TIMESTAMPTZ;`);
+      await pool.query(`ALTER TABLE order_shipments ADD COLUMN IF NOT EXISTS delivered_at TIMESTAMPTZ;`);
+      await pool.query(`ALTER TABLE order_shipments ADD COLUMN IF NOT EXISTS courier_company_id VARCHAR(80);`);
+      await pool.query(`ALTER TABLE order_shipments ADD COLUMN IF NOT EXISTS pickup_token_number VARCHAR(180);`);
+      await pool.query(`ALTER TABLE order_shipments ADD COLUMN IF NOT EXISTS tracking_status VARCHAR(180);`);
+      await pool.query(`ALTER TABLE order_shipments ADD COLUMN IF NOT EXISTS tracking_payload JSONB;`);
+      await pool.query(`ALTER TABLE order_shipments ADD COLUMN IF NOT EXISTS last_tracked_at TIMESTAMPTZ;`);
+      await pool.query(`ALTER TABLE order_shipments ADD COLUMN IF NOT EXISTS logistics_error TEXT;`);
+      await pool.query(`ALTER TABLE order_shipments ADD COLUMN IF NOT EXISTS logistics_error_at TIMESTAMPTZ;`);
+      await pool.query(`ALTER TABLE order_shipments ADD COLUMN IF NOT EXISTS admin_note TEXT;`);
+      await pool.query(`ALTER TABLE order_shipments ADD COLUMN IF NOT EXISTS last_admin_action_at TIMESTAMPTZ;`);
+      await pool.query(`ALTER TABLE order_shipments ADD COLUMN IF NOT EXISTS delivery_method VARCHAR(30);`);
+      await pool.query(`ALTER TABLE order_shipments ADD COLUMN IF NOT EXISTS delivery_charge NUMERIC(12,2) NOT NULL DEFAULT 0;`);
+      await pool.query(`ALTER TABLE order_shipments ADD COLUMN IF NOT EXISTS delivery_charge_payer VARCHAR(20) NOT NULL DEFAULT 'customer';`);
+      await pool.query(`ALTER TABLE order_shipments ADD COLUMN IF NOT EXISTS selection_deadline_at TIMESTAMPTZ;`);
+      await pool.query(`ALTER TABLE order_shipments ADD COLUMN IF NOT EXISTS quoted_shipping_charge NUMERIC(14,2) NOT NULL DEFAULT 0`);
+      await pool.query(`ALTER TABLE order_shipments ADD COLUMN IF NOT EXISTS promised_delivery_from DATE`);
+      await pool.query(`ALTER TABLE order_shipments ADD COLUMN IF NOT EXISTS promised_delivery_to DATE`);
+      await pool.query(`ALTER TABLE order_shipments ADD COLUMN IF NOT EXISTS shipping_rule_id BIGINT`);
+      await pool.query(`ALTER TABLE order_shipments ADD COLUMN IF NOT EXISTS shipping_quote_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb`);
+      await pool.query(`ALTER TABLE order_shipments ADD COLUMN IF NOT EXISTS acceptance_due_at TIMESTAMPTZ`);
+      await pool.query(`ALTER TABLE order_shipments ADD COLUMN IF NOT EXISTS packing_due_at TIMESTAMPTZ`);
+      await pool.query(`ALTER TABLE order_shipments ADD COLUMN IF NOT EXISTS handover_due_at TIMESTAMPTZ`);
+      await pool.query(`ALTER TABLE order_shipments ADD COLUMN IF NOT EXISTS rejected_at TIMESTAMPTZ`);
+      await pool.query(`ALTER TABLE order_shipments ADD COLUMN IF NOT EXISTS rejection_reason TEXT`);
+      await pool.query(`ALTER TABLE order_shipments ADD COLUMN IF NOT EXISTS handover_at TIMESTAMPTZ`);
+      await pool.query(`ALTER TABLE order_shipments ADD COLUMN IF NOT EXISTS fulfillment_version INTEGER NOT NULL DEFAULT 1`);
+      await pool.query(`ALTER TABLE order_shipments ADD COLUMN IF NOT EXISTS sla_state VARCHAR(40) NOT NULL DEFAULT 'ON_TRACK'`);
+      // --- order_shipment_items (source: original lines 2004-2010) ---
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS order_shipment_items (
+            shipment_id UUID NOT NULL REFERENCES order_shipments(id) ON DELETE CASCADE,
+            order_item_id UUID NOT NULL REFERENCES order_items(id) ON DELETE CASCADE,
+            PRIMARY KEY(shipment_id,order_item_id)
+          );
+        `);
+      // --- vendor_products (source: original lines 1762-1785) ---
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS vendor_products (
+            id BIGSERIAL PRIMARY KEY,
+            vendor_profile_id BIGINT NOT NULL REFERENCES vendor_profiles(id) ON DELETE CASCADE,
+            name VARCHAR(220) NOT NULL,
+            sku VARCHAR(80) NOT NULL,
+            category VARCHAR(120) NOT NULL DEFAULT 'Crochet & Handmade',
+            subcategory VARCHAR(120),
+            description TEXT,
+            mrp NUMERIC(12,2) NOT NULL DEFAULT 0,
+            price NUMERIC(12,2) NOT NULL DEFAULT 0,
+            stock INTEGER NOT NULL DEFAULT 0,
+            low_stock_threshold INTEGER NOT NULL DEFAULT 5,
+            variant_options JSONB NOT NULL DEFAULT '{"colors":[],"sizes":[]}'::jsonb,
+            image_urls JSONB NOT NULL DEFAULT '[]'::jsonb,
+            video_url TEXT,
+            status VARCHAR(30) NOT NULL DEFAULT 'draft',
+            published_at TIMESTAMPTZ,
+            archived_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE(vendor_profile_id,sku)
+          );
+        `);
+      // --- order_returns (source: original lines 1865-1889) ---
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS order_returns (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+            shipment_id UUID REFERENCES order_shipments(id) ON DELETE SET NULL,
+            vendor_profile_id BIGINT REFERENCES vendor_profiles(id) ON DELETE SET NULL,
+            return_type VARCHAR(30) NOT NULL DEFAULT 'customer_return',
+            reason_code VARCHAR(60),
+            reason_text TEXT,
+            status VARCHAR(40) NOT NULL DEFAULT 'REQUESTED',
+            return_address_source VARCHAR(30) NOT NULL DEFAULT 'pickup',
+            provider VARCHAR(30) NOT NULL DEFAULT 'shiprocket',
+            shiprocket_return_order_id VARCHAR(120),
+            shiprocket_return_shipment_id VARCHAR(120),
+            awb_code VARCHAR(160),
+            courier_name VARCHAR(160),
+            tracking_url TEXT,
+            pickup_scheduled_at TIMESTAMPTZ,
+            received_at TIMESTAMPTZ,
+            qc_status VARCHAR(30),
+            refund_status VARCHAR(30) NOT NULL DEFAULT 'pending',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          );
+        `);
+      // --- shipment_exceptions (source: original lines 1546-1565) ---
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS shipment_exceptions(
+          id BIGSERIAL PRIMARY KEY,
+          shipment_id UUID NOT NULL REFERENCES order_shipments(id) ON DELETE CASCADE,
+          order_id VARCHAR(180),
+          exception_type VARCHAR(80) NOT NULL,
+          raw_status VARCHAR(180),
+          severity VARCHAR(30) NOT NULL DEFAULT 'medium',
+          status VARCHAR(40) NOT NULL DEFAULT 'OPEN',
+          source VARCHAR(60) NOT NULL DEFAULT 'shiprocket',
+          title VARCHAR(220),
+          details TEXT,
+          resolution_note TEXT,
+          assigned_to VARCHAR(180),
+          opened_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          acknowledged_at TIMESTAMPTZ,
+          resolved_at TIMESTAMPTZ,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
+      // --- shipment_events (source: original lines 1899-1908) ---
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS shipment_events(
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            shipment_id UUID NOT NULL REFERENCES order_shipments(id) ON DELETE CASCADE,
+            status VARCHAR(50) NOT NULL,
+            note TEXT,
+            actor_type VARCHAR(30) NOT NULL DEFAULT 'vendor',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          );
+        `);
+      // --- vendor_delivery_preferences (source: original lines 2013-2022) ---
+        await pool.query(`CREATE TABLE IF NOT EXISTS vendor_delivery_preferences (
+          vendor_profile_id BIGINT PRIMARY KEY REFERENCES vendor_profiles(id) ON DELETE CASCADE,
+          default_delivery_method VARCHAR(30) NOT NULL DEFAULT 'ask_each_order',
+          apply_scope VARCHAR(30) NOT NULL DEFAULT 'all_products',
+          selected_product_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+          allow_order_override BOOLEAN NOT NULL DEFAULT TRUE,
+          pickup_ready BOOLEAN NOT NULL DEFAULT FALSE,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );`);
+      // --- user_subscriptions (source: original lines 3201-3215) ---
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS user_subscriptions (
+            id BIGSERIAL PRIMARY KEY,
+            user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            plan_id BIGINT NOT NULL REFERENCES membership_plans(id),
+            status VARCHAR(30) NOT NULL DEFAULT 'ACTIVE'
+              CHECK (status IN ('ACTIVE','PAUSED','CANCELLED','EXPIRED')),
+            started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            ends_at TIMESTAMPTZ,
+            auto_renew BOOLEAN NOT NULL DEFAULT TRUE,
+            cancelled_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          );
+        `);
+      // --- learning_opportunity_interests (source: original lines 4117-4130) ---
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS learning_opportunity_interests(
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            opportunity_id UUID NOT NULL REFERENCES learning_opportunities(id) ON DELETE CASCADE,
+            user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            status VARCHAR(30) NOT NULL DEFAULT 'INTERESTED',
+            learner_note VARCHAR(1500),
+            passport_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+            expressed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE(opportunity_id,user_id),
+            CONSTRAINT learning_opportunity_interest_status_chk CHECK(status IN ('INTERESTED','WITHDRAWN','SHORTLISTED','DECLINED','SELECTED','COMPLETED'))
+          )
+        `);
+      // --- learning_teacher_profiles (source: original lines 4531-4564) ---
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS learning_teacher_profiles(
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            user_id BIGINT NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+            teacher_code VARCHAR(50) UNIQUE,
+            display_name VARCHAR(180),
+            headline VARCHAR(255),
+            bio TEXT,
+            languages JSONB NOT NULL DEFAULT '[]'::jsonb,
+            skills JSONB NOT NULL DEFAULT '[]'::jsonb,
+            specializations JSONB NOT NULL DEFAULT '[]'::jsonb,
+            experience_years NUMERIC(5,2) NOT NULL DEFAULT 0,
+            demo_video_url TEXT,
+            profile_photo_url TEXT,
+            city VARCHAR(120),
+            state VARCHAR(120),
+            teaching_modes JSONB NOT NULL DEFAULT '["RECORDED","GROUP","ONE_TO_ONE"]'::jsonb,
+            application_status VARCHAR(30) NOT NULL DEFAULT 'DRAFT',
+            verification_status VARCHAR(30) NOT NULL DEFAULT 'NOT_SUBMITTED',
+            kyc_status VARCHAR(30) NOT NULL DEFAULT 'NOT_SUBMITTED',
+            payout_status VARCHAR(30) NOT NULL DEFAULT 'NOT_CONNECTED',
+            admin_note TEXT,
+            rejection_reason TEXT,
+            submitted_at TIMESTAMPTZ,
+            approved_at TIMESTAMPTZ,
+            approved_by VARCHAR(180),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CHECK(application_status IN ('DRAFT','SUBMITTED','UNDER_REVIEW','APPROVED','CHANGES_REQUIRED','REJECTED','SUSPENDED')),
+            CHECK(verification_status IN ('NOT_SUBMITTED','PENDING','VERIFIED','FAILED')),
+            CHECK(kyc_status IN ('NOT_SUBMITTED','PENDING','VERIFIED','FAILED')),
+            CHECK(payout_status IN ('NOT_CONNECTED','PENDING','READY','HOLD'))
+          )
+        `);
+      // --- howdi_connect_space_chat (source: original lines 7854-7862) ---
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS howdi_connect_space_chat (
+            id BIGSERIAL PRIMARY KEY,
+            community_id BIGINT NOT NULL REFERENCES howdi_connect_communities(id) ON DELETE CASCADE,
+            user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            message_text TEXT NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          );
+        `);
+      // --- works_payments (source: original lines 12587-12603) ---
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS works_payments (
+          id BIGSERIAL PRIMARY KEY,
+          payment_code VARCHAR(80) UNIQUE NOT NULL,
+          work_order_id BIGINT NOT NULL REFERENCES works_work_orders(id) ON DELETE CASCADE,
+          customer_user_id BIGINT NOT NULL,
+          payment_kind VARCHAR(30) NOT NULL DEFAULT 'service' CHECK(payment_kind IN ('service','tip')),
+          amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+          method VARCHAR(40) NOT NULL DEFAULT 'HPAY',
+          status VARCHAR(30) NOT NULL DEFAULT 'pending'
+            CHECK(status IN ('pending','processing','success','failed','cancelled','refunded')),
+          provider_reference VARCHAR(220),
+          provider_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
+      // --- works_job_journeys (source: original lines 12772-12795) ---
+      await pool.query(`CREATE TABLE IF NOT EXISTS works_job_journeys (
+        id BIGSERIAL PRIMARY KEY,
+        work_order_id BIGINT UNIQUE NOT NULL REFERENCES works_work_orders(id) ON DELETE CASCADE,
+        worker_id BIGINT NOT NULL REFERENCES works_workers(id) ON DELETE RESTRICT,
+        accepted_offer_id BIGINT REFERENCES works_work_offers(id) ON DELETE SET NULL,
+        stage VARCHAR(40) NOT NULL DEFAULT 'accepted',
+        job_pin VARCHAR(6) NOT NULL,
+        pin_verified BOOLEAN DEFAULT FALSE,
+        accepted_at TIMESTAMPTZ DEFAULT NOW(),
+        journey_started_at TIMESTAMPTZ,
+        arrived_at TIMESTAMPTZ,
+        pin_verified_at TIMESTAMPTZ,
+        work_started_at TIMESTAMPTZ,
+        completed_at TIMESTAMPTZ,
+        customer_confirmed_at TIMESTAMPTZ,
+        checked_out_at TIMESTAMPTZ,
+        closed_at TIMESTAMPTZ,
+        last_latitude NUMERIC(10,7),
+        last_longitude NUMERIC(10,7),
+        last_accuracy_m INTEGER,
+        last_location_at TIMESTAMPTZ,
+        eta_minutes INTEGER,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )`);
+      // --- checkout_pricing_integrity_events (source: original lines 18674-18677) ---
+  await pool.query(`CREATE TABLE IF NOT EXISTS checkout_pricing_integrity_events(
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),user_id BIGINT,order_id UUID,event_type VARCHAR(50) NOT NULL,
+    client_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,server_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
+      // --- commerce_coupons (source: original lines 18684-18688) ---
+  await pool.query(`CREATE TABLE IF NOT EXISTS commerce_coupons(
+    id BIGSERIAL PRIMARY KEY,code VARCHAR(50) UNIQUE NOT NULL,discount_type VARCHAR(20) NOT NULL CHECK(discount_type IN ('PERCENT','FLAT')),
+    discount_value NUMERIC(14,2) NOT NULL DEFAULT 0,max_discount NUMERIC(14,2),min_order_value NUMERIC(14,2) NOT NULL DEFAULT 0,
+    max_uses INTEGER NOT NULL DEFAULT 0,per_user_limit INTEGER NOT NULL DEFAULT 1,is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    starts_at TIMESTAMPTZ,ends_at TIMESTAMPTZ,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
+      // --- commerce_coupon_redemptions (source: original lines 18689-18692) ---
+  await pool.query(`CREATE TABLE IF NOT EXISTS commerce_coupon_redemptions(
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),coupon_id BIGINT NOT NULL REFERENCES commerce_coupons(id),user_id BIGINT NOT NULL REFERENCES users(id),
+    order_id UUID NOT NULL,discount_amount NUMERIC(14,2) NOT NULL DEFAULT 0,status VARCHAR(20) NOT NULL DEFAULT 'APPLIED',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),UNIQUE(coupon_id,order_id))`);
+      // --- commerce_order_tax_lines (source: original lines 19324-19332) ---
+  await pool.query(`CREATE TABLE IF NOT EXISTS commerce_order_tax_lines(
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,order_item_id UUID REFERENCES order_items(id) ON DELETE CASCADE,
+    product_id VARCHAR(120),vendor_profile_id BIGINT,hsn_sac_code VARCHAR(20),supply_type VARCHAR(20) NOT NULL DEFAULT 'GOODS',
+    tax_mode VARCHAR(20) NOT NULL DEFAULT 'EXCLUSIVE',jurisdiction VARCHAR(20) NOT NULL,seller_state VARCHAR(120),buyer_state VARCHAR(120),
+    taxable_value NUMERIC(14,2) NOT NULL,cgst_rate NUMERIC(7,4) NOT NULL DEFAULT 0,sgst_rate NUMERIC(7,4) NOT NULL DEFAULT 0,
+    igst_rate NUMERIC(7,4) NOT NULL DEFAULT 0,cess_rate NUMERIC(7,4) NOT NULL DEFAULT 0,cgst_amount NUMERIC(14,2) NOT NULL DEFAULT 0,
+    sgst_amount NUMERIC(14,2) NOT NULL DEFAULT 0,igst_amount NUMERIC(14,2) NOT NULL DEFAULT 0,cess_amount NUMERIC(14,2) NOT NULL DEFAULT 0,
+    total_tax NUMERIC(14,2) NOT NULL DEFAULT 0,rule_id BIGINT,snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(order_id,order_item_id))`);
+
+      console.log("✅ HOWDI V16.6K4 — core identity tables ready (fresh-database bootstrap guard)");
+    }
+
     async function startHowdiServer() {
+      // HOWDI V16.6K4 — self-healing bootstrap retry.
+      //
+      // The schema bootstrap below is one long sequential chain of
+      // ensure*Schema()/ensure*Tables() calls that has grown over many
+      // releases. Some later calls reference tables that earlier calls
+      // in the SAME chain create (e.g. Vibe/Works/Learn & Earn code
+      // referencing commerce-foundation tables), and in a few places
+      // even a single function references a table it creates itself a
+      // few statements later. On an already-migrated database none of
+      // this ever mattered — every table already existed from a prior
+      // boot. On a completely empty database, though, the first
+      // ordering gap encountered aborts the whole sequence.
+      //
+      // Every statement in this chain is written as CREATE TABLE IF
+      // NOT EXISTS / ADD COLUMN IF NOT EXISTS, i.e. idempotent and
+      // safe to re-run. So instead of hand-auditing every one of these
+      // ordering gaps (a real but very large undertaking across this
+      // file), we retry the ENTIRE sequence from the top whenever it
+      // fails on a missing relation: everything that already succeeded
+      // this run stays (already committed to Postgres), so each retry
+      // gets further before hitting the next gap, and the sequence
+      // converges once every table has been created somewhere in an
+      // earlier attempt. This only costs extra time on the very first
+      // boot against a brand-new database; a normal restart against an
+      // already-migrated database still succeeds on attempt 1. Any
+      // error that is NOT a missing-relation error is treated as real
+      // and fails fast, exactly as before.
+      const HOWDI_BOOTSTRAP_MAX_ATTEMPTS = 40;
+      let howdiBootstrapDone = false;
+      for (let howdiBootstrapAttempt = 1; howdiBootstrapAttempt <= HOWDI_BOOTSTRAP_MAX_ATTEMPTS && !howdiBootstrapDone; howdiBootstrapAttempt++) {
       try {
+        // HOWDI V16.6K4 — fresh-database bootstrap order fix.
+        // Several of the ensure*Schema() calls below (Vibe commerce,
+        // Works, Learn & Earn) reference `users` and `vendor_profiles`
+        // via foreign keys or queries before those two tables' own
+        // CREATE TABLE statements run inside initializeDatabase(),
+        // which is only called much later in this sequence. On an
+        // already-migrated database this was invisible (the tables
+        // already existed), but on a completely empty database it
+        // fails with `relation "vendor_profiles" does not exist`.
+        // This call creates just the minimal core shape of both
+        // tables, first. It is purely additive (CREATE TABLE IF NOT
+        // EXISTS is a no-op once the real tables exist) — the full
+        // column/index/backfill definitions inside initializeDatabase()
+        // still run exactly as before and remain the source of truth.
+        await ensureHowdiCoreIdentityTables();
+        // HOWDI V16.6K4 — moved initializeDatabase() (and the other
+        // foundational ensure*Tables() calls) to run BEFORE the
+        // Vibe/Learn & Earn schema functions below. Those functions
+        // reference commerce-foundation tables (orders, order_items,
+        // vendor_profiles, etc.) that initializeDatabase() creates;
+        // on an already-migrated database the original ordering never
+        // mattered because the tables already existed, but on a
+        // completely empty database the Vibe/Learn & Earn functions
+        // were running first and failing. No functionality removed —
+        // every one of these calls still runs, just earlier.
+        await initializeDatabase();
+        await ensureCriticalPortalTables();
+        await initializeWorksLiveTables();
+        await ensureHPayTables();
+        console.log("✅ HPay PostgreSQL foundation ready");
         await ensureLearnEarnV20074Schema();
         await ensureLearnEarnRuntimeCompatibility();
         await ensureVibeCoreV140Schema();
@@ -53132,19 +53956,21 @@ async function ensureVibeReleaseReadinessV140LSchema(){
         await ensureVibeCommerceV153WSchema();
         await ensureVibeCommerceV153XSchema();
         await ensureVibeCommerceV153YSchema();
-        await initializeDatabase();
-        await ensureCriticalPortalTables();
-        await initializeWorksLiveTables();
-        await ensureHPayTables();
-        console.log("✅ HPay PostgreSQL foundation ready");
         await backfillMissingOrderShipments();
         console.log("✅ HOWDI database initialization completed before accepting requests");
       console.log("✅ HOWDI Works Customer + Admin Separation V31 loaded");
     console.log("✅ HOWDI Works Shared Cancellation Ledger V34 loaded");
+        howdiBootstrapDone = true;
       } catch (error) {
+        const isMissingRelation = /relation .* does not exist/i.test(error?.message || "");
+        if (isMissingRelation && howdiBootstrapAttempt < HOWDI_BOOTSTRAP_MAX_ATTEMPTS) {
+          console.warn(`⚠️ HOWDI schema bootstrap attempt ${howdiBootstrapAttempt} hit an ordering gap (${error.message}) — retrying from the top (tables already created this run are kept).`);
+          continue;
+        }
         console.error("❌ HOWDI database initialization failed:", error.message);
         process.exitCode = 1;
         return;
+      }
       }
 
       console.log("✅ HOWDI Works Booking + Availability Fix V35 loaded");
