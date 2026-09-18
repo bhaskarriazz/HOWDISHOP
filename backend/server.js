@@ -44178,7 +44178,10 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             }
 
             if(req.method==="POST"&&/^\/api\/connect\/users\/\d+\/follow\/?$/.test(pathname)){
-              const target=Number(pathname.match(/^\/api\/connect\/users\/(\d+)\/follow\/?$/)?.[1]);const sessionUser=await getSessionUserFromRequest(req);const body=await getBody(req);const userId=Number(sessionUser?.id||body.user_id||body.userId||0);
+              const target=Number(pathname.match(/^\/api\/connect\/users\/(\d+)\/follow\/?$/)?.[1]);
+              const sessionUser=await getSessionUserFromRequest(req);
+              if(!sessionUser)return sendJSON(res,401,{status:"error",message:"Login required"});
+              const userId=Number(sessionUser.id);
               if(!Number.isInteger(userId)||userId<=0||!Number.isInteger(target)||target<=0||userId===target)return sendJSON(res,400,{status:"error",message:"Valid follower and target are required"});
               const blocked=(await pool.query(`SELECT 1 FROM howdi_connect_profile_blocks WHERE (blocker_user_id=$1 AND blocked_user_id=$2) OR (blocker_user_id=$2 AND blocked_user_id=$1)`,[userId,target])).rows[0];
               if(blocked)return sendJSON(res,403,{status:"error",message:"Follow is unavailable for this profile"});
@@ -44192,11 +44195,11 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   await pool.query(`INSERT INTO howdi_connect_follow_requests(requester_user_id,target_user_id,status) VALUES($1,$2,'PENDING') ON CONFLICT(requester_user_id,target_user_id) DO UPDATE SET status='PENDING',updated_at=NOW()`,[userId,target]);
                   requested=true;
                   const actor=(await pool.query(`SELECT full_name FROM users WHERE id=$1`,[userId])).rows[0];
-                  await pool.query(`INSERT INTO howdi_connect_notifications(user_id,actor_user_id,notification_type,entity_type,entity_id,message) VALUES($1,$2,'FOLLOW_REQUEST','USER',$2::text,$3)`,[target,userId,`${actor?.full_name||"A HOWDI member"} requested to follow you`]);
+                  await pool.query(`INSERT INTO howdi_connect_notifications(user_id,actor_user_id,notification_type,entity_type,entity_id,message) VALUES($1,$2,'FOLLOW_REQUEST','USER',$3,$4)`,[target,userId,String(userId),`${actor?.full_name||"A HOWDI member"} requested to follow you`]);
                 }else{
                   await pool.query(`INSERT INTO howdi_connect_follows(follower_user_id,following_user_id) VALUES($1,$2) ON CONFLICT DO NOTHING`,[userId,target]);following=true;
                   const actor=(await pool.query(`SELECT full_name FROM users WHERE id=$1`,[userId])).rows[0];
-                  await pool.query(`INSERT INTO howdi_connect_notifications(user_id,actor_user_id,notification_type,entity_type,entity_id,message) VALUES($1,$2,'FOLLOW','USER',$2::text,$3)`,[target,userId,`${actor?.full_name||"A HOWDI member"} followed you`]);
+                  await pool.query(`INSERT INTO howdi_connect_notifications(user_id,actor_user_id,notification_type,entity_type,entity_id,message) VALUES($1,$2,'FOLLOW','USER',$3,$4)`,[target,userId,String(userId),`${actor?.full_name||"A HOWDI member"} followed you`]);
                 }
               }
               return sendJSON(res,200,{status:"success",following,requested});
@@ -45499,13 +45502,17 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             }
 
             if(req.method==="GET"&&pathname==="/api/connect/follow-requests"){
-              const uid=Number(url.searchParams.get("userId")||0);
+              const sessionUser=await getSessionUserFromRequest(req);
+              if(!sessionUser)return sendJSON(res,401,{status:"error",message:"Login required"});
+              const uid=Number(sessionUser.id);
               const rows=(await pool.query(`SELECT fr.*,u.full_name,cp.public_username,COALESCE(cp.profession_title,'') profession_title FROM howdi_connect_follow_requests fr JOIN users u ON u.id=fr.requester_user_id LEFT JOIN howdi_connect_profiles cp ON cp.user_id=u.id WHERE fr.target_user_id=$1 AND fr.status='PENDING' ORDER BY fr.created_at DESC`,[uid])).rows;
               return sendJSON(res,200,{status:"success",requests:rows});
             }
 
             if(req.method==="PATCH"&&/^\/api\/connect\/follow-requests\/\d+\/respond\/?$/.test(pathname)){
-              const requester=Number(pathname.match(/follow-requests\/(\d+)\/respond/)?.[1]),body=await getBody(req),target=Number(body.userId),accept=Boolean(body.accept);
+              const sessionUser=await getSessionUserFromRequest(req);
+              if(!sessionUser)return sendJSON(res,401,{status:"error",message:"Login required"});
+              const requester=Number(pathname.match(/follow-requests\/(\d+)\/respond/)?.[1]),body=await getBody(req),target=Number(sessionUser.id),accept=Boolean(body.accept);
               const row=(await pool.query(`UPDATE howdi_connect_follow_requests SET status=$3,updated_at=NOW() WHERE requester_user_id=$1 AND target_user_id=$2 AND status='PENDING' RETURNING *`,[requester,target,accept?'ACCEPTED':'DECLINED'])).rows[0];
               if(!row)return sendJSON(res,404,{status:"error",message:"Follow request not found"});
               if(accept)await pool.query(`INSERT INTO howdi_connect_follows(follower_user_id,following_user_id) VALUES($1,$2) ON CONFLICT DO NOTHING`,[requester,target]);

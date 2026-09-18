@@ -12,6 +12,11 @@ const dm=between('            if(req.method==="GET"&&pathname==="/api/connect/co
 const spaces=between('            const hcSpaceMatch=','            /* =========================================================\n               HOWDI CONNECT V16.0A');
 const articles=between('            if(req.method==="POST"&&pathname==="/api/connect/articles")','            if(req.method==="GET"&&/^\\/api\\/connect\\/articles\\/\\d+\\/?$/.test(pathname))');
 const engagement=['reaction','comments'].map(action=>block('            if (\n              req.method === "POST" &&\n              /^\\/api\\/connect\\/posts\\/\\d+\\/'+action+'\\/?$/.test(pathname)')).join('\n')+['save','share'].map(action=>block('            if(req.method==="POST"&&/^\\/api\\/connect\\/posts\\/\\d+\\/'+action+'\\/?$/.test(pathname)){')).join('\n');
+const follow=[
+ block('            if(req.method==="POST"&&/^\\/api\\/connect\\/users\\/\\d+\\/follow\\/?$/.test(pathname)){'),
+ block('            if(req.method==="GET"&&pathname==="/api/connect/follow-requests"){'),
+ block('            if(req.method==="PATCH"&&/^\\/api\\/connect\\/follow-requests\\/\\d+\\/respond\\/?$/.test(pathname)){')
+].join('\n');
 const helpers=between('    const HOWDI_ATTACHMENT_RULES =','    function number(')+between('    function getBody(req)','    // =====================================================\n    // URL HELPER')+between('    async function getSessionUserFromRequest(req)','    function adminTokenHash(');
 const image='data:image/png;base64,iVBORw0KGgo=';
 async function run(method,path,body={},options={}){
@@ -34,13 +39,23 @@ async function run(method,path,body={},options={}){
   else if(sql.startsWith('INSERT INTO howdi_community_reactions'))rows=[{post_id:7}];
   else if(sql.startsWith('INSERT INTO howdi_community_comments'))rows=[{id:7}];
   else if(sql.startsWith('INSERT INTO howdi_connect_post_saves'))rows=[{post_id:7}];
+  else if(sql.startsWith('SELECT 1 FROM howdi_connect_profile_blocks'))rows=options.blocked?[{exists:1}]:[];
+  else if(sql.startsWith('SELECT 1 FROM howdi_connect_follows WHERE follower_user_id'))rows=options.alreadyFollowing?[{exists:1}]:[];
+  else if(sql.startsWith('SELECT private_profile FROM howdi_connect_profiles'))rows=[{private_profile:Boolean(options.privateTarget)}];
+  else if(sql.startsWith('INSERT INTO howdi_connect_follow_requests'))rows=[{requester_user_id:params[0],target_user_id:params[1],status:'PENDING'}];
+  else if(sql.startsWith('INSERT INTO howdi_connect_follows'))rows=[{follower_user_id:params[0],following_user_id:params[1]}];
+  else if(sql.startsWith('DELETE FROM howdi_connect_follows'))rows=[];
+  else if(sql.startsWith('SELECT full_name FROM users WHERE id'))rows=[{full_name:'Session A'}];
+  else if(sql.startsWith('INSERT INTO howdi_connect_notifications'))rows=[{id:1}];
+  else if(sql.startsWith('SELECT fr.*,u.full_name,cp.public_username'))rows=[{requester_user_id:303,target_user_id:params[0],full_name:'Requester',public_username:'req303',profession_title:''}];
+  else if(sql.startsWith('UPDATE howdi_connect_follow_requests'))rows=(Number(params[1])===Number(options.requestOwner??101))?[{requester_user_id:params[0],target_user_id:params[1],status:params[2]}]:[];
   else if(sql.includes('COUNT(*)'))rows=[{n:1,total:1}];
   return {rows,rowCount:rows.length};
  };
  const pool={query,connect:async()=>({query,release(){}})};
  const req=Readable.from([JSON.stringify(body)]);req.method=method;req.headers=options.anonymous?{}:{authorization:'Bearer session-A'};
  const context={pool,req,res:{},url:new URL(path,'http://localhost'),pathname:path.split('?')[0],URL,Buffer,clean:x=>String(x??'').trim(),sendJSON:(_res,status,data)=>({status,data})};
- const response=await vm.runInNewContext(helpers+'\n(async()=>{'+dm+spaces+articles+engagement+'})()',context);
+ const response=await vm.runInNewContext(helpers+'\n(async()=>{'+dm+spaces+articles+engagement+follow+'})()',context);
  assert.ok(response,'Route must respond');return {...response,calls,db};
 }
 function write(r,prefix){const q=r.calls.find(c=>c.sql.startsWith(prefix));assert.ok(q,prefix);return q.params;}
@@ -76,4 +91,37 @@ test('Protected K3 writes reject missing session even with supplied identity',as
  for(const [method,path] of [['POST','/api/connect/conversations'],['POST','/api/connect/conversations/7/messages'],['POST','/api/connect/groups-channels/7/messages'],['POST','/api/connect/groups-channels/7/join'],['POST','/api/connect/invite/token/join'],['POST','/api/connect/articles'],['PATCH','/api/connect/articles/7'],...['reaction','comments','save','share'].map(a=>['POST','/api/connect/posts/7/'+a])]){
   const r=await run(method,path,{userId:202,user_id:202},{anonymous:true});assert.equal(r.status,401,path);assert.equal(r.calls.filter(c=>/^(INSERT|UPDATE|DELETE)/.test(c.sql)).length,0,path);
  }
+});
+test('Follow uses session A identity even when body supplies B, notification params well-typed',async()=>{
+ const r=await run('POST','/api/connect/users/303/follow',{userId:202,user_id:202});assert.equal(r.status,200);assert.equal(r.data.following,true);
+ assert.deepEqual(Array.from(write(r,'INSERT INTO howdi_connect_follows')),[101,303]);
+ const note=write(r,'INSERT INTO howdi_connect_notifications');
+ assert.equal(note[0],303);assert.equal(note[1],101);assert.equal(note[2],'101');assert.equal(typeof note[3],'string');
+});
+test('Unauthenticated Follow returns 401 and writes nothing',async()=>{
+ const r=await run('POST','/api/connect/users/303/follow',{userId:202},{anonymous:true});assert.equal(r.status,401);
+ assert.equal(r.calls.filter(c=>/^(INSERT|UPDATE|DELETE)/.test(c.sql)).length,0);
+});
+test('Follow on a private profile creates a request and a well-typed notification',async()=>{
+ const r=await run('POST','/api/connect/users/303/follow',{userId:202},{privateTarget:true});assert.equal(r.status,200);assert.equal(r.data.requested,true);
+ assert.deepEqual(Array.from(write(r,'INSERT INTO howdi_connect_follow_requests')),[101,303]);
+ const note=write(r,'INSERT INTO howdi_connect_notifications');
+ assert.equal(note[0],303);assert.equal(note[1],101);assert.equal(note[2],'101');assert.equal(typeof note[3],'string');
+});
+test('Follow-requests GET ignores a spoofed query userId and scopes to the session user',async()=>{
+ const r=await run('GET','/api/connect/follow-requests?userId=999',{});assert.equal(r.status,200);
+ assert.equal(r.calls.find(c=>c.sql.startsWith('SELECT fr.*,u.full_name,cp.public_username')).params[0],101);
+ assert.equal(r.data.requests[0].target_user_id,101);
+});
+test('Follow-requests GET without a session returns 401',async()=>{
+ const r=await run('GET','/api/connect/follow-requests?userId=101',{},{anonymous:true});assert.equal(r.status,401);
+});
+test('Follow-request accept ignores a spoofed body userId and acts as the session user',async()=>{
+ const r=await run('PATCH','/api/connect/follow-requests/303/respond',{userId:999,accept:true},{requestOwner:101});assert.equal(r.status,200);
+ assert.deepEqual(Array.from(write(r,'UPDATE howdi_connect_follow_requests')),[303,101,'ACCEPTED']);
+ assert.deepEqual(Array.from(write(r,'INSERT INTO howdi_connect_follows')),[303,101]);
+});
+test('Non-owner cannot accept another user\'s follow request',async()=>{
+ const r=await run('PATCH','/api/connect/follow-requests/303/respond',{accept:true},{requestOwner:202});assert.equal(r.status,404);
+ assert.equal(r.calls.filter(c=>c.sql.startsWith('INSERT INTO howdi_connect_follows')).length,0);
 });
