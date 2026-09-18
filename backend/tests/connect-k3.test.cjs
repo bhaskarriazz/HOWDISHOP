@@ -125,3 +125,67 @@ test('Non-owner cannot accept another user\'s follow request',async()=>{
  const r=await run('PATCH','/api/connect/follow-requests/303/respond',{accept:true},{requestOwner:202});assert.equal(r.status,404);
  assert.equal(r.calls.filter(c=>c.sql.startsWith('INSERT INTO howdi_connect_follows')).length,0);
 });
+
+// =====================================================
+// K5A — CONNECT HOME SHELL + FEED COMPOSITION
+// =====================================================
+const homeRoute=block('            if (req.method === "GET" && pathname === "/api/connect/home") {');
+const vibeCursorDecodeSrc=between('    function vibeCursorDecode(value){','    async function getVibeViewer(req){');
+const getVibeFeedRowsSrc=between('    async function getVibeFeedRows({','    // ============================================================\n    // HOWDI V14.0F');
+const getSessionUserFromRequestSrc=between('    async function getSessionUserFromRequest(req)','    function adminTokenHash(');
+const HOME_SECTION_KEYS=['special','hero','stories','forYou','vibes','continueWatching','recommendedCreators','suggestedPeople','communities','trendingArticles','shopRecommendations','worksRecommendations','learnRecommendations','recentActivity','dailyQuote','continueYourJourney'];
+async function runHome(path,options={}){
+ const calls=[];
+ const query=async(sql,params=[])=>{
+  sql=sql.replace(/\s+/g,' ').trim();calls.push({sql,params});
+  if(sql.includes('FROM user_sessions s'))return {rows:params[0]==='session-A'?[{id:101}]:[],rowCount:params[0]==='session-A'?1:0};
+  if(sql.startsWith('UPDATE user_sessions'))return {rows:[],rowCount:0};
+  if(sql.includes('SELECT COUNT(*)::int n FROM howdi_connect_daily_quotes'))return {rows:[{n:options.quoteCount??7}],rowCount:1};
+  if(sql.includes('FROM howdi_connect_daily_quotes') && sql.startsWith('SELECT quote_text'))return {rows:[{quote_text:'Test quote',author:'HOWDI'}],rowCount:1};
+  return {rows:[],rowCount:0};
+ };
+ const pool={query};
+ const req={method:'GET',headers:options.anonymous?{}:{authorization:'Bearer session-A'}};
+ const url=new URL('http://localhost'+path);
+ const context={
+  pool,req,res:{},url,pathname:'/api/connect/home',URL,Buffer,
+  clean:x=>String(x??'').trim(),
+  sendJSON:(_res,status,data)=>({status,data}),
+  console:{error:()=>{}},
+ };
+ const src=`${getSessionUserFromRequestSrc}\n${vibeCursorDecodeSrc}\n${getVibeFeedRowsSrc}\n(async()=>{${homeRoute}})()`;
+ const response=await vm.runInNewContext(src,context);
+ assert.ok(response,'Route must respond');
+ return {...response,calls};
+}
+test('Connect Home returns all 16 required sections for a guest',async()=>{
+ const r=await runHome('/api/connect/home',{anonymous:true});
+ assert.equal(r.status,200);
+ assert.equal(r.data.meta.guest,true);
+ assert.deepEqual(Array.from(r.data.order),HOME_SECTION_KEYS);
+ for(const key of HOME_SECTION_KEYS)assert.ok(Object.prototype.hasOwnProperty.call(r.data.sections,key),`missing section ${key}`);
+});
+test('Connect Home returns all 16 required sections for an authenticated user',async()=>{
+ const r=await runHome('/api/connect/home');
+ assert.equal(r.status,200);
+ assert.equal(r.data.meta.guest,false);
+ for(const key of HOME_SECTION_KEYS)assert.ok(Object.prototype.hasOwnProperty.call(r.data.sections,key),`missing section ${key}`);
+});
+test('Connect Home honors the ?sections= filter for progressive loading',async()=>{
+ const r=await runHome('/api/connect/home?sections=dailyQuote,special,hero');
+ assert.equal(r.status,200);
+ assert.deepEqual(Object.keys(r.data.sections).sort(),['dailyQuote','hero','special']);
+ assert.equal(r.data.sections.dailyQuote.item.quote_text,'Test quote');
+});
+test('Connect Home never leaks internal identity fields to the client',async()=>{
+ const r=await runHome('/api/connect/home');
+ assert.equal(r.status,200);
+ const serialized=JSON.stringify(r.data);
+ assert.doesNotMatch(serialized,/howdi_id|master_id|identity_uuid/);
+});
+test('Connect Home is session-authoritative (ignores no client-supplied identity, uses session)',async()=>{
+ const r=await runHome('/api/connect/home');
+ const sessionCall=r.calls.find(c=>c.sql.includes('FROM user_sessions s'));
+ assert.ok(sessionCall);
+ assert.equal(sessionCall.params[0],'session-A');
+});
