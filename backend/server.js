@@ -6481,6 +6481,8 @@
         // HOWDI CONNECT V16.0D — ARTICLES COMPLETE
         await pool.query(`ALTER TABLE howdi_community_posts ADD COLUMN IF NOT EXISTS article_excerpt VARCHAR(500) NOT NULL DEFAULT '';`);
         await pool.query(`ALTER TABLE howdi_community_posts ADD COLUMN IF NOT EXISTS article_cover_url TEXT NOT NULL DEFAULT '';`);
+        // HOWDI CONNECT V16.6K3 — uploaded article cover (base64), URL field kept for backward compatibility
+        await pool.query(`ALTER TABLE howdi_community_posts ADD COLUMN IF NOT EXISTS article_cover_data TEXT;`);
         await pool.query(`ALTER TABLE howdi_community_posts ADD COLUMN IF NOT EXISTS article_category VARCHAR(80) NOT NULL DEFAULT 'GENERAL';`);
         await pool.query(`ALTER TABLE howdi_community_posts ADD COLUMN IF NOT EXISTS article_read_minutes INTEGER NOT NULL DEFAULT 1;`);
         await pool.query(`CREATE TABLE IF NOT EXISTS howdi_connect_article_history(id BIGSERIAL PRIMARY KEY,article_id BIGINT NOT NULL REFERENCES howdi_community_posts(id) ON DELETE CASCADE,user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,last_read_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),read_seconds INTEGER NOT NULL DEFAULT 0,completed BOOLEAN NOT NULL DEFAULT FALSE,UNIQUE(article_id,user_id));`);
@@ -7111,6 +7113,8 @@
           edited_at TIMESTAMPTZ,
           deleted_at TIMESTAMPTZ
         );`);
+        // HOWDI CONNECT V16.6K3 — group/channel chat attachment metadata (filename/mime/size/link domain)
+        await pool.query(`ALTER TABLE howdi_connect_social_messages ADD COLUMN IF NOT EXISTS attachment_meta JSONB NOT NULL DEFAULT '{}'::jsonb;`);
         await pool.query(`CREATE INDEX IF NOT EXISTS hc_social_spaces_type_idx ON howdi_connect_social_spaces(space_type,privacy,created_at DESC);`);
         await pool.query(`CREATE INDEX IF NOT EXISTS hc_social_members_user_idx ON howdi_connect_social_space_members(user_id,status,joined_at DESC);`);
         await pool.query(`CREATE INDEX IF NOT EXISTS hc_social_messages_space_idx ON howdi_connect_social_messages(space_id,created_at DESC);`);
@@ -7902,6 +7906,10 @@
         await pool.query(`ALTER TABLE howdi_connect_messages ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;`);
         await pool.query(`ALTER TABLE howdi_connect_messages ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;`);
         await pool.query(`ALTER TABLE howdi_connect_messages ADD COLUMN IF NOT EXISTS reactions JSONB NOT NULL DEFAULT '{}'::jsonb;`);
+        // HOWDI CONNECT V16.6K3 — personal chat attachments (image/video/document/link)
+        await pool.query(`ALTER TABLE howdi_connect_messages ADD COLUMN IF NOT EXISTS attachment_type VARCHAR(20);`);
+        await pool.query(`ALTER TABLE howdi_connect_messages ADD COLUMN IF NOT EXISTS attachment_data TEXT;`);
+        await pool.query(`ALTER TABLE howdi_connect_messages ADD COLUMN IF NOT EXISTS attachment_meta JSONB NOT NULL DEFAULT '{}'::jsonb;`);
         await pool.query(`CREATE TABLE IF NOT EXISTS howdi_connect_notifications (
           id BIGSERIAL PRIMARY KEY,
           user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -8209,6 +8217,45 @@
       return String(value).trim();
     }
 
+
+    // HOWDI CONNECT V16.6K3 — chat attachment validation (image/video/document/link)
+    const HOWDI_ATTACHMENT_RULES = {
+      IMAGE: { maxBytes: 5 * 1024 * 1024, mime: [/^image\//] },
+      VIDEO: { maxBytes: 25 * 1024 * 1024, mime: [/^video\//] },
+      DOCUMENT: { maxBytes: 10 * 1024 * 1024, mime: [
+        /^application\/pdf$/,
+        /^application\/msword$/,
+        /^application\/vnd\.openxmlformats/,
+        /^application\/vnd\.ms-excel$/,
+        /^text\/plain$/,
+      ] },
+    };
+    function howdiAttachmentDomain(rawUrl) {
+      try { return new URL(String(rawUrl || "")).hostname.replace(/^www\./, ""); }
+      catch { return ""; }
+    }
+    function validateHowdiAttachment(attachmentType, mimeType, base64Data, linkUrl) {
+      const type = String(attachmentType || "").toUpperCase();
+      if (!type || type === "NONE") return { ok: true, type: "" };
+      if (type === "LINK") {
+        const url = String(linkUrl || "").trim();
+        if (!url || !/^https?:\/\//i.test(url)) return { ok: false, message: "A valid http(s) link is required" };
+        if (url.length > 2000) return { ok: false, message: "Link is too long" };
+        return { ok: true, type: "LINK", domain: howdiAttachmentDomain(url) };
+      }
+      const rule = HOWDI_ATTACHMENT_RULES[type];
+      if (!rule) return { ok: false, message: "Unsupported attachment type" };
+      if (!rule.mime.some((rx) => rx.test(String(mimeType || "")))) {
+        return { ok: false, message: `That file doesn't look like a valid ${type.toLowerCase()}` };
+      }
+      const b64 = String(base64Data || "").split(",").pop() || "";
+      if (!b64) return { ok: false, message: "Attachment data is required" };
+      const approxBytes = Math.floor((b64.length * 3) / 4);
+      if (approxBytes > rule.maxBytes) {
+        return { ok: false, message: `${type[0]}${type.slice(1).toLowerCase()} must be under ${Math.round(rule.maxBytes / (1024 * 1024))}MB` };
+      }
+      return { ok: true, type, bytes: approxBytes };
+    }
 
     function number(value, fallback = 0) {
       const n = Number(value);
@@ -45144,10 +45191,22 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               }
               if(req.method==="GET"&&action==="messages"){
                 const uid=Number(url.searchParams.get('userId')||0),membership=(await pool.query(`SELECT role,status FROM howdi_connect_social_space_members WHERE space_id=$1 AND user_id=$2`,[spaceId,uid])).rows[0];if(space.privacy!=='PUBLIC'&&membership?.status!=='ACTIVE')return sendJSON(res,403,{status:"error",message:"Join to view messages"});
-                const messages=(await pool.query(`SELECT m.id,m.message_type,m.body,m.media_data,m.reply_to_id,m.is_pinned,m.created_at,m.edited_at,u.full_name,cp.public_username FROM howdi_connect_social_messages m JOIN users u ON u.id=m.sender_user_id LEFT JOIN howdi_connect_profiles cp ON cp.user_id=u.id WHERE m.space_id=$1 AND m.deleted_at IS NULL ORDER BY m.created_at DESC LIMIT 200`,[spaceId])).rows.reverse();return sendJSON(res,200,{status:"success",messages});
+                const messages=(await pool.query(`SELECT m.id,m.message_type,m.body,m.media_data,m.attachment_meta,m.reply_to_id,m.is_pinned,m.created_at,m.edited_at,u.full_name,cp.public_username FROM howdi_connect_social_messages m JOIN users u ON u.id=m.sender_user_id LEFT JOIN howdi_connect_profiles cp ON cp.user_id=u.id WHERE m.space_id=$1 AND m.deleted_at IS NULL ORDER BY m.created_at DESC LIMIT 200`,[spaceId])).rows.reverse();return sendJSON(res,200,{status:"success",messages});
               }
               if(req.method==="POST"&&action==="messages"){
-                const body=await getBody(req),uid=Number(body.userId),membership=(await pool.query(`SELECT role,status FROM howdi_connect_social_space_members WHERE space_id=$1 AND user_id=$2`,[spaceId,uid])).rows[0];if(!membership||membership.status!=='ACTIVE')return sendJSON(res,403,{status:"error",message:"Join before posting"});if(space.space_type==='CHANNEL'&&!['OWNER','ADMIN','MODERATOR'].includes(membership.role))return sendJSON(res,403,{status:"error",message:"Only channel admins can publish"});const text=clean(body.body||'').slice(0,6000);if(!text&&!body.mediaData)return sendJSON(res,400,{status:"error",message:"Message cannot be empty"});const row=(await pool.query(`INSERT INTO howdi_connect_social_messages(space_id,sender_user_id,message_type,body,media_data,reply_to_id) VALUES($1,$2,$3,$4,$5,$6) RETURNING *`,[spaceId,uid,clean(body.messageType||'TEXT').slice(0,20),text,body.mediaData||null,Number(body.replyToId)||null])).rows[0];await pool.query(`UPDATE howdi_connect_social_spaces SET message_count=message_count+1,updated_at=NOW() WHERE id=$1`,[spaceId]);return sendJSON(res,201,{status:"success",message:row});
+                const sessionUser=await getSessionUserFromRequest(req);const body=await getBody(req);const uid=Number(sessionUser?.id||body.userId||0),membership=(await pool.query(`SELECT role,status FROM howdi_connect_social_space_members WHERE space_id=$1 AND user_id=$2`,[spaceId,uid])).rows[0];if(!membership||membership.status!=='ACTIVE')return sendJSON(res,403,{status:"error",message:"Join before posting"});if(space.space_type==='CHANNEL'&&!['OWNER','ADMIN','MODERATOR'].includes(membership.role))return sendJSON(res,403,{status:"error",message:"Only channel admins can publish"});
+                const text=clean(body.body||'').slice(0,6000);
+                const attachmentType=String(body.attachmentType||'').toUpperCase();
+                let mediaData=body.mediaData||null,attachmentMeta={};
+                if(attachmentType){
+                  const check=validateHowdiAttachment(attachmentType,body.attachmentMime,body.mediaData,body.linkUrl);
+                  if(!check.ok)return sendJSON(res,400,{status:"error",message:check.message});
+                  if(attachmentType==='LINK'){mediaData=String(body.linkUrl||'').slice(0,2000);attachmentMeta={url:mediaData,domain:check.domain};}
+                  else attachmentMeta={filename:clean(body.attachmentName||'').slice(0,200),mime:clean(body.attachmentMime||'').slice(0,120),bytes:check.bytes||0};
+                }
+                if(!text&&!mediaData)return sendJSON(res,400,{status:"error",message:"Message cannot be empty"});
+                const messageType=attachmentType||clean(body.messageType||'TEXT').slice(0,20);
+                const row=(await pool.query(`INSERT INTO howdi_connect_social_messages(space_id,sender_user_id,message_type,body,media_data,attachment_meta,reply_to_id) VALUES($1,$2,$3,$4,$5,$6::jsonb,$7) RETURNING *`,[spaceId,uid,messageType,text,mediaData,JSON.stringify(attachmentMeta),Number(body.replyToId)||null])).rows[0];await pool.query(`UPDATE howdi_connect_social_spaces SET message_count=message_count+1,updated_at=NOW() WHERE id=$1`,[spaceId]);return sendJSON(res,201,{status:"success",message:row});
               }
               if(req.method==="GET"&&action==="invite-links"){
                 const uid=Number(url.searchParams.get('userId')||0),membership=(await pool.query(`SELECT role,status FROM howdi_connect_social_space_members WHERE space_id=$1 AND user_id=$2`,[spaceId,uid])).rows[0];if(!membership||membership.status!=='ACTIVE'||!['OWNER','ADMIN','MODERATOR'].includes(membership.role))return sendJSON(res,403,{status:"error",message:"Admin access required"});const links=(await pool.query(`SELECT id,token,label,expires_at,max_uses,use_count,requires_approval,revoked_at,created_at FROM howdi_connect_social_invite_links WHERE space_id=$1 ORDER BY created_at DESC`,[spaceId])).rows;return sendJSON(res,200,{status:"success",links});
@@ -45161,7 +45220,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             if(hcInviteMatch){
               const token=hcInviteMatch[1],invite=(await pool.query(`SELECT i.*,s.name,s.space_type,s.description,s.privacy,s.member_count,s.owner_user_id,u.full_name owner_name FROM howdi_connect_social_invite_links i JOIN howdi_connect_social_spaces s ON s.id=i.space_id JOIN users u ON u.id=s.owner_user_id WHERE i.token=$1 AND i.revoked_at IS NULL AND (i.expires_at IS NULL OR i.expires_at>NOW()) AND (i.max_uses IS NULL OR i.use_count<i.max_uses) AND s.is_archived=FALSE`,[token])).rows[0];if(!invite)return sendJSON(res,404,{status:"error",message:"Invite link is invalid, expired or exhausted"});
               if(req.method==="GET")return sendJSON(res,200,{status:"success",invite:{token,name:invite.name,spaceType:invite.space_type,description:invite.description,privacy:invite.privacy,memberCount:invite.member_count,ownerName:invite.owner_name,requiresApproval:invite.requires_approval}});
-              if(req.method==="POST"&&pathname.endsWith('/join')){const body=await getBody(req),uid=Number(body.userId);if(!uid)return sendJSON(res,400,{status:"error",message:"Login required"});const status=invite.requires_approval?'PENDING':'ACTIVE',role=invite.space_type==='CHANNEL'?'SUBSCRIBER':'MEMBER';await pool.query(`INSERT INTO howdi_connect_social_space_members(space_id,user_id,role,status,joined_via) VALUES($1,$2,$3,$4,'INVITE') ON CONFLICT(space_id,user_id) DO UPDATE SET role=EXCLUDED.role,status=EXCLUDED.status,joined_via='INVITE',updated_at=NOW()`,[invite.space_id,uid,role,status]);await pool.query(`UPDATE howdi_connect_social_invite_links SET use_count=use_count+1 WHERE id=$1`,[invite.id]);if(status==='ACTIVE')await pool.query(`UPDATE howdi_connect_social_spaces SET member_count=(SELECT COUNT(*) FROM howdi_connect_social_space_members WHERE space_id=$1 AND status='ACTIVE'),updated_at=NOW() WHERE id=$1`,[invite.space_id]);return sendJSON(res,200,{status:"success",spaceId:invite.space_id,membershipStatus:status,message:status==='PENDING'?'Join request sent':'Joined from invite link'});}
+              if(req.method==="POST"&&pathname.endsWith('/join')){const sessionUser=await getSessionUserFromRequest(req);const body=await getBody(req);const uid=Number(sessionUser?.id||body.userId||0);if(!uid)return sendJSON(res,400,{status:"error",message:"Login required"});const status=invite.requires_approval?'PENDING':'ACTIVE',role=invite.space_type==='CHANNEL'?'SUBSCRIBER':'MEMBER';await pool.query(`INSERT INTO howdi_connect_social_space_members(space_id,user_id,role,status,joined_via) VALUES($1,$2,$3,$4,'INVITE') ON CONFLICT(space_id,user_id) DO UPDATE SET role=EXCLUDED.role,status=EXCLUDED.status,joined_via='INVITE',updated_at=NOW()`,[invite.space_id,uid,role,status]);await pool.query(`UPDATE howdi_connect_social_invite_links SET use_count=use_count+1 WHERE id=$1`,[invite.id]);if(status==='ACTIVE')await pool.query(`UPDATE howdi_connect_social_spaces SET member_count=(SELECT COUNT(*) FROM howdi_connect_social_space_members WHERE space_id=$1 AND status='ACTIVE'),updated_at=NOW() WHERE id=$1`,[invite.space_id]);return sendJSON(res,200,{status:"success",spaceId:invite.space_id,spaceType:invite.space_type,membershipStatus:status,message:status==='PENDING'?'Join request sent':'Joined from invite link'});}
             }
 
             /* =========================================================
@@ -47036,18 +47095,27 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               const id=Number(pathname.match(/^\/api\/connect\/conversations\/(\d+)\/messages\/?$/)?.[1]);const userId=Number(url.searchParams.get("userId")||0);
               const member=(await pool.query(`SELECT 1 FROM howdi_connect_conversation_members WHERE conversation_id=$1 AND user_id=$2`,[id,userId])).rows[0];if(!member)return sendJSON(res,403,{status:"error",message:"Conversation access denied"});
               await pool.query(`UPDATE howdi_connect_messages SET deleted_at=COALESCE(deleted_at,NOW()),message_text='' WHERE conversation_id=$1 AND expires_at IS NOT NULL AND expires_at<=NOW()`,[id]);
-              const rows=(await pool.query(`SELECT m.id,m.conversation_id,m.sender_user_id,m.message_text,m.edited_at,m.deleted_at,m.expires_at,m.reactions,m.created_at,u.full_name,u.howdi_id FROM howdi_connect_messages m JOIN users u ON u.id=m.sender_user_id WHERE m.conversation_id=$1 ORDER BY m.created_at ASC LIMIT 500`,[id])).rows;
+              const rows=(await pool.query(`SELECT m.id,m.conversation_id,m.sender_user_id,m.message_text,m.attachment_type,m.attachment_data,m.attachment_meta,m.edited_at,m.deleted_at,m.expires_at,m.reactions,m.created_at,u.full_name FROM howdi_connect_messages m JOIN users u ON u.id=m.sender_user_id WHERE m.conversation_id=$1 ORDER BY m.created_at ASC LIMIT 500`,[id])).rows;
               await pool.query(`UPDATE howdi_connect_conversation_members SET last_read_at=NOW() WHERE conversation_id=$1 AND user_id=$2`,[id,userId]);
               return sendJSON(res,200,{status:"success",messages:rows});
             }
 
             if(req.method==="POST"&&/^\/api\/connect\/conversations\/\d+\/messages\/?$/.test(pathname)){
-              const id=Number(pathname.match(/^\/api\/connect\/conversations\/(\d+)\/messages\/?$/)?.[1]);const body=await getBody(req);const userId=Number(body.userId??body.user_id);const text=clean(body.messageText??body.message_text??"").trim();
+              const id=Number(pathname.match(/^\/api\/connect\/conversations\/(\d+)\/messages\/?$/)?.[1]);const sessionUser=await getSessionUserFromRequest(req);const body=await getBody(req);const userId=Number(sessionUser?.id||body.userId||body.user_id||0);const text=clean(body.messageText??body.message_text??"").trim();
               const expireMode=String(body.expireMode??body.expire_mode??"Keep");
-              if(!text||text.length>4000)return sendJSON(res,400,{status:"error",message:"Message must contain 1 to 4000 characters"});
+              const attachmentType=String(body.attachmentType||"").toUpperCase();
+              let attachmentData=null,attachmentMeta={};
+              if(attachmentType){
+                const check=validateHowdiAttachment(attachmentType,body.attachmentMime,body.attachmentData,body.linkUrl);
+                if(!check.ok)return sendJSON(res,400,{status:"error",message:check.message});
+                if(attachmentType==="LINK"){attachmentData=String(body.linkUrl||"").slice(0,2000);attachmentMeta={url:attachmentData,domain:check.domain};}
+                else{attachmentData=String(body.attachmentData||"");attachmentMeta={filename:clean(body.attachmentName||"").slice(0,200),mime:clean(body.attachmentMime||"").slice(0,120),bytes:check.bytes||0};}
+              }
+              if((!text||text.length>4000)&&!attachmentData)return sendJSON(res,400,{status:"error",message:"Message must contain 1 to 4000 characters"});
+              if(text.length>4000)return sendJSON(res,400,{status:"error",message:"Message must contain 1 to 4000 characters"});
               const member=(await pool.query(`SELECT 1 FROM howdi_connect_conversation_members WHERE conversation_id=$1 AND user_id=$2`,[id,userId])).rows[0];if(!member)return sendJSON(res,403,{status:"error",message:"Conversation access denied"});
               const expiresAt=expireMode==="24 hours" ? new Date(Date.now()+24*60*60*1000) : null;
-              const row=(await pool.query(`INSERT INTO howdi_connect_messages(conversation_id,sender_user_id,message_text,expires_at) VALUES($1,$2,$3,$4) RETURNING *`,[id,userId,text,expiresAt])).rows[0];
+              const row=(await pool.query(`INSERT INTO howdi_connect_messages(conversation_id,sender_user_id,message_text,expires_at,attachment_type,attachment_data,attachment_meta) VALUES($1,$2,$3,$4,$5,$6,$7::jsonb) RETURNING *`,[id,userId,text,expiresAt,attachmentType||null,attachmentData,JSON.stringify(attachmentMeta)])).rows[0];
               await pool.query(`UPDATE howdi_connect_conversations SET updated_at=NOW() WHERE id=$1`,[id]);
               return sendJSON(res,201,{status:"success",message:row});
             }
@@ -47365,7 +47433,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             // =====================================================
             if(req.method==="GET"&&pathname==="/api/connect/articles"){
               const viewerId=Number(url.searchParams.get("userId")||0),mode=String(url.searchParams.get("mode")||"DISCOVER").toUpperCase(),category=String(url.searchParams.get("category")||"").toUpperCase(),q=String(url.searchParams.get("q")||"").trim();
-              const rows=(await pool.query(`SELECT p.id,p.article_title,p.article_excerpt,p.article_cover_url,p.article_category,p.article_read_minutes,p.content,p.topics,p.created_at,p.updated_at,u.full_name,cp.public_username,COALESCE(cp.profile_image,'') profile_image,
+              const rows=(await pool.query(`SELECT p.id,p.article_title,p.article_excerpt,p.article_cover_url,p.article_cover_data,p.article_category,p.article_read_minutes,p.content,p.topics,p.created_at,p.updated_at,u.full_name,cp.public_username,COALESCE(cp.profile_image,'') profile_image,
                 (SELECT COUNT(*)::int FROM howdi_community_reactions r WHERE r.post_id=p.id) like_count,(SELECT COUNT(*)::int FROM howdi_community_comments cm WHERE cm.post_id=p.id) comment_count,(SELECT COUNT(*)::int FROM howdi_connect_post_saves s WHERE s.post_id=p.id) save_count,(SELECT COUNT(*)::int FROM howdi_connect_shares sh WHERE sh.post_id=p.id) share_count,
                 CASE WHEN $1>0 AND EXISTS(SELECT 1 FROM howdi_community_reactions r WHERE r.post_id=p.id AND r.user_id=$1) THEN TRUE ELSE FALSE END liked_by_viewer,
                 CASE WHEN $1>0 AND EXISTS(SELECT 1 FROM howdi_connect_post_saves s WHERE s.post_id=p.id AND s.user_id=$1) THEN TRUE ELSE FALSE END saved_by_viewer,
@@ -47377,24 +47445,33 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             }
             if(req.method==="GET"&&pathname==="/api/connect/articles/mine"){
               const userId=Number(url.searchParams.get("userId")||0);if(!userId)return sendJSON(res,400,{status:"error",message:"User required"});
-              const rows=(await pool.query(`SELECT id,article_title,article_excerpt,article_cover_url,article_category,article_read_minutes,content,topics,post_status,scheduled_for,created_at,updated_at,(SELECT COUNT(*)::int FROM howdi_connect_post_views v WHERE v.post_id=p.id) views,(SELECT COUNT(*)::int FROM howdi_community_reactions r WHERE r.post_id=p.id) likes,(SELECT COUNT(*)::int FROM howdi_community_comments c WHERE c.post_id=p.id) comments,(SELECT COUNT(*)::int FROM howdi_connect_post_saves s WHERE s.post_id=p.id) saves FROM howdi_community_posts p WHERE user_id=$1 AND post_type='ARTICLE' ORDER BY updated_at DESC`,[userId])).rows;
+              const rows=(await pool.query(`SELECT id,article_title,article_excerpt,article_cover_url,article_cover_data,article_category,article_read_minutes,content,topics,post_status,scheduled_for,created_at,updated_at,(SELECT COUNT(*)::int FROM howdi_connect_post_views v WHERE v.post_id=p.id) views,(SELECT COUNT(*)::int FROM howdi_community_reactions r WHERE r.post_id=p.id) likes,(SELECT COUNT(*)::int FROM howdi_community_comments c WHERE c.post_id=p.id) comments,(SELECT COUNT(*)::int FROM howdi_connect_post_saves s WHERE s.post_id=p.id) saves FROM howdi_community_posts p WHERE user_id=$1 AND post_type='ARTICLE' ORDER BY updated_at DESC`,[userId])).rows;
               return sendJSON(res,200,{status:"success",articles:rows});
             }
             if(req.method==="POST"&&pathname==="/api/connect/articles"){
-              const body=await readJSON(req),userId=Number(body.userId||0),title=String(body.title||'').trim().slice(0,240),content=String(body.content||'').trim();
+              const sessionUser=await getSessionUserFromRequest(req);const body=await readJSON(req);const userId=Number(sessionUser?.id||body.userId||0),title=String(body.title||'').trim().slice(0,240),content=String(body.content||'').trim();
               if(!userId||title.length<3||content.length<20)return sendJSON(res,400,{status:"error",message:"Title and article content are required"});
               const status=String(body.status||'DRAFT').toUpperCase();if(!['DRAFT','PUBLISHED','SCHEDULED'].includes(status))return sendJSON(res,400,{status:"error",message:"Invalid article status"});
+              let coverData=null;
+              if(body.coverData){const check=validateHowdiAttachment('IMAGE',body.coverMime,body.coverData);if(!check.ok)return sendJSON(res,400,{status:"error",message:check.message});coverData=String(body.coverData);}
               const words=content.split(/\s+/).filter(Boolean).length,mins=Math.max(1,Math.ceil(words/220));
-              const row=(await pool.query(`INSERT INTO howdi_community_posts(user_id,content,category,visibility,post_type,article_title,article_excerpt,article_cover_url,article_category,article_read_minutes,topics,post_status,scheduled_for,audience_scope,allow_comments,allow_repost) VALUES($1,$2,'ARTICLE','PUBLIC','ARTICLE',$3,$4,$5,$6,$7,$8,$9,$10,'EVERYONE',$11,$12) RETURNING id,article_title,post_status,created_at`,[userId,content,title,String(body.excerpt||'').slice(0,500),String(body.coverUrl||'').slice(0,3000),String(body.category||'GENERAL').toUpperCase().slice(0,80),mins,String(body.topics||'').slice(0,600),status,body.scheduledFor||null,body.allowComments!==false,body.allowRepost!==false])).rows[0];
+              const row=(await pool.query(`INSERT INTO howdi_community_posts(user_id,content,category,visibility,post_type,article_title,article_excerpt,article_cover_url,article_cover_data,article_category,article_read_minutes,topics,post_status,scheduled_for,audience_scope,allow_comments,allow_repost) VALUES($1,$2,'ARTICLE','PUBLIC','ARTICLE',$3,$4,$5,$6,$7,$8,$9,$10,$11,'EVERYONE',$12,$13) RETURNING id,article_title,post_status,created_at`,[userId,content,title,String(body.excerpt||'').slice(0,500),String(body.coverUrl||'').slice(0,3000),coverData,String(body.category||'GENERAL').toUpperCase().slice(0,80),mins,String(body.topics||'').slice(0,600),status,body.scheduledFor||null,body.allowComments!==false,body.allowRepost!==false])).rows[0];
               return sendJSON(res,201,{status:"success",article:row});
             }
             if(req.method==="PATCH"&&/^\/api\/connect\/articles\/\d+\/?$/.test(pathname)){
-              const id=Number(pathname.match(/articles\/(\d+)/)?.[1]),body=await readJSON(req),userId=Number(body.userId||0);const own=(await pool.query(`SELECT * FROM howdi_community_posts WHERE id=$1 AND user_id=$2 AND post_type='ARTICLE'`,[id,userId])).rows[0];if(!own)return sendJSON(res,404,{status:"error",message:"Article not found"});
+              const id=Number(pathname.match(/articles\/(\d+)/)?.[1]);const sessionUser=await getSessionUserFromRequest(req);const body=await readJSON(req);const userId=Number(sessionUser?.id||body.userId||0);const own=(await pool.query(`SELECT * FROM howdi_community_posts WHERE id=$1 AND user_id=$2 AND post_type='ARTICLE'`,[id,userId])).rows[0];if(!own)return sendJSON(res,404,{status:"error",message:"Article not found"});
               const content=String(body.content??own.content),words=content.split(/\s+/).filter(Boolean).length,status=String(body.status??own.post_status).toUpperCase();
-              const row=(await pool.query(`UPDATE howdi_community_posts SET article_title=$3,article_excerpt=$4,article_cover_url=$5,article_category=$6,content=$7,topics=$8,article_read_minutes=$9,post_status=$10,scheduled_for=$11,updated_at=NOW() WHERE id=$1 AND user_id=$2 RETURNING id,article_title,post_status,updated_at`,[id,userId,String(body.title??own.article_title).slice(0,240),String(body.excerpt??own.article_excerpt).slice(0,500),String(body.coverUrl??own.article_cover_url).slice(0,3000),String(body.category??own.article_category).toUpperCase().slice(0,80),content,String(body.topics??own.topics).slice(0,600),Math.max(1,Math.ceil(words/220)),status,body.scheduledFor??own.scheduled_for])).rows[0];return sendJSON(res,200,{status:"success",article:row});
+              let coverData=own.article_cover_data;
+              if(body.coverData){const check=validateHowdiAttachment('IMAGE',body.coverMime,body.coverData);if(!check.ok)return sendJSON(res,400,{status:"error",message:check.message});coverData=String(body.coverData);}
+              else if(body.clearCoverData)coverData=null;
+              const row=(await pool.query(`UPDATE howdi_community_posts SET article_title=$3,article_excerpt=$4,article_cover_url=$5,article_cover_data=$6,article_category=$7,content=$8,topics=$9,article_read_minutes=$10,post_status=$11,scheduled_for=$12,updated_at=NOW() WHERE id=$1 AND user_id=$2 RETURNING id,article_title,post_status,updated_at`,[id,userId,String(body.title??own.article_title).slice(0,240),String(body.excerpt??own.article_excerpt).slice(0,500),String(body.coverUrl??own.article_cover_url).slice(0,3000),coverData,String(body.category??own.article_category).toUpperCase().slice(0,80),content,String(body.topics??own.topics).slice(0,600),Math.max(1,Math.ceil(words/220)),status,body.scheduledFor??own.scheduled_for])).rows[0];return sendJSON(res,200,{status:"success",article:row});
             }
             if(req.method==="GET"&&/^\/api\/connect\/articles\/\d+\/?$/.test(pathname)){
-              const id=Number(pathname.match(/articles\/(\d+)/)?.[1]),viewerId=Number(url.searchParams.get("userId")||0);const a=(await pool.query(`SELECT p.id,p.article_title,p.article_excerpt,p.article_cover_url,p.article_category,p.article_read_minutes,p.content,p.topics,p.created_at,p.updated_at,p.user_id,u.full_name,cp.public_username,COALESCE(cp.profile_image,'') profile_image FROM howdi_community_posts p JOIN users u ON u.id=p.user_id LEFT JOIN howdi_connect_profiles cp ON cp.user_id=p.user_id WHERE p.id=$1 AND p.post_type='ARTICLE' AND (p.post_status='PUBLISHED' OR p.user_id=$2)`,[id,viewerId])).rows[0];if(!a)return sendJSON(res,404,{status:"error",message:"Article not found"});delete a.user_id;return sendJSON(res,200,{status:"success",article:a});
+              const id=Number(pathname.match(/articles\/(\d+)/)?.[1]),viewerId=Number(url.searchParams.get("userId")||0);const a=(await pool.query(`SELECT p.id,p.article_title,p.article_excerpt,p.article_cover_url,p.article_cover_data,p.article_category,p.article_read_minutes,p.content,p.topics,p.created_at,p.updated_at,p.user_id,u.full_name,cp.public_username,COALESCE(cp.profile_image,'') profile_image,
+                (SELECT COUNT(*)::int FROM howdi_community_reactions r WHERE r.post_id=p.id) like_count,(SELECT COUNT(*)::int FROM howdi_community_comments cm WHERE cm.post_id=p.id) comment_count,(SELECT COUNT(*)::int FROM howdi_connect_post_saves s WHERE s.post_id=p.id) save_count,(SELECT COUNT(*)::int FROM howdi_connect_shares sh WHERE sh.post_id=p.id) share_count,
+                CASE WHEN $2>0 AND EXISTS(SELECT 1 FROM howdi_community_reactions r WHERE r.post_id=p.id AND r.user_id=$2) THEN TRUE ELSE FALSE END liked_by_viewer,
+                CASE WHEN $2>0 AND EXISTS(SELECT 1 FROM howdi_connect_post_saves s WHERE s.post_id=p.id AND s.user_id=$2) THEN TRUE ELSE FALSE END saved_by_viewer
+                FROM howdi_community_posts p JOIN users u ON u.id=p.user_id LEFT JOIN howdi_connect_profiles cp ON cp.user_id=p.user_id WHERE p.id=$1 AND p.post_type='ARTICLE' AND (p.post_status='PUBLISHED' OR p.user_id=$2)`,[id,viewerId])).rows[0];if(!a)return sendJSON(res,404,{status:"error",message:"Article not found"});delete a.user_id;return sendJSON(res,200,{status:"success",article:a});
             }
             if(req.method==="POST"&&/^\/api\/connect\/articles\/\d+\/history\/?$/.test(pathname)){
               const id=Number(pathname.match(/articles\/(\d+)/)?.[1]),body=await readJSON(req),userId=Number(body.userId||0);if(userId)await pool.query(`INSERT INTO howdi_connect_article_history(article_id,user_id,read_seconds,completed) VALUES($1,$2,$3,$4) ON CONFLICT(article_id,user_id) DO UPDATE SET last_read_at=NOW(),read_seconds=GREATEST(howdi_connect_article_history.read_seconds,EXCLUDED.read_seconds),completed=howdi_connect_article_history.completed OR EXCLUDED.completed`,[id,userId,Math.max(0,Number(body.readSeconds||0)),!!body.completed]);return sendJSON(res,200,{status:"success"});

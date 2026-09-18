@@ -3173,6 +3173,11 @@ function App() {
   const [connectGCInvite,setConnectGCInvite]=useState(null);
   const [connectGCCreateOpen,setConnectGCCreateOpen]=useState(false);
   const [connectGCCreate,setConnectGCCreate]=useState({name:"",description:"",privacy:"PUBLIC",category:"GENERAL"});
+  // HOWDI Connect V16.6K3 — fresh-open invitation link deep linking (/connect/invite/:token)
+  const [connectInviteToken,setConnectInviteToken]=useState(null);
+  const [connectInvitePreview,setConnectInvitePreview]=useState(null);
+  const [connectInviteBusy,setConnectInviteBusy]=useState(false);
+  const [connectInviteStatus,setConnectInviteStatus]=useState("");
   const [connectNetworkGraphOpen,setConnectNetworkGraphOpen]=useState(false);
   const [connectNetworkGraph,setConnectNetworkGraph]=useState({people:[],partnerRequests:[],mentorRequests:[],trust:{}});
   const [connectNetworkGraphTab,setConnectNetworkGraphTab]=useState("people");
@@ -3343,6 +3348,9 @@ function App() {
   const [connectActiveConversation,setConnectActiveConversation]=useState(null);
   const [connectMessages,setConnectMessages]=useState([]);
   const [connectMessageText,setConnectMessageText]=useState("");
+  // HOWDI Connect V16.6K3 — personal/group/channel chat attachments (image/video/document/link)
+  const [connectPendingAttachment,setConnectPendingAttachment]=useState(null);
+  const [connectAttachBusy,setConnectAttachBusy]=useState(false);
   const [connectEditingMessage,setConnectEditingMessage]=useState(null);
   const [connectEmojiOpen,setConnectEmojiOpen]=useState(false);
   const [connectNotifications,setConnectNotifications]=useState([]);
@@ -3487,6 +3495,8 @@ function App() {
   // HOWDI CONNECT V16.0D — Articles
   const [connectArticles,setConnectArticles]=useState([]),[connectArticleMine,setConnectArticleMine]=useState([]),[connectArticleSelected,setConnectArticleSelected]=useState(null);
   const [connectArticleEditor,setConnectArticleEditor]=useState(false),[connectArticleTitle,setConnectArticleTitle]=useState(""),[connectArticleExcerpt,setConnectArticleExcerpt]=useState(""),[connectArticleCover,setConnectArticleCover]=useState(""),[connectArticleCategory,setConnectArticleCategory]=useState("GENERAL"),[connectArticleTopics,setConnectArticleTopics]=useState(""),[connectArticleBody,setConnectArticleBody]=useState("");
+  // HOWDI Connect V16.6K3 — uploaded article cover (URL field kept for backward compatibility)
+  const [connectArticleCoverData,setConnectArticleCoverData]=useState(""),[connectArticleCoverBusy,setConnectArticleCoverBusy]=useState(false);
   const [connectArticleMode,setConnectArticleMode]=useState("DISCOVER"),[connectArticleAnalytics,setConnectArticleAnalytics]=useState(null),[connectArticleNotice,setConnectArticleNotice]=useState("");
 
   // HOWDI CONNECT V16.0C — Direct voice/video/group calling
@@ -4189,7 +4199,35 @@ function App() {
   const loadConnectConversations=async()=>{const userId=Number(currentUser?.id||currentUser?.user_id||0);if(!userId)return;try{const d=await connectApi(`/api/connect/conversations?userId=${userId}`);setConnectConversations(d.conversations||[]);}catch(e){setConnectNotice(e.message||"Chat load failed.");}};
   const openConnectConversation=async(c)=>{const userId=Number(currentUser?.id||currentUser?.user_id||0);if(!userId||!c?.id)return;setConnectActiveConversation(c);try{const d=await connectApi(`/api/connect/conversations/${c.id}/messages?userId=${userId}`);setConnectMessages(d.messages||[]);}catch(e){setConnectNotice(e.message||"Messages load failed.");}};
   const startConnectConversation=async(person)=>{const userId=Number(currentUser?.id||currentUser?.user_id||0);if(!userId||!person?.id)return;try{const d=await connectApi(`/api/connect/conversations`,{method:"POST",body:JSON.stringify({userId,targetUserId:person.id})});setConnectView("messages");await loadConnectConversations();await openConnectConversation({id:d.conversation_id,full_name:person.full_name,howdi_id:person.howdi_id});}catch(e){setConnectNotice(e.message||"Unable to start chat.");}};
-  const sendConnectMessage=async()=>{const userId=Number(currentUser?.id||currentUser?.user_id||0),text=connectMessageText.trim();if(!userId||!connectActiveConversation?.id||!text)return;if(connectEditingMessage){await editConnectMessage(connectEditingMessage);return;}try{await connectApi(`/api/connect/conversations/${connectActiveConversation.id}/messages`,{method:"POST",body:JSON.stringify({userId,messageText:text,expireMode:connectMessageMode})});setConnectMessageText("");await openConnectConversation(connectActiveConversation);await loadConnectConversations();}catch(e){setConnectNotice(e.message||"Send failed.");}};
+  const sendConnectMessage=async()=>{const userId=Number(currentUser?.id||currentUser?.user_id||0),text=connectMessageText.trim();if(!userId||!connectActiveConversation?.id||(!text&&!connectPendingAttachment))return;if(connectEditingMessage){await editConnectMessage(connectEditingMessage);return;}try{const att=connectPendingAttachment;const payload={userId,messageText:text,expireMode:connectMessageMode};if(att){payload.attachmentType=att.type;if(att.type==="LINK")payload.linkUrl=att.linkUrl;else{payload.attachmentData=att.data;payload.attachmentMime=att.mime;payload.attachmentName=att.name;}}await connectApi(`/api/connect/conversations/${connectActiveConversation.id}/messages`,{method:"POST",body:JSON.stringify(payload)});setConnectMessageText("");setConnectPendingAttachment(null);await openConnectConversation(connectActiveConversation);await loadConnectConversations();}catch(e){setConnectNotice(e.message||"Send failed.");}};
+  // HOWDI Connect V16.6K3 — pick/validate an image, video or document for chat (mirrors backend limits)
+  const CONNECT_ATTACHMENT_LIMITS={IMAGE:5*1024*1024,VIDEO:25*1024*1024,DOCUMENT:10*1024*1024};
+  const connectAttachmentTypeForFile=(file)=>{
+    const mime=String(file?.type||"");
+    if(mime.startsWith("image/"))return "IMAGE";
+    if(mime.startsWith("video/"))return "VIDEO";
+    if(["application/pdf","application/msword","application/vnd.ms-excel","text/plain"].includes(mime)||mime.startsWith("application/vnd.openxmlformats"))return "DOCUMENT";
+    return "";
+  };
+  const pickConnectChatAttachment=async(file)=>{
+    if(!file)return;
+    const type=connectAttachmentTypeForFile(file);
+    if(!type){setConnectNotice("That file type isn't supported. Use an image, video or document.");return;}
+    const limit=CONNECT_ATTACHMENT_LIMITS[type];
+    if(file.size>limit){setConnectNotice(`${type[0]}${type.slice(1).toLowerCase()} must be under ${Math.round(limit/1024/1024)}MB.`);return;}
+    setConnectAttachBusy(true);
+    try{
+      const data=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(String(r.result||""));r.onerror=reject;r.readAsDataURL(file);});
+      setConnectPendingAttachment({type,mime:file.type,name:file.name,data});
+    }catch{setConnectNotice("Unable to read that file.");}
+    finally{setConnectAttachBusy(false);}
+  };
+  const attachConnectLink=()=>{
+    const url=(window.prompt("Paste a link to share (https://...)")||"").trim();
+    if(!url)return;
+    if(!/^https?:\/\//i.test(url)){setConnectNotice("Links must start with http:// or https://.");return;}
+    setConnectPendingAttachment({type:"LINK",linkUrl:url});
+  };
   const editConnectMessage=async(message)=>{
     const userId=Number(currentUser?.id||currentUser?.user_id||0);
     const text=connectMessageText.trim();
@@ -4276,7 +4314,41 @@ function App() {
   const createConnectGCSpace=async()=>{const uid=Number(currentUser?.id||currentUser?.user_id||0);if(!uid||!connectGCCreate.name.trim())return;try{await connectApi(`/api/connect/groups-channels`,{method:"POST",body:JSON.stringify({userId:uid,spaceType:connectCommunityView==="channels"?"CHANNEL":"GROUP",...connectGCCreate})});setConnectGCCreate({name:"",description:"",privacy:"PUBLIC",category:"GENERAL"});setConnectGCCreateOpen(false);await loadConnectGCSpaces(connectCommunityView);setConnectNotice(`${connectCommunityView==="channels"?"Channel":"Group"} created.`)}catch(e){setConnectNotice(e.message||"Unable to create.")}};
   const toggleConnectGCMembership=async(space)=>{const uid=Number(currentUser?.id||currentUser?.user_id||0);if(!uid)return;try{await connectApi(`/api/connect/groups-channels/${space.id}/${space.joined?"leave":"join"}`,{method:"POST",body:JSON.stringify({userId:uid})});await loadConnectGCSpaces(connectCommunityView)}catch(e){setConnectNotice(e.message||"Unable to update membership.")}};
   const openConnectGCSpace=async(space)=>{const uid=Number(currentUser?.id||currentUser?.user_id||0);setConnectGCSelected(space);setConnectGCInvite(null);try{const d=await connectApi(`/api/connect/groups-channels/${space.id}/messages?userId=${uid}`);setConnectGCMessages(d.messages||[])}catch(e){setConnectGCMessages([]);setConnectNotice(e.message||"Join this space to open it.")}};
-  const sendConnectGCMessage=async()=>{const uid=Number(currentUser?.id||currentUser?.user_id||0);if(!uid||!connectGCSelected||!connectGCMessage.trim())return;try{await connectApi(`/api/connect/groups-channels/${connectGCSelected.id}/messages`,{method:"POST",body:JSON.stringify({userId:uid,body:connectGCMessage})});setConnectGCMessage("");await openConnectGCSpace(connectGCSelected)}catch(e){setConnectNotice(e.message||"Unable to send.")}};
+  const sendConnectGCMessage=async()=>{const uid=Number(currentUser?.id||currentUser?.user_id||0);if(!uid||!connectGCSelected||(!connectGCMessage.trim()&&!connectPendingAttachment))return;try{const att=connectPendingAttachment;const payload={userId:uid,body:connectGCMessage};if(att){payload.attachmentType=att.type;if(att.type==="LINK")payload.linkUrl=att.linkUrl;else{payload.mediaData=att.data;payload.attachmentMime=att.mime;payload.attachmentName=att.name;}}await connectApi(`/api/connect/groups-channels/${connectGCSelected.id}/messages`,{method:"POST",body:JSON.stringify(payload)});setConnectGCMessage("");setConnectPendingAttachment(null);await openConnectGCSpace(connectGCSelected)}catch(e){setConnectNotice(e.message||"Unable to send.")}};
+  // HOWDI Connect V16.6K3 — render an image/video/document/link attachment inside a chat bubble
+  const renderConnectDMAttachment=(m)=>{
+    const type=m.attachment_type,data=m.attachment_data;if(!type||!data)return null;
+    if(type==="IMAGE")return <img src={data} alt="Attachment" style={{display:"block",maxWidth:220,borderRadius:10,marginTop:6}}/>;
+    if(type==="VIDEO")return <video src={data} controls style={{display:"block",maxWidth:240,borderRadius:10,marginTop:6}}/>;
+    if(type==="DOCUMENT")return <a href={data} download={m.attachment_meta?.filename||"file"} style={{display:"block",marginTop:6}}>📎 {m.attachment_meta?.filename||"Document"}</a>;
+    if(type==="LINK")return <a href={data} target="_blank" rel="noreferrer" style={{display:"block",marginTop:6,color:"#2563eb"}}>🔗 {m.attachment_meta?.domain||data}</a>;
+    return null;
+  };
+  const renderConnectSpaceAttachment=(m)=>{
+    const type=m.message_type,data=m.media_data;if(!type||type==="TEXT"||!data)return null;
+    if(type==="IMAGE")return <img src={data} alt="Attachment" style={{display:"block",maxWidth:260,borderRadius:10,marginTop:6}}/>;
+    if(type==="VIDEO")return <video src={data} controls style={{display:"block",maxWidth:280,borderRadius:10,marginTop:6}}/>;
+    if(type==="DOCUMENT")return <a href={data} download={m.attachment_meta?.filename||"file"} style={{display:"block",marginTop:6}}>📎 {m.attachment_meta?.filename||"Document"}</a>;
+    if(type==="LINK")return <a href={data} target="_blank" rel="noreferrer" style={{display:"block",marginTop:6,color:"#2563eb"}}>🔗 {m.attachment_meta?.domain||data}</a>;
+    return null;
+  };
+  const connectAttachmentPickerRow=()=>(
+    <div style={{display:"flex",alignItems:"center",gap:6}}>
+      <label style={{cursor:"pointer",padding:"6px 8px"}} title="Attach image or video">
+        📷<input type="file" accept="image/*,video/*" style={{display:"none"}} onChange={e=>{pickConnectChatAttachment(e.target.files?.[0]);e.target.value="";}}/>
+      </label>
+      <label style={{cursor:"pointer",padding:"6px 8px"}} title="Attach document">
+        📄<input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.txt" style={{display:"none"}} onChange={e=>{pickConnectChatAttachment(e.target.files?.[0]);e.target.value="";}}/>
+      </label>
+      <button type="button" onClick={attachConnectLink} title="Attach link" style={{border:0,background:"transparent",cursor:"pointer",padding:"6px 8px"}}>🔗</button>
+      {connectAttachBusy&&<small style={{color:"#64748b"}}>Reading file…</small>}
+      {connectPendingAttachment&&<span style={{display:"flex",alignItems:"center",gap:6,background:"#f1f5f9",borderRadius:8,padding:"4px 8px",fontSize:12}}>
+        {connectPendingAttachment.type==="IMAGE"&&"🖼️"}{connectPendingAttachment.type==="VIDEO"&&"🎞️"}{connectPendingAttachment.type==="DOCUMENT"&&"📎"}{connectPendingAttachment.type==="LINK"&&"🔗"}
+        {" "}{connectPendingAttachment.name||connectPendingAttachment.linkUrl}
+        <button type="button" onClick={()=>setConnectPendingAttachment(null)} style={{border:0,background:"transparent",cursor:"pointer"}}>×</button>
+      </span>}
+    </div>
+  );
   const createConnectGCInvite=async(space)=>{const uid=Number(currentUser?.id||currentUser?.user_id||0);try{const d=await connectApi(`/api/connect/groups-channels/${space.id}/invite-links`,{method:"POST",body:JSON.stringify({userId:uid,label:"Share invite",expiresInDays:30,maxUses:0,requiresApproval:space.privacy==="PRIVATE"})});const origin=window.location.origin;const link=`${origin}/connect/invite/${d.invite.token}`;setConnectGCInvite({...d.invite,link});try{await navigator.clipboard?.writeText(link)}catch{}setConnectNotice("Invite link created and copied.")}catch(e){setConnectNotice(e.message||"Only admins can create invite links.")}};
   useEffect(()=>{if(connectView==="communities"&&["groups","channels"].includes(connectCommunityView))loadConnectGCSpaces(connectCommunityView)},[connectView,connectCommunityView,currentUser?.id,currentUser?.user_id]);
   useEffect(()=>{if(connectView==="communities"&&connectCommunityView==="spaces"){loadConnectSpaceRecommendations();loadConnectSpaceLibrary();}},[connectView,connectCommunityView,currentUser?.id,currentUser?.user_id]);
@@ -4384,6 +4456,53 @@ function App() {
     openNavigationOSArea("connect", "communities");
     setConnectCommunityView("spaces");
   },[]);
+
+  // HOWDI Connect V16.6K3 — resolve a fresh-open /connect/invite/:token link once.
+  // Does not touch the existing #space-{id} share flow above.
+  useEffect(()=>{
+    const m=window.location.pathname.match(/^\/connect\/invite\/([A-Za-z0-9_-]+)\/?$/);
+    if(!m)return;
+    const token=m[1];
+    setConnectInviteToken(token);
+    (async()=>{
+      try{
+        const r=await fetch(`${SHOP_API_BASE}/api/connect/invite/${encodeURIComponent(token)}`,{cache:"no-store"});
+        const d=await r.json().catch(()=>({}));
+        if(!r.ok||d.status==="error"){setConnectInviteStatus(d.message||"This invite link is invalid, expired or exhausted.");setConnectInvitePreview({error:true});return;}
+        setConnectInvitePreview(d.invite);
+      }catch{setConnectInviteStatus("Unable to reach HOWDI to resolve this invite.");setConnectInvitePreview({error:true});}
+    })();
+    openNavigationOSArea("connect","communities");
+    setConnectCommunityView("spaces");
+    // Clean the URL so a later refresh doesn't try to resolve the same link again.
+    try{window.history.replaceState(null,"",`${window.location.origin}/${window.location.search}`);}catch{}
+  },[]);
+
+  const joinConnectInviteSpace=async()=>{
+    if(!connectInviteToken||connectInvitePreview?.error)return;
+    if(!currentUser?.id&&!currentUser?.user_id){setShowLogin(true);setAuthMode("login");return;}
+    setConnectInviteBusy(true);setConnectInviteStatus("");
+    try{
+      const uid=Number(currentUser?.id||currentUser?.user_id||0);
+      const d=await connectApi(`/api/connect/invite/${encodeURIComponent(connectInviteToken)}/join`,{method:"POST",body:JSON.stringify({userId:uid})});
+      const spaceType=String(d.spaceType||connectInvitePreview?.spaceType||"GROUP")==="CHANNEL"?"CHANNEL":"GROUP";
+      const listView=spaceType==="CHANNEL"?"channels":"groups";
+      const listing=await connectApi(`/api/connect/groups-channels?userId=${uid}&type=${spaceType}`);
+      setConnectGCSpaces(listing.spaces||[]);
+      setConnectCommunityView(listView);
+      const found=(listing.spaces||[]).find(s=>Number(s.id)===Number(d.spaceId));
+      if(d.membershipStatus==="PENDING"){
+        setConnectGCSelected(found||{id:d.spaceId,name:connectInvitePreview?.name,space_type:spaceType,privacy:connectInvitePreview?.privacy,member_count:connectInvitePreview?.memberCount,joined:false});
+        setConnectGCMessages([]);
+        setConnectNotice("Join request sent — waiting for admin approval.");
+      }else{
+        if(found)await openConnectGCSpace(found);
+        setConnectNotice("Joined from invite link.");
+      }
+      setConnectInvitePreview(null);setConnectInviteToken(null);
+    }catch(e){setConnectInviteStatus(e.message||"Unable to join from this invite link.");}
+    finally{setConnectInviteBusy(false);}
+  };
 
   const connectRealtimeUserId=()=>Number(currentUser?.id||currentUser?.user_id||0);
 
@@ -5002,8 +5121,28 @@ function App() {
 
   const loadConnectArticles=async(mode="DISCOVER")=>{setConnectView("articles");setConnectArticleNotice("");const uid=Number(currentUser?.id||currentUser?.user_id||0);setConnectArticleMode(mode);try{const d=await connectApi(`/api/connect/articles?userId=${uid}&mode=${mode}`);setConnectArticles(d.articles||[]);}catch(e){setConnectArticleNotice(e.message||"Unable to load articles.")}};
   const loadMyConnectArticles=async()=>{setConnectView("articles");setConnectArticleMode("MINE");setConnectArticleNotice("");const uid=Number(currentUser?.id||currentUser?.user_id||0);try{const [m,a]=await Promise.all([connectApi(`/api/connect/articles/mine?userId=${uid}`),connectApi(`/api/connect/articles/analytics?userId=${uid}`)]);setConnectArticleMine(m.articles||[]);setConnectArticleAnalytics(a.analytics||null);}catch(e){setConnectArticleNotice(e.message||"Unable to load your articles.")}};
-  const publishConnectArticle=async(status="PUBLISHED")=>{const uid=Number(currentUser?.id||currentUser?.user_id||0);try{await connectApi('/api/connect/articles',{method:'POST',body:JSON.stringify({userId:uid,title:connectArticleTitle,excerpt:connectArticleExcerpt,coverUrl:connectArticleCover,category:connectArticleCategory,topics:connectArticleTopics,content:connectArticleBody,status})});setConnectArticleEditor(false);setConnectArticleTitle("");setConnectArticleExcerpt("");setConnectArticleCover("");setConnectArticleTopics("");setConnectArticleBody("");setConnectArticleNotice(status==="DRAFT"?"Draft saved.":"Article published.");await loadMyConnectArticles();}catch(e){setConnectArticleNotice(e.message||"Unable to save article.")}};
+  const pickConnectArticleCover=async(file)=>{
+    if(!file)return;
+    if(!String(file.type||"").startsWith("image/")){setConnectArticleNotice("Cover must be an image.");return;}
+    if(file.size>5*1024*1024){setConnectArticleNotice("Cover image must be under 5MB.");return;}
+    setConnectArticleCoverBusy(true);
+    try{const data=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(String(r.result||""));r.onerror=reject;r.readAsDataURL(file);});setConnectArticleCoverData(data);}
+    catch{setConnectArticleNotice("Unable to read that image.");}
+    finally{setConnectArticleCoverBusy(false);}
+  };
+  const publishConnectArticle=async(status="PUBLISHED")=>{const uid=Number(currentUser?.id||currentUser?.user_id||0);try{await connectApi('/api/connect/articles',{method:'POST',body:JSON.stringify({userId:uid,title:connectArticleTitle,excerpt:connectArticleExcerpt,coverUrl:connectArticleCover,coverData:connectArticleCoverData||undefined,category:connectArticleCategory,topics:connectArticleTopics,content:connectArticleBody,status})});setConnectArticleEditor(false);setConnectArticleTitle("");setConnectArticleExcerpt("");setConnectArticleCover("");setConnectArticleCoverData("");setConnectArticleTopics("");setConnectArticleBody("");setConnectArticleNotice(status==="DRAFT"?"Draft saved.":"Article published.");await loadMyConnectArticles();}catch(e){setConnectArticleNotice(e.message||"Unable to save article.")}};
   const openConnectArticle=async(a)=>{const uid=Number(currentUser?.id||currentUser?.user_id||0);try{const d=await connectApi(`/api/connect/articles/${a.id}?userId=${uid}`);setConnectArticleSelected(d.article);connectApi(`/api/connect/articles/${a.id}/history`,{method:'POST',body:JSON.stringify({userId:uid,readSeconds:1})}).catch(()=>{});}catch(e){setConnectArticleNotice(e.message||"Unable to open article.")}};
+  // HOWDI Connect V16.6K3 — wire Like/Save/Share into the Article reader using the existing generic post interaction system (posts/:id/reaction|save|share|comments)
+  const toggleConnectArticleReaction=async()=>{
+    const uid=Number(currentUser?.id||currentUser?.user_id||0);if(!uid||!connectArticleSelected?.id){setConnectNotice("Please login before reacting.");return;}
+    try{const d=await connectApi(`/api/connect/posts/${connectArticleSelected.id}/reaction`,{method:"POST",body:JSON.stringify({userId:uid})});setConnectArticleSelected(v=>v?{...v,liked_by_viewer:d.reacted,like_count:d.reaction_count}:v);}
+    catch(e){setConnectNotice(e.message||"Unable to update your reaction.");}
+  };
+  const shareConnectArticle=async()=>{
+    if(!connectArticleSelected?.id)return;
+    try{const uid=Number(currentUser?.id||currentUser?.user_id||0);const d=await connectApi(`/api/connect/posts/${connectArticleSelected.id}/share`,{method:"POST",body:JSON.stringify({userId:uid,shareType:"COPY_LINK"})});setConnectArticleSelected(v=>v?{...v,share_count:Number(d.share_count||0)}:v);const link=`${window.location.origin}${window.location.pathname}#connect-post-${connectArticleSelected.id}`;if(navigator.clipboard)await navigator.clipboard.writeText(link);setConnectNotice("Article link copied.");}
+    catch(e){setConnectNotice(e.message||"Unable to share.");}
+  };
 
   const createConnectCall=async()=>{const uid=connectRealtimeUserId(),handles=connectCallInvitees.split(/[, ]+/).map(x=>x.trim().replace(/^@/,"").toLowerCase()).filter(Boolean);if(!uid||!handles.length)return setConnectCallNotice("Enter one or more public usernames to call.");try{const d=await connectApi('/api/connect/calls',{method:'POST',body:JSON.stringify({userId:uid,callType:connectCallType,inviteeUsernames:handles})});await connectCallMedia(connectCallType);setConnectCall(d.call);setConnectCallOpen(true);setConnectCallNotice(handles.length>1?"Group call started — waiting for participants.":"Calling…");connectCallStartPolling(d.call);}catch(e){setConnectCallNotice(e.message||'Unable to start call.');}};
   const respondConnectCall=async(call,accept)=>{const uid=connectRealtimeUserId();try{await connectApi(`/api/connect/calls/${call.id}/respond`,{method:'PATCH',body:JSON.stringify({userId:uid,accept})});if(accept){await connectCallMedia(call.call_type);setConnectCall(call);setConnectCallOpen(true);connectCallStartPolling(call);}await loadConnectCallInbox();}catch(e){setConnectCallNotice(e.message||'Unable to respond.');}};
@@ -19179,7 +19318,7 @@ const removeNotification = async (notificationId) => {
                     {!connectConversations.length&&<div className="hc2-empty">No chats yet. Find someone in Explore.</div>}
                     {connectConversations.map(c=><button className={Number(connectActiveConversation?.id)===Number(c.id)?"active":""} key={c.id} onClick={()=>openConnectConversation(c)}><div className="hc2-avatar">{String(c.full_name||"H")[0]}</div><span><b>{c.full_name||"HOWDI Member"}</b><small>{c.last_message||c.public_username||"Start chatting"}</small></span><em>{Number(c.unread_count||0)>0?c.unread_count:""}</em></button>)}
                   </aside>
-                  <div className="hc2-chat">{connectActiveConversation?<><header><div className="hc2-avatar">{String(connectActiveConversation.full_name||"H")[0]}</div><span><b>{connectActiveConversation.full_name||"HOWDI Member"}</b><small>{connectActiveConversation.public_username?`@${connectActiveConversation.public_username}`:"HOWDI Connect"}</small></span></header><div className="hc2-chat-body">{connectMessages.map(m=><div key={m.id} className={Number(m.sender_user_id)===Number(currentUser?.id||currentUser?.user_id)?"hc2-bubble mine":"hc2-bubble theirs"}>{m.deleted_at?<i>Message deleted</i>:<>{m.message_text}{m.edited_at&&<em style={{fontSize:9,opacity:.65,marginLeft:6}}>(edited)</em>}<div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:4}}>{Object.entries(m.reactions||{}).map(([uid,emoji])=><span key={uid}>{emoji}</span>)}</div><div style={{display:"flex",gap:4,marginTop:5}}>{["👍","❤️","😂"].map(e=><button key={e} type="button" onClick={()=>reactConnectMessage(m,e)} style={{border:0,background:"transparent",cursor:"pointer"}}>{e}</button>)}{Number(m.sender_user_id)===Number(currentUser?.id||currentUser?.user_id)&&<><button type="button" onClick={()=>{setConnectEditingMessage(m);setConnectMessageText(m.message_text)}} style={{border:0,background:"transparent",cursor:"pointer"}}>Edit</button><button type="button" onClick={()=>deleteConnectMessage(m)} style={{border:0,background:"transparent",cursor:"pointer"}}>Delete</button></>}</div></>}<small>{formatConnectDate(m.created_at)}{m.expires_at?` · expires ${formatConnectDate(m.expires_at)}`:""}</small></div>)}</div><footer style={{position:"relative"}}><button type="button" onClick={()=>setConnectEmojiOpen(v=>!v)}>😊</button>{connectEmojiOpen&&<div style={{position:"absolute",bottom:"52px",left:8,display:"flex",gap:6,padding:8,background:"#fff",border:"1px solid #e5e9e6",borderRadius:12,zIndex:5}}>{["😀","😂","😍","👍","🙏","🔥","🎉","❤️"].map(e=><button type="button" key={e} onClick={()=>{setConnectMessageText(v=>v+e);setConnectEmojiOpen(false)}} style={{fontSize:20,border:0,background:"transparent"}}>{e}</button>)}</div>}<input value={connectMessageText} onChange={e=>setConnectMessageText(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")sendConnectMessage()}} placeholder={connectEditingMessage?"Edit message…":"Message…"}/>{connectEditingMessage&&<button type="button" onClick={()=>{setConnectEditingMessage(null);setConnectMessageText("")}}>×</button>}<button className="send" onClick={sendConnectMessage}>↑</button></footer></>:<div className="hc2-empty">Select a conversation.</div>}</div>
+                  <div className="hc2-chat">{connectActiveConversation?<><header><div className="hc2-avatar">{String(connectActiveConversation.full_name||"H")[0]}</div><span><b>{connectActiveConversation.full_name||"HOWDI Member"}</b><small>{connectActiveConversation.public_username?`@${connectActiveConversation.public_username}`:"HOWDI Connect"}</small></span></header><div className="hc2-chat-body">{connectMessages.map(m=><div key={m.id} className={Number(m.sender_user_id)===Number(currentUser?.id||currentUser?.user_id)?"hc2-bubble mine":"hc2-bubble theirs"}>{m.deleted_at?<i>Message deleted</i>:<>{m.message_text}{renderConnectDMAttachment(m)}{m.edited_at&&<em style={{fontSize:9,opacity:.65,marginLeft:6}}>(edited)</em>}<div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:4}}>{Object.entries(m.reactions||{}).map(([uid,emoji])=><span key={uid}>{emoji}</span>)}</div><div style={{display:"flex",gap:4,marginTop:5}}>{["👍","❤️","😂"].map(e=><button key={e} type="button" onClick={()=>reactConnectMessage(m,e)} style={{border:0,background:"transparent",cursor:"pointer"}}>{e}</button>)}{Number(m.sender_user_id)===Number(currentUser?.id||currentUser?.user_id)&&<><button type="button" onClick={()=>{setConnectEditingMessage(m);setConnectMessageText(m.message_text)}} style={{border:0,background:"transparent",cursor:"pointer"}}>Edit</button><button type="button" onClick={()=>deleteConnectMessage(m)} style={{border:0,background:"transparent",cursor:"pointer"}}>Delete</button></>}</div></>}<small>{formatConnectDate(m.created_at)}{m.expires_at?` · expires ${formatConnectDate(m.expires_at)}`:""}</small></div>)}</div><footer style={{position:"relative",flexWrap:"wrap"}}>{connectAttachmentPickerRow()}<button type="button" onClick={()=>setConnectEmojiOpen(v=>!v)}>😊</button>{connectEmojiOpen&&<div style={{position:"absolute",bottom:"52px",left:8,display:"flex",gap:6,padding:8,background:"#fff",border:"1px solid #e5e9e6",borderRadius:12,zIndex:5}}>{["😀","😂","😍","👍","🙏","🔥","🎉","❤️"].map(e=><button type="button" key={e} onClick={()=>{setConnectMessageText(v=>v+e);setConnectEmojiOpen(false)}} style={{fontSize:20,border:0,background:"transparent"}}>{e}</button>)}</div>}<input value={connectMessageText} onChange={e=>setConnectMessageText(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")sendConnectMessage()}} placeholder={connectEditingMessage?"Edit message…":"Message…"}/>{connectEditingMessage&&<button type="button" onClick={()=>{setConnectEditingMessage(null);setConnectMessageText("")}}>×</button>}<button className="send" onClick={sendConnectMessage}>↑</button></footer></>:<div className="hc2-empty">Select a conversation.</div>}</div>
                   <aside className="hc2-chat-info"><div className="hc2-avatar big">{String(connectActiveConversation?.full_name||"H")[0]}</div><b>{connectActiveConversation?.full_name||"HOWDI Connect"}</b><small>{connectActiveConversation?.public_username?`@${connectActiveConversation.public_username}`:"Select a chat"}</small><label><span><b>Message mode</b><small>Keep or auto-delete messages after 24 hours.</small></span><select value={connectMessageMode} onChange={e=>{setConnectMessageMode(e.target.value);saveConnectPreferences({messageMode:e.target.value})}}><option>Keep</option><option>After viewing</option><option>24 hours</option></select></label></aside>
                 </section>}
 
@@ -19376,7 +19515,7 @@ const removeNotification = async (notificationId) => {
                   <header><div><small>HOWDI CONNECT · ARTICLES</small><h2>Ideas worth reading</h2><p>Long-form stories, knowledge, creator insights and useful community writing.</p></div><button onClick={()=>setConnectArticleEditor(true)}>＋ Write article</button></header>
                   <nav><button className={connectArticleMode==="DISCOVER"?"active":""} onClick={()=>loadConnectArticles("DISCOVER")}>Discover</button><button className={connectArticleMode==="FOLLOWING"?"active":""} onClick={()=>loadConnectArticles("FOLLOWING")}>Following</button><button className={connectArticleMode==="MINE"?"active":""} onClick={loadMyConnectArticles}>My articles</button></nav>
                   {connectArticleAnalytics&&connectArticleMode==="MINE"&&<div className="hc160d-analytics">{[["Articles",connectArticleAnalytics.total_articles],["Published",connectArticleAnalytics.published],["Views",connectArticleAnalytics.views],["Likes",connectArticleAnalytics.likes],["Saves",connectArticleAnalytics.saves]].map(([k,v])=><article key={k}><b>{v||0}</b><span>{k}</span></article>)}</div>}
-                  <div className="hc160d-grid">{(connectArticleMode==="MINE"?connectArticleMine:connectArticles).map(a=><article key={a.id} onClick={()=>openConnectArticle(a)}>{a.article_cover_url?<img src={a.article_cover_url} alt=""/>:<div className="hc160d-cover">HOWDI</div>}<small>{a.article_category||"GENERAL"}{a.post_status?` · ${a.post_status}`:""}</small><h3>{a.article_title}</h3><p>{a.article_excerpt||String(a.content||"").slice(0,180)}</p><footer><span>{a.public_username?`@${a.public_username}`:a.full_name||"You"}</span><span>{a.article_read_minutes||1} min read</span></footer></article>)}</div>{connectArticleNotice&&<em className="hc160d-notice">{connectArticleNotice}</em>}
+                  <div className="hc160d-grid">{(connectArticleMode==="MINE"?connectArticleMine:connectArticles).map(a=><article key={a.id} onClick={()=>openConnectArticle(a)}>{(a.article_cover_data||a.article_cover_url)?<img src={a.article_cover_data||a.article_cover_url} alt=""/>:<div className="hc160d-cover">HOWDI</div>}<small>{a.article_category||"GENERAL"}{a.post_status?` · ${a.post_status}`:""}</small><h3>{a.article_title}</h3><p>{a.article_excerpt||String(a.content||"").slice(0,180)}</p><footer><span>{a.public_username?`@${a.public_username}`:a.full_name||"You"}</span><span>{a.article_read_minutes||1} min read</span></footer></article>)}</div>{connectArticleNotice&&<em className="hc160d-notice">{connectArticleNotice}</em>}
                 </section>}
 
                 {connectView==="social" && <section className="hc160-social-page">
@@ -21374,10 +21513,31 @@ const removeNotification = async (notificationId) => {
 
       {connectGCCreateOpen&&<div className="hc160b-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setConnectGCCreateOpen(false)}}><div className="hc160b-modal"><header><div><small>HOWDI CONNECT</small><h3>Create {connectCommunityView==="channels"?"channel":"group"}</h3></div><button onClick={()=>setConnectGCCreateOpen(false)}>×</button></header><label>Name<input value={connectGCCreate.name} onChange={e=>setConnectGCCreate(v=>({...v,name:e.target.value}))} placeholder="Community name"/></label><label>Description<textarea rows="3" value={connectGCCreate.description} onChange={e=>setConnectGCCreate(v=>({...v,description:e.target.value}))}/></label><div className="hc160b-form-row"><label>Privacy<select value={connectGCCreate.privacy} onChange={e=>setConnectGCCreate(v=>({...v,privacy:e.target.value}))}><option value="PUBLIC">Public</option><option value="PRIVATE">Private · approval</option><option value="INVITE_ONLY">Invite only</option></select></label><label>Category<input value={connectGCCreate.category} onChange={e=>setConnectGCCreate(v=>({...v,category:e.target.value.toUpperCase()}))}/></label></div><footer><button onClick={()=>setConnectGCCreateOpen(false)}>Cancel</button><button className="primary" onClick={createConnectGCSpace}>Create →</button></footer></div></div>}
 
-      {connectArticleEditor&&<div className="hc160d-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setConnectArticleEditor(false)}}><div className="hc160d-editor"><header><div><small>ARTICLE STUDIO</small><h2>Write on HOWDI</h2></div><button onClick={()=>setConnectArticleEditor(false)}>×</button></header><input value={connectArticleTitle} onChange={e=>setConnectArticleTitle(e.target.value)} placeholder="Article title"/><textarea className="excerpt" value={connectArticleExcerpt} onChange={e=>setConnectArticleExcerpt(e.target.value)} placeholder="Short summary / excerpt"/><div className="row"><select value={connectArticleCategory} onChange={e=>setConnectArticleCategory(e.target.value)}><option>GENERAL</option><option>EDUCATION</option><option>TECHNOLOGY</option><option>BUSINESS</option><option>CREATIVITY</option><option>COMMUNITY</option><option>CAREER</option><option>TRAVEL</option></select><input value={connectArticleTopics} onChange={e=>setConnectArticleTopics(e.target.value)} placeholder="Topics: AI, crochet, learning"/></div><input value={connectArticleCover} onChange={e=>setConnectArticleCover(e.target.value)} placeholder="Cover image URL (media upload can plug in here)"/><textarea className="body" value={connectArticleBody} onChange={e=>setConnectArticleBody(e.target.value)} placeholder="Tell the full story…"/><footer><button onClick={()=>publishConnectArticle("DRAFT")}>Save draft</button><button className="primary" onClick={()=>publishConnectArticle("PUBLISHED")}>Publish article</button></footer></div></div>}
-      {connectArticleSelected&&<div className="hc160d-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setConnectArticleSelected(null)}}><article className="hc160d-reader"><button className="close" onClick={()=>setConnectArticleSelected(null)}>×</button>{connectArticleSelected.article_cover_url&&<img src={connectArticleSelected.article_cover_url} alt=""/>}<small>{connectArticleSelected.article_category} · {connectArticleSelected.article_read_minutes||1} min read</small><h1>{connectArticleSelected.article_title}</h1><div className="author"><b>{connectArticleSelected.full_name}</b><span>{connectArticleSelected.public_username?`@${connectArticleSelected.public_username}`:"HOWDI creator"}</span></div><p className="lead">{connectArticleSelected.article_excerpt}</p><div className="content">{String(connectArticleSelected.content||"").split("\n").map((x,i)=><p key={i}>{x}</p>)}</div></article></div>}
+      {connectArticleEditor&&<div className="hc160d-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setConnectArticleEditor(false)}}><div className="hc160d-editor"><header><div><small>ARTICLE STUDIO</small><h2>Write on HOWDI</h2></div><button onClick={()=>setConnectArticleEditor(false)}>×</button></header><input value={connectArticleTitle} onChange={e=>setConnectArticleTitle(e.target.value)} placeholder="Article title"/><textarea className="excerpt" value={connectArticleExcerpt} onChange={e=>setConnectArticleExcerpt(e.target.value)} placeholder="Short summary / excerpt"/><div className="row"><select value={connectArticleCategory} onChange={e=>setConnectArticleCategory(e.target.value)}><option>GENERAL</option><option>EDUCATION</option><option>TECHNOLOGY</option><option>BUSINESS</option><option>CREATIVITY</option><option>COMMUNITY</option><option>CAREER</option><option>TRAVEL</option></select><input value={connectArticleTopics} onChange={e=>setConnectArticleTopics(e.target.value)} placeholder="Topics: AI, crochet, learning"/></div><input value={connectArticleCover} onChange={e=>setConnectArticleCover(e.target.value)} placeholder="Cover image URL (optional)"/><div className="row" style={{alignItems:"center",gap:10}}><label style={{cursor:"pointer",border:"1px solid #dbe3dc",borderRadius:8,padding:"7px 12px"}}>📷 Upload cover<input type="file" accept="image/*" style={{display:"none"}} onChange={e=>{pickConnectArticleCover(e.target.files?.[0]);e.target.value="";}}/></label>{connectArticleCoverBusy&&<small>Reading image…</small>}{connectArticleCoverData&&<><img src={connectArticleCoverData} alt="Cover preview" style={{height:52,width:78,objectFit:"cover",borderRadius:8}}/><button type="button" onClick={()=>setConnectArticleCoverData("")}>Remove</button></>}</div><textarea className="body" value={connectArticleBody} onChange={e=>setConnectArticleBody(e.target.value)} placeholder="Tell the full story…"/><footer><button onClick={()=>publishConnectArticle("DRAFT")}>Save draft</button><button className="primary" onClick={()=>publishConnectArticle("PUBLISHED")}>Publish article</button></footer></div></div>}
+      {connectArticleSelected&&<div className="hc160d-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setConnectArticleSelected(null)}}><article className="hc160d-reader"><button className="close" onClick={()=>setConnectArticleSelected(null)}>×</button>{(connectArticleSelected.article_cover_data||connectArticleSelected.article_cover_url)&&<img src={connectArticleSelected.article_cover_data||connectArticleSelected.article_cover_url} alt=""/>}<small>{connectArticleSelected.article_category} · {connectArticleSelected.article_read_minutes||1} min read</small><h1>{connectArticleSelected.article_title}</h1><div className="author"><b>{connectArticleSelected.full_name}</b><span>{connectArticleSelected.public_username?`@${connectArticleSelected.public_username}`:"HOWDI creator"}</span></div><p className="lead">{connectArticleSelected.article_excerpt}</p><div className="content">{String(connectArticleSelected.content||"").split("\n").map((x,i)=><p key={i}>{x}</p>)}</div><div style={{marginTop:16,paddingTop:12,borderTop:"1px solid #edf0f2",display:"flex",gap:9,flexWrap:"wrap"}}>
+        <button type="button" onClick={toggleConnectArticleReaction} style={{border:"1px solid #dbe3dc",borderRadius:999,padding:"8px 12px",background:connectArticleSelected.liked_by_viewer?"#eef7f0":"#fff",color:connectArticleSelected.liked_by_viewer?"#365947":"#475569",fontWeight:800,cursor:"pointer"}}>{connectArticleSelected.liked_by_viewer?"❤️ Liked":"🤍 Like"} {Number(connectArticleSelected.like_count||0)>0?`(${connectArticleSelected.like_count})`:""}</button>
+        <button type="button" onClick={()=>openConnectComments(connectArticleSelected)} style={{border:"1px solid #dbe3dc",borderRadius:999,padding:"8px 12px",background:"#fff",color:"#475569",fontWeight:800,cursor:"pointer"}}>💬 Comment {Number(connectArticleSelected.comment_count||0)>0?`(${connectArticleSelected.comment_count})`:""}</button>
+        <button type="button" onClick={()=>toggleConnectSave(connectArticleSelected.id)} style={{border:"1px solid #dbe3dc",borderRadius:999,padding:"8px 12px",background:connectSavedPosts[String(connectArticleSelected.id)]?"#eef7f0":"#fff",color:connectSavedPosts[String(connectArticleSelected.id)]?"#365947":"#475569",fontWeight:800,cursor:"pointer"}}>{connectSavedPosts[String(connectArticleSelected.id)]?"🔖 Saved":"📑 Save"}</button>
+        <button type="button" onClick={shareConnectArticle} style={{border:"1px solid #dbe3dc",borderRadius:999,padding:"8px 12px",background:"#fff",color:"#475569",fontWeight:800,cursor:"pointer"}}>↗ Share {Number(connectArticleSelected.share_count||0)>0?`(${connectArticleSelected.share_count})`:""}</button>
+      </div></article></div>}
 
-      {connectGCSelected&&<div className="hc160b-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setConnectGCSelected(null)}}><div className="hc160b-room"><header><div><small>{connectGCSelected.space_type} · {String(connectGCSelected.privacy).replaceAll("_"," ")}</small><h3>{connectGCSelected.name}</h3><span>{connectGCSelected.member_count||0} {connectGCSelected.space_type==="CHANNEL"?"subscribers":"members"}</span></div><div>{["OWNER","ADMIN","MODERATOR"].includes(connectGCSelected.membership_role)&&<button onClick={()=>createConnectGCInvite(connectGCSelected)}>🔗 Invite</button>}<button onClick={()=>setConnectGCSelected(null)}>×</button></div></header>{connectGCInvite&&<div className="hc160b-invite"><b>Invite link ready</b><input readOnly value={connectGCInvite.link}/><button onClick={()=>navigator.clipboard?.writeText(connectGCInvite.link)}>Copy</button><small>30-day link · can be shared like Telegram invitation links.</small></div>}<div className="hc160b-messages">{connectGCMessages.length?connectGCMessages.map(m=><article key={m.id}><b>{m.full_name||m.public_username||"HOWDI member"}</b><p>{m.body}</p><small>{formatConnectDate(m.created_at)}</small></article>):<div className="hc2-empty">No messages yet.</div>}</div>{connectGCSelected.joined&&<footer className="hc160b-compose"><input value={connectGCMessage} onChange={e=>setConnectGCMessage(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")sendConnectGCMessage()}} placeholder={connectGCSelected.space_type==="CHANNEL"?"Publish channel update…":"Message group…"}/><button onClick={sendConnectGCMessage}>Send ↑</button></footer>}</div></div>}
+      {connectInvitePreview&&<div className="hc160b-overlay" onMouseDown={e=>{if(e.target===e.currentTarget){setConnectInvitePreview(null);setConnectInviteToken(null);setConnectInviteStatus("");}}}>
+        <div className="hc160b-room">
+          <header>
+            <div><small>HOWDI INVITE</small><h3>{connectInvitePreview.error?"Invite link unavailable":connectInvitePreview.name}</h3>
+              {!connectInvitePreview.error&&<span>{connectInvitePreview.spaceType==="CHANNEL"?"Channel":"Group"} · {String(connectInvitePreview.privacy||"").replaceAll("_"," ")} · {connectInvitePreview.memberCount||0} {connectInvitePreview.spaceType==="CHANNEL"?"subscribers":"members"}</span>}
+            </div>
+            <button onClick={()=>{setConnectInvitePreview(null);setConnectInviteToken(null);setConnectInviteStatus("");}}>×</button>
+          </header>
+          {!connectInvitePreview.error&&<p style={{padding:"0 4px",color:"#475569"}}>{connectInvitePreview.description||`You've been invited by ${connectInvitePreview.ownerName||"a HOWDI member"} to join this ${connectInvitePreview.spaceType==="CHANNEL"?"channel":"group"}.`}</p>}
+          {connectInvitePreview.requiresApproval&&!connectInvitePreview.error&&<small style={{padding:"0 4px",display:"block",color:"#92620a"}}>Admin approval required to join.</small>}
+          {connectInviteStatus&&<em style={{padding:"0 4px",display:"block",color:"#b42318"}}>{connectInviteStatus}</em>}
+          {!connectInvitePreview.error&&<footer className="hc160b-compose" style={{justifyContent:"flex-end"}}>
+            <button disabled={connectInviteBusy} onClick={joinConnectInviteSpace}>{currentUser?.id||currentUser?.user_id?(connectInviteBusy?"Joining…":"Join"):"Log in to join"}</button>
+          </footer>}
+        </div>
+      </div>}
+      {connectGCSelected&&<div className="hc160b-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setConnectGCSelected(null)}}><div className="hc160b-room"><header><div><small>{connectGCSelected.space_type} · {String(connectGCSelected.privacy).replaceAll("_"," ")}</small><h3>{connectGCSelected.name}</h3><span>{connectGCSelected.member_count||0} {connectGCSelected.space_type==="CHANNEL"?"subscribers":"members"}</span></div><div>{["OWNER","ADMIN","MODERATOR"].includes(connectGCSelected.membership_role)&&<button onClick={()=>createConnectGCInvite(connectGCSelected)}>🔗 Invite</button>}<button onClick={()=>setConnectGCSelected(null)}>×</button></div></header>{connectGCInvite&&<div className="hc160b-invite"><b>Invite link ready</b><input readOnly value={connectGCInvite.link}/><button onClick={()=>navigator.clipboard?.writeText(connectGCInvite.link)}>Copy</button><small>30-day link · can be shared like Telegram invitation links.</small></div>}<div className="hc160b-messages">{connectGCMessages.length?connectGCMessages.map(m=><article key={m.id}><b>{m.full_name||m.public_username||"HOWDI member"}</b><p>{m.body}</p>{renderConnectSpaceAttachment(m)}<small>{formatConnectDate(m.created_at)}</small></article>):<div className="hc2-empty">No messages yet.</div>}</div>{connectGCSelected.joined&&<footer className="hc160b-compose" style={{flexWrap:"wrap"}}>{connectAttachmentPickerRow()}<input value={connectGCMessage} onChange={e=>setConnectGCMessage(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")sendConnectGCMessage()}} placeholder={connectGCSelected.space_type==="CHANNEL"?"Publish channel update…":"Message group…"}/><button onClick={sendConnectGCMessage}>Send ↑</button></footer>}</div></div>}
 
 
       {/* HOWDI CONNECT V16.0C — Call launcher + incoming calls */}
