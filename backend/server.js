@@ -2982,6 +2982,28 @@
           );
         `);
 
+        // K4 FIX (reconciled): `learning_content` is referenced (FK/INSERT/SELECT)
+        // throughout this file but has no CREATE TABLE statement anywhere — a
+        // genuinely missing table, not just an ordering issue. Schema inferred
+        // from usage (INSERT below, SELECT ...WHERE is_published/category/sort_order,
+        // and the index created right after this block).
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS learning_content (
+            id BIGSERIAL PRIMARY KEY,
+            content_code VARCHAR(60) UNIQUE NOT NULL,
+            title VARCHAR(220) NOT NULL,
+            category VARCHAR(60) NOT NULL,
+            short_description VARCHAR(500),
+            content_body TEXT,
+            estimated_minutes INTEGER NOT NULL DEFAULT 5,
+            level VARCHAR(30) NOT NULL DEFAULT 'BEGINNER',
+            cover_icon VARCHAR(20),
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            is_published BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          );
+        `);
         await pool.query(`
           CREATE TABLE IF NOT EXISTS user_learning_progress (
             id BIGSERIAL PRIMARY KEY,
@@ -6041,6 +6063,13 @@
         await pool.query(`ALTER TABLE howdi_community_posts ADD COLUMN IF NOT EXISTS intent_type VARCHAR(24) NOT NULL DEFAULT 'SHARE';`);
         await pool.query(`ALTER TABLE howdi_community_posts ADD COLUMN IF NOT EXISTS intent_status VARCHAR(20) NOT NULL DEFAULT 'OPEN';`);
         await pool.query(`ALTER TABLE howdi_community_posts ADD COLUMN IF NOT EXISTS intent_expires_at TIMESTAMPTZ;`);
+        // K4 FIX (reconciled): duplicate-CREATE-TABLE bug — this first CREATE wins
+        // and locked in CHECK (visibility IN ('COMMUNITY')). The Article feature
+        // (POST/PATCH /api/connect/articles, repaired-K3 version) inserts
+        // visibility='PUBLIC', which the locked-in constraint rejects. Idempotent
+        // widen to the only two literal values ever inserted into this column.
+        await pool.query(`ALTER TABLE howdi_community_posts DROP CONSTRAINT IF EXISTS howdi_community_posts_visibility_check;`);
+        await pool.query(`ALTER TABLE howdi_community_posts ADD CONSTRAINT howdi_community_posts_visibility_check CHECK (visibility IN ('COMMUNITY','PUBLIC'));`);
 
         await pool.query(`
           CREATE TABLE IF NOT EXISTS howdi_connect_post_participants (
@@ -6487,6 +6516,12 @@
         await pool.query(`ALTER TABLE howdi_community_posts ADD COLUMN IF NOT EXISTS article_read_minutes INTEGER NOT NULL DEFAULT 1;`);
         await pool.query(`CREATE TABLE IF NOT EXISTS howdi_connect_article_history(id BIGSERIAL PRIMARY KEY,article_id BIGINT NOT NULL REFERENCES howdi_community_posts(id) ON DELETE CASCADE,user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,last_read_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),read_seconds INTEGER NOT NULL DEFAULT 0,completed BOOLEAN NOT NULL DEFAULT FALSE,UNIQUE(article_id,user_id));`);
         await pool.query(`CREATE TABLE IF NOT EXISTS howdi_connect_article_reports(id BIGSERIAL PRIMARY KEY,article_id BIGINT NOT NULL REFERENCES howdi_community_posts(id) ON DELETE CASCADE,reporter_user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,reason VARCHAR(80) NOT NULL,details TEXT NOT NULL DEFAULT '',status VARCHAR(20) NOT NULL DEFAULT 'OPEN',created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),UNIQUE(article_id,reporter_user_id));`);
+        // K4 FIX (reconciled): self-referential ordering bug inside this same function —
+        // this index needs post_type/post_status, but their own ALTER ADD COLUMN
+        // statements are ~700 lines further down in this file (still run there too,
+        // now no-ops). Duplicated here so the index creation doesn't fail on a fresh DB.
+        await pool.query(`ALTER TABLE howdi_community_posts ADD COLUMN IF NOT EXISTS post_type VARCHAR(30) NOT NULL DEFAULT 'POST';`);
+        await pool.query(`ALTER TABLE howdi_community_posts ADD COLUMN IF NOT EXISTS post_status VARCHAR(20) NOT NULL DEFAULT 'PUBLISHED';`);
         await pool.query(`CREATE INDEX IF NOT EXISTS howdi_connect_articles_feed_idx ON howdi_community_posts(post_type,post_status,created_at DESC);`);
         await pool.query(`CREATE INDEX IF NOT EXISTS howdi_connect_article_history_user_idx ON howdi_connect_article_history(user_id,last_read_at DESC);`);
 
@@ -6932,6 +6967,12 @@
         await pool.query(`CREATE INDEX IF NOT EXISTS howdi_connect_presence_seen_idx ON howdi_connect_presence(last_seen_at DESC);`);
         await pool.query(`ALTER TABLE howdi_connect_profiles ADD COLUMN IF NOT EXISTS avatar_data TEXT;`);
         await pool.query(`ALTER TABLE howdi_connect_profiles ADD COLUMN IF NOT EXISTS cover_data TEXT;`);
+        // K4 FIX (reconciled): missing runtime-required column, no ALTER fallback
+        // existed. `cp.profile_image` is selected directly off howdi_connect_profiles
+        // by several queries (Article feed/detail, subscription-plan listings, call
+        // rosters), but this table only ever got avatar_data/cover_data columns —
+        // profile_image lives on the unrelated user_profile_settings table.
+        await pool.query(`ALTER TABLE howdi_connect_profiles ADD COLUMN IF NOT EXISTS profile_image TEXT NOT NULL DEFAULT '';`);
         await pool.query(`ALTER TABLE howdi_connect_profiles ADD COLUMN IF NOT EXISTS student_level VARCHAR(120) NOT NULL DEFAULT '';`);
         await pool.query(`ALTER TABLE howdi_connect_profiles ADD COLUMN IF NOT EXISTS institution_type VARCHAR(120) NOT NULL DEFAULT '';`);
         await pool.query(`ALTER TABLE howdi_connect_profiles ADD COLUMN IF NOT EXISTS service_area VARCHAR(240) NOT NULL DEFAULT '';`);
@@ -7256,6 +7297,11 @@
         await pool.query(`CREATE TABLE IF NOT EXISTS howdi_connect_post_progress(user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,post_id BIGINT NOT NULL REFERENCES howdi_community_posts(id) ON DELETE CASCADE,status VARCHAR(20) NOT NULL DEFAULT 'NOT_STARTED',updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),PRIMARY KEY(user_id,post_id));`);
         await pool.query(`CREATE TABLE IF NOT EXISTS howdi_connect_post_views(id BIGSERIAL PRIMARY KEY,post_id BIGINT NOT NULL REFERENCES howdi_community_posts(id) ON DELETE CASCADE,viewer_user_id BIGINT,viewer_type VARCHAR(40) NOT NULL DEFAULT 'UNKNOWN',read_seconds INTEGER NOT NULL DEFAULT 0,completed BOOLEAN NOT NULL DEFAULT FALSE,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());`);
         await pool.query(`CREATE TABLE IF NOT EXISTS howdi_connect_quiz_attempts(user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,post_id BIGINT NOT NULL REFERENCES howdi_community_posts(id) ON DELETE CASCADE,selected_index INTEGER NOT NULL,is_correct BOOLEAN NOT NULL DEFAULT FALSE,attempted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),PRIMARY KEY(user_id,post_id));`);
+        // K4 FIX (reconciled): same duplicate-CREATE-TABLE bug as above — the FIRST
+        // `CREATE TABLE IF NOT EXISTS howdi_connect_post_views` (much earlier in this
+        // file) wins and lacks `created_at`, so this later, fuller CREATE is a no-op.
+        // Must run BEFORE the index below, which needs created_at to exist.
+        await pool.query(`ALTER TABLE howdi_connect_post_views ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();`);
         await pool.query(`CREATE INDEX IF NOT EXISTS howdi_connect_post_views_post_idx ON howdi_connect_post_views(post_id,created_at DESC);`);
         await pool.query(`CREATE INDEX IF NOT EXISTS howdi_connect_topic_follows_user_idx ON howdi_connect_topic_follows(user_id,created_at DESC);`);
         /* V13.2 runtime-safe migration for the pre-existing post_views table */
@@ -47080,7 +47126,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             if(req.method==="GET"&&pathname==="/api/connect/conversations"){
               const sessionUser=await getSessionUserFromRequest(req);if(!sessionUser)return sendJSON(res,401,{status:"error",message:"Login required"});
               const userId=Number(sessionUser.id);
-              const rows=(await pool.query(`SELECT c.id,c.updated_at,other.user_id other_user_id,u.full_name,cp.public_username,COALESCE(ps.profile_image,'') profile_image,
+              const rows=(await pool.query(`SELECT c.id,c.updated_at,u.full_name,cp.public_username,COALESCE(ps.profile_image,'') profile_image,
                 lm.message_text last_message,lm.created_at last_message_at,COALESCE(unread.n,0)::int unread_count
                 FROM howdi_connect_conversations c JOIN howdi_connect_conversation_members mine ON mine.conversation_id=c.id AND mine.user_id=$1
                 JOIN LATERAL(SELECT cm.user_id FROM howdi_connect_conversation_members cm WHERE cm.conversation_id=c.id AND cm.user_id<>$1 LIMIT 1) other ON TRUE
@@ -53051,9 +53097,27 @@ async function ensureVibeReleaseReadinessV140LSchema(){
           role VARCHAR(50) DEFAULT 'customer',
           is_active BOOLEAN DEFAULT TRUE,
           created_at TIMESTAMPTZ DEFAULT NOW(),
-          updated_at TIMESTAMPTZ DEFAULT NOW()
+          updated_at TIMESTAMPTZ DEFAULT NOW(),
+          howdi_id VARCHAR(100) UNIQUE,
+          identity_uuid UUID UNIQUE,
+          master_id VARCHAR(50),
+          account_type_id BIGINT DEFAULT 1,
+          account_status VARCHAR(50) DEFAULT 'ACTIVE'
         );
       `);
+      // K4 FIX (reconciled on repaired K3): this is the ORIGINAL Priority-1 login
+      // bug — a minimal CREATE TABLE IF NOT EXISTS above permanently locks in this
+      // shape on a fresh DB (it's a no-op once the table exists), so registration/
+      // login code elsewhere that expects howdi_id/identity_uuid/master_id/
+      // account_type_id/account_status on `users` fails. Adding them directly to
+      // the CREATE above (for a genuinely fresh DB) plus explicit ALTER fallbacks
+      // (for a DB that already has a narrower `users` from an older boot) closes
+      // both cases idempotently.
+      await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS howdi_id VARCHAR(100);`);
+      await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS identity_uuid UUID;`);
+      await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS master_id VARCHAR(50);`);
+      await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS account_type_id BIGINT DEFAULT 1;`);
+      await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS account_status VARCHAR(50) DEFAULT 'ACTIVE';`);
       await pool.query(`
         CREATE TABLE IF NOT EXISTS vendor_profiles (
           id BIGSERIAL PRIMARY KEY,
@@ -53260,6 +53324,14 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
           );
         `);
+      // K4 FIX (reconciled): this early-boot copy of membership_plans (and the
+      // two later, fuller copies of it further down this file) is a duplicate-
+      // CREATE-TABLE situation — whichever CREATE runs first wins permanently.
+      // Since this one now runs first (ensureHowdiCoreIdentityTables executes
+      // before initializeDatabase), it locks in a shape without `sort_order`,
+      // which a later seed INSERT elsewhere in the file requires. Idempotent
+      // ALTER fallback closes the gap regardless of boot ordering.
+      await pool.query(`ALTER TABLE membership_plans ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 0;`);
       // --- works_workers (source: original lines 12415-12421) ---
       await pool.query(`CREATE TABLE IF NOT EXISTS works_workers (
         id BIGSERIAL PRIMARY KEY, worker_code VARCHAR(60) UNIQUE NOT NULL, full_name VARCHAR(160) NOT NULL, phone VARCHAR(30) NOT NULL,
@@ -53856,13 +53928,22 @@ async function ensureVibeReleaseReadinessV140LSchema(){
         // completely empty database the Vibe/Learn & Earn functions
         // were running first and failing. No functionality removed —
         // every one of these calls still runs, just earlier.
+        //
+        // K4 FIX (reconciled on repaired K3): the reorder above created an
+        // INVERSE ordering bug of its own. initializeDatabase() itself
+        // references `learning_teacher_statement_prevention_playbooks` via
+        // FK (~line 5317) before its own late CREATE for that table
+        // (~line 5797) — the table is only actually available in time if
+        // ensureLearnEarnV20074Schema()'s own earlier CREATE (~line 206)
+        // already ran. So Learn & Earn schema setup must run BEFORE
+        // initializeDatabase(), not after, on a genuinely empty database.
+        await ensureLearnEarnV20074Schema();
+        await ensureLearnEarnRuntimeCompatibility();
         await initializeDatabase();
         await ensureCriticalPortalTables();
         await initializeWorksLiveTables();
         await ensureHPayTables();
         console.log("✅ HPay PostgreSQL foundation ready");
-        await ensureLearnEarnV20074Schema();
-        await ensureLearnEarnRuntimeCompatibility();
         await ensureVibeCoreV140Schema();
         await ensureVibeDiscoveryV140FSchema();
         await ensureVibeWatchIntelligenceV140GSchema();
@@ -54243,7 +54324,10 @@ async function ensureVibeReleaseReadinessV140LSchema(){
       )`);
       await pool.query(`CREATE INDEX IF NOT EXISTS works_reschedule_work_idx ON works_reschedule_requests(work_order_id,created_at DESC)`);
     }
-    ensureWorksRescheduleV161C().catch(e=>console.error("[V16.1C] Works reschedule schema bootstrap failed:",e.message));
+    // K4 FIX (reconciled): this used to fire at module-load time, before
+    // startHowdiServer() (and therefore before the DB pool/schema bootstrap
+    // sequence) even ran, so works_work_orders didn't exist yet on a fresh DB.
+    // Deferred to fire only after the main boot sequence resolves.
 
     app.get('/api/works/customer/bookings/:workCode/lifecycle-v161c', async (req,res)=>{
       try{
@@ -54299,7 +54383,9 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
     console.log('✅ HOWDI Works V16.1C active — booking lifecycle + reschedule + invoice foundation');
 
-    startHowdiServer();
+    startHowdiServer().then(() => {
+      ensureWorksRescheduleV161C().catch(e=>console.error("[V16.1C] Works reschedule schema bootstrap failed:",e.message));
+    });
     console.log("✅ HOWDI Backend V37 active — booking SQL/trigger diagnostics enabled");
 
     console.log("✅ HOWDI Backend V38 loaded — root booking fix active");
