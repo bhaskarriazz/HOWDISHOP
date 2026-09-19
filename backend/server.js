@@ -36434,12 +36434,25 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             if(req.method==="POST" && learnerBatchEnrollMatch){
               const client=await pool.connect();
               try{
+                const sessionUser=await getSessionUserFromRequest(req);
+                if(!sessionUser){
+                  return sendJSON(res,401,{status:'error',code:'LEARNER_SESSION_REQUIRED',message:'Learner sign in required'});
+                }
+
                 const body=await getBody(req);
                 const rawUserId=body?.user_id ?? body?.userId ?? body?.learner_id;
-                const userId=Number(rawUserId);
+                const userId=Number(sessionUser.id);
 
                 if(!Number.isInteger(userId)||userId<=0)
                   return sendJSON(res,400,{status:'error',message:'Valid learner is required. Please sign in again.'});
+
+                if(rawUserId!==undefined && rawUserId!==null && String(rawUserId)!==""){
+                  const bodyUserId=Number(rawUserId);
+                  if(!Number.isInteger(bodyUserId)||bodyUserId<=0)
+                    return sendJSON(res,400,{status:'error',message:'Invalid learner identity in request body'});
+                  if(bodyUserId!==userId)
+                    return sendJSON(res,403,{status:'error',code:'LEARNER_IDENTITY_MISMATCH',message:'You can only enrol your own learner account'});
+                }
 
                 await client.query('BEGIN');
 
