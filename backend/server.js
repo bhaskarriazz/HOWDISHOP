@@ -46250,10 +46250,22 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             }
 
             if(req.method==="GET"&&pathname==="/api/connect/profile-recommendations"){
-              const uid=Number(url.searchParams.get("userId")||0),category=clean(url.searchParams.get("category")||"").toUpperCase(),type=clean(url.searchParams.get("type")||"").toUpperCase();
-              const me=(await pool.query(`SELECT professional_category,profile_type,interests FROM howdi_connect_profiles WHERE user_id=$1`,[uid])).rows[0]||{};
+              // K5B CLOSURE FIX: viewer identity must come from the authenticated session,
+              // never a client-supplied ?userId (previously trusted directly — the same
+              // identity-spoofing gap already closed on social-graph/social-summary and
+              // connect-suggestions). Guests may still browse Discover (uid=0), matching
+              // the existing /api/connect/connect-suggestions guest behavior — the query's
+              // own predicates naturally no-op the "following"/"block" checks for uid=0.
+              const sessionUser=await getSessionUserFromRequest(req);
+              const uid=sessionUser?Number(sessionUser.id):0;
+              const category=clean(url.searchParams.get("category")||"").toUpperCase(),type=clean(url.searchParams.get("type")||"").toUpperCase();
+              const me=uid?(await pool.query(`SELECT professional_category,profile_type,interests FROM howdi_connect_profiles WHERE user_id=$1`,[uid])).rows[0]||{}:{};
+              // K5B CLOSURE FIX: never select the raw numeric users.id — public identity is
+              // @public_username, and rows without one are excluded so every card returned
+              // is addressable by username (matching Home's recommendedCreators/
+              // suggestedPeople and the new connect-suggestions contract).
               const rows=(await pool.query(`
-                SELECT u.id,u.full_name,cp.public_username,cp.profile_type,cp.professional_category,cp.profession_title,cp.organization_name,cp.creator_mode,cp.professional_mode,
+                SELECT u.full_name,cp.public_username,cp.profile_type,cp.professional_category,cp.profession_title,cp.organization_name,cp.creator_mode,cp.professional_mode,
                   COALESCE(cp.avatar_data,ps.profile_image,'') profile_image,
                   CASE WHEN COALESCE(cp.activity_visible,TRUE) THEN pr.presence_status ELSE 'HIDDEN' END presence_status,
                   EXISTS(SELECT 1 FROM howdi_connect_communities c WHERE c.owner_user_id=u.id AND c.community_type IN('LIVE','SPACE') AND c.session_status='LIVE') is_live_now,
@@ -46267,7 +46279,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 LEFT JOIN user_profile_settings ps ON ps.user_id=u.id
                 LEFT JOIN howdi_connect_presence pr ON pr.user_id=u.id
                 WHERE u.id<>$1 AND COALESCE(cp.discoverable,TRUE)=TRUE
-                  AND NOT EXISTS(SELECT 1 FROM howdi_connect_profile_blocks b WHERE (b.blocker_user_id=$1 AND b.blocked_user_id=u.id) OR (b.blocker_user_id=u.id AND b.blocked_user_id=$1))
+                  AND cp.public_username IS NOT NULL AND cp.public_username<>''
+                  AND ($1::bigint=0 OR NOT EXISTS(SELECT 1 FROM howdi_connect_profile_blocks b WHERE (b.blocker_user_id=$1 AND b.blocked_user_id=u.id) OR (b.blocker_user_id=u.id AND b.blocked_user_id=$1)))
                   AND ($2='' OR cp.professional_category=$2) AND ($3='' OR cp.profile_type=$3)
                 ORDER BY recommendation_score DESC,u.id DESC LIMIT 40
               `,[uid,category,type,me.professional_category||'GENERAL',me.profile_type||'PERSONAL'])).rows;

@@ -869,3 +869,59 @@ test('Public profile tolerates a Communities query failure by returning an empty
  assert.equal(r.status,200);
  assert.deepEqual(Array.from(r.data.communities),[]);
 });
+
+// =====================================================
+// K5B CLOSURE — /api/connect/profile-recommendations (Discover / "People you may know")
+// Session-authoritative viewer, public_username required, no raw numeric id exposed,
+// Follow/Message/View-Profile actions converted to @public_username routes.
+// =====================================================
+const profileRecommendationsRoute=block('            if(req.method==="GET"&&pathname==="/api/connect/profile-recommendations"){');
+test('Discover ignores a spoofed ?userId and derives the viewer strictly from the session',async()=>{
+ const r=await runK5B(profileRecommendationsRoute,'GET','/api/connect/profile-recommendations?userId=999');
+ assert.equal(r.status,200);
+ const meCall=r.calls.find(c=>c.sql.startsWith('SELECT professional_category,profile_type,interests'));
+ assert.ok(meCall,'the "me" profile lookup must run for the session user');
+ assert.equal(meCall.params[0],101,'must use the session user (101), not the spoofed ?userId=999');
+ const mainCall=r.calls.find(c=>c.sql.includes('recommendation_score'));
+ assert.ok(mainCall);
+ assert.equal(mainCall.params[0],101,'the recommendation query must bind the session user, not the spoofed ?userId=999');
+});
+test('Discover works for a guest (no session) with viewer treated as 0, not the client-supplied ?userId',async()=>{
+ const r=await runK5B(profileRecommendationsRoute,'GET','/api/connect/profile-recommendations?userId=999',{anonymous:true});
+ assert.equal(r.status,200);
+ assert.equal(r.calls.filter(c=>c.sql.startsWith('SELECT professional_category,profile_type,interests')).length,0,'the "me" profile lookup must be skipped entirely for a guest');
+ const mainCall=r.calls.find(c=>c.sql.includes('recommendation_score'));
+ assert.ok(mainCall);
+ assert.equal(mainCall.params[0],0,'guest viewer must be 0, never the spoofed ?userId');
+});
+test('Discover requires a non-null public_username and excludes rows without one',async()=>{
+ const r=await runK5B(profileRecommendationsRoute,'GET','/api/connect/profile-recommendations');
+ assert.equal(r.status,200);
+ const call=r.calls.find(c=>c.sql.includes('recommendation_score'));
+ assert.ok(call);
+ assert.match(call.sql,/cp\.public_username IS NOT NULL AND cp\.public_username<>''/);
+});
+test('Discover never selects or returns the raw numeric users.id',async()=>{
+ const r=await runK5B(profileRecommendationsRoute,'GET','/api/connect/profile-recommendations',{queryOverride:(sql)=>{
+  if(sql.includes('recommendation_score'))return {rows:[{full_name:'Alice',public_username:'crafty_alice',profile_type:'CREATOR',professional_category:'ARTS',profession_title:'Potter',organization_name:'',creator_mode:true,professional_mode:false,profile_image:'',presence_status:'ONLINE',is_live_now:false,following:false,recommendation_score:5}],rowCount:1};
+  return undefined;
+ }});
+ assert.equal(r.status,200);
+ const call=r.calls.find(c=>c.sql.includes('recommendation_score'));
+ assert.ok(call);
+ assert.doesNotMatch(call.sql.split(' FROM ')[0],/\bu\.id\b/,'SELECT list must not project the raw numeric id');
+ assert.equal(r.data.people.length,1);
+ for(const item of r.data.people){
+  assert.equal(Object.prototype.hasOwnProperty.call(item,'id'),false,'Discover card must not expose a raw id');
+  assert.ok(item.public_username,'Discover card must carry public_username');
+ }
+});
+test('Discover still excludes bidirectionally blocked profiles for an authenticated viewer, and skips the block check entirely for a guest',async()=>{
+ const authed=await runK5B(profileRecommendationsRoute,'GET','/api/connect/profile-recommendations');
+ const authedCall=authed.calls.find(c=>c.sql.includes('recommendation_score'));
+ assert.match(authedCall.sql,/howdi_connect_profile_blocks/);
+ const guest=await runK5B(profileRecommendationsRoute,'GET','/api/connect/profile-recommendations',{anonymous:true});
+ assert.equal(guest.status,200);
+ // The guard `$1::bigint=0 OR NOT EXISTS(...)` short-circuits the block predicate for a
+ // guest (viewer 0) without erroring — this just re-confirms the route still returns 200.
+});
