@@ -52238,44 +52238,112 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               return sendJSON(res, 200, { status:"success", message:"HPay settings updated", settings:result.rows[0] });
             }
 
-            // Customer-side account bootstrap/read. Does not move money.
-            if (req.method === "POST" && pathname === "/api/hpay/accounts") {
-              const body = await getBody(req);
-              const userId = Number(body.user_id ?? body.userId);
-              if (!Number.isInteger(userId) || userId <= 0) return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
-              const user = (await pool.query(`SELECT id,full_name,howdi_id FROM users WHERE id=$1 AND COALESCE(is_active,TRUE)=TRUE`,[userId])).rows[0];
-              if (!user) return sendJSON(res,404,{status:"error",message:"HOWDI user not found"});
-              const base = clean((user.howdi_id || `user${user.id}`).toLowerCase()).replace(/[^a-z0-9._-]/g,"").slice(0,70) || `user${user.id}`;
-              const hpayId = `${base}@hpay`;
-              const result = await pool.query(`
+            // Customer HPay is session-authoritative. Browser supplied user/account IDs never select the actor.
+            const hpayPublicAccount=(row)=>row?({
+              hpay_id:row.hpay_id,status:row.status,kyc_status:row.kyc_status,
+              single_limit:Number(row.single_limit||0),daily_limit:Number(row.daily_limit||0),
+              qr_enabled:row.qr_enabled===true,upi_enabled:row.upi_enabled===true,bank_enabled:row.bank_enabled===true,
+              requests_enabled:row.requests_enabled===true,chat_pay_enabled:row.chat_pay_enabled===true,
+              created_at:row.created_at,updated_at:row.updated_at
+            }):null;
+            const ensureSessionHpayAccount=async(user)=>{
+              const publicBase=clean((user.public_username||"").toLowerCase()).replace(/[^a-z0-9._-]/g,"").slice(0,70);
+              const legacyBase=clean((user.howdi_id||`user${user.id}`).toLowerCase()).replace(/[^a-z0-9._-]/g,"").slice(0,70)||`user${user.id}`;
+              const desiredId=`${publicBase||legacyBase}@hpay`;
+              return (await pool.query(`
                 INSERT INTO hpay_accounts(user_id,hpay_id)
                 VALUES($1,$2)
                 ON CONFLICT(user_id) DO UPDATE SET updated_at=NOW()
                 RETURNING *
-              `,[userId,hpayId]);
-              return sendJSON(res,201,{status:"success",account:result.rows[0]});
+              `,[user.id,desiredId])).rows[0];
+            };
+
+            if (req.method === "GET" && (pathname === "/api/hpay/me" || pathname === "/api/hpay/me/")) {
+              const sessionUser=await getSessionUserFromRequest(req);
+              if(!sessionUser) return sendJSON(res,401,{status:"error",message:"Sign in to use HPay"});
+              const account=await ensureSessionHpayAccount(sessionUser);
+              let wallet=(await pool.query(`SELECT * FROM user_wallets WHERE user_id=$1 LIMIT 1`,[sessionUser.id])).rows[0];
+              if(!wallet) wallet=(await pool.query(`INSERT INTO user_wallets(user_id) VALUES($1) RETURNING *`,[sessionUser.id])).rows[0];
+              let walletRows=[];
+              try{walletRows=(await pool.query(`SELECT * FROM wallet_transactions WHERE user_id=$1 ORDER BY created_at DESC LIMIT 100`,[sessionUser.id])).rows;}
+              catch(error){walletRows=(await pool.query(`SELECT * FROM wallet_transactions WHERE wallet_id=$1 ORDER BY created_at DESC LIMIT 100`,[wallet.id])).rows;}
+              const hpayRows=(await pool.query(`
+                SELECT transaction_id,transaction_type,amount,currency,method,status,description,provider,created_at,completed_at,
+                  CASE WHEN receiver_account_id=$1 THEN 'CREDIT' ELSE 'DEBIT' END AS direction
+                FROM hpay_transactions
+                WHERE sender_account_id=$1 OR receiver_account_id=$1
+                ORDER BY created_at DESC LIMIT 100
+              `,[account.id])).rows;
+              const walletTx=walletRows.map(row=>({
+                id:`wallet:${row.id}`,transaction_id:row.reference_id||null,transaction_type:row.transaction_type||"WALLET",
+                amount:Number(row.amount||0),currency:wallet.currency||"INR",method:"WALLET",status:row.status||"COMPLETED",
+                description:row.description||row.title||"Wallet activity",direction:row.direction||(["DEBIT","REWARD_REDEMPTION"].includes(String(row.transaction_type||"").toUpperCase())?"DEBIT":"CREDIT"),
+                created_at:row.created_at,completed_at:row.created_at,source:"WALLET"
+              }));
+              const hpayTx=hpayRows.map(row=>({...row,id:`hpay:${row.transaction_id}`,amount:Number(row.amount||0),source:"HPAY"}));
+              const transactions=[...walletTx,...hpayTx].sort((a,b)=>new Date(b.created_at||0)-new Date(a.created_at||0)).slice(0,100);
+              const requests=(await pool.query(`
+                SELECT r.request_id,r.amount,r.currency,r.note,r.status,r.expires_at,r.created_at,r.updated_at,
+                  CASE WHEN r.requester_account_id=$1 THEN 'OUTGOING' ELSE 'INCOMING' END AS direction,
+                  requester.hpay_id AS requester_hpay_id,payer.hpay_id AS payer_hpay_id
+                FROM hpay_payment_requests r
+                JOIN hpay_accounts requester ON requester.id=r.requester_account_id
+                LEFT JOIN hpay_accounts payer ON payer.id=r.payer_account_id
+                WHERE r.requester_account_id=$1 OR r.payer_account_id=$1
+                ORDER BY r.created_at DESC LIMIT 50
+              `,[account.id])).rows;
+              const banks=(await pool.query(`
+                SELECT account_holder_name,bank_name,account_number_masked,ifsc,verification_status,is_default,is_active,created_at,updated_at
+                FROM hpay_bank_accounts WHERE account_id=$1 AND is_active=TRUE ORDER BY is_default DESC,created_at DESC
+              `,[account.id])).rows;
+              return sendJSON(res,200,{status:"success",account:hpayPublicAccount(account),wallet:{
+                balance:Number(wallet.wallet_balance??wallet.available_balance??wallet.balance??0),
+                cashback_balance:Number(wallet.cashback_balance??wallet.total_cashback??0),credit_balance:Number(wallet.credit_balance??0),
+                total_spent:Number(wallet.total_spent??0),currency:wallet.currency||"INR",status:wallet.wallet_status||"ACTIVE"
+              },transactions,requests,banks,provider:{money_movement_connected:false}});
+            }
+
+            // Compatibility account bootstrap: actor is always the authenticated session user.
+            if (req.method === "POST" && pathname === "/api/hpay/accounts") {
+              const sessionUser=await getSessionUserFromRequest(req);
+              if(!sessionUser) return sendJSON(res,401,{status:"error",message:"Sign in to use HPay"});
+              const account=await ensureSessionHpayAccount(sessionUser);
+              return sendJSON(res,201,{status:"success",account:hpayPublicAccount(account)});
             }
 
             if (req.method === "GET" && /^\/api\/hpay\/accounts\/user\/\d+\/?$/.test(pathname)) {
-              const userId=Number(pathname.match(/^\/api\/hpay\/accounts\/user\/(\d+)\/?$/)?.[1]);
-              const result=await pool.query(`SELECT * FROM hpay_accounts WHERE user_id=$1 LIMIT 1`,[userId]);
-              if(!result.rows.length) return sendJSON(res,404,{status:"error",message:"HPay account not found"});
-              return sendJSON(res,200,{status:"success",account:result.rows[0]});
+              const sessionUser=await getSessionUserFromRequest(req);
+              if(!sessionUser) return sendJSON(res,401,{status:"error",message:"Sign in to use HPay"});
+              const requestedUserId=Number(pathname.match(/^\/api\/hpay\/accounts\/user\/(\d+)\/?$/)?.[1]);
+              if(requestedUserId!==Number(sessionUser.id)) return sendJSON(res,403,{status:"error",message:"You can only access your own HPay account"});
+              const account=await ensureSessionHpayAccount(sessionUser);
+              return sendJSON(res,200,{status:"success",account:hpayPublicAccount(account)});
             }
 
-            // Create a payment request only; no funds are moved by this endpoint.
+            // Creates a request record only. It does not move funds or mark anything paid.
             if (req.method === "POST" && pathname === "/api/hpay/requests") {
+              const sessionUser=await getSessionUserFromRequest(req);
+              if(!sessionUser) return sendJSON(res,401,{status:"error",message:"Sign in to use HPay"});
+              const requester=await ensureSessionHpayAccount(sessionUser);
+              if(requester.requests_enabled!==true) return sendJSON(res,403,{status:"error",message:"Payment requests are disabled for this HPay account"});
               const body=await getBody(req);
-              const requesterId=Number(body.requester_account_id ?? body.requesterAccountId);
-              const payerId=body.payer_account_id ?? body.payerAccountId;
               const amount=Number(body.amount);
-              if(!Number.isInteger(requesterId)||requesterId<=0||!(amount>0)) return sendJSON(res,400,{status:"error",message:"Requester account and positive amount are required"});
+              if(!(amount>0)||!Number.isFinite(amount)) return sendJSON(res,400,{status:"error",message:"A positive amount is required"});
+              if(Number(requester.single_limit||0)>0&&amount>Number(requester.single_limit)) return sendJSON(res,400,{status:"error",message:"Amount exceeds your HPay single-request limit"});
+              const payerHpayId=clean(body.payer_hpay_id??body.payerHpayId??"").toLowerCase().slice(0,120);
+              let payer=null;
+              if(payerHpayId){
+                payer=(await pool.query(`SELECT * FROM hpay_accounts WHERE LOWER(hpay_id)=LOWER($1) AND status='ACTIVE' LIMIT 1`,[payerHpayId])).rows[0];
+                if(!payer) return sendJSON(res,404,{status:"error",message:"Unable to create a request for that HPay ID"});
+                if(Number(payer.id)===Number(requester.id)) return sendJSON(res,400,{status:"error",message:"You cannot request money from your own HPay account"});
+              }
               const requestId=`HPREQ-${Date.now()}-${crypto.randomBytes(4).toString("hex").toUpperCase()}`;
-              const result=await pool.query(`
+              const row=(await pool.query(`
                 INSERT INTO hpay_payment_requests(request_id,requester_account_id,payer_account_id,amount,note,expires_at)
-                VALUES($1,$2,$3,$4,$5,COALESCE($6::timestamptz,NOW()+INTERVAL '7 days')) RETURNING *
-              `,[requestId,requesterId,payerId?Number(payerId):null,amount,clean(body.note||"").slice(0,300),body.expires_at||body.expiresAt||null]);
-              return sendJSON(res,201,{status:"success",request:result.rows[0]});
+                VALUES($1,$2,$3,$4,$5,COALESCE($6::timestamptz,NOW()+INTERVAL '7 days')) RETURNING request_id,amount,currency,note,status,expires_at,created_at,updated_at
+              `,[requestId,requester.id,payer?.id||null,amount,clean(body.note||"").slice(0,300),body.expires_at||body.expiresAt||null])).rows[0];
+              await pool.query(`INSERT INTO hpay_audit_logs(actor_type,actor_id,action,entity_type,entity_id,ip_address,metadata) VALUES('CUSTOMER',$1,'HPAY_REQUEST_CREATED','HPAY_REQUEST',$2,$3,$4::jsonb)`,[String(sessionUser.id),requestId,getRequestIp(req),JSON.stringify({amount,payer_hpay_id:payer?.hpay_id||null})]).catch(()=>{});
+              return sendJSON(res,201,{status:"success",request:{...row,amount:Number(row.amount||0),payer_hpay_id:payer?.hpay_id||null}});
             }
 
             // HOWDI WORKS LIVE V1

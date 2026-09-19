@@ -3534,6 +3534,14 @@ function App() {
   const [hpayRecipient, setHpayRecipient] = useState("Maya Studio");
   const [hpayStatus, setHpayStatus] = useState(null);
   const [hpayPrivacyAccepted, setHpayPrivacyAccepted] = useState(true);
+  const [hpayAccount,setHpayAccount]=useState(null);
+  const [hpayRequests,setHpayRequests]=useState([]);
+  const [hpayBanks,setHpayBanks]=useState([]);
+  const [hpayRecipientHpayId,setHpayRecipientHpayId]=useState("");
+  const [hpayLoading,setHpayLoading]=useState(false);
+  const [hpaySubmitting,setHpaySubmitting]=useState(false);
+  const [hpayError,setHpayError]=useState("");
+  const [hpayProviderConnected,setHpayProviderConnected]=useState(false);
 
   const supportFaqs = [
     { id: 1, category: "orders", icon: "📦", question: "Where is my order?", answer: "Open My Orders to view the latest status, shipment details and delivery updates." },
@@ -9644,6 +9652,42 @@ return () => window.clearInterval(timer);
   const [returnRequestBusy,setReturnRequestBusy]=useState(false);
   const returnIdempotencyRef=useRef("");
   const customerSessionHeaders=()=>{try{const t=localStorage.getItem("howdiSessionToken")||"";return t?{Authorization:`Bearer ${t}`}:{}}catch{return {}}};
+  const HPAY_API_BASE=(import.meta.env.VITE_API_BASE_URL||"http://localhost:5000").replace(/\/+$/,"");
+  async function loadHpayDashboard(){
+    if(!currentUser){setHpayAccount(null);setHpayRequests([]);setHpayBanks([]);setHpayError("Sign in to use HPay.");return;}
+    setHpayLoading(true);setHpayError("");
+    try{
+      const r=await fetch(`${HPAY_API_BASE}/api/hpay/me`,{headers:customerSessionHeaders(),cache:"no-store"});
+      const d=await r.json().catch(()=>({}));
+      if(!r.ok||d.status!=="success")throw new Error(d.message||"Unable to load HPay");
+      setHpayAccount(d.account||null);setHpayRequests(Array.isArray(d.requests)?d.requests:[]);setHpayBanks(Array.isArray(d.banks)?d.banks:[]);
+      setHpayProviderConnected(d.provider?.money_movement_connected===true);
+      setWalletBalance(Number(d.wallet?.balance||0));
+      setWalletTransactions((Array.isArray(d.transactions)?d.transactions:[]).map(x=>({
+        ...x,amount:Number(x.amount||0),type:String(x.direction||"").toUpperCase()==="DEBIT"?"debit":"credit",
+        title:x.description||x.transaction_type||"HPay activity",date:x.created_at?new Date(x.created_at).toLocaleString("en-IN"):""
+      })));
+    }catch(e){setHpayError(e.message||"Unable to load HPay");}
+    finally{setHpayLoading(false);}
+  }
+  async function submitHpayAction(){
+    const amount=Number(hpayAmount||0);
+    if(!(amount>0)||!hpayPrivacyAccepted)return;
+    setHpaySubmitting(true);setHpayStatus(null);
+    try{
+      if(hpayAction!=="request"){
+        setHpayStatus({type:"info",title:"Payment provider required",message:"HPay will not mark money as sent, added, or transferred until an authorized payment provider confirms the movement."});
+        return;
+      }
+      const r=await fetch(`${HPAY_API_BASE}/api/hpay/requests`,{method:"POST",headers:{"Content-Type":"application/json",...customerSessionHeaders()},body:JSON.stringify({amount,note:hpayNote,payer_hpay_id:hpayRecipientHpayId.trim()||null})});
+      const d=await r.json().catch(()=>({}));
+      if(!r.ok||d.status!=="success")throw new Error(d.message||"Unable to create payment request");
+      setHpayStatus({type:"success",title:"Request created",message:`₹${amount.toLocaleString("en-IN")} request ${d.request?.payer_hpay_id?`sent to ${d.request.payer_hpay_id}`:"created"}. No funds have moved.`});
+      await loadHpayDashboard();
+    }catch(e){setHpayStatus({type:"error",title:"Request not created",message:e.message||"Unable to create payment request"});}
+    finally{setHpaySubmitting(false);}
+  }
+  useEffect(()=>{if(connectView==="hpay")loadHpayDashboard();},[connectView,currentUser?.id]);
   function openReturnRequest(order,status){
     setOrdersNotice("");
     const eligible=status?.eligibility?.eligible_items||[];
@@ -19329,7 +19373,7 @@ const removeNotification = async (notificationId) => {
 
                 {connectView==="hpay" && <section className="hp-page hp-approved-home">
                   <div className="hp-approved-heading">
-                    <div><h2>HPay</h2><b>Fast. Secure. For a Kinder Tomorrow.</b><p>Pay, receive, and manage your money — all in one place.</p></div>
+                    <div><h2>HPay</h2><b>Fast. Secure. For a Kinder Tomorrow.</b><p>{hpayAccount?.hpay_id?`${hpayAccount.hpay_id} · `:""}Wallet, requests and verified payment records in one place.</p>{hpayError&&<small role="alert">{hpayError}</small>}</div>
                     <div className="hp-purpose">Payments<br/>with Purpose <span>♡</span></div>
                   </div>
 
@@ -19337,7 +19381,7 @@ const removeNotification = async (notificationId) => {
                     <main>
                       <div className="hp-top-cards">
                         <section className="hp-approved-balance">
-                          <div><small>Your HPay Balance</small><strong>₹{Number(walletBalance||0).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2})}</strong><span>⬡ &nbsp; Secure & Encrypted</span></div>
+                          <div><small>Your HPay Balance</small><strong>{hpayLoading?"…":`₹${Number(walletBalance||0).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2})}`}</strong><span>⬡ &nbsp; {hpayAccount?.status||"Account state unavailable"}</span></div>
                           <div className="hp-balance-actions"><button onClick={()=>{setHpayAction("self");setHpayAmount("");setHpayNote("")}}>＋ &nbsp; Add Money</button><button className="outline" onClick={()=>{setHpayAction("pay");setHpayAmount("");setHpayNote("")}}>➤ &nbsp; Send Money</button></div>
                         </section>
                         <button className="hp-account-card" type="button" onClick={()=>setHpayView("settings")}><span>▣</span><div><b>UPI & Bank Accounts</b><small>Manage your linked accounts</small><em>Link or manage account</em></div><i>›</i></button>
@@ -19350,7 +19394,7 @@ const removeNotification = async (notificationId) => {
 
                       <div className="hp-section-head"><h3>Recent Transactions</h3><button onClick={()=>setHpayView("transactions")}>View all →</button></div>
                       <section className="hp-approved-transactions">
-                        {walletTransactions.length===0?<div className="hp-empty-transactions"><b>No HPay transactions yet</b><span>Your completed wallet and payment activity will appear here.</span></div>:walletTransactions.slice(0,5).map((item,idx)=>{const amount=Number(item.amount||0);const positive=amount>=0;return <article key={item.id||idx}><i>{positive?"＋":"↗"}</i><div><b>{item.description||item.transaction_type||"HPay transaction"}</b><small>{item.created_at?new Date(item.created_at).toLocaleString("en-IN"):""}</small></div><strong className={positive?"credit":"debit"}>{positive?"+ ":"- "}₹{Math.abs(amount).toLocaleString("en-IN")}</strong><em>Completed</em></article>})}
+                        {walletTransactions.length===0?<div className="hp-empty-transactions"><b>No HPay transactions yet</b><span>Your wallet and provider-confirmed HPay activity will appear here.</span></div>:walletTransactions.slice(0,5).map((item,idx)=>{const amount=Number(item.amount||0),debit=String(item.direction||item.type||"").toUpperCase().includes("DEBIT");return <article key={item.id||idx}><i>{debit?"↗":"＋"}</i><div><b>{item.description||item.title||item.transaction_type||"HPay transaction"}</b><small>{item.created_at?new Date(item.created_at).toLocaleString("en-IN"):item.date||""}</small></div><strong className={debit?"debit":"credit"}>{debit?"- ":"+ "}₹{Math.abs(amount).toLocaleString("en-IN")}</strong><em>{item.status||"Recorded"}</em></article>})}
                       </section>
                     </main>
 
@@ -19432,12 +19476,13 @@ const removeNotification = async (notificationId) => {
                 <small>YOUR HPAY QR</small>
                 <div className="hp-qr-placeholder"><div></div><span>H</span></div>
                 <b>{customerDisplayName}</b>
-                <p>howditestttt@hpay</p>
+                <p>{hpayAccount?.hpay_id||"Sign in to create your HPay identity"}</p>
                 <div><button>Share QR</button><button>Save QR</button></div>
               </div>}
 
               {["pay","request","upi","bank","self"].includes(hpayAction) && <div className="hp-payment-form">
-                {hpayAction==="pay" || hpayAction==="request" ? <label><span>{hpayAction==="request"?"Request from":"Paying"}</span><div className="hp-recipient-box"><div className="hp-person-avatar">{hpayRecipient.slice(0,1)}</div><div><b>{hpayRecipient}</b><small>Verified HOWDI identity <i className="hc5-verified">✓</i></small></div><button>Change</button></div></label> : null}
+                {hpayAction==="pay" ? <label><span>Paying</span><div className="hp-recipient-box"><div className="hp-person-avatar">{hpayRecipient.slice(0,1)}</div><div><b>{hpayRecipient}</b><small>Recipient must be confirmed by the payment provider before money moves.</small></div></div></label> : null}
+                {hpayAction==="request" ? <label><span>Request from HPay ID (optional)</span><input value={hpayRecipientHpayId} onChange={e=>setHpayRecipientHpayId(e.target.value.toLowerCase().replace(/[^a-z0-9._@-]/g,"").slice(0,120))} placeholder="username@hpay"/><small>Leave blank to create a shareable request without assigning a payer.</small></label> : null}
                 {hpayAction==="upi" && <label><span>UPI ID</span><input placeholder="name@upi" /></label>}
                 {hpayAction==="bank" && <><label><span>Account number</span><input placeholder="Enter account number" /></label><label><span>IFSC</span><input placeholder="Enter IFSC code" /></label><label><span>Account holder</span><input placeholder="Name on bank account" /></label></>}
                 {hpayAction==="self" && <><label><span>From</span><select><option>Primary bank •••• 9002</option><option>Bank account •••• 9098</option></select></label><label><span>To</span><select><option>Bank account •••• 9098</option><option>HPay balance</option></select></label></>}
@@ -19446,11 +19491,11 @@ const removeNotification = async (notificationId) => {
                 <label><span>Note (optional)</span><input value={hpayNote} onChange={e=>setHpayNote(e.target.value)} placeholder={hpayAction==="request"?"What is this request for?":"Add a message"} /></label>
                 <label className="hp-safety-check"><input type="checkbox" checked={hpayPrivacyAccepted} onChange={e=>setHpayPrivacyAccepted(e.target.checked)} /><span>I checked the recipient details.</span></label>
 
-                {!hpayStatus ? <button type="button" className="hp-confirm" disabled={!hpayAmount || !hpayPrivacyAccepted} onClick={()=>setHpayStatus("success")}>{hpayAction==="request"?"Send request":hpayAction==="self"?"Transfer":"Continue to pay"} ₹{hpayAmount||"0"}</button>
-                : <div className="hp-success"><i>✓</i><b>{hpayAction==="request"?"Request sent":"Payment ready"}</b><small>{hpayAction==="request"?`₹${hpayAmount} request created for ${hpayRecipient}.`:`₹${hpayAmount} payment flow is ready for backend/UPI integration.`}</small><button onClick={()=>{setHpayAction(null);setHpayStatus(null)}}>Done</button></div>}
+                {!hpayStatus ? <button type="button" className="hp-confirm" disabled={!hpayAmount || !hpayPrivacyAccepted || hpaySubmitting} onClick={submitHpayAction}>{hpaySubmitting?"Saving…":hpayAction==="request"?"Create request":"Continue"} {hpayAmount?`₹${hpayAmount}`:""}</button>
+                : <div className={`hp-success ${hpayStatus.type||"info"}`}><i>{hpayStatus.type==="success"?"✓":"i"}</i><b>{hpayStatus.title}</b><small>{hpayStatus.message}</small><button onClick={()=>{setHpayAction(null);setHpayStatus(null);setHpayRecipientHpayId("")}}>Done</button></div>}
               </div>}
 
-              <footer className="hp-sheet-footer"><span>Protected by HOWDI security</span><em>Frontend payment preview</em></footer>
+              <footer className="hp-sheet-footer"><span>Session-protected HPay</span><em>{hpayProviderConnected?"Payment provider connected":"Money movement requires provider confirmation"}</em></footer>
             </div>
           </div>}
 
