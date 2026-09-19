@@ -3087,6 +3087,12 @@ function App() {
   const [connectHomeSections, setConnectHomeSections] = useState({});
   const [connectHomeLoading, setConnectHomeLoading] = useState({});
   const [connectHomeLoaded, setConnectHomeLoaded] = useState(false);
+  // K5A REVIEW FIX: which identity ("guest" or a numeric uid) the loaded Home
+  // state belongs to, so a login/logout/account-switch invalidates stale
+  // personalized data instead of leaving it rendered under a new identity.
+  const connectHomeIdentityRef=useRef(null);
+  const connectHomeObserverRef=useRef(null);
+  const connectHomeObservedKeysRef=useRef(new Set());
   const [connectCreateOpen, setConnectCreateOpen] = useState(false);
   const [connectCreateType, setConnectCreateType] = useState("post");
   const [connectPostMedia,setConnectPostMedia]=useState(null);
@@ -3954,8 +3960,30 @@ function App() {
   };
   const loadConnectHome=async()=>{
     setConnectHomeLoaded(true);
+    // K5A REVIEW FIX: only the above-the-fold sections load eagerly. Sections
+    // 6-16 are fetched on demand as their wrapper scrolls into view (see
+    // attachConnectHomeLazySection / the IntersectionObserver below) so a
+    // first paint of Connect Home doesn't pay for all 16 sections at once.
     await loadConnectHomeSections(CONNECT_HOME_PRIMARY);
-    loadConnectHomeSections(CONNECT_HOME_SECONDARY);
+  };
+  // K5A REVIEW FIX: single shared IntersectionObserver; each secondary
+  // section's wrapper <section ref={...}> registers itself once and is
+  // unobserved the moment it has been requested, so scrolling never
+  // re-triggers a fetch.
+  const attachConnectHomeLazySection=(key,el)=>{
+    if(!el||connectHomeObservedKeysRef.current.has(key))return;
+    if(!connectHomeObserverRef.current){
+      connectHomeObserverRef.current=new IntersectionObserver((entries)=>{
+        entries.forEach(entry=>{
+          if(!entry.isIntersecting)return;
+          const k=entry.target.getAttribute("data-home-section");
+          if(k){loadConnectHomeSections([k]);connectHomeObserverRef.current.unobserve(entry.target);}
+        });
+      },{root:null,rootMargin:"400px 0px",threshold:0.01});
+    }
+    el.setAttribute("data-home-section",key);
+    connectHomeObservedKeysRef.current.add(key);
+    connectHomeObserverRef.current.observe(el);
   };
   const loadConnectHomeForYouMore=async()=>{
     const cur=connectHomeSections.forYou;
@@ -3973,12 +4001,30 @@ function App() {
       setConnectHomeLoading(v=>({...v,forYou:false}));
     }
   };
+  // K5A REVIEW FIX: an authentication-state change (guest→login, login→logout,
+  // or user A→user B) must never leave a previous identity's personalized
+  // Home state (Continue Watching / Recent Activity / Continue Your Journey /
+  // For You / following flags, etc.) rendered under the new identity. Reset
+  // and force a reload the instant the effective identity changes.
+  useEffect(()=>{
+    const uid=Number(currentUser?.id||currentUser?.user_id||0)||0;
+    const identity=uid?String(uid):"guest";
+    if(connectHomeIdentityRef.current!==null&&connectHomeIdentityRef.current!==identity){
+      setConnectHomeSections({});
+      setConnectHomeLoading({});
+      setConnectHomeLoaded(false);
+      connectHomeObservedKeysRef.current=new Set();
+      if(connectHomeObserverRef.current){connectHomeObserverRef.current.disconnect();connectHomeObserverRef.current=null;}
+    }
+    connectHomeIdentityRef.current=identity;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[currentUser?.id,currentUser?.user_id]);
   useEffect(()=>{
     if(navigationOSArea==="connect"&&connectView==="dashboard"&&!connectHomeLoaded){
       loadConnectHome();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[navigationOSArea,connectView]);
+  },[navigationOSArea,connectView,connectHomeLoaded]);
   const loadConnectSocialSummary=async()=>{const userId=Number(currentUser?.id||currentUser?.user_id||0);if(!userId)return;try{const d=await connectApi(`/api/connect/social-summary?userId=${encodeURIComponent(userId)}`);setConnectSocialSummary(d);const p=d.profile||{};setConnectSocialSettings({publicUsername:p.public_username||"",privateProfile:Boolean(p.private_profile),followerListVisibility:p.follower_list_visibility||"EVERYONE",contactPermission:p.contact_permission||"EVERYONE",mentionPermission:p.mention_permission||"EVERYONE",tagPermission:p.tag_permission||"FOLLOWERS",activityVisible:p.activity_visible!==false,discoverable:p.discoverable!==false});}catch(e){setConnectNotice(e.message||"Unable to load social profile.");}};
   const loadConnectSocialGraph=async(type="followers")=>{const userId=Number(currentUser?.id||currentUser?.user_id||0);if(!userId)return;setConnectSocialTab(type);setConnectSocialLoading(true);try{const d=await connectApi(`/api/connect/social-graph?userId=${encodeURIComponent(userId)}&ownerId=${encodeURIComponent(userId)}&type=${encodeURIComponent(type)}`);setConnectSocialPeople(d.people||[]);await loadConnectSocialSummary();}catch(e){setConnectNotice(e.message||"Unable to load network.");}finally{setConnectSocialLoading(false);}};
   const openConnectSocial=async()=>{setConnectView("social");await Promise.all([loadConnectSocialSummary(),loadConnectSocialGraph(connectSocialTab||"followers")]);};
@@ -4264,8 +4310,33 @@ function App() {
   };
 
   const openConnectPublicProfile=async(person)=>{
-    const target=Number(person?.id||person?.user_id||0);if(!target)return;
-    try{const d=await connectApi(`/api/connect/public-profile/${target}?viewerId=${Number(currentUser?.id||currentUser?.user_id||0)}`);setConnectPublicProfile(d);}catch(e){setConnectNotice(e.message||"Unable to open profile.");}
+    // K5A REVIEW FIX: prefer the public-username-addressed route so callers
+    // (e.g. Connect Home cards) never need to hold a raw numeric user id.
+    const viewerId=Number(currentUser?.id||currentUser?.user_id||0);
+    const username=person?.public_username||person?.publicUsername||"";
+    const target=Number(person?.id||person?.user_id||0);
+    if(!username&&!target)return;
+    const path=username
+      ?`/api/connect/public-profile/username/${encodeURIComponent(username)}?viewerId=${viewerId}`
+      :`/api/connect/public-profile/${target}?viewerId=${viewerId}`;
+    try{const d=await connectApi(path);setConnectPublicProfile(d);}catch(e){setConnectNotice(e.message||"Unable to open profile.");}
+  };
+  // K5A REVIEW FIX: follow by public_username so Home person cards never carry a raw id.
+  const toggleConnectFollowByUsername=async(publicUsername,fullName)=>{
+    if(!requireConnectLogin(()=>toggleConnectFollowByUsername(publicUsername,fullName)))return;
+    if(!publicUsername)return setConnectNotice("Please login to follow people.");
+    try{
+      const d=await connectApi(`/api/connect/profile/username/${encodeURIComponent(publicUsername)}/follow`,{method:"POST"});
+      const following=Boolean(d.following);
+      setConnectHomeSections(v=>{
+        const patchList=(list)=>Array.isArray(list)?list.map(p=>p.public_username===publicUsername?{...p,following}:p):list;
+        return {...v,
+          recommendedCreators:v.recommendedCreators?{...v.recommendedCreators,items:patchList(v.recommendedCreators.items)}:v.recommendedCreators,
+          suggestedPeople:v.suggestedPeople?{...v.suggestedPeople,items:patchList(v.suggestedPeople.items)}:v.suggestedPeople,
+        };
+      });
+      setConnectNotice(d.requested?`Follow request sent to ${fullName||"HOWDI member"}.`:following?`Following ${fullName||"HOWDI member"}.`:`Unfollowed ${fullName||"HOWDI member"}.`);
+    }catch(e){setConnectNotice(e.message||"Follow failed.");}
   };
 
   const saveConnectPreferences=async(patch={})=>{const userId=Number(currentUser?.id||currentUser?.user_id||0);if(!userId)return;try{await connectApi(`/api/connect/profile/${userId}`,{method:"PUT",body:JSON.stringify({privateProfile:patch.privateProfile??connectProfilePrivate,activityVisible:patch.activityVisible??connectActivityVisible,storyAudience:patch.storyAudience??connectStoryAudience,messageMode:patch.messageMode??connectMessageMode,headline:connectBootstrap.profile?.headline||"",about:connectBootstrap.profile?.about||"",profileType:connectBootstrap.profile?.profile_type||"PERSONAL",professionalCategory:connectBootstrap.profile?.professional_category||"GENERAL",professionTitle:connectBootstrap.profile?.profession_title||"",organizationName:connectBootstrap.profile?.organization_name||"",educationFocus:connectBootstrap.profile?.education_focus||"",expertise:connectBootstrap.profile?.expertise||"",interests:connectBootstrap.profile?.interests||"",statusMessage:connectBootstrap.profile?.status_message||"",availabilityStatus:connectBootstrap.profile?.availability_status||"AVAILABLE",discoverable:connectBootstrap.profile?.discoverable!==false,contactPermission:connectBootstrap.profile?.contact_permission||"EVERYONE",creatorMode:Boolean(connectBootstrap.profile?.creator_mode),professionalMode:Boolean(connectBootstrap.profile?.professional_mode),portfolioUrl:connectBootstrap.profile?.portfolio_url||"",socialLinks:connectBootstrap.profile?.social_links||{}})});await loadConnectBootstrap();}catch(e){setConnectNotice(e.message||"Setting save failed.");}};
@@ -19307,12 +19378,22 @@ const removeNotification = async (notificationId) => {
                 {connectView==="dashboard" && (()=>{
                   const S=connectHomeSections;
                   const L=connectHomeLoading;
-                  const who=(p)=>p?.public_username||p?.creatorPublicUsername?`@${p.public_username||p.creatorPublicUsername}`:(p?.full_name||p?.creatorName||"HOWDI member");
+                  const loggedIn=Boolean(currentUser?.id||currentUser?.user_id);
+                  const who=(p)=>{const u=p?.public_username||p?.creatorPublicUsername||p?.actor_public_username;return u?`@${u}`:(p?.full_name||p?.creatorName||p?.actor_name||"HOWDI member");};
                   const avatarInitial=(p)=>(p?.full_name||p?.creatorName||"H").slice(0,1).toUpperCase();
                   const Skeleton=({rows=1})=><div className="hc-home-skel" aria-busy="true">{Array.from({length:rows}).map((_,i)=><div key={i} className="hc-home-skel-row" />)}</div>;
                   const Empty=({label})=><div className="hc-home-empty"><span>{label}</span></div>;
-                  const openPersonProfile=(p)=>openConnectPublicProfile({id:p.id,full_name:p.full_name,public_username:p.public_username});
-                  const followBtn=(p)=><button type="button" className={`hc-home-follow${p.following?" following":""}`} onClick={(e)=>{e.stopPropagation();requireConnectLogin(()=>toggleConnectFollow({id:p.id,full_name:p.full_name}));}}>{p.following?"Following":"Follow"}</button>;
+                  const SectionError=({onRetry})=><div className="hc-home-error"><span>Couldn't load this right now.</span><button type="button" onClick={onRetry}>Retry</button></div>;
+                  const railNav=(dir)=>(e)=>{const wrap=e.currentTarget.closest('.hc-home-rail-wrap');const rail=wrap&&wrap.querySelector('.hc-home-rail');if(rail)rail.scrollBy({left:dir*Math.round(rail.clientWidth*0.8),behavior:'smooth'});};
+                  const Rail=({label,children,className=""})=>(
+                    <div className="hc-home-rail-wrap">
+                      <button type="button" className="hc-home-rail-nav prev" aria-label={`Scroll ${label} backward`} onClick={railNav(-1)}>‹</button>
+                      <div className={`hc-home-rail ${className}`} role="region" aria-label={label} tabIndex={-1}>{children}</div>
+                      <button type="button" className="hc-home-rail-nav next" aria-label={`Scroll ${label} forward`} onClick={railNav(1)}>›</button>
+                    </div>
+                  );
+                  const openPersonProfile=(p)=>{if(p.public_username)openConnectPublicProfile({public_username:p.public_username,full_name:p.full_name});};
+                  const followBtn=(p)=><button type="button" className={`hc-home-follow${p.following?" following":""}`} onClick={(e)=>{e.stopPropagation();requireConnectLogin(()=>toggleConnectFollowByUsername(p.public_username,p.full_name));}}>{p.following?"Following":"Follow"}</button>;
                   const openPost=(item)=>{ if(item.post_type==="ARTICLE"){openConnectArticle(item);} else {setConnectView("feed");setConnectContentMode("posts");} };
                   const openSpecialCta=(item)=>{
                     const u=String(item?.cta_url||"").toLowerCase();
@@ -19322,50 +19403,54 @@ const removeNotification = async (notificationId) => {
                     if(u.includes("vibe"))return openNavigationOSArea("connect","vibe");
                     if(u.includes("communit"))return openNavigationOSArea("connect","communities");
                   };
+                  const lazyRef=(key)=>(el)=>attachConnectHomeLazySection(key,el);
                   return (
                   <div className="hc-home-shell" aria-label="HOWDI Connect Home">
 
-                    {/* 1. HOWDI Special */}
+                    {/* 1. HOWDI Special (admin-managed) */}
                     <section className="hc-home-section hc-home-special">
-                      {L.special?<Skeleton/>:S.special?.item?(
+                      {S.special?.error?<SectionError onRetry={()=>loadConnectHomeSections(["special"])}/>:!S.special?<Skeleton/>:S.special.item?(
                         <div className="hc-home-special-card">
                           <div className="hc-home-special-copy">
                             <b>{S.special.item.title}</b>
                             <span>{S.special.item.subtitle}</span>
                           </div>
                           {S.special.item.cta_label&&<button type="button" onClick={()=>openSpecialCta(S.special.item)}>{S.special.item.cta_label} →</button>}
+                          <button type="button" className="hc-home-dismiss" aria-label="Dismiss" onClick={(e)=>{e.stopPropagation();e.currentTarget.closest('.hc-home-special-card').style.display='none';}}>×</button>
                         </div>
-                      ):(S.special?<Empty label="No HOWDI Special right now."/>:null)}
+                      ):<Empty label="No HOWDI Special right now."/>}
                     </section>
 
-                    {/* 2. Hero / Media of the Day */}
+                    {/* 2. Hero / Media of the Day (admin-managed, with intelligent fallback) */}
                     <section className="hc-home-section hc-home-hero">
-                      {L.hero?<Skeleton/>:S.hero?.item?(
-                        <div className="hc-home-hero-card" onClick={()=>openPost(S.hero.item)}>
+                      {S.hero?.error?<SectionError onRetry={()=>loadConnectHomeSections(["hero"])}/>:!S.hero?<Skeleton/>:S.hero.item?(
+                        <div className="hc-home-hero-card" onClick={()=>S.hero.source==="admin"?openSpecialCta(S.hero.item):openPost(S.hero.item)}>
                           <small>Media of the Day</small>
-                          <h3>{S.hero.item.article_title||(S.hero.item.content||"").slice(0,120)}</h3>
-                          <span>By {who(S.hero.item)}</span>
+                          {S.hero.item.media_type==="IMAGE"&&S.hero.item.media_url&&<img className="hc-home-hero-media" src={S.hero.item.media_url} alt=""/>}
+                          {S.hero.item.media_type==="VIDEO"&&S.hero.item.media_url&&<video className="hc-home-hero-media" src={S.hero.item.media_url} muted playsInline/>}
+                          <h3>{S.hero.item.title||S.hero.item.article_title||(S.hero.item.body_text||S.hero.item.content||"").slice(0,120)}</h3>
+                          {S.hero.source==="admin"?(S.hero.item.cta_label&&<button type="button" onClick={(e)=>{e.stopPropagation();openSpecialCta(S.hero.item);}}>{S.hero.item.cta_label} →</button>):<span>By {who(S.hero.item)}</span>}
                         </div>
-                      ):(S.hero?<Empty label="Nothing featured yet."/>:null)}
+                      ):<Empty label="Nothing featured yet."/>}
                     </section>
 
                     {/* 3. Stories */}
                     <section className="hc-home-section hc-home-stories">
                       <h4>Stories</h4>
-                      {L.stories?<Skeleton rows={1}/>:S.stories?(S.stories.items.length?(
-                        <div className="hc-home-stories-row">
+                      {S.stories?.error?<SectionError onRetry={()=>loadConnectHomeSections(["stories"])}/>:!S.stories?<Skeleton rows={1}/>:S.stories.items.length?(
+                        <Rail label="Stories" className="hc-home-stories-row">
                           {S.stories.items.map(s=><button type="button" key={s.id} className="hc-home-story" onClick={()=>openNavigationOSArea("connect","stories")}>
                             <span className="hc-home-story-ring">{avatarInitial(s)}</span>
                             <small>{s.mine?"You":who(s)}</small>
                           </button>)}
-                        </div>
-                      ):<Empty label="No stories yet."/>):null}
+                        </Rail>
+                      ):<Empty label="No stories yet. Share the first moment of your day."/>}
                     </section>
 
                     {/* 4. For You */}
                     <section className="hc-home-section hc-home-foryou">
                       <h4>For You</h4>
-                      {L.forYou?<Skeleton rows={3}/>:S.forYou?(S.forYou.items.length?(
+                      {S.forYou?.error?<SectionError onRetry={()=>loadConnectHomeSections(["forYou"])}/>:!S.forYou?<Skeleton rows={3}/>:S.forYou.items.length?(
                         <div className="hc-home-list">
                           {S.forYou.items.map(p=><article key={p.id} className="hc-home-post-card" onClick={()=>openPost(p)}>
                             <span className="hc-home-post-author">{who(p)}{p.from_followed&&<em>· Following</em>}</span>
@@ -19374,80 +19459,85 @@ const removeNotification = async (notificationId) => {
                           </article>)}
                           {S.forYou.nextCursor&&<button type="button" className="hc-home-more" onClick={loadConnectHomeForYouMore} disabled={L.forYou}>{L.forYou?"Loading…":"Load more"}</button>}
                         </div>
-                      ):<Empty label="Follow people and interests to fill your feed."/>):null}
+                      ):<Empty label={loggedIn?"Follow people and interests to fill your feed.":"Log in to get a feed tailored to you — for now, here's what's trending on HOWDI Connect."}/>}
                     </section>
 
                     {/* 5. Vibe discovery */}
                     <section className="hc-home-section hc-home-vibes">
                       <h4>Vibe</h4>
-                      {L.vibes?<Skeleton rows={1}/>:S.vibes?(S.vibes.items.length?(
-                        <div className="hc-home-vibe-row">
+                      {S.vibes?.error?<SectionError onRetry={()=>loadConnectHomeSections(["vibes"])}/>:!S.vibes?<Skeleton rows={1}/>:S.vibes.items.length?(
+                        <Rail label="Vibe" className="hc-home-vibe-row">
                           {S.vibes.items.map(v=><button type="button" key={v.id} className="hc-home-vibe-card" onClick={()=>openNavigationOSArea("connect","vibe")}>
                             {v.coverUrl?<img src={v.coverUrl} alt=""/>:<span className="hc-home-vibe-fallback">▷</span>}
                             <small>{v.creatorPublicUsername?`@${v.creatorPublicUsername}`:v.creatorName}</small>
                           </button>)}
-                        </div>
-                      ):<Empty label="No Vibes yet — be the first."/>):null}
+                        </Rail>
+                      ):<Empty label="No Vibes yet — be the first to share one."/>}
                     </section>
 
-                    {/* 6. Continue Watching */}
-                    {(L.continueWatching||S.continueWatching?.items?.length>0)&&<section className="hc-home-section hc-home-continue-watching">
+                    {/* 6. Continue Watching (Vibe watch progress — visually distinct: thumbnail + progress bar) */}
+                    <section ref={lazyRef("continueWatching")} className="hc-home-section hc-home-continue-watching">
                       <h4>Continue Watching</h4>
-                      {L.continueWatching?<Skeleton rows={2}/>:<div className="hc-home-list">
-                        {S.continueWatching.items.map(p=><article key={p.id} className="hc-home-post-card" onClick={()=>openPost(p)}>
-                          <p>{p.article_title||(p.content||"").slice(0,120)}</p>
-                          <span className="hc-home-post-meta">In progress</span>
-                        </article>)}
-                      </div>}
-                    </section>}
+                      {S.continueWatching?.error?<SectionError onRetry={()=>loadConnectHomeSections(["continueWatching"])}/>:!S.continueWatching?<Skeleton rows={2}/>:S.continueWatching.items.length?(
+                        <Rail label="Continue Watching" className="hc-home-watch-row">
+                          {S.continueWatching.items.map(v=><button type="button" key={v.vibeId} className="hc-home-watch-card" onClick={()=>openNavigationOSArea("connect","vibe")}>
+                            <span className="hc-home-watch-thumb">
+                              {v.coverUrl?<img src={v.coverUrl} alt=""/>:<span className="hc-home-vibe-fallback">▷</span>}
+                              <span className="hc-home-watch-progress"><span style={{width:`${Math.min(100,Math.max(0,v.completionPercent||0))}%`}}/></span>
+                            </span>
+                            <small>{v.creatorPublicUsername?`@${v.creatorPublicUsername}`:v.creatorName}</small>
+                          </button>)}
+                        </Rail>
+                      ):<Empty label={loggedIn?"Watch a Vibe and your progress will appear here.":"Log in to pick up Vibes where you left off."}/>}
+                    </section>
 
                     {/* 7. Recommended Creators */}
-                    <section className="hc-home-section hc-home-creators">
+                    <section ref={lazyRef("recommendedCreators")} className="hc-home-section hc-home-creators">
                       <h4>Recommended Creators</h4>
-                      {L.recommendedCreators?<Skeleton rows={2}/>:S.recommendedCreators?(S.recommendedCreators.items.length?(
-                        <div className="hc-home-people-row">
-                          {S.recommendedCreators.items.map(p=><div key={p.id} className="hc-home-person-card" onClick={()=>openPersonProfile(p)}>
+                      {S.recommendedCreators?.error?<SectionError onRetry={()=>loadConnectHomeSections(["recommendedCreators"])}/>:!S.recommendedCreators?<Skeleton rows={2}/>:S.recommendedCreators.items.length?(
+                        <Rail label="Recommended Creators" className="hc-home-people-row">
+                          {S.recommendedCreators.items.map(p=><div key={p.public_username} className="hc-home-person-card" onClick={()=>openPersonProfile(p)}>
                             <span className="hc-home-avatar">{p.profile_image?<img src={p.profile_image} alt=""/>:avatarInitial(p)}</span>
-                            <b>{p.public_username?`@${p.public_username}`:p.full_name}</b>
+                            <b>@{p.public_username}</b>
                             <small>{p.profession_title||p.professional_category||"Creator"}</small>
                             {followBtn(p)}
                           </div>)}
-                        </div>
-                      ):<Empty label="No creators to recommend yet."/>):null}
+                        </Rail>
+                      ):<Empty label="No creators to recommend yet."/>}
                     </section>
 
                     {/* 8. Suggested People */}
-                    <section className="hc-home-section hc-home-people">
+                    <section ref={lazyRef("suggestedPeople")} className="hc-home-section hc-home-people">
                       <h4>Suggested People</h4>
-                      {L.suggestedPeople?<Skeleton rows={2}/>:S.suggestedPeople?(S.suggestedPeople.items.length?(
-                        <div className="hc-home-people-row">
-                          {S.suggestedPeople.items.map(p=><div key={p.id} className="hc-home-person-card" onClick={()=>openPersonProfile(p)}>
+                      {S.suggestedPeople?.error?<SectionError onRetry={()=>loadConnectHomeSections(["suggestedPeople"])}/>:!S.suggestedPeople?<Skeleton rows={2}/>:S.suggestedPeople.items.length?(
+                        <Rail label="Suggested People" className="hc-home-people-row">
+                          {S.suggestedPeople.items.map(p=><div key={p.public_username} className="hc-home-person-card" onClick={()=>openPersonProfile(p)}>
                             <span className="hc-home-avatar">{p.profile_image?<img src={p.profile_image} alt=""/>:avatarInitial(p)}</span>
-                            <b>{p.public_username?`@${p.public_username}`:p.full_name}</b>
+                            <b>@{p.public_username}</b>
                             <small>{p.profession_title||"HOWDI member"}</small>
                             {followBtn(p)}
                           </div>)}
-                        </div>
-                      ):<Empty label="No suggestions right now."/>):null}
+                        </Rail>
+                      ):<Empty label="No suggestions right now."/>}
                     </section>
 
                     {/* 9. Communities */}
-                    <section className="hc-home-section hc-home-communities">
+                    <section ref={lazyRef("communities")} className="hc-home-section hc-home-communities">
                       <h4>Communities</h4>
-                      {L.communities?<Skeleton rows={2}/>:S.communities?(S.communities.items.length?(
-                        <div className="hc-home-communities-row">
+                      {S.communities?.error?<SectionError onRetry={()=>loadConnectHomeSections(["communities"])}/>:!S.communities?<Skeleton rows={2}/>:S.communities.items.length?(
+                        <Rail label="Communities" className="hc-home-communities-row">
                           {S.communities.items.map(c=><button type="button" key={c.id} className="hc-home-community-card" onClick={()=>openNavigationOSArea("connect","communities")}>
                             <b>{c.name}</b>
                             <small>{c.member_count||0} members</small>
                           </button>)}
-                        </div>
-                      ):<Empty label="No public communities yet."/>):null}
+                        </Rail>
+                      ):<Empty label="No public communities yet."/>}
                     </section>
 
                     {/* 10. Trending Articles */}
-                    <section className="hc-home-section hc-home-articles">
+                    <section ref={lazyRef("trendingArticles")} className="hc-home-section hc-home-articles">
                       <h4>Trending Articles</h4>
-                      {L.trendingArticles?<Skeleton rows={2}/>:S.trendingArticles?(S.trendingArticles.items.length?(
+                      {S.trendingArticles?.error?<SectionError onRetry={()=>loadConnectHomeSections(["trendingArticles"])}/>:!S.trendingArticles?<Skeleton rows={2}/>:S.trendingArticles.items.length?(
                         <div className="hc-home-list">
                           {S.trendingArticles.items.map(a=><article key={a.id} className="hc-home-article-card" onClick={()=>openConnectArticle(a)}>
                             <b>{a.article_title}</b>
@@ -19455,77 +19545,89 @@ const removeNotification = async (notificationId) => {
                             <small>By {who(a)} · {a.view_count||0} views</small>
                           </article>)}
                         </div>
-                      ):<Empty label="No trending articles yet."/>):null}
+                      ):<Empty label="No trending articles yet."/>}
                     </section>
 
                     {/* 11. Shop recommendations */}
-                    <section className="hc-home-section hc-home-shop">
+                    <section ref={lazyRef("shopRecommendations")} className="hc-home-section hc-home-shop">
                       <h4>Shop</h4>
-                      {L.shopRecommendations?<Skeleton rows={2}/>:S.shopRecommendations?(S.shopRecommendations.items.length?(
-                        <div className="hc-home-shop-row">
+                      {S.shopRecommendations?.error?<SectionError onRetry={()=>loadConnectHomeSections(["shopRecommendations"])}/>:!S.shopRecommendations?<Skeleton rows={2}/>:S.shopRecommendations.items.length?(
+                        <Rail label="Shop" className="hc-home-shop-row">
                           {S.shopRecommendations.items.map(p=><button type="button" key={p.id} className="hc-home-shop-card" onClick={()=>openProductDetails(p)}>
+                            <span className="hc-home-pillar-tag">Shop</span>
                             <b>{p.name}</b>
-                            <span>₹{p.price}</span>
+                            <span className="hc-home-price">₹{p.price}</span>
+                            <em className="hc-home-cta">View Product →</em>
                           </button>)}
-                        </div>
-                      ):<Empty label="No products to recommend yet."/>):null}
+                        </Rail>
+                      ):<Empty label="No products to recommend yet."/>}
                     </section>
 
                     {/* 12. Works recommendations */}
-                    <section className="hc-home-section hc-home-works">
+                    <section ref={lazyRef("worksRecommendations")} className="hc-home-section hc-home-works">
                       <h4>Works</h4>
-                      {L.worksRecommendations?<Skeleton rows={2}/>:S.worksRecommendations?(S.worksRecommendations.items.length?(
-                        <div className="hc-home-works-row">
+                      {S.worksRecommendations?.error?<SectionError onRetry={()=>loadConnectHomeSections(["worksRecommendations"])}/>:!S.worksRecommendations?<Skeleton rows={2}/>:S.worksRecommendations.items.length?(
+                        <Rail label="Works" className="hc-home-works-row">
                           {S.worksRecommendations.items.map(w=><button type="button" key={w.id} className="hc-home-works-card" onClick={()=>openNavigationOSArea("works","home")}>
+                            <span className="hc-home-pillar-tag">Works</span>
                             <b>{w.full_name}</b>
                             <span>{w.requested_skill||"HOWDI Works"}</span>
                             <small>★ {Number(w.rating||0).toFixed(1)}</small>
+                            <em className="hc-home-cta">View Service →</em>
                           </button>)}
-                        </div>
-                      ):<Empty label="No Works recommendations yet."/>):null}
+                        </Rail>
+                      ):<Empty label="No Works recommendations yet."/>}
                     </section>
 
                     {/* 13. Learn recommendations */}
-                    <section className="hc-home-section hc-home-learn">
+                    <section ref={lazyRef("learnRecommendations")} className="hc-home-section hc-home-learn">
                       <h4>Learn & Earn</h4>
-                      {L.learnRecommendations?<Skeleton rows={2}/>:S.learnRecommendations?(S.learnRecommendations.items.length?(
-                        <div className="hc-home-learn-row">
+                      {S.learnRecommendations?.error?<SectionError onRetry={()=>loadConnectHomeSections(["learnRecommendations"])}/>:!S.learnRecommendations?<Skeleton rows={2}/>:S.learnRecommendations.items.length?(
+                        <Rail label="Learn and Earn" className="hc-home-learn-row">
                           {S.learnRecommendations.items.map(c=><button type="button" key={c.id} className="hc-home-learn-card" onClick={()=>openNavigationOSArea("learn","home")}>
+                            <span className="hc-home-pillar-tag">Learn & Earn</span>
                             <b>{c.title}</b>
                             <small>{c.category} · {c.level}</small>
+                            <em className="hc-home-cta">View Course →</em>
                           </button>)}
-                        </div>
-                      ):<Empty label="No courses to recommend yet."/>):null}
+                        </Rail>
+                      ):<Empty label="No courses to recommend yet."/>}
                     </section>
 
                     {/* 14. Recent Activity */}
-                    {(L.recentActivity||S.recentActivity?.items?.length>0)&&<section className="hc-home-section hc-home-activity">
+                    <section ref={lazyRef("recentActivity")} className="hc-home-section hc-home-activity">
                       <h4>Recent Activity</h4>
-                      {L.recentActivity?<Skeleton rows={2}/>:<div className="hc-home-list">
-                        {S.recentActivity.items.map(n=><div key={n.id} className={`hc-home-activity-row${n.is_read?"":" unread"}`}>
-                          <span>{n.actor_public_username?`@${n.actor_public_username}`:n.actor_name||"HOWDI"}</span>
-                          <p>{n.message}</p>
-                        </div>)}
-                      </div>}
-                    </section>}
+                      {S.recentActivity?.error?<SectionError onRetry={()=>loadConnectHomeSections(["recentActivity"])}/>:!S.recentActivity?<Skeleton rows={2}/>:S.recentActivity.items.length?(
+                        <div className="hc-home-list">
+                          {S.recentActivity.items.map(n=><div key={n.id} className={`hc-home-activity-row${n.is_read?"":" unread"}`}>
+                            <span>{who(n)}</span>
+                            <p>{n.message}</p>
+                          </div>)}
+                        </div>
+                      ):<Empty label={loggedIn?"No recent activity yet. Follow, comment or share to see it here.":"Log in to see follows, comments and replies as they happen."}/>}
+                    </section>
 
-                    {/* 15. Daily Quote */}
-                    <section className="hc-home-section hc-home-quote">
-                      {L.dailyQuote?<Skeleton/>:S.dailyQuote?.item?(
+                    {/* 15. Daily Quote (admin-managed) */}
+                    <section ref={lazyRef("dailyQuote")} className="hc-home-section hc-home-quote">
+                      {S.dailyQuote?.error?<SectionError onRetry={()=>loadConnectHomeSections(["dailyQuote"])}/>:!S.dailyQuote?<Skeleton/>:S.dailyQuote.item?(
                         <blockquote>“{S.dailyQuote.item.quote_text}”<cite>— {S.dailyQuote.item.author}</cite></blockquote>
                       ):null}
                     </section>
 
-                    {/* 16. Continue Your Journey */}
-                    {(L.continueYourJourney||S.continueYourJourney?.items?.length>0)&&<section className="hc-home-section hc-home-journey">
+                    {/* 16. Continue Your Journey (wide utility/action cards — visually distinct from Continue Watching) */}
+                    <section ref={lazyRef("continueYourJourney")} className="hc-home-section hc-home-journey">
                       <h4>Continue Your Journey</h4>
-                      {L.continueYourJourney?<Skeleton rows={2}/>:<div className="hc-home-list">
-                        {S.continueYourJourney.items.map(e=><button type="button" key={e.course_id} className="hc-home-journey-card" onClick={()=>openNavigationOSArea("learn","home")}>
-                          <b>{e.title}</b>
-                          <span>{e.progress||0}% complete</span>
-                        </button>)}
-                      </div>}
-                    </section>}
+                      {S.continueYourJourney?.error?<SectionError onRetry={()=>loadConnectHomeSections(["continueYourJourney"])}/>:!S.continueYourJourney?<Skeleton rows={2}/>:S.continueYourJourney.items.length?(
+                        <div className="hc-home-journey-list">
+                          {S.continueYourJourney.items.map(e=><button type="button" key={e.course_id} className="hc-home-journey-card" onClick={()=>openNavigationOSArea("learn","home")}>
+                            <span className="hc-home-pillar-tag">Learn & Earn</span>
+                            <b>{e.title}</b>
+                            <span className="hc-home-journey-bar"><span style={{width:`${Math.min(100,Math.max(0,e.progress||0))}%`}}/></span>
+                            <small>{e.progress||0}% complete</small>
+                          </button>)}
+                        </div>
+                      ):<Empty label={loggedIn?"Nothing in progress right now — start a course, booking or unfinished action from Learn & Earn.":"Log in to resume courses, bookings and unfinished HOWDI actions."}/>}
+                    </section>
 
                   </div>
                   );

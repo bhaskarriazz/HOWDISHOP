@@ -12467,3 +12467,262 @@ body:has(.howdi-profile-overlay) .howdi-connect-vibe{
   background:#eef6f1 !important;
   color:#0f513f !important;
 }
+
+/* =====================================================================
+   HOWDI CONNECT V16.6K5A — HOME SHELL
+   Scoped to .hc-home-* only. Does not touch any other HOWDI surface.
+   ===================================================================== */
+.hc-home-shell{
+  max-width:960px;
+  margin:0 auto;
+  padding:12px 16px 64px;
+  display:flex;
+  flex-direction:column;
+  gap:22px;
+}
+.hc-home-section{ display:flex; flex-direction:column; gap:10px; }
+.hc-home-section h4{
+  margin:0;
+  font-size:15px;
+  font-weight:700;
+  color:#0f513f;
+  letter-spacing:.01em;
+}
+
+/* Stable skeleton heights — reduces layout shift while sections load */
+.hc-home-skel{ display:flex; flex-direction:column; gap:8px; }
+.hc-home-skel-row{
+  height:64px;
+  border-radius:14px;
+  background:linear-gradient(90deg,#eef2ef 25%,#f6f8f6 37%,#eef2ef 63%);
+  background-size:400% 100%;
+  animation:hcHomeShimmer 1.4s ease-in-out infinite;
+}
+@keyframes hcHomeShimmer{ 0%{background-position:100% 0;} 100%{background-position:0 0;} }
+
+.hc-home-empty{
+  padding:16px;
+  border:1px dashed #d8e3dc;
+  border-radius:14px;
+  color:#5c6b63;
+  font-size:13.5px;
+  background:#fafcfb;
+}
+.hc-home-error{
+  display:flex; align-items:center; justify-content:space-between; gap:10px;
+  padding:14px 16px;
+  border-radius:14px;
+  background:#fdf3f2;
+  border:1px solid #f3d3cf;
+  color:#8a3226;
+  font-size:13.5px;
+}
+.hc-home-error button{
+  border:1px solid #8a3226; background:#fff; color:#8a3226;
+  border-radius:999px; padding:6px 14px; font-weight:600; cursor:pointer;
+}
+.hc-home-error button:focus-visible{ outline:2px solid #8a3226; outline-offset:2px; }
+
+/* ---- HOWDI Special / Hero ---- */
+.hc-home-special-card, .hc-home-hero-card{
+  position:relative;
+  border-radius:18px;
+  padding:18px 20px;
+  background:linear-gradient(135deg,#0f513f,#17795c);
+  color:#fff;
+  cursor:pointer;
+  min-height:64px;
+  display:flex; flex-direction:column; gap:8px; justify-content:center;
+}
+.hc-home-special-copy{ display:flex; flex-direction:column; gap:2px; }
+.hc-home-special-copy b{ font-size:15px; }
+.hc-home-special-copy span{ font-size:13px; opacity:.9; }
+.hc-home-special-card button, .hc-home-hero-card button{
+  align-self:flex-start;
+  background:#fff; color:#0f513f; border:none; border-radius:999px;
+  padding:8px 16px; font-weight:700; font-size:13px; cursor:pointer;
+}
+.hc-home-dismiss{
+  position:absolute; top:8px; right:10px;
+  background:rgba(255,255,255,.18) !important; color:#fff !important;
+  width:26px; height:26px; border-radius:50%; padding:0 !important;
+  display:flex; align-items:center; justify-content:center; font-size:16px; line-height:1;
+}
+.hc-home-hero-card{ min-height:160px; }
+.hc-home-hero-card h3{ margin:0; font-size:19px; line-height:1.3; max-width:640px; }
+.hc-home-hero-card span{ font-size:13px; opacity:.85; }
+.hc-home-hero-media{
+  width:100%; max-height:220px; object-fit:cover; border-radius:12px;
+}
+
+/* ---- Rails (Stories, Vibe, Continue Watching, People, Communities, Shop, Works, Learn) ---- */
+.hc-home-rail-wrap{ position:relative; }
+.hc-home-rail{
+  display:flex;
+  gap:12px;
+  overflow-x:auto;
+  scroll-snap-type:x proximity;
+  padding:2px 2px 8px;
+  scrollbar-width:thin;
+}
+.hc-home-rail:focus-visible{ outline:2px solid #0f513f; outline-offset:2px; }
+.hc-home-rail > *{ scroll-snap-align:start; flex:0 0 auto; }
+.hc-home-rail-nav{
+  position:absolute; top:50%; transform:translateY(-50%);
+  width:32px; height:32px; border-radius:50%;
+  background:#fff; border:1px solid #d8e3dc; color:#0f513f;
+  font-size:18px; line-height:1; cursor:pointer;
+  display:none; align-items:center; justify-content:center;
+  box-shadow:0 2px 8px rgba(15,81,63,.12);
+  z-index:2;
+}
+.hc-home-rail-nav.prev{ left:-6px; }
+.hc-home-rail-nav.next{ right:-6px; }
+.hc-home-rail-nav:focus-visible{ outline:2px solid #0f513f; outline-offset:2px; }
+@media (min-width:768px){
+  .hc-home-rail-nav{ display:flex; }
+}
+
+.hc-home-story{
+  display:flex; flex-direction:column; align-items:center; gap:6px;
+  width:72px; background:none; border:none; cursor:pointer; padding:2px;
+}
+.hc-home-story-ring{
+  width:56px; height:56px; border-radius:50%;
+  display:flex; align-items:center; justify-content:center;
+  background:#eef6f1; color:#0f513f; font-weight:700; font-size:18px;
+  border:2px solid #0f513f;
+}
+.hc-home-story small{ font-size:11px; color:#3d4a44; max-width:70px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+.hc-home-vibe-card{
+  width:110px; height:150px; border-radius:14px; overflow:hidden; position:relative;
+  border:none; padding:0; cursor:pointer; background:#0f513f;
+}
+.hc-home-vibe-card img{ width:100%; height:100%; object-fit:cover; display:block; }
+.hc-home-vibe-fallback{ display:flex; align-items:center; justify-content:center; width:100%; height:100%; color:#fff; font-size:22px; }
+.hc-home-vibe-card small{
+  position:absolute; left:0; right:0; bottom:0; padding:6px 8px;
+  background:linear-gradient(0deg,rgba(0,0,0,.65),transparent);
+  color:#fff; font-size:11px; text-align:left;
+}
+
+/* Continue Watching — thumbnail + progress bar, visually distinct from Continue Your Journey */
+.hc-home-watch-card{
+  width:130px; border:1px solid #e4ece7; border-radius:14px; padding:0;
+  background:#fff; cursor:pointer; overflow:hidden; display:flex; flex-direction:column; gap:0;
+}
+.hc-home-watch-thumb{ position:relative; display:block; width:100%; height:90px; background:#0f513f; }
+.hc-home-watch-thumb img{ width:100%; height:100%; object-fit:cover; display:block; }
+.hc-home-watch-progress{
+  position:absolute; left:0; right:0; bottom:0; height:4px; background:rgba(255,255,255,.35);
+}
+.hc-home-watch-progress span{ display:block; height:100%; background:#ffb703; }
+.hc-home-watch-card small{ padding:6px 8px; font-size:11px; color:#3d4a44; text-align:left; }
+
+.hc-home-person-card{
+  width:150px; border:1px solid #e4ece7; border-radius:14px; padding:14px 12px;
+  display:flex; flex-direction:column; align-items:center; gap:6px; text-align:center;
+  background:#fff; cursor:pointer;
+}
+.hc-home-avatar{
+  width:48px; height:48px; border-radius:50%; overflow:hidden;
+  display:flex; align-items:center; justify-content:center;
+  background:#eef6f1; color:#0f513f; font-weight:700;
+}
+.hc-home-avatar img{ width:100%; height:100%; object-fit:cover; }
+.hc-home-person-card b{ font-size:13px; }
+.hc-home-person-card small{ font-size:11.5px; color:#5c6b63; }
+.hc-home-follow{
+  border:1px solid #0f513f; background:#0f513f; color:#fff;
+  border-radius:999px; padding:5px 14px; font-size:12px; font-weight:700; cursor:pointer;
+  min-height:30px;
+}
+.hc-home-follow.following{ background:#fff; color:#0f513f; }
+.hc-home-follow:focus-visible{ outline:2px solid #0f513f; outline-offset:2px; }
+
+.hc-home-community-card{
+  width:170px; border:1px solid #e4ece7; border-radius:14px; padding:14px;
+  background:#fff; cursor:pointer; text-align:left; display:flex; flex-direction:column; gap:4px;
+}
+
+/* ---- Lists (For You, Trending Articles, Recent Activity) ---- */
+.hc-home-list{ display:flex; flex-direction:column; gap:10px; }
+.hc-home-post-card, .hc-home-article-card{
+  border:1px solid #e4ece7; border-radius:14px; padding:14px 16px;
+  background:#fff; cursor:pointer; display:flex; flex-direction:column; gap:6px;
+}
+.hc-home-post-author{ font-size:12.5px; font-weight:700; color:#0f513f; }
+.hc-home-post-author em{ font-style:normal; color:#5c6b63; margin-left:6px; font-weight:500; }
+.hc-home-post-card p, .hc-home-article-card > span{ font-size:13.5px; color:#2c352f; margin:0; }
+.hc-home-post-meta{ font-size:11.5px; color:#5c6b63; }
+.hc-home-more{
+  align-self:center; border:1px solid #0f513f; background:#fff; color:#0f513f;
+  border-radius:999px; padding:8px 20px; font-weight:700; cursor:pointer; min-height:38px;
+}
+.hc-home-activity-row{
+  display:flex; flex-direction:column; gap:2px; padding:10px 12px;
+  border-radius:12px; background:#fafcfb;
+}
+.hc-home-activity-row.unread{ background:#eef6f1; border-left:3px solid #0f513f; }
+.hc-home-activity-row span{ font-size:12px; font-weight:700; color:#0f513f; }
+.hc-home-activity-row p{ margin:0; font-size:13px; color:#2c352f; }
+
+/* ---- Cross-pillar cards: Shop / Works / Learn & Earn (labelled + CTA) ---- */
+.hc-home-shop-card, .hc-home-works-card, .hc-home-learn-card{
+  width:160px; border:1px solid #e4ece7; border-radius:14px; padding:14px;
+  background:#fff; cursor:pointer; text-align:left; display:flex; flex-direction:column; gap:5px;
+}
+.hc-home-pillar-tag{
+  align-self:flex-start;
+  font-size:10.5px; font-weight:700; letter-spacing:.03em; text-transform:uppercase;
+  color:#0f513f; background:#eef6f1; border-radius:999px; padding:2px 9px;
+}
+.hc-home-price{ font-weight:700; color:#0f513f; font-size:14px; }
+.hc-home-cta{ font-style:normal; font-size:12px; font-weight:700; color:#0f513f; margin-top:2px; }
+
+/* ---- Daily Quote ---- */
+.hc-home-quote blockquote{
+  margin:0; padding:20px 22px; border-radius:16px;
+  background:#f4f7f5; color:#28352e; font-size:16px; font-style:italic; line-height:1.5;
+}
+.hc-home-quote cite{ display:block; margin-top:10px; font-style:normal; font-size:12.5px; color:#5c6b63; }
+
+/* ---- Continue Your Journey — wide utility/action cards (distinct from Continue Watching) ---- */
+.hc-home-journey-list{ display:flex; flex-direction:column; gap:10px; }
+.hc-home-journey-card{
+  display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+  width:100%; border:1px solid #e4ece7; border-radius:14px; padding:14px 16px;
+  background:#fff; cursor:pointer; text-align:left;
+}
+.hc-home-journey-card b{ flex:1 1 auto; min-width:140px; font-size:14px; }
+.hc-home-journey-bar{
+  flex:1 1 160px; height:6px; border-radius:999px; background:#e4ece7; overflow:hidden; min-width:100px;
+}
+.hc-home-journey-bar span{ display:block; height:100%; background:#0f513f; }
+.hc-home-journey-card small{ font-size:12px; color:#5c6b63; }
+
+/* ---- Focus visibility across all interactive Home cards/buttons ---- */
+.hc-home-shell button:focus-visible,
+.hc-home-shell [tabindex]:focus-visible{
+  outline:2px solid #0f513f;
+  outline-offset:2px;
+}
+
+/* ---- Mobile first-screen fixes (K5A scope only: no full K5F redesign) ---- */
+@media (max-width:640px){
+  .hc-home-shell{ padding:10px 12px 48px; gap:16px; }
+  .hc-home-special-card{
+    flex-direction:row; align-items:center; justify-content:space-between;
+    padding:12px 40px 12px 14px; min-height:0;
+  }
+  .hc-home-special-copy span{ display:none; }
+  .hc-home-hero-card{ min-height:0; padding:14px 16px; }
+  .hc-home-hero-card h3{ font-size:16px; }
+  .hc-home-hero-media{ max-height:150px; }
+  .hc-home-person-card, .hc-home-community-card, .hc-home-shop-card, .hc-home-works-card, .hc-home-learn-card{
+    width:132px;
+  }
+  .hc-home-vibe-card{ width:92px; height:128px; }
+  .hc-home-watch-card{ width:112px; }
+}
