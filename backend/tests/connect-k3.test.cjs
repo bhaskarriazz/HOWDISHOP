@@ -27,14 +27,17 @@ async function run(method,path,body={},options={}){
   else if(sql.includes('SELECT * FROM howdi_community_posts'))rows=db.article?[db.article]:[];
   else if(sql.startsWith('INSERT INTO howdi_community_posts')){db.article={id:7,user_id:params[0],content:params[1],article_title:params[2],article_cover_url:params[4],article_cover_data:params[5],post_status:params[9]};rows=[db.article];}
   else if(sql.startsWith('UPDATE howdi_community_posts')){Object.assign(db.article,{article_cover_url:params[4],article_cover_data:params[5]});rows=[db.article];}
-  else if(sql.includes('SELECT * FROM howdi_connect_social_spaces'))rows=[{id:7,space_type:db.spaceType,privacy:'PUBLIC',owner_user_id:303}];
-  else if(sql.includes('SELECT role,status FROM howdi_connect_social_space_members'))rows=[{role:options.role||'ADMIN',status:'ACTIVE'}];
+  else if(sql.includes('SELECT * FROM howdi_connect_social_spaces'))rows=[{id:7,space_type:db.spaceType,privacy:options.privacy||'PUBLIC',owner_user_id:303}];
+  else if(sql.includes('SELECT role,status FROM howdi_connect_social_space_members'))rows=options.notAMember?[]:[{role:options.role||'ADMIN',status:options.membershipStatus||'ACTIVE'}];
   else if(sql.includes('FROM howdi_connect_social_invite_links i'))rows=[{id:9,space_id:7,space_type:db.spaceType,requires_approval:false}];
+  else if(sql.startsWith('INSERT INTO howdi_connect_social_invite_links'))rows=[{id:9,space_id:params[0],created_by:params[1],token:params[2],label:params[3],max_uses:params[5],requires_approval:params[6]}];
+  else if(sql.startsWith('UPDATE howdi_connect_social_invite_links SET revoked_at'))rows=options.inviteFound===false?[]:[{id:params[0]}];
+  else if(sql.startsWith('SELECT last_read_at FROM howdi_connect_conversation_members'))rows=options.otherRead?[{last_read_at:options.otherRead}]:[];
   else if(sql.startsWith('SELECT 1 FROM howdi_connect_conversation_members'))rows=options.nonmember?[]:[{exists:1}];
   else if(sql.startsWith('INSERT INTO howdi_connect_messages'))rows=[{id:8,sender_user_id:params[1],attachment_type:params[4],attachment_data:params[5],attachment_meta:JSON.parse(params[6]),reactions:{101:'👍'}}];
   else if(sql.startsWith('INSERT INTO howdi_connect_social_messages'))rows=[{id:8,sender_user_id:params[1],message_type:params[2],media_data:params[4],attachment_meta:JSON.parse(params[5])}];
   else if(sql.startsWith('SELECT c.id,c.updated_at')){assert.match(sql,/cp.public_username/);assert.doesNotMatch(sql.split(' FROM ')[0],/howdi_id|master_id|identity_uuid|other_user_id/);rows=[{id:7,public_username:'member-b',full_name:'B'}];}
-  else if(sql.startsWith('SELECT m.id,m.conversation_id'))rows=[{id:8,sender_user_id:101,public_username:'member-a',reactions:{101:'👍',202:'❤️'},attachment_data:image}];
+  else if(sql.startsWith('SELECT m.id,m.conversation_id'))rows=[{id:8,sender_user_id:101,public_username:'member-a',reactions:{101:'👍',202:'❤️'},attachment_data:image,created_at:new Date(Date.now()-120000).toISOString()}];
   else if(sql.startsWith('INSERT INTO howdi_connect_conversations'))rows=[{id:7}];
   else if(sql.startsWith('INSERT INTO howdi_community_reactions'))rows=[{post_id:7}];
   else if(sql.startsWith('INSERT INTO howdi_community_comments'))rows=[{id:7}];
@@ -54,7 +57,7 @@ async function run(method,path,body={},options={}){
  };
  const pool={query,connect:async()=>({query,release(){}})};
  const req=Readable.from([JSON.stringify(body)]);req.method=method;req.headers=options.anonymous?{}:{authorization:'Bearer session-A'};
- const context={pool,req,res:{},url:new URL(path,'http://localhost'),pathname:path.split('?')[0],URL,Buffer,clean:x=>String(x??'').trim(),sendJSON:(_res,status,data)=>({status,data})};
+ const context={pool,req,res:{},url:new URL(path,'http://localhost'),pathname:path.split('?')[0],URL,Buffer,crypto:require('node:crypto'),clean:x=>String(x??'').trim(),sendJSON:(_res,status,data)=>({status,data})};
  const response=await vm.runInNewContext(helpers+'\n(async()=>{'+dm+spaces+articles+engagement+follow+'})()',context);
  assert.ok(response,'Route must respond');return {...response,calls,db};
 }
@@ -967,4 +970,225 @@ test('Vibe/Community open handlers never reference a numeric user id (only conte
 test('Social tab two-line spacer fix (Mutuals/Suggestions) from the prior K5B closure is preserved',()=>{
  assert.match(connectAppSource,/loadConnectSocialGraph\("mutuals"\)[\s\S]{0,120}<b aria-hidden="true">&nbsp;<\/b><span>Mutuals<\/span>/);
  assert.match(connectAppSource,/loadConnectSuggestions\(\)[\s\S]{0,120}<b aria-hidden="true">&nbsp;<\/b><span>Suggestions<\/span>/);
+});
+
+// =====================================================
+// K5C — HOWDI Connect Messages, Groups, Channels & Calls
+// Focused regression tests for the gap-closing hardening pass: DM block re-check on
+// send, DM read receipts, Groups/Channels list session-identity + no owner-id leak,
+// invite-link server-forced approval + revoke, and session-derived identity across
+// all 7 Calls routes (the largest single gap: every Calls route previously trusted
+// client-supplied body.userId/?userId with zero session check).
+// =====================================================
+
+test('DM: a block created after the conversation already exists is now enforced at send-time (previously only checked at conversation-creation)',async()=>{
+ const blockedSend=await run('POST','/api/connect/conversations/7/messages',{messageText:'hello'},{blocked:true});
+ assert.equal(blockedSend.status,403);
+ assert.equal(blockedSend.calls.filter(c=>c.sql.startsWith('INSERT INTO howdi_connect_messages')).length,0,'must not insert a message once blocked');
+ const allowedSend=await run('POST','/api/connect/conversations/7/messages',{messageText:'hello'});
+ assert.equal(allowedSend.status,201);
+});
+
+test('DM: GET messages exposes a per-message "seen" flag for the sender\'s own messages, sourced from the other member\'s last_read_at, without any raw member id',async()=>{
+ const future=new Date(Date.now()+60000).toISOString();
+ const seen=await run('GET','/api/connect/conversations/7/messages',{},{otherRead:future});
+ assert.equal(seen.status,200);
+ privateFree(seen.data);
+ assert.equal(seen.data.messages[0].is_mine,true);
+ assert.equal(seen.data.messages[0].seen,true);
+ const unseen=await run('GET','/api/connect/conversations/7/messages',{},{otherRead:null});
+ assert.equal(unseen.data.messages[0].seen,false);
+});
+
+test('Groups/Channels list route requires a session (401 for a guest) — regression: previously trusted ?userId directly',async()=>{
+ const groupsChannelsListRoute=block('            if(req.method==="GET"&&pathname==="/api/connect/groups-channels"){');
+ const r=await runK5B(groupsChannelsListRoute,'GET','/api/connect/groups-channels?userId=999&type=GROUP',{anonymous:true});
+ assert.equal(r.status,401);
+});
+
+test('Groups/Channels list route ignores a spoofed ?userId, derives viewer from the session, and never returns a raw owner_user_id',async()=>{
+ const groupsChannelsListRoute=block('            if(req.method==="GET"&&pathname==="/api/connect/groups-channels"){');
+ const r=await runK5B(groupsChannelsListRoute,'GET','/api/connect/groups-channels?userId=999&type=GROUP',{queryOverride:(sql,params)=>{
+  if(sql.startsWith('SELECT s.id,s.space_type')){
+   assert.equal(params[0],101,'must bind the session user (101), not the spoofed ?userId=999');
+   assert.doesNotMatch(sql.split(' FROM ')[0],/\bs\.owner_user_id\b/,'SELECT list must not project the raw numeric owner id');
+   return {rows:[{id:1,space_type:'GROUP',name:'Potters',owner_name:'Alice',owner_username:'crafty_alice',membership_status:'ACTIVE',membership_role:'OWNER',joined:true}],rowCount:1};
+  }
+  return undefined;
+ }});
+ assert.equal(r.status,200);
+ assert.equal(r.data.spaces.length,1);
+ assert.equal(Object.prototype.hasOwnProperty.call(r.data.spaces[0],'owner_user_id'),false);
+});
+
+test('Invite-link creation forces requires_approval=true server-side for a PRIVATE space even when the client sends requiresApproval:false (closes the private-space bypass)',async()=>{
+ const r=await run('POST','/api/connect/groups-channels/7/invite-links',{requiresApproval:false},{privacy:'PRIVATE'});
+ assert.equal(r.status,201);
+ assert.equal(r.data.invite.requires_approval,true);
+});
+
+test('Invite-link creation forces requires_approval=true server-side for an INVITE_ONLY space regardless of client input',async()=>{
+ const r=await run('POST','/api/connect/groups-channels/7/invite-links',{requiresApproval:false},{privacy:'INVITE_ONLY'});
+ assert.equal(r.status,201);
+ assert.equal(r.data.invite.requires_approval,true);
+});
+
+test('Invite-link creation still honors the client\'s requiresApproval choice for a PUBLIC space',async()=>{
+ const off=await run('POST','/api/connect/groups-channels/7/invite-links',{requiresApproval:false},{privacy:'PUBLIC'});
+ assert.equal(off.data.invite.requires_approval,false);
+ const on=await run('POST','/api/connect/groups-channels/7/invite-links',{requiresApproval:true},{privacy:'PUBLIC'});
+ assert.equal(on.data.invite.requires_approval,true);
+});
+
+test('Invite-link creation requires admin/owner/moderator membership (403 for a plain member)',async()=>{
+ const r=await run('POST','/api/connect/groups-channels/7/invite-links',{requiresApproval:false},{role:'MEMBER'});
+ assert.equal(r.status,403);
+});
+
+test('Invite-link revoke: a new endpoint exists, is admin-gated, and sets revoked_at (previously no revoke endpoint existed at all)',async()=>{
+ const forbidden=await run('PATCH','/api/connect/groups-channels/7/invite-links/9/revoke',{},{role:'MEMBER'});
+ assert.equal(forbidden.status,403);
+ const ok=await run('PATCH','/api/connect/groups-channels/7/invite-links/9/revoke',{});
+ assert.equal(ok.status,200);
+ const upd=write(ok,'UPDATE howdi_connect_social_invite_links SET revoked_at');
+ assert.equal(Number(upd[0]),9);
+ assert.equal(Number(upd[1]),7);
+});
+
+test('Invite-link revoke 404s when the link is missing or already revoked',async()=>{
+ const r=await run('DELETE','/api/connect/groups-channels/7/invite-links/9/revoke',{},{inviteFound:false});
+ assert.equal(r.status,404);
+});
+
+test('Invite-link revoke requires an authenticated session (401, no writes)',async()=>{
+ const r=await run('PATCH','/api/connect/groups-channels/7/invite-links/9/revoke',{},{anonymous:true});
+ assert.equal(r.status,401);
+ assert.equal(r.calls.filter(c=>/^(UPDATE|INSERT|DELETE)/.test(c.sql)).length,0);
+});
+
+// ---- Calls: session-derived identity across all 7 routes (create/inbox/respond/state/
+// signal/signals/leave). Previously every one of these trusted a client-supplied
+// body.userId or ?userId with zero session check — the largest single actor-identity
+// gap in the whole K5C surface, and a direct violation of "all actor identity from
+// session; block rules must prevent DM, invitations, and calls". ----
+const callsCreateRoute=block('            if(req.method==="POST"&&pathname==="/api/connect/calls"){');
+const callsInboxRoute=block('            if(req.method==="GET"&&pathname==="/api/connect/calls/inbox"){');
+const callsRespondRoute=block('            if(req.method==="PATCH"&&/^\\/api\\/connect\\/calls\\/\\d+\\/respond\\/?$/.test(pathname)){');
+const callsStateRoute=block('            if(req.method==="GET"&&/^\\/api\\/connect\\/calls\\/\\d+\\/state\\/?$/.test(pathname)){');
+const callsSignalRoute=block('            if(req.method==="POST"&&/^\\/api\\/connect\\/calls\\/\\d+\\/signal\\/?$/.test(pathname)){');
+const callsSignalsRoute=block('            if(req.method==="GET"&&/^\\/api\\/connect\\/calls\\/\\d+\\/signals\\/?$/.test(pathname)){');
+const callsLeaveRoute=block('            if(req.method==="POST"&&/^\\/api\\/connect\\/calls\\/\\d+\\/leave\\/?$/.test(pathname)){');
+
+async function runK5CCall(routeSrc,method,path,options={}){
+ const calls=[];
+ const query=async(sql,params=[])=>{
+  sql=sql.replace(/\s+/g,' ').trim();calls.push({sql,params});
+  if(sql.includes('FROM user_sessions s'))return {rows:params[0]==='session-A'?[{id:101}]:[],rowCount:0};
+  if(sql.startsWith('SELECT user_id,LOWER(public_username)'))return {rows:(options.usernames||['bob']).map((u,i)=>({user_id:options.inviteeIds?options.inviteeIds[i]:202,public_username:u})),rowCount:1};
+  if(sql.startsWith('SELECT 1 FROM howdi_connect_profile_blocks'))return options.blocked?{rows:[{exists:1}],rowCount:1}:{rows:[],rowCount:0};
+  if(sql.startsWith('INSERT INTO howdi_connect_calls'))return {rows:[{id:55,call_code:'HCALL-X',call_type:params[1],status:'RINGING'}],rowCount:1};
+  if(sql.startsWith('INSERT INTO howdi_connect_call_participants'))return {rows:[],rowCount:0};
+  if(sql.startsWith('SELECT c.id,c.call_code'))return {rows:options.inbox||[],rowCount:(options.inbox||[]).length};
+  if(sql.startsWith('UPDATE howdi_connect_call_participants SET invite_status=$3'))return {rows:options.inviteFound===false?[]:[{call_id:55,user_id:params[1]}],rowCount:options.inviteFound===false?0:1};
+  if(sql.startsWith('UPDATE howdi_connect_calls SET status=\'ACTIVE\''))return {rows:[],rowCount:0};
+  if(sql.startsWith('SELECT 1 FROM howdi_connect_call_participants'))return {rows:options.notAParticipant?[]:[{exists:1}],rowCount:options.notAParticipant?0:1};
+  if(sql.startsWith('SELECT id,call_code,call_type,status,caller_user_id'))return {rows:options.callFound===false?[]:[{id:55,call_code:'HCALL-X',call_type:'VOICE',status:'ACTIVE',caller_user_id:101}],rowCount:1};
+  if(sql.startsWith('SELECT p.user_id,p.participant_role'))return {rows:options.participants||[{user_id:101,participant_role:'HOST',invite_status:'JOINED'}],rowCount:1};
+  if(sql.startsWith('SELECT COUNT(*)::int n FROM howdi_connect_call_participants WHERE call_id=$1 AND user_id=ANY'))return {rows:[{n:options.participantPairCount??2}],rowCount:1};
+  if(sql.startsWith('INSERT INTO howdi_connect_call_signals'))return {rows:[{id:1,created_at:new Date().toISOString()}],rowCount:1};
+  if(sql.startsWith('SELECT id,from_user_id,to_user_id,signal_type'))return {rows:options.signals||[],rowCount:(options.signals||[]).length};
+  if(sql.startsWith('UPDATE howdi_connect_call_participants SET invite_status=\'LEFT\''))return {rows:[],rowCount:0};
+  if(sql.startsWith('SELECT COUNT(*)::int n FROM howdi_connect_call_participants WHERE call_id=$1 AND invite_status=\'JOINED\''))return {rows:[{n:options.stillActive??0}],rowCount:1};
+  if(sql.startsWith('UPDATE howdi_connect_calls SET status=\'ENDED\''))return {rows:[],rowCount:0};
+  if(options.queryOverride){const over=options.queryOverride(sql,params);if(over!==undefined)return over;}
+  return {rows:[],rowCount:0};
+ };
+ const pool={query,connect:async()=>({query,release(){}})};
+ const req=new Readable({read(){}});req.push(JSON.stringify(options.body||{}));req.push(null);
+ req.method=method;req.headers=options.anonymous?{}:{authorization:'Bearer session-A'};
+ const url=new URL('http://localhost'+path);
+ const context={pool,req,res:{},url,pathname:path.split('?')[0],URL,Buffer,clean:x=>String(x??'').trim(),sendJSON:(_res,status,data)=>({status,data}),console:{error:()=>{}}};
+ const src=`${helpers}\n(async()=>{${routeSrc}})()`;
+ const response=await vm.runInNewContext(src,context);
+ assert.ok(response,'Route must respond');
+ return {...response,calls};
+}
+
+test('POST /api/connect/calls requires a session (401) and ignores a spoofed body.userId, using the session as caller',async()=>{
+ const anon=await runK5CCall(callsCreateRoute,'POST','/api/connect/calls',{anonymous:true,body:{userId:999,callType:'VOICE',inviteeUsernames:['bob']}});
+ assert.equal(anon.status,401);
+ assert.equal(anon.calls.filter(c=>c.sql.startsWith('INSERT INTO howdi_connect_calls')).length,0);
+ const r=await runK5CCall(callsCreateRoute,'POST','/api/connect/calls',{body:{userId:999,callType:'VOICE',inviteeUsernames:['bob']},usernames:['bob'],inviteeIds:[202]});
+ assert.equal(r.status,201);
+ assert.equal(r.data.call.caller_user_id,101,'caller must be the session user (101), never the spoofed body.userId=999');
+ const ins=r.calls.find(c=>c.sql.startsWith('INSERT INTO howdi_connect_calls'));
+ assert.equal(Number(ins.params[2]),101);
+});
+
+test('POST /api/connect/calls is blocked (403) when caller and invitee have a bidirectional block',async()=>{
+ const r=await runK5CCall(callsCreateRoute,'POST','/api/connect/calls',{body:{callType:'VOICE',inviteeUsernames:['bob']},usernames:['bob'],inviteeIds:[202],blocked:true});
+ assert.equal(r.status,403);
+ assert.equal(r.calls.filter(c=>c.sql.startsWith('INSERT INTO howdi_connect_calls')).length,0);
+});
+
+test('GET /api/connect/calls/inbox requires a session (401) and ignores a spoofed ?userId, scoping to the session user',async()=>{
+ const anon=await runK5CCall(callsInboxRoute,'GET','/api/connect/calls/inbox?userId=999',{anonymous:true});
+ assert.equal(anon.status,401);
+ const r=await runK5CCall(callsInboxRoute,'GET','/api/connect/calls/inbox?userId=999');
+ assert.equal(r.status,200);
+ const call=r.calls.find(c=>c.sql.startsWith('SELECT c.id,c.call_code'));
+ assert.equal(Number(call.params[0]),101,'must scope to the session user (101), not the spoofed ?userId=999');
+});
+
+test('PATCH /api/connect/calls/:id/respond requires a session (401) and ignores a spoofed body.userId, acting as the session user',async()=>{
+ const anon=await runK5CCall(callsRespondRoute,'PATCH','/api/connect/calls/55/respond',{anonymous:true,body:{userId:999,accept:true}});
+ assert.equal(anon.status,401);
+ const r=await runK5CCall(callsRespondRoute,'PATCH','/api/connect/calls/55/respond',{body:{userId:999,accept:true}});
+ assert.equal(r.status,200);
+ const upd=r.calls.find(c=>c.sql.startsWith('UPDATE howdi_connect_call_participants SET invite_status=$3'));
+ assert.equal(Number(upd.params[1]),101,'must respond as the session user (101), not the spoofed body.userId=999');
+});
+
+test('GET /api/connect/calls/:id/state requires a session (401) and ignores a spoofed ?userId for the membership/participant check',async()=>{
+ const anon=await runK5CCall(callsStateRoute,'GET','/api/connect/calls/55/state?userId=999',{anonymous:true});
+ assert.equal(anon.status,401);
+ const notMine=await runK5CCall(callsStateRoute,'GET','/api/connect/calls/55/state?userId=999',{notAParticipant:true});
+ assert.equal(notMine.status,403,'the spoofed ?userId=999 must not be used to satisfy the participant check');
+ const r=await runK5CCall(callsStateRoute,'GET','/api/connect/calls/55/state?userId=999');
+ assert.equal(r.status,200);
+ const member=r.calls.find(c=>c.sql.startsWith('SELECT 1 FROM howdi_connect_call_participants'));
+ assert.equal(Number(member.params[1]),101,'must check participation for the session user (101), not the spoofed ?userId=999');
+});
+
+test('POST /api/connect/calls/:id/signal requires a session (401) and forces the "from" side to the session user, ignoring a spoofed body.userId (previously anyone could inject a signal claiming to be another participant)',async()=>{
+ const anon=await runK5CCall(callsSignalRoute,'POST','/api/connect/calls/55/signal',{anonymous:true,body:{userId:999,toUserId:202,signalType:'OFFER',payload:{}}});
+ assert.equal(anon.status,401);
+ const r=await runK5CCall(callsSignalRoute,'POST','/api/connect/calls/55/signal',{body:{userId:999,toUserId:202,signalType:'OFFER',payload:{}}});
+ assert.equal(r.status,201);
+ const ins=r.calls.find(c=>c.sql.startsWith('INSERT INTO howdi_connect_call_signals'));
+ assert.equal(Number(ins.params[1]),101,'the from_user_id must be the session user (101), never the spoofed body.userId=999');
+ assert.equal(Number(ins.params[2]),202);
+});
+
+test('POST /api/connect/calls/:id/signal rejects when the (session, target) pair are not both call participants',async()=>{
+ const r=await runK5CCall(callsSignalRoute,'POST','/api/connect/calls/55/signal',{body:{toUserId:202,signalType:'OFFER',payload:{}},participantPairCount:1});
+ assert.equal(r.status,403);
+});
+
+test('GET /api/connect/calls/:id/signals requires a session (401) and ignores a spoofed ?userId — previously a client could read another participant\'s inbound signaling traffic by passing a different userId',async()=>{
+ const anon=await runK5CCall(callsSignalsRoute,'GET','/api/connect/calls/55/signals?userId=999',{anonymous:true});
+ assert.equal(anon.status,401);
+ const r=await runK5CCall(callsSignalsRoute,'GET','/api/connect/calls/55/signals?userId=999&after=0');
+ assert.equal(r.status,200);
+ const call=r.calls.find(c=>c.sql.startsWith('SELECT id,from_user_id,to_user_id,signal_type'));
+ assert.equal(Number(call.params[1]),101,'must fetch signals addressed to the session user (101), not the spoofed ?userId=999');
+});
+
+test('POST /api/connect/calls/:id/leave requires a session (401) and ignores a spoofed body.userId — previously any caller could force another participant to be marked as having left',async()=>{
+ const anon=await runK5CCall(callsLeaveRoute,'POST','/api/connect/calls/55/leave',{anonymous:true,body:{userId:999}});
+ assert.equal(anon.status,401);
+ const r=await runK5CCall(callsLeaveRoute,'POST','/api/connect/calls/55/leave',{body:{userId:999}});
+ assert.equal(r.status,200);
+ const upd=r.calls.find(c=>c.sql.startsWith('UPDATE howdi_connect_call_participants SET invite_status=\'LEFT\''));
+ assert.equal(Number(upd.params[1]),101,'must mark the session user (101) as having left, not the spoofed body.userId=999');
 });

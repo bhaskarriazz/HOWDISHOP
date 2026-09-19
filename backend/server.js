@@ -45844,11 +45844,17 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                HOWDI CONNECT V16.0B — GROUPS + CHANNELS + INVITE LINKS
                ========================================================= */
             if(req.method==="GET"&&pathname==="/api/connect/groups-channels"){
-              const uid=Number(url.searchParams.get("userId")||0),type=String(url.searchParams.get("type")||"").toUpperCase();
-              if(!uid)return sendJSON(res,400,{status:"error",message:"Valid user required"});
+              // K5C FIX: viewer identity must come from the authenticated session, never the
+              // client-supplied ?userId (previously trusted directly, matching every sibling
+              // route's identity-hardening pattern in this file). owner_user_id is also no
+              // longer returned to the client — owner_username (public_username) plus
+              // membership_role/'OWNER' already tell the UI everything it needs without
+              // exposing a raw numeric id.
+              const sessionUser=await getSessionUserFromRequest(req);if(!sessionUser)return sendJSON(res,401,{status:"error",message:"Login required"});
+              const uid=Number(sessionUser.id),type=String(url.searchParams.get("type")||"").toUpperCase();
               const params=[uid],where=[`s.is_archived=FALSE`,`NOT EXISTS(SELECT 1 FROM howdi_connect_profile_blocks b WHERE (b.blocker_user_id=$1 AND b.blocked_user_id=s.owner_user_id) OR (b.blocker_user_id=s.owner_user_id AND b.blocked_user_id=$1))`];
               if(["GROUP","CHANNEL"].includes(type)){params.push(type);where.push(`s.space_type=$${params.length}`)}
-              const rows=(await pool.query(`SELECT s.id,s.space_type,s.name,s.slug,s.description,s.category,s.privacy,s.avatar_data,s.cover_data,s.member_count,s.message_count,s.is_verified,s.owner_user_id,u.full_name owner_name,cp.public_username owner_username,
+              const rows=(await pool.query(`SELECT s.id,s.space_type,s.name,s.slug,s.description,s.category,s.privacy,s.avatar_data,s.cover_data,s.member_count,s.message_count,s.is_verified,u.full_name owner_name,cp.public_username owner_username,
                 COALESCE(m.status,'') membership_status,COALESCE(m.role,'') membership_role,
                 EXISTS(SELECT 1 FROM howdi_connect_social_space_members mm WHERE mm.space_id=s.id AND mm.user_id=$1 AND mm.status='ACTIVE') joined
                 FROM howdi_connect_social_spaces s JOIN users u ON u.id=s.owner_user_id LEFT JOIN howdi_connect_profiles cp ON cp.user_id=u.id LEFT JOIN howdi_connect_social_space_members m ON m.space_id=s.id AND m.user_id=$1
@@ -45908,8 +45914,29 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 const uid=Number(sessionUser.id),membership=(await pool.query(`SELECT role,status FROM howdi_connect_social_space_members WHERE space_id=$1 AND user_id=$2`,[spaceId,uid])).rows[0];if(!membership||membership.status!=='ACTIVE'||!['OWNER','ADMIN','MODERATOR'].includes(membership.role))return sendJSON(res,403,{status:"error",message:"Admin access required"});const links=(await pool.query(`SELECT id,token,label,expires_at,max_uses,use_count,requires_approval,revoked_at,created_at FROM howdi_connect_social_invite_links WHERE space_id=$1 ORDER BY created_at DESC`,[spaceId])).rows;return sendJSON(res,200,{status:"success",links});
               }
               if(req.method==="POST"&&action==="invite-links"){
-                const body=await getBody(req),uid=Number(sessionUser.id),membership=(await pool.query(`SELECT role,status FROM howdi_connect_social_space_members WHERE space_id=$1 AND user_id=$2`,[spaceId,uid])).rows[0];if(!membership||membership.status!=='ACTIVE'||!['OWNER','ADMIN','MODERATOR'].includes(membership.role))return sendJSON(res,403,{status:"error",message:"Admin access required"});const token=crypto.randomBytes(24).toString('base64url'),days=Math.max(0,Math.min(365,Number(body.expiresInDays)||0)),maxUses=Number(body.maxUses)>0?Math.min(100000,Number(body.maxUses)):null;const row=(await pool.query(`INSERT INTO howdi_connect_social_invite_links(space_id,created_by,token,label,expires_at,max_uses,requires_approval) VALUES($1,$2,$3,$4,CASE WHEN $5::int>0 THEN NOW()+($5::text||' days')::interval ELSE NULL END,$6,$7) RETURNING *`,[spaceId,uid,token,clean(body.label||'Invite link').slice(0,80),days,maxUses,Boolean(body.requiresApproval)])).rows[0];return sendJSON(res,201,{status:"success",invite:{...row,path:`/connect/invite/${token}`}});
+                const body=await getBody(req),uid=Number(sessionUser.id),membership=(await pool.query(`SELECT role,status FROM howdi_connect_social_space_members WHERE space_id=$1 AND user_id=$2`,[spaceId,uid])).rows[0];if(!membership||membership.status!=='ACTIVE'||!['OWNER','ADMIN','MODERATOR'].includes(membership.role))return sendJSON(res,403,{status:"error",message:"Admin access required"});const token=crypto.randomBytes(24).toString('base64url'),days=Math.max(0,Math.min(365,Number(body.expiresInDays)||0)),maxUses=Number(body.maxUses)>0?Math.min(100000,Number(body.maxUses)):null;
+                // K5C FIX: requires_approval must be forced server-side for any non-PUBLIC space
+                // (PRIVATE/INVITE_ONLY) regardless of what the client sends — previously trusted
+                // body.requiresApproval directly, which let a client bypass approval on a private
+                // space by simply sending requiresApproval:false.
+                const requiresApproval=space.privacy==='PUBLIC'?Boolean(body.requiresApproval):true;
+                const row=(await pool.query(`INSERT INTO howdi_connect_social_invite_links(space_id,created_by,token,label,expires_at,max_uses,requires_approval) VALUES($1,$2,$3,$4,CASE WHEN $5::int>0 THEN NOW()+($5::text||' days')::interval ELSE NULL END,$6,$7) RETURNING *`,[spaceId,uid,token,clean(body.label||'Invite link').slice(0,80),days,maxUses,requiresApproval])).rows[0];return sendJSON(res,201,{status:"success",invite:{...row,path:`/connect/invite/${token}`}});
               }
+            }
+
+            // K5C: revoke an invite link. Separate route (outside hcSpaceMatch, whose regex
+            // only covers the fixed join/leave/members/messages/invite-links leaf actions) —
+            // same admin gate as creation/listing; setting revoked_at is enough to close it,
+            // since the join route already excludes any invite where revoked_at IS NOT NULL.
+            const hcRevokeMatch=pathname.match(/^\/api\/connect\/groups-channels\/(\d+)\/invite-links\/(\d+)\/revoke\/?$/);
+            if(hcRevokeMatch&&(req.method==="PATCH"||req.method==="DELETE")){
+              const sessionUser=await getSessionUserFromRequest(req);if(!sessionUser)return sendJSON(res,401,{status:"error",message:"Login required"});
+              const spaceId=Number(hcRevokeMatch[1]),inviteId=Number(hcRevokeMatch[2]),uid=Number(sessionUser.id);
+              const membership=(await pool.query(`SELECT role,status FROM howdi_connect_social_space_members WHERE space_id=$1 AND user_id=$2`,[spaceId,uid])).rows[0];
+              if(!membership||membership.status!=='ACTIVE'||!['OWNER','ADMIN','MODERATOR'].includes(membership.role))return sendJSON(res,403,{status:"error",message:"Admin access required"});
+              const row=(await pool.query(`UPDATE howdi_connect_social_invite_links SET revoked_at=NOW() WHERE id=$1 AND space_id=$2 AND revoked_at IS NULL RETURNING id`,[inviteId,spaceId])).rows[0];
+              if(!row)return sendJSON(res,404,{status:"error",message:"Invite link not found or already revoked"});
+              return sendJSON(res,200,{status:"success"});
             }
 
             const hcInviteMatch=pathname.match(/^\/api\/connect\/invite\/([A-Za-z0-9_-]+)(?:\/join)?$/);
@@ -47865,8 +47892,16 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               const member=(await pool.query(`SELECT 1 FROM howdi_connect_conversation_members WHERE conversation_id=$1 AND user_id=$2`,[id,userId])).rows[0];if(!member)return sendJSON(res,403,{status:"error",message:"Conversation access denied"});
               await pool.query(`UPDATE howdi_connect_messages SET deleted_at=COALESCE(deleted_at,NOW()),message_text='' WHERE conversation_id=$1 AND expires_at IS NOT NULL AND expires_at<=NOW()`,[id]);
               const rows=(await pool.query(`SELECT m.id,m.conversation_id,m.sender_user_id,m.message_text,m.attachment_type,m.attachment_data,m.attachment_meta,m.edited_at,m.deleted_at,m.expires_at,m.reactions,m.created_at,u.full_name,cp.public_username FROM howdi_connect_messages m JOIN users u ON u.id=m.sender_user_id LEFT JOIN howdi_connect_profiles cp ON cp.user_id=u.id WHERE m.conversation_id=$1 ORDER BY m.created_at ASC LIMIT 500`,[id])).rows;
+              // K5C: expose a per-message "seen" flag for the sender's own messages, reusing the
+              // existing last_read_at column on the OTHER member's row — no new schema, and no
+              // raw member id is ever returned to the client.
+              const otherRead=(await pool.query(`SELECT last_read_at FROM howdi_connect_conversation_members WHERE conversation_id=$1 AND user_id<>$2 LIMIT 1`,[id,userId])).rows[0]?.last_read_at||null;
               await pool.query(`UPDATE howdi_connect_conversation_members SET last_read_at=NOW() WHERE conversation_id=$1 AND user_id=$2`,[id,userId]);
-              return sendJSON(res,200,{status:"success",messages:rows.map(row=>publicConnectMessage(row,userId))});
+              return sendJSON(res,200,{status:"success",messages:rows.map(row=>{
+                const isMine=Number(row.sender_user_id)===userId;
+                const seen=isMine&&otherRead?new Date(otherRead)>=new Date(row.created_at):false;
+                return {...publicConnectMessage(row,userId),seen};
+              })});
             }
 
             if(req.method==="POST"&&/^\/api\/connect\/conversations\/\d+\/messages\/?$/.test(pathname)){
@@ -47884,6 +47919,13 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               if((!text||text.length>4000)&&!attachmentData)return sendJSON(res,400,{status:"error",message:"Message must contain 1 to 4000 characters"});
               if(text.length>4000)return sendJSON(res,400,{status:"error",message:"Message must contain 1 to 4000 characters"});
               const member=(await pool.query(`SELECT 1 FROM howdi_connect_conversation_members WHERE conversation_id=$1 AND user_id=$2`,[id,userId])).rows[0];if(!member)return sendJSON(res,403,{status:"error",message:"Conversation access denied"});
+              // K5C FIX: a block created after the conversation already exists previously went
+              // unenforced here (only checked at conversation-creation time). Re-check bidirectionally
+              // against every other member of this conversation before allowing the send.
+              const blockedInConvo=(await pool.query(`SELECT 1 FROM howdi_connect_profile_blocks b
+                JOIN howdi_connect_conversation_members cm ON cm.conversation_id=$1 AND cm.user_id<>$2
+                WHERE (b.blocker_user_id=$2 AND b.blocked_user_id=cm.user_id) OR (b.blocker_user_id=cm.user_id AND b.blocked_user_id=$2) LIMIT 1`,[id,userId])).rows[0];
+              if(blockedInConvo)return sendJSON(res,403,{status:"error",message:"Messaging is unavailable for this profile"});
               const expiresAt=expireMode==="24 hours" ? new Date(Date.now()+24*60*60*1000) : null;
               const row=(await pool.query(`INSERT INTO howdi_connect_messages(conversation_id,sender_user_id,message_text,expires_at,attachment_type,attachment_data,attachment_meta) VALUES($1,$2,$3,$4,$5,$6,$7::jsonb) RETURNING *`,[id,userId,text,expiresAt,attachmentType||null,attachmentData,JSON.stringify(attachmentMeta)])).rows[0];
               await pool.query(`UPDATE howdi_connect_conversations SET updated_at=NOW() WHERE id=$1`,[id]);
@@ -48267,7 +48309,11 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             // Public payloads use public username; internal HOWDI ID is never returned.
             // =====================================================
             if(req.method==="POST"&&pathname==="/api/connect/calls"){
-              const body=await getBody(req),callerId=Number(body.userId||0),type=String(body.callType||'VOICE').toUpperCase();
+              // K5C FIX: caller identity must come from the authenticated session, never the
+              // client-supplied body.userId (previously trusted directly — the largest actor-
+              // identity gap in the whole K5C surface).
+              const sessionUser=await getSessionUserFromRequest(req);if(!sessionUser)return sendJSON(res,401,{status:'error',message:'Login required'});
+              const body=await getBody(req),callerId=Number(sessionUser.id),type=String(body.callType||'VOICE').toUpperCase();
               const usernames=[...new Set((Array.isArray(body.inviteeUsernames)?body.inviteeUsernames:[]).map(x=>String(x||'').trim().replace(/^@/,'').toLowerCase()).filter(Boolean))].slice(0,15);
               let invitees=[];
               if(usernames.length){
@@ -48289,7 +48335,9 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               return sendJSON(res,201,{status:'success',call:{id:call.id,call_code:call.call_code,call_type:call.call_type,status:call.status,caller_user_id:callerId,group_call:invitees.length>1}});
             }
             if(req.method==="GET"&&pathname==="/api/connect/calls/inbox"){
-              const userId=Number(url.searchParams.get('userId')||0);if(!userId)return sendJSON(res,400,{status:'error',message:'userId required'});
+              // K5C FIX: session-derived identity, not client-supplied ?userId.
+              const sessionUser=await getSessionUserFromRequest(req);if(!sessionUser)return sendJSON(res,401,{status:'error',message:'Login required'});
+              const userId=Number(sessionUser.id);
               const rows=(await pool.query(`SELECT c.id,c.call_code,c.call_type,c.status,c.created_at,c.caller_user_id,u.full_name,cp.public_username,cp.profile_image,
                 (SELECT COUNT(*)::int FROM howdi_connect_call_participants x WHERE x.call_id=c.id) participant_count
                 FROM howdi_connect_call_participants p JOIN howdi_connect_calls c ON c.id=p.call_id JOIN users u ON u.id=c.caller_user_id
@@ -48297,14 +48345,18 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               return sendJSON(res,200,{status:'success',calls:rows});
             }
             if(req.method==="PATCH"&&/^\/api\/connect\/calls\/\d+\/respond\/?$/.test(pathname)){
-              const callId=Number(pathname.match(/calls\/(\d+)\/respond/)?.[1]),body=await getBody(req),userId=Number(body.userId||0),accept=Boolean(body.accept);
+              // K5C FIX: session-derived identity, not client-supplied body.userId.
+              const sessionUser=await getSessionUserFromRequest(req);if(!sessionUser)return sendJSON(res,401,{status:'error',message:'Login required'});
+              const callId=Number(pathname.match(/calls\/(\d+)\/respond/)?.[1]),body=await getBody(req),userId=Number(sessionUser.id),accept=Boolean(body.accept);
               const p=(await pool.query(`UPDATE howdi_connect_call_participants SET invite_status=$3,joined_at=CASE WHEN $3='JOINED' THEN NOW() ELSE joined_at END WHERE call_id=$1 AND user_id=$2 AND invite_status='RINGING' RETURNING *`,[callId,userId,accept?'JOINED':'DECLINED'])).rows[0];
               if(!p)return sendJSON(res,404,{status:'error',message:'Call invitation not found'});
               if(accept)await pool.query(`UPDATE howdi_connect_calls SET status='ACTIVE',started_at=COALESCE(started_at,NOW()),updated_at=NOW() WHERE id=$1`,[callId]);
               return sendJSON(res,200,{status:'success',accepted:accept});
             }
             if(req.method==="GET"&&/^\/api\/connect\/calls\/\d+\/state\/?$/.test(pathname)){
-              const callId=Number(pathname.match(/calls\/(\d+)\/state/)?.[1]),userId=Number(url.searchParams.get('userId')||0);
+              // K5C FIX: session-derived identity, not client-supplied ?userId.
+              const sessionUser=await getSessionUserFromRequest(req);if(!sessionUser)return sendJSON(res,401,{status:'error',message:'Login required'});
+              const callId=Number(pathname.match(/calls\/(\d+)\/state/)?.[1]),userId=Number(sessionUser.id);
               const member=(await pool.query(`SELECT 1 FROM howdi_connect_call_participants WHERE call_id=$1 AND user_id=$2`,[callId,userId])).rowCount;if(!member)return sendJSON(res,403,{status:'error',message:'Not a call participant'});
               const call=(await pool.query(`SELECT id,call_code,call_type,status,caller_user_id,group_space_id,started_at,ended_at,created_at FROM howdi_connect_calls WHERE id=$1`,[callId])).rows[0];
               if(!call)return sendJSON(res,404,{status:'error',message:'Call not found'});
@@ -48312,17 +48364,29 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               return sendJSON(res,200,{status:'success',call,participants});
             }
             if(req.method==="POST"&&/^\/api\/connect\/calls\/\d+\/signal\/?$/.test(pathname)){
-              const callId=Number(pathname.match(/calls\/(\d+)\/signal/)?.[1]),body=await getBody(req),from=Number(body.userId||0),to=Number(body.toUserId||0),kind=String(body.signalType||'').toUpperCase();
+              // K5C FIX: the "from" side of a signal must be the authenticated session, never
+              // client-supplied body.userId — previously anyone could inject a signal claiming
+              // to be any other participant.
+              const sessionUser=await getSessionUserFromRequest(req);if(!sessionUser)return sendJSON(res,401,{status:'error',message:'Login required'});
+              const callId=Number(pathname.match(/calls\/(\d+)\/signal/)?.[1]),body=await getBody(req),from=Number(sessionUser.id),to=Number(body.toUserId||0),kind=String(body.signalType||'').toUpperCase();
               if(!['OFFER','ANSWER','ICE'].includes(kind))return sendJSON(res,400,{status:'error',message:'Invalid signal type'});
               const ok=(await pool.query(`SELECT COUNT(*)::int n FROM howdi_connect_call_participants WHERE call_id=$1 AND user_id=ANY($2::bigint[])`,[callId,[from,to]])).rows[0]?.n;if(Number(ok)!==2)return sendJSON(res,403,{status:'error',message:'Participants only'});
               const row=(await pool.query(`INSERT INTO howdi_connect_call_signals(call_id,from_user_id,to_user_id,signal_type,payload) VALUES($1,$2,$3,$4,$5::jsonb) RETURNING id,created_at`,[callId,from,to,kind,JSON.stringify(body.payload||{})])).rows[0];return sendJSON(res,201,{status:'success',signal:row});
             }
             if(req.method==="GET"&&/^\/api\/connect\/calls\/\d+\/signals\/?$/.test(pathname)){
-              const callId=Number(pathname.match(/calls\/(\d+)\/signals/)?.[1]),userId=Number(url.searchParams.get('userId')||0),after=Number(url.searchParams.get('after')||0);
+              // K5C FIX: session-derived identity, not client-supplied ?userId — a client could
+              // previously read another participant's inbound signaling traffic (offers/answers/
+              // ICE candidates) by simply passing a different userId.
+              const sessionUser=await getSessionUserFromRequest(req);if(!sessionUser)return sendJSON(res,401,{status:'error',message:'Login required'});
+              const callId=Number(pathname.match(/calls\/(\d+)\/signals/)?.[1]),userId=Number(sessionUser.id),after=Number(url.searchParams.get('after')||0);
               const rows=(await pool.query(`SELECT id,from_user_id,to_user_id,signal_type,payload,created_at FROM howdi_connect_call_signals WHERE call_id=$1 AND to_user_id=$2 AND id>$3 ORDER BY id ASC LIMIT 100`,[callId,userId,after])).rows;return sendJSON(res,200,{status:'success',signals:rows});
             }
             if(req.method==="POST"&&/^\/api\/connect\/calls\/\d+\/leave\/?$/.test(pathname)){
-              const callId=Number(pathname.match(/calls\/(\d+)\/leave/)?.[1]),body=await getBody(req),userId=Number(body.userId||0);
+              // K5C FIX: session-derived identity, not client-supplied body.userId — previously
+              // any caller could force any other participant to be marked as having left a call.
+              const sessionUser=await getSessionUserFromRequest(req);if(!sessionUser)return sendJSON(res,401,{status:'error',message:'Login required'});
+              await getBody(req);
+              const callId=Number(pathname.match(/calls\/(\d+)\/leave/)?.[1]),userId=Number(sessionUser.id);
               await pool.query(`UPDATE howdi_connect_call_participants SET invite_status='LEFT',left_at=NOW() WHERE call_id=$1 AND user_id=$2`,[callId,userId]);
               const active=Number((await pool.query(`SELECT COUNT(*)::int n FROM howdi_connect_call_participants WHERE call_id=$1 AND invite_status='JOINED' AND left_at IS NULL`,[callId])).rows[0]?.n||0);
               if(active<2)await pool.query(`UPDATE howdi_connect_calls SET status='ENDED',ended_at=NOW(),updated_at=NOW() WHERE id=$1 AND status<>'ENDED'`,[callId]);
