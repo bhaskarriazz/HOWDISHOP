@@ -333,3 +333,161 @@ test('Admin Home config route succeeds with a valid admin session token',async()
  }});
  assert.equal(r.status,200);
 });
+
+// =====================================================
+// K5A FINAL CLOSURE — 4 confirmed post-review blockers
+// =====================================================
+
+// ---- 1. Public profile viewer identity must come from the session, never ?viewerId ----
+const publicProfileUsernameRoute=block('            if(req.method==="GET"&&/^\\/api\\/connect\\/public-profile\\/username\\/[^\\/?]+\\/?$/.test(pathname)){');
+const publicProfileNumericRoute=block('            if(req.method==="GET"&&/^\\/api\\/connect\\/public-profile\\/\\d+\\/?$/.test(pathname)){');
+async function runProfileViewerTest(routeSrc,path,options={}){
+ const calls=[];
+ const query=async(sql,params=[])=>{
+  sql=sql.replace(/\s+/g,' ').trim();calls.push({sql,params});
+  if(sql.includes('FROM user_sessions s'))return {rows:params[0]==='session-A'?[{id:101}]:[],rowCount:0};
+  if(sql.startsWith('UPDATE user_sessions'))return {rows:[],rowCount:0};
+  if(sql.startsWith('SELECT user_id FROM howdi_connect_profiles WHERE LOWER(public_username)'))return {rows:options.knownUsername?[{user_id:Number(options.targetId||303)}]:[],rowCount:0};
+  return {rows:[],rowCount:0};
+ };
+ const pool={query};
+ const req={method:'GET',headers:options.anonymous?{}:{authorization:'Bearer session-A'}};
+ const url=new URL('http://localhost'+path);
+ const profileCalls=[];
+ const context={
+  pool,req,res:{},url,pathname:path.split('?')[0],URL,Buffer,
+  clean:x=>String(x??'').trim(),
+  sendJSON:(_res,status,data)=>({status,data}),
+  loadConnectPublicProfileResponse:async(res,target,viewer)=>{profileCalls.push({target,viewer});return {status:200,data:{status:'success',profile:{target}}};},
+ };
+ const src=`${getSessionUserFromRequestSrc}\n(async()=>{${routeSrc}})()`;
+ const response=await vm.runInNewContext(src,context);
+ assert.ok(response,'Route must respond');
+ return {...response,calls,profileCalls};
+}
+test('Guest viewing a username profile cannot impersonate the target via ?viewerId',async()=>{
+ const r=await runProfileViewerTest(publicProfileUsernameRoute,'/api/connect/public-profile/username/crafty_alice?viewerId=303',{anonymous:true,knownUsername:true,targetId:303});
+ assert.equal(r.status,200);
+ assert.equal(r.profileCalls[0].viewer,0,'guest must be treated as viewer 0, not the spoofed target id');
+});
+test('Guest viewing a numeric profile cannot impersonate the target via ?viewerId',async()=>{
+ const r=await runProfileViewerTest(publicProfileNumericRoute,'/api/connect/public-profile/303?viewerId=303',{anonymous:true});
+ assert.equal(r.status,200);
+ assert.equal(r.profileCalls[0].viewer,0);
+});
+test('Authenticated session A viewing a profile with ?viewerId=B still acts as A',async()=>{
+ const r=await runProfileViewerTest(publicProfileUsernameRoute,'/api/connect/public-profile/username/crafty_alice?viewerId=999',{knownUsername:true,targetId:303});
+ assert.equal(r.status,200);
+ assert.equal(r.profileCalls[0].viewer,101,'authenticated viewer must be the real session user, not the spoofed query value');
+ assert.equal(r.profileCalls[0].target,303);
+});
+test('Authenticated session A viewing a numeric profile with ?viewerId=B still acts as A',async()=>{
+ const r=await runProfileViewerTest(publicProfileNumericRoute,'/api/connect/public-profile/303?viewerId=999');
+ assert.equal(r.status,200);
+ assert.equal(r.profileCalls[0].viewer,101);
+});
+test('Username profile 404s for an unknown username regardless of viewer spoof attempt',async()=>{
+ const r=await runProfileViewerTest(publicProfileUsernameRoute,'/api/connect/public-profile/username/nobody?viewerId=303',{anonymous:true,knownUsername:false});
+ assert.equal(r.status,404);
+ assert.equal(r.profileCalls.length,0);
+});
+
+// ---- 2. Admin Special / Hero created_by must be a text column, and writes with a
+//         non-numeric admin username (e.g. "root") must succeed ----
+const adminSpecialCreateRoute=block('            if(req.method==="POST"&&pathname==="/api/admin/connect/home/special"){');
+const adminHeroCreateRoute=block('            if(req.method==="POST"&&pathname==="/api/admin/connect/home/hero"){');
+test('Schema: howdi_connect_home_specials / howdi_connect_home_hero declare created_by as text, not BIGINT',()=>{
+ assert.match(source,/CREATE TABLE IF NOT EXISTS howdi_connect_home_specials\([\s\S]*?created_by VARCHAR\(180\)/);
+ assert.match(source,/CREATE TABLE IF NOT EXISTS howdi_connect_home_hero\([\s\S]*?created_by VARCHAR\(180\)/);
+ assert.match(source,/ALTER TABLE howdi_connect_home_specials ALTER COLUMN created_by TYPE VARCHAR\(180\)/);
+ assert.match(source,/ALTER TABLE howdi_connect_home_hero ALTER COLUMN created_by TYPE VARCHAR\(180\)/);
+});
+test('Admin Special create succeeds for a valid admin session with a nonnumeric admin username',async()=>{
+ const r=await runUsernameAction(adminSpecialCreateRoute,'POST','/api/admin/connect/home/special',{
+  anonymous:true,adminToken:'admin-token-good',body:{title:'Founders Sale',subtitle:'50% off',ctaLabel:'Shop now',ctaUrl:'/shop'},
+  queryOverride:(sql,params)=>{ if(sql.startsWith('INSERT INTO howdi_connect_home_specials'))return {rows:[{id:1,title:params[0],created_by:params[11]}],rowCount:1}; return undefined; }
+ });
+ assert.equal(r.status,200);
+ const insert=r.calls.find(c=>c.sql.startsWith('INSERT INTO howdi_connect_home_specials'));
+ assert.ok(insert);
+ assert.equal(insert.params[11],'root');
+ assert.equal(typeof insert.params[11],'string');
+});
+test('Admin Hero create succeeds for a valid admin session with a nonnumeric admin username',async()=>{
+ const r=await runUsernameAction(adminHeroCreateRoute,'POST','/api/admin/connect/home/hero',{
+  anonymous:true,adminToken:'admin-token-good',body:{title:'Meet our top makers',bodyText:'Featured this week'},
+  queryOverride:(sql,params)=>{ if(sql.startsWith('INSERT INTO howdi_connect_home_hero'))return {rows:[{id:1,title:params[0],created_by:params[10]}],rowCount:1}; return undefined; }
+ });
+ assert.equal(r.status,200);
+ const insert=r.calls.find(c=>c.sql.startsWith('INSERT INTO howdi_connect_home_hero'));
+ assert.ok(insert);
+ assert.equal(insert.params[10],'root');
+ assert.equal(typeof insert.params[10],'string');
+});
+
+// ---- 3. Continue Watching must only surface currently-available Vibes ----
+test('Continue Watching query requires published/public/non-deleted Vibes',async()=>{
+ const r=await runHome('/api/connect/home?sections=continueWatching',{queryOverride:(sql)=>{
+   if(sql.includes('FROM vibe_watch_session_items'))return {rows:[],rowCount:0};
+   return undefined;
+ }});
+ assert.equal(r.status,200);
+ const call=r.calls.find(c=>c.sql.includes('FROM vibe_watch_session_items'));
+ assert.ok(call);
+ assert.match(call.sql,/v\.status='published'/);
+ assert.match(call.sql,/v\.visibility='public'/);
+ assert.match(call.sql,/v\.deleted_at IS NULL/);
+});
+test('Continue Watching block predicate casts both sides to text consistently with the $1::text usage (regression: bigint=text type error found in live smoke test)',async()=>{
+ const r=await runHome('/api/connect/home?sections=continueWatching',{queryOverride:(sql)=>{
+   if(sql.includes('FROM vibe_watch_session_items'))return {rows:[],rowCount:0};
+   return undefined;
+ }});
+ const call=r.calls.find(c=>c.sql.includes('FROM vibe_watch_session_items'));
+ assert.ok(call);
+ // $1 is used both as wsi.user_id=$1::text and in the block predicate; every other
+ // reference to $1 against a BIGINT column (blocker_user_id/blocked_user_id) must
+ // also be cast to text, or Postgres infers $1 as text and rejects the bare bigint
+ // comparison with "operator does not exist: bigint = text".
+ assert.match(call.sql,/b\.blocker_user_id::text=\$1/);
+ assert.match(call.sql,/b\.blocked_user_id::text=\$1/);
+ assert.doesNotMatch(call.sql,/b\.blocker_user_id=\$1(?!::)/);
+ assert.doesNotMatch(call.sql,/b\.blocked_user_id=\$1(?!::)/);
+});
+test('Continue Watching excludes a watched Vibe that is draft, private, or deleted (mocked as filtered by the availability predicate)',async()=>{
+ // The availability predicate lives in SQL (asserted above); here we confirm the mocked
+ // fixture representing an unavailable Vibe never reaches the mapped items when the
+ // predicate is honored by the (mock) query layer, i.e. an empty result set is handled cleanly.
+ const r=await runHome('/api/connect/home?sections=continueWatching',{queryOverride:(sql)=>{
+   if(sql.includes('FROM vibe_watch_session_items'))return {rows:[],rowCount:0};
+   return undefined;
+ }});
+ assert.equal(r.status,200);
+ assert.deepEqual(r.data.sections.continueWatching.items,[]);
+});
+
+// ---- 4. Home Vibe rail (getVibeFeedRows) must exclude blocked creators ----
+test('getVibeFeedRows excludes blocked creators via SQL predicate when a viewer is present',async()=>{
+ const calls=[];
+ const query=async(sql,params=[])=>{sql=sql.replace(/\s+/g,' ').trim();calls.push({sql,params});return {rows:[],rowCount:0};};
+ const pool={query};
+ const context={pool,console:{error:()=>{}}};
+ const src=`${vibeCursorDecodeSrc}\n${getVibeFeedRowsSrc}\ngetVibeFeedRows({mode:'for-you',viewerId:101,limit:10})`;
+ await vm.runInNewContext(src,context);
+ const feedCall=calls.find(c=>c.sql.startsWith('SELECT v.*'));
+ assert.ok(feedCall,'feed query not found');
+ assert.match(feedCall.sql,/vibe_creator_blocks/);
+ assert.match(feedCall.sql,/howdi_connect_profile_blocks/);
+ assert.ok(feedCall.params.includes('101'),'viewer id must be bound as a query param for the block predicate');
+});
+test('getVibeFeedRows guest browsing (no viewerId) does not apply the block predicate and still works',async()=>{
+ const calls=[];
+ const query=async(sql,params=[])=>{sql=sql.replace(/\s+/g,' ').trim();calls.push({sql,params});return {rows:[],rowCount:0};};
+ const pool={query};
+ const context={pool,console:{error:()=>{}}};
+ const src=`${vibeCursorDecodeSrc}\n${getVibeFeedRowsSrc}\ngetVibeFeedRows({mode:'for-you',viewerId:null,limit:10})`;
+ const result=await vm.runInNewContext(src,context);
+ assert.ok(result.rows);
+ const feedCall=calls.find(c=>c.sql.startsWith('SELECT v.*'));
+ assert.doesNotMatch(feedCall.sql,/vibe_creator_blocks/);
+});

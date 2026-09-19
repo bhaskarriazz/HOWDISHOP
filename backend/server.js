@@ -13873,6 +13873,16 @@
         params.push(String(viewerId));
         where.push(`EXISTS(SELECT 1 FROM vibe_follows vf WHERE vf.creator_user_id=v.creator_user_id AND vf.follower_user_id=$${params.length})`);
       }
+      // K5A CLOSURE FIX: exclude vibes from creators the viewer has blocked (or who blocked the
+      // viewer) via either the Vibe-native block list or the HOWDI Connect profile-block system,
+      // so a blocked creator's content does not resurface in the Home Vibe rail. Done in the WHERE
+      // clause (not post-fetch) so LIMIT/pagination stay correct.
+      if(viewerId){
+        params.push(String(viewerId));
+        const vp=params.length;
+        where.push(`NOT EXISTS(SELECT 1 FROM vibe_creator_blocks b WHERE (b.blocker_user_id=$${vp} AND b.blocked_creator_user_id=v.creator_user_id) OR (b.blocker_user_id=v.creator_user_id AND b.blocked_creator_user_id=$${vp}))`);
+        where.push(`NOT EXISTS(SELECT 1 FROM howdi_connect_profile_blocks b WHERE (b.blocker_user_id::text=$${vp} AND b.blocked_user_id::text=v.creator_user_id) OR (b.blocker_user_id::text=v.creator_user_id AND b.blocked_user_id::text=$${vp}))`);
+      }
       if(c){params.push(c.publishedAt,c.id);where.push(`(v.published_at,v.id)<($${params.length-1}::timestamptz,$${params.length}::uuid)`);}
       params.push(safeLimit+1);
       const order=mode==='quantum'
@@ -13917,9 +13927,13 @@
         sort_order INTEGER NOT NULL DEFAULT 100,
         starts_at TIMESTAMPTZ,
         ends_at TIMESTAMPTZ,
-        created_by BIGINT,
+        created_by VARCHAR(180),
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )`);
+      // K5A CLOSURE FIX: created_by holds the admin session username (text), not a numeric users.id —
+      // an earlier pass declared this column BIGINT, which fails on every admin write. Widen it
+      // idempotently for any database that already booted with the old (unusable) BIGINT column.
+      await pool.query(`ALTER TABLE howdi_connect_home_specials ALTER COLUMN created_by TYPE VARCHAR(180) USING created_by::text`).catch(()=>{});
       await pool.query(`CREATE TABLE IF NOT EXISTS howdi_connect_home_hero(
         id BIGSERIAL PRIMARY KEY,
         title VARCHAR(200) NOT NULL DEFAULT '',
@@ -13932,9 +13946,10 @@
         sort_order INTEGER NOT NULL DEFAULT 100,
         starts_at TIMESTAMPTZ,
         ends_at TIMESTAMPTZ,
-        created_by BIGINT,
+        created_by VARCHAR(180),
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )`);
+      await pool.query(`ALTER TABLE howdi_connect_home_hero ALTER COLUMN created_by TYPE VARCHAR(180) USING created_by::text`).catch(()=>{});
       await pool.query(`CREATE TABLE IF NOT EXISTS howdi_connect_daily_quotes(
         id BIGSERIAL PRIMARY KEY,
         quote_text VARCHAR(500) NOT NULL,
@@ -44414,7 +44429,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   FROM vibe_watch_session_items wsi
                   JOIN vibes v ON v.id=wsi.vibe_id
                   WHERE wsi.user_id=$1::text
-                    AND NOT EXISTS(SELECT 1 FROM howdi_connect_profile_blocks b WHERE (b.blocker_user_id=$1 AND b.blocked_user_id::text=v.creator_user_id) OR (b.blocker_user_id::text=v.creator_user_id AND b.blocked_user_id=$1))
+                    AND v.status='published' AND v.visibility='public' AND v.deleted_at IS NULL
+                    AND NOT EXISTS(SELECT 1 FROM howdi_connect_profile_blocks b WHERE (b.blocker_user_id::text=$1 AND b.blocked_user_id::text=v.creator_user_id) OR (b.blocker_user_id::text=v.creator_user_id AND b.blocked_user_id::text=$1))
                   GROUP BY v.id,v.vibe_code,v.vibe_type,v.caption,v.cover_url,v.creator_user_id,v.creator_name
                   HAVING BOOL_OR(wsi.completed)=FALSE AND MAX(wsi.max_completion_percent)>0
                   ORDER BY MAX(wsi.last_seen_at) DESC LIMIT 8
@@ -44644,7 +44660,9 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             // (avoids exposing raw numeric users.id to the browser from Home person cards)
             if(req.method==="GET"&&/^\/api\/connect\/public-profile\/username\/[^\/?]+\/?$/.test(pathname)){
               const username=decodeURIComponent((pathname.match(/public-profile\/username\/([^\/?]+)/)||[])[1]||"");
-              const viewer=Number(url.searchParams.get("viewerId")||0);
+              // K5A CLOSURE FIX: viewer identity must come from the authenticated session, never a client-supplied ?viewerId
+              const sessionUser=await getSessionUserFromRequest(req);
+              const viewer=sessionUser?Number(sessionUser.id):0;
               const row=(await pool.query(`SELECT user_id FROM howdi_connect_profiles WHERE LOWER(public_username)=LOWER($1) LIMIT 1`,[username])).rows[0];
               if(!row)return sendJSON(res,404,{status:"error",message:"Profile not found"});
               return loadConnectPublicProfileResponse(res,Number(row.user_id),viewer);
@@ -45889,7 +45907,10 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               return sendJSON(res,200,{status:"success",profile,private:false,completion,completionChecklist,profileStrength,canSeeFollowerList,canMessage,recent_posts:recentPosts,featured:resolvedFeatured,projects,experience,education,skills,badges,verification});
             }
             if(req.method==="GET"&&/^\/api\/connect\/public-profile\/\d+\/?$/.test(pathname)){
-              const target=Number(pathname.match(/public-profile\/(\d+)/)?.[1]),viewer=Number(url.searchParams.get("viewerId")||0);
+              const target=Number(pathname.match(/public-profile\/(\d+)/)?.[1]);
+              // K5A CLOSURE FIX: viewer identity must come from the authenticated session, never a client-supplied ?viewerId
+              const sessionUser=await getSessionUserFromRequest(req);
+              const viewer=sessionUser?Number(sessionUser.id):0;
               return loadConnectPublicProfileResponse(res,target,viewer);
             }
 
