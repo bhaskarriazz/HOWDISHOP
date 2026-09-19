@@ -9166,6 +9166,11 @@
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
 
+        -- HPay IDs are public handles and lookups are case-insensitive. Fail closed on
+        -- legacy case-only collisions rather than allowing ambiguous payer resolution.
+        CREATE UNIQUE INDEX IF NOT EXISTS hpay_accounts_hpay_id_ci_unique
+          ON hpay_accounts (LOWER(hpay_id));
+
         CREATE TABLE IF NOT EXISTS hpay_transactions (
           id BIGSERIAL PRIMARY KEY,
           transaction_id VARCHAR(80) NOT NULL UNIQUE,
@@ -52973,6 +52978,16 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               "SERVER ROUTE ERROR:",
               error
             );
+
+            // HPAY_STAGE4B_ERROR_SANITIZATION
+            // HPay may surface PostgreSQL/provider failures. Keep diagnostics server-side
+            // and never return raw exception messages to the customer.
+            if (pathname === "/api/hpay" || pathname.startsWith("/api/hpay/")) {
+              return sendJSON(res, 500, {
+                status: "error",
+                message: "Unable to complete the HPay request right now",
+              });
+            }
 
             return sendJSON(
               res,
