@@ -8373,7 +8373,7 @@
             "GET,POST,PUT,PATCH,DELETE,OPTIONS",
 
           "Access-Control-Allow-Headers":
-            "Content-Type, Authorization, x-howdi-admin-token",
+            "Content-Type, Authorization, x-howdi-admin-token, x-howdi-worker-id",
         }
       );
 
@@ -21039,7 +21039,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
       if(!res.headersSent){
         res.setHeader("Access-Control-Allow-Origin","*");
         res.setHeader("Access-Control-Allow-Methods","GET,POST,PUT,PATCH,DELETE,OPTIONS");
-        res.setHeader("Access-Control-Allow-Headers","Content-Type, Authorization, x-howdi-admin-token");
+        res.setHeader("Access-Control-Allow-Headers","Content-Type, Authorization, x-howdi-admin-token, x-howdi-worker-id");
       }
       res.status=function(code){res.statusCode=Number(code)||500;return res;};
       res.json=function(payload){
@@ -21154,7 +21154,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   "GET,POST,PUT,PATCH,DELETE,OPTIONS",
 
                 "Access-Control-Allow-Headers":
-                  "Content-Type, Authorization, x-howdi-admin-token",
+                  "Content-Type, Authorization, x-howdi-admin-token, x-howdi-worker-id",
               }
             );
 

@@ -46,6 +46,12 @@ test('Worker Portal routes reject spoofed identity sources in favour of the sess
   assert.doesNotMatch(locationRoute,/x-howdi-worker-id|body\.workerId|req\.query\.workerId/);
 });
 
+test('Legacy worker header remains CORS-compatible but is never used as identity',()=>{
+  assert.match(source,/Access-Control-Allow-Headers[\s\S]{0,140}x-howdi-worker-id/);
+  const workerPortal=source.slice(source.indexOf('// HOWDI WORKER PORTAL — JOB OFFERS + ACTIVE JOURNEY'),source.indexOf('// HOWDI COMMUNITY — USER MENTION SEARCH'));
+  assert.doesNotMatch(workerPortal,/req\.headers\["x-howdi-worker-id"\]/);
+});
+
 test('Portal profile and bootstrap responses do not expose worker or user database identifiers',()=>{
   const serializer=between('function worksPortalWorkerRow','async function requireActiveSessionWorker');
   assert.match(serializer,/const \{id,user_id,\.\.\.worker\}=worksWorkerRow\(r\)/);
