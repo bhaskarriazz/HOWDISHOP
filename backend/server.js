@@ -37588,8 +37588,10 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               if(!howdiPaymentAdapterEnabled())return sendJSON(res,503,{status:"error",message:"Payment provider is not configured yet"});
               const client=await pool.connect();
               try{
-                const body=await getBody(req);
-                const userId=Number(body.user_id??body.userId);
+                await getBody(req);
+                const learner=await getSessionUserFromRequest(req);
+                if(!learner)return sendJSON(res,401,{status:"error",message:"Learner sign in required",code:"LEARNER_SESSION_REQUIRED"});
+                const userId=Number(learner.id);
                 if(!Number.isInteger(userId)||userId<=0)return sendJSON(res,400,{status:"error",message:"Valid learner is required"});
                 await client.query("BEGIN");
                 const purchase=(await client.query(`
@@ -37718,6 +37720,29 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 const enrollment=(await client.query(`INSERT INTO user_course_enrollments(user_id,course_id) VALUES($1,$2::uuid) ON CONFLICT(user_id,course_id) DO UPDATE SET updated_at=NOW() RETURNING *`,[purchase.user_id,purchase.course_id])).rows[0];
                 await client.query("COMMIT"); return sendJSON(res,200,{status:"success",message:"Development payment confirmed. Course unlocked.",purchase:updated,entitlement,enrollment});
               }catch(error){try{await client.query("ROLLBACK")}catch{};return sendJSON(res,500,{status:"error",message:"Unable to confirm development payment",detail:error.message||null});}finally{client.release();}
+            }
+
+            if(req.method==="GET" && (pathname==="/api/learning/my-learning" || pathname==="/api/learning/my-learning/")){
+              try{
+                const learner=await getSessionUserFromRequest(req);
+                if(!learner)return sendJSON(res,401,{status:"error",message:"Learner sign in required",code:"LEARNER_SESSION_REQUIRED"});
+                const rows=(await pool.query(`
+                  SELECT
+                    e.course_id,e.progress,e.status,e.started_at,e.completed_at,e.updated_at,
+                    c.title,c.tagline,c.description,c.category,c.level,c.language,c.duration_minutes,
+                    c.thumbnail_url,c.project_required,c.certificate_enabled,
+                    cert.certificate_code,cert.issued_at
+                  FROM user_course_enrollments e
+                  JOIN learning_courses c ON c.id=e.course_id
+                  LEFT JOIN user_learning_certificates cert
+                    ON cert.user_id=e.user_id AND cert.course_id=e.course_id AND cert.status='ACTIVE'
+                  WHERE e.user_id=$1
+                  ORDER BY e.updated_at DESC
+                `,[learner.id])).rows;
+                return sendJSON(res,200,{status:"success",courses:rows});
+              }catch(error){
+                return sendJSON(res,500,{status:"error",message:"Unable to load My Learning"});
+              }
             }
 
             if(req.method==="POST" && pathname==="/api/learning/enroll"){
@@ -37879,7 +37904,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             if(req.method==="GET" && certVerifyMatch){
               try{
                 const code=decodeURIComponent(certVerifyMatch[1]);
-                const cert=(await pool.query(`SELECT cert.certificate_code,cert.status,cert.issued_at,cert.revoked_at,cert.issued_by,c.title AS course_title,u.full_name AS learner_name,u.howdi_id,x.score FROM user_learning_certificates cert JOIN learning_courses c ON c.id=cert.course_id JOIN users u ON u.id=cert.user_id LEFT JOIN learning_skill_assessment_attempts x ON x.id=cert.assessment_attempt_id WHERE cert.certificate_code=$1 LIMIT 1`,[code])).rows[0];
+                const cert=(await pool.query(`SELECT cert.certificate_code,cert.status,cert.issued_at,cert.revoked_at,cert.issued_by,c.title AS course_title,u.full_name AS learner_name,cp.public_username,x.score FROM user_learning_certificates cert JOIN learning_courses c ON c.id=cert.course_id JOIN users u ON u.id=cert.user_id LEFT JOIN howdi_connect_profiles cp ON cp.user_id=u.id LEFT JOIN learning_skill_assessment_attempts x ON x.id=cert.assessment_attempt_id WHERE cert.certificate_code=$1 LIMIT 1`,[code])).rows[0];
                 if(!cert)return sendJSON(res,404,{status:'error',message:'Certificate not found'});
                 return sendJSON(res,200,{status:'success',verified:cert.status==='ACTIVE',certificate:cert});
               }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to verify certificate'});}
@@ -42161,7 +42186,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
                 return sendJSON(res,200,{
                   status:'success',release:'V19.6',
-                  learner:{id:user.id,full_name:user.full_name,howdi_id:user.howdi_id},
+                  learner:{full_name:user.full_name,public_username:(await pool.query(`SELECT public_username FROM howdi_connect_profiles WHERE user_id=$1 LIMIT 1`,[user.id])).rows[0]?.public_username||null},
                   passport_summary:{verified_evidence:evidence.length,verified_projects:projectCount,certificates:certificates.length,readiness,readiness_label:readinessLabel},
                   opportunities,
                   policy:{selection_guaranteed:false,income_guaranteed:false,proof_is_signal_only:true,interest_is_not_application_acceptance:true}
@@ -42361,7 +42386,33 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 const readinessLabel=readiness>=75?'STRONG PROOF':readiness>=40?'PROVEN PROGRESS':'BUILDING PROOF';
                 const events=(await pool.query(`SELECT event_type,actor,metadata,created_at FROM learning_skill_passport_events WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20`,[user.id])).rows;
                 const publicUsername=(await pool.query(`SELECT public_username FROM howdi_connect_profiles WHERE user_id=$1 LIMIT 1`,[user.id])).rows[0]?.public_username||null;
-                return sendJSON(res,200,{status:'success',profile:{...profile,learner_name:user.full_name,public_username:publicUsername},summary:{verified_evidence:evidence.length,verified_projects:projectCount,courses_proven:courseCount,certificates:certificates.length,average_score:averageScore,readiness,readiness_label:readinessLabel},evidence,certificates,events});
+                const safeProfile={
+                  visibility:profile?.visibility||'PRIVATE',
+                  headline:profile?.headline||null,
+                  summary:profile?.summary||null,
+                  last_published_at:profile?.last_published_at||null,
+                  learner_name:user.full_name,
+                  public_username:publicUsername
+                };
+                const safeEvidence=evidence.map(x=>({
+                  evidence_type:x.evidence_type,
+                  title:x.title,
+                  skill_label:x.skill_label,
+                  skill_level:x.skill_level,
+                  score:x.score,
+                  verification_status:x.verification_status,
+                  verified_at:x.verified_at,
+                  is_visible:x.is_visible,
+                  course_title:x.course_title,
+                  display_title:x.display_title,
+                  verified_by_name:x.verified_by_name
+                }));
+                const safeCertificates=certificates.map(x=>({
+                  certificate_code:x.certificate_code,
+                  issued_at:x.issued_at,
+                  course_title:x.course_title
+                }));
+                return sendJSON(res,200,{status:'success',profile:safeProfile,summary:{verified_evidence:evidence.length,verified_projects:projectCount,courses_proven:courseCount,certificates:certificates.length,average_score:averageScore,readiness,readiness_label:readinessLabel},evidence:safeEvidence,certificates:safeCertificates,events});
               }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to load Skill Passport',detail:error.message||null});}
             }
 
@@ -42726,8 +42777,9 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             if(req.method==="GET" && /^\/api\/learning\/course\/[^/]+\/journey\/?$/.test(pathname)){
               try{
                 const courseId=decodeURIComponent(pathname.match(/^\/api\/learning\/course\/([^/]+)\/journey\/?$/)?.[1]||"");
-                const journeyUrl=new URL(req.url,'http://localhost');
-                const userId=Number(journeyUrl.searchParams.get("user_id"));
+                const learner=await getSessionUserFromRequest(req);
+                if(!learner)return sendJSON(res,401,{status:"error",message:"Learner sign in required",code:"LEARNER_SESSION_REQUIRED"});
+                const userId=Number(learner.id);
                 if(!courseId||!Number.isInteger(userId)||userId<=0)
                   return sendJSON(res,400,{status:"error",message:"Valid learner and course are required"});
 
@@ -42926,8 +42978,9 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             if(req.method==="GET" && /^\/api\/learning\/course\/[^/]+\/player\/?$/.test(pathname)){
               try{
                 const courseId=decodeURIComponent(pathname.match(/^\/api\/learning\/course\/([^/]+)\/player\/?$/)?.[1]||"");
-                const playerUrl=new URL(req.url,'http://localhost');
-                const userId=Number(playerUrl.searchParams.get("user_id"));
+                const learner=await getSessionUserFromRequest(req);
+                if(!learner)return sendJSON(res,401,{status:"error",message:"Learner sign in required",code:"LEARNER_SESSION_REQUIRED"});
+                const userId=Number(learner.id);
                 if(!courseId||!Number.isInteger(userId)||userId<=0)
                   return sendJSON(res,400,{status:"error",message:"Valid learner and course are required"});
 
@@ -43063,8 +43116,10 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 const match=pathname.match(/^\/api\/learning\/course\/([^/]+)\/lesson\/([^/]+)\/complete\/?$/);
                 const courseId=decodeURIComponent(match?.[1]||"");
                 const lessonId=decodeURIComponent(match?.[2]||"");
-                const body=await getBody(req);
-                const userId=Number(body.user_id??body.userId);
+                await getBody(req);
+                const learner=await getSessionUserFromRequest(req);
+                if(!learner)return sendJSON(res,401,{status:"error",message:"Learner sign in required",code:"LEARNER_SESSION_REQUIRED"});
+                const userId=Number(learner.id);
                 if(!Number.isInteger(userId)||userId<=0)return sendJSON(res,400,{status:"error",message:"Valid learner is required"});
 
                 await client.query("BEGIN");
@@ -43131,7 +43186,10 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
             if(req.method==="PUT" && /^\/api\/learning\/course\/[^/]+\/progress\/?$/.test(pathname)){
               const courseId=decodeURIComponent(pathname.match(/^\/api\/learning\/course\/([^/]+)\/progress\/?$/)?.[1]||"");
-              const body=await getBody(req);const userId=Number(body.user_id??body.userId);const progress=Math.round(Number(body.progress));
+              const body=await getBody(req);
+              const learner=await getSessionUserFromRequest(req);
+              if(!learner)return sendJSON(res,401,{status:"error",message:"Learner sign in required",code:"LEARNER_SESSION_REQUIRED"});
+              const userId=Number(learner.id),progress=Math.round(Number(body.progress));
               if(!Number.isInteger(userId)||userId<=0||!courseId||!Number.isFinite(progress)||progress<0||progress>100) return sendJSON(res,400,{status:"error",message:"Valid progress between 0 and 100 is required"});
               const client=await pool.connect();
               try{
@@ -43148,8 +43206,10 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
             if(req.method==="GET" && /^\/api\/learning\/certificate\/[^/]+\/?$/.test(pathname)){
               const certificateId=decodeURIComponent(pathname.match(/^\/api\/learning\/certificate\/([^/]+)\/?$/)?.[1]||"");
-              const userId=Number(url.searchParams.get("user_id"));
-              const result=await pool.query(`SELECT cert.id,cert.certificate_code,cert.issued_at,c.title AS course_title FROM user_learning_certificates cert JOIN learning_courses c ON c.id=cert.course_id WHERE cert.id=$1 AND cert.user_id=$2`,[certificateId,userId]);
+              const learner=await getSessionUserFromRequest(req);
+              if(!learner)return sendJSON(res,401,{status:"error",message:"Learner sign in required",code:"LEARNER_SESSION_REQUIRED"});
+              const userId=Number(learner.id);
+              const result=await pool.query(`SELECT cert.certificate_code,cert.issued_at,c.title AS course_title FROM user_learning_certificates cert JOIN learning_courses c ON c.id=cert.course_id WHERE cert.id=$1 AND cert.user_id=$2`,[certificateId,userId]);
               if(!result.rows.length) return sendJSON(res,404,{status:"error",message:"Certificate not found"});
               return sendJSON(res,200,{status:"success",certificate:result.rows[0]});
             }
