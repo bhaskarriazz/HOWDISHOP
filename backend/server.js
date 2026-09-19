@@ -44263,6 +44263,86 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               }
               return sendJSON(res,200,{status:"success",following,requested});
             }
+
+            // =====================================================
+            // K5B — PUBLIC PROFILE + FOLLOW SYSTEM
+            // Shared, session-authoritative, username-safe helpers. Reuses the
+            // existing howdi_connect_follows / howdi_connect_follow_requests /
+            // howdi_connect_profile_blocks tables and the existing numeric
+            // /api/connect/social-graph route's query logic (mechanically
+            // extracted, then extended with a "mutuals" type). Every row
+            // returned by these helpers omits the raw numeric users.id — rows
+            // without a public_username are excluded, matching the existing
+            // K5A Home recommendedCreators/suggestedPeople contract.
+            // =====================================================
+            async function loadConnectFollowListResponse(res,viewerId,ownerId,type){
+              if(!Number.isInteger(ownerId)||ownerId<=0||!["followers","following","requests","mutuals"].includes(type))
+                return sendJSON(res,400,{status:"error",message:"Valid connections request required"});
+              const ownerProfile=(await pool.query(`SELECT private_profile,follower_list_visibility FROM howdi_connect_profiles WHERE user_id=$1`,[ownerId])).rows[0]||{};
+              const viewerFollows=viewerId===ownerId?true:Boolean((await pool.query(`SELECT 1 FROM howdi_connect_follows WHERE follower_user_id=$1 AND following_user_id=$2`,[viewerId,ownerId])).rows[0]);
+              const allowed=viewerId===ownerId||ownerProfile.follower_list_visibility==='EVERYONE'||(ownerProfile.follower_list_visibility==='FOLLOWERS'&&viewerFollows);
+              if(type!=="requests"&&!allowed)return sendJSON(res,403,{status:"error",message:"This member keeps their network private"});
+              if(type==="requests"){
+                if(viewerId!==ownerId)return sendJSON(res,403,{status:"error",message:"Follow requests are private"});
+                const rows=(await pool.query(`SELECT u.full_name,cp.public_username,COALESCE(cp.avatar_data,ps.profile_image,'') profile_image,cp.headline,cp.profession_title,fr.created_at,
+                  EXISTS(SELECT 1 FROM howdi_connect_follows f WHERE f.follower_user_id=$1 AND f.following_user_id=u.id) viewer_following
+                  FROM howdi_connect_follow_requests fr JOIN users u ON u.id=fr.requester_user_id LEFT JOIN howdi_connect_profiles cp ON cp.user_id=u.id LEFT JOIN user_profile_settings ps ON ps.user_id=u.id
+                  WHERE fr.target_user_id=$1 AND fr.status='PENDING' AND cp.public_username IS NOT NULL AND cp.public_username<>'' ORDER BY fr.created_at DESC LIMIT 200`,[ownerId])).rows;
+                return sendJSON(res,200,{status:"success",type,people:rows});
+              }
+              if(type==="mutuals"){
+                if(viewerId<=0)return sendJSON(res,200,{status:"success",type,people:[]});
+                const rows=(await pool.query(`SELECT u.full_name,cp.public_username,COALESCE(cp.avatar_data,ps.profile_image,'') profile_image,cp.headline,cp.profession_title
+                  FROM howdi_connect_follows f1
+                  JOIN howdi_connect_follows f2 ON f2.following_user_id=f1.following_user_id
+                  JOIN users u ON u.id=f1.following_user_id
+                  LEFT JOIN howdi_connect_profiles cp ON cp.user_id=u.id
+                  LEFT JOIN user_profile_settings ps ON ps.user_id=u.id
+                  WHERE f1.follower_user_id=$1 AND f2.follower_user_id=$2 AND u.id<>$1 AND u.id<>$2
+                    AND cp.public_username IS NOT NULL AND cp.public_username<>''
+                    AND NOT EXISTS(SELECT 1 FROM howdi_connect_profile_blocks b WHERE (b.blocker_user_id=$1 AND b.blocked_user_id=u.id) OR (b.blocker_user_id=u.id AND b.blocked_user_id=$1))
+                  ORDER BY u.full_name ASC LIMIT 100`,[viewerId,ownerId])).rows;
+                return sendJSON(res,200,{status:"success",type,people:rows});
+              }
+              const join=type==="followers"?`f.follower_user_id=u.id AND f.following_user_id=$2`:`f.following_user_id=u.id AND f.follower_user_id=$2`;
+              const rows=(await pool.query(`SELECT u.full_name,cp.public_username,COALESCE(cp.avatar_data,ps.profile_image,'') profile_image,cp.headline,cp.profession_title,cp.private_profile,
+                EXISTS(SELECT 1 FROM howdi_connect_follows vf WHERE vf.follower_user_id=$1 AND vf.following_user_id=u.id) viewer_following,
+                EXISTS(SELECT 1 FROM howdi_connect_follows rf WHERE rf.follower_user_id=u.id AND rf.following_user_id=$1) follows_viewer,
+                EXISTS(SELECT 1 FROM howdi_connect_follow_requests r WHERE r.requester_user_id=$1 AND r.target_user_id=u.id AND r.status='PENDING') request_pending
+                FROM howdi_connect_follows f JOIN users u ON ${join} LEFT JOIN howdi_connect_profiles cp ON cp.user_id=u.id LEFT JOIN user_profile_settings ps ON ps.user_id=u.id
+                WHERE cp.public_username IS NOT NULL AND cp.public_username<>''
+                  AND NOT EXISTS(SELECT 1 FROM howdi_connect_profile_blocks b WHERE (b.blocker_user_id=$1 AND b.blocked_user_id=u.id) OR (b.blocker_user_id=u.id AND b.blocked_user_id=$1))
+                ORDER BY f.created_at DESC LIMIT 300`,[viewerId,ownerId])).rows;
+              return sendJSON(res,200,{status:"success",type,people:rows});
+            }
+
+            async function respondConnectFollowRequestResponse(res,targetUserId,requesterUserId,accept){
+              if(!Number.isInteger(targetUserId)||targetUserId<=0||!Number.isInteger(requesterUserId)||requesterUserId<=0)
+                return sendJSON(res,400,{status:"error",message:"Valid follow request is required"});
+              const row=(await pool.query(`UPDATE howdi_connect_follow_requests SET status=$3,updated_at=NOW() WHERE requester_user_id=$1 AND target_user_id=$2 AND status='PENDING' RETURNING *`,[requesterUserId,targetUserId,accept?'ACCEPTED':'DECLINED'])).rows[0];
+              if(!row)return sendJSON(res,404,{status:"error",message:"Follow request not found"});
+              if(accept)await pool.query(`INSERT INTO howdi_connect_follows(follower_user_id,following_user_id) VALUES($1,$2) ON CONFLICT DO NOTHING`,[requesterUserId,targetUserId]);
+              return sendJSON(res,200,{status:"success",accepted:accept});
+            }
+
+            async function startConnectConversationWith(res,userId,target){
+              if(!Number.isInteger(userId)||!Number.isInteger(target)||userId<=0||target<=0||userId===target)return sendJSON(res,400,{status:"error",message:"Valid users are required"});
+              const blocked=(await pool.query(`SELECT 1 FROM howdi_connect_profile_blocks WHERE (blocker_user_id=$1 AND blocked_user_id=$2) OR (blocker_user_id=$2 AND blocked_user_id=$1)`,[userId,target])).rows[0];
+              if(blocked)return sendJSON(res,403,{status:"error",message:"Messaging is unavailable for this profile"});
+              const existing=(await pool.query(`SELECT c.id FROM howdi_connect_conversations c
+                JOIN howdi_connect_conversation_members a ON a.conversation_id=c.id AND a.user_id=$1
+                JOIN howdi_connect_conversation_members b ON b.conversation_id=c.id AND b.user_id=$2
+                WHERE c.conversation_type='DIRECT' AND (SELECT COUNT(*) FROM howdi_connect_conversation_members x WHERE x.conversation_id=c.id)=2 LIMIT 1`,[userId,target])).rows[0];
+              let id=existing?.id;
+              if(!id){const client=await pool.connect();try{await client.query("BEGIN");id=(await client.query(`INSERT INTO howdi_connect_conversations(conversation_type) VALUES('DIRECT') RETURNING id`)).rows[0].id;await client.query(`INSERT INTO howdi_connect_conversation_members(conversation_id,user_id) VALUES($1,$2),($1,$3)`,[id,userId,target]);await client.query("COMMIT");}catch(e){await client.query("ROLLBACK");throw e;}finally{client.release();}}
+              return sendJSON(res,200,{status:"success",conversation_id:id});
+            }
+
+            async function resolveConnectUsernameToId(username){
+              const row=(await pool.query(`SELECT user_id FROM howdi_connect_profiles WHERE LOWER(public_username)=LOWER($1) LIMIT 1`,[username])).rows[0];
+              return row?Number(row.user_id):null;
+            }
+
             if (req.method === "GET" && pathname === "/api/connect/home") {
               const sessionUser=await getSessionUserFromRequest(req);
               const authedUid=Number(sessionUser?.id||0)||0;
@@ -44654,6 +44734,67 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               const id=Number(pathname.match(/quotes\/(\d+)/)?.[1]);
               await pool.query(`DELETE FROM howdi_connect_daily_quotes WHERE id=$1`,[id]);
               return sendJSON(res,200,{status:"success"});
+            }
+
+            // ---- K5B — Public Profile + Follow system: connections/mutuals/suggestions/
+            // respond-by-username/conversation-by-username routes. (Placed after the Home
+            // route so these route bodies — which use top-level await inside their `if`
+            // blocks — never fall inside the connect-k3 test harness's mechanically-extracted
+            // "helpers" range, which must contain only function declarations.) ----
+            if(req.method==="GET"&&/^\/api\/connect\/profile\/username\/[^\/?]+\/connections\/?$/.test(pathname)){
+              const username=decodeURIComponent((pathname.match(/profile\/username\/([^\/?]+)\/connections/)||[])[1]||"");
+              const sessionUser=await getSessionUserFromRequest(req);
+              const viewerId=sessionUser?Number(sessionUser.id):0;
+              const type=String(url.searchParams.get("type")||"followers").toLowerCase();
+              const ownerId=await resolveConnectUsernameToId(username);
+              if(!ownerId)return sendJSON(res,404,{status:"error",message:"Profile not found"});
+              return loadConnectFollowListResponse(res,viewerId,ownerId,type);
+            }
+
+            if(req.method==="GET"&&pathname==="/api/connect/connections/mine"){
+              const sessionUser=await getSessionUserFromRequest(req);
+              if(!sessionUser)return sendJSON(res,401,{status:"error",message:"Login required"});
+              const viewerId=Number(sessionUser.id);
+              const type=String(url.searchParams.get("type")||"followers").toLowerCase();
+              return loadConnectFollowListResponse(res,viewerId,viewerId,type);
+            }
+
+            if(req.method==="PATCH"&&/^\/api\/connect\/profile\/username\/[^\/?]+\/respond-follow-request\/?$/.test(pathname)){
+              const username=decodeURIComponent((pathname.match(/profile\/username\/([^\/?]+)\/respond-follow-request/)||[])[1]||"");
+              const sessionUser=await getSessionUserFromRequest(req);
+              if(!sessionUser)return sendJSON(res,401,{status:"error",message:"Login required"});
+              const body=await getBody(req);
+              const requesterUserId=await resolveConnectUsernameToId(username);
+              if(!requesterUserId)return sendJSON(res,404,{status:"error",message:"Profile not found"});
+              return respondConnectFollowRequestResponse(res,Number(sessionUser.id),requesterUserId,Boolean(body.accept));
+            }
+
+            if(req.method==="GET"&&pathname==="/api/connect/connect-suggestions"){
+              const sessionUser=await getSessionUserFromRequest(req);
+              const viewerId=sessionUser?Number(sessionUser.id):0;
+              const limit=Math.min(40,Math.max(1,Number(url.searchParams.get("limit"))||20));
+              const rows=(await pool.query(`
+                SELECT u.full_name,cp.public_username,COALESCE(cp.avatar_data,ps.profile_image,'') profile_image,cp.headline,cp.profession_title,cp.professional_category,cp.creator_mode,
+                  (SELECT COUNT(*)::int FROM howdi_connect_follows mf WHERE mf.following_user_id=u.id AND mf.follower_user_id IN (SELECT following_user_id FROM howdi_connect_follows WHERE follower_user_id=$1)) mutual_count
+                FROM users u
+                JOIN howdi_connect_profiles cp ON cp.user_id=u.id
+                LEFT JOIN user_profile_settings ps ON ps.user_id=u.id
+                WHERE u.id<>$1 AND COALESCE(cp.discoverable,TRUE)=TRUE
+                  AND cp.public_username IS NOT NULL AND cp.public_username<>''
+                  AND NOT EXISTS(SELECT 1 FROM howdi_connect_follows f WHERE f.follower_user_id=$1 AND f.following_user_id=u.id)
+                  AND ($1::bigint=0 OR NOT EXISTS(SELECT 1 FROM howdi_connect_profile_blocks b WHERE (b.blocker_user_id=$1 AND b.blocked_user_id=u.id) OR (b.blocker_user_id=u.id AND b.blocked_user_id=$1)))
+                ORDER BY mutual_count DESC,cp.creator_mode DESC,u.id DESC LIMIT $2
+              `,[viewerId,limit])).rows;
+              return sendJSON(res,200,{status:"success",people:rows});
+            }
+
+            if(req.method==="POST"&&/^\/api\/connect\/conversations\/username\/[^\/?]+\/start\/?$/.test(pathname)){
+              const username=decodeURIComponent((pathname.match(/conversations\/username\/([^\/?]+)\/start/)||[])[1]||"");
+              const sessionUser=await getSessionUserFromRequest(req);
+              if(!sessionUser)return sendJSON(res,401,{status:"error",message:"Login required"});
+              const target=await resolveConnectUsernameToId(username);
+              if(!target)return sendJSON(res,404,{status:"error",message:"Profile not found"});
+              return startConnectConversationWith(res,Number(sessionUser.id),target);
             }
 
             // ---- K5A REVIEW FIX: public-username-addressed profile/follow actions ----
@@ -45783,33 +45924,27 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                Public identity + followers/following/follow-back + privacy
                ========================================================= */
             if(req.method==="GET"&&pathname==="/api/connect/social-graph"){
-              const uid=Number(url.searchParams.get("userId")||0),owner=Number(url.searchParams.get("ownerId")||uid),type=String(url.searchParams.get("type")||"followers").toLowerCase();
-              if(!uid||!owner||!["followers","following","requests"].includes(type))return sendJSON(res,400,{status:"error",message:"Valid social graph request required"});
-              const ownerProfile=(await pool.query(`SELECT private_profile,follower_list_visibility FROM howdi_connect_profiles WHERE user_id=$1`,[owner])).rows[0]||{};
-              const viewerFollows=uid===owner?true:Boolean((await pool.query(`SELECT 1 FROM howdi_connect_follows WHERE follower_user_id=$1 AND following_user_id=$2`,[uid,owner])).rows[0]);
-              const allowed=uid===owner||ownerProfile.follower_list_visibility==='EVERYONE'||(ownerProfile.follower_list_visibility==='FOLLOWERS'&&viewerFollows);
-              if(type!=="requests"&&!allowed)return sendJSON(res,403,{status:"error",message:"This member keeps their network private"});
-              if(type==="requests"){
-                if(uid!==owner)return sendJSON(res,403,{status:"error",message:"Follow requests are private"});
-                const rows=(await pool.query(`SELECT u.id,u.full_name,cp.public_username,COALESCE(cp.avatar_data,ps.profile_image,'') profile_image,cp.headline,cp.profession_title,fr.created_at,
-                  EXISTS(SELECT 1 FROM howdi_connect_follows f WHERE f.follower_user_id=$1 AND f.following_user_id=u.id) viewer_following
-                  FROM howdi_connect_follow_requests fr JOIN users u ON u.id=fr.requester_user_id LEFT JOIN howdi_connect_profiles cp ON cp.user_id=u.id LEFT JOIN user_profile_settings ps ON ps.user_id=u.id
-                  WHERE fr.target_user_id=$1 AND fr.status='PENDING' ORDER BY fr.created_at DESC LIMIT 200`,[owner])).rows;
-                return sendJSON(res,200,{status:"success",type,people:rows});
-              }
-              const join=type==="followers"?`f.follower_user_id=u.id AND f.following_user_id=$2`:`f.following_user_id=u.id AND f.follower_user_id=$2`;
-              const rows=(await pool.query(`SELECT u.id,u.full_name,cp.public_username,COALESCE(cp.avatar_data,ps.profile_image,'') profile_image,cp.headline,cp.profession_title,cp.private_profile,
-                EXISTS(SELECT 1 FROM howdi_connect_follows vf WHERE vf.follower_user_id=$1 AND vf.following_user_id=u.id) viewer_following,
-                EXISTS(SELECT 1 FROM howdi_connect_follows rf WHERE rf.follower_user_id=u.id AND rf.following_user_id=$1) follows_viewer,
-                EXISTS(SELECT 1 FROM howdi_connect_follow_requests r WHERE r.requester_user_id=$1 AND r.target_user_id=u.id AND r.status='PENDING') request_pending
-                FROM howdi_connect_follows f JOIN users u ON ${join} LEFT JOIN howdi_connect_profiles cp ON cp.user_id=u.id LEFT JOIN user_profile_settings ps ON ps.user_id=u.id
-                WHERE NOT EXISTS(SELECT 1 FROM howdi_connect_profile_blocks b WHERE (b.blocker_user_id=$1 AND b.blocked_user_id=u.id) OR (b.blocker_user_id=u.id AND b.blocked_user_id=$1))
-                ORDER BY f.created_at DESC LIMIT 300`,[uid,owner])).rows;
-              return sendJSON(res,200,{status:"success",type,people:rows});
+              // K5B FIX: viewer identity must come from the authenticated session, never the
+              // client-supplied ?userId (previously trusted directly — a session-identity gap).
+              // ?ownerId still selects WHOSE list to view (analogous to a follow target), and
+              // still defaults to the viewer for the existing self-view "Your network" screen.
+              // Delegates to the shared, username-safe helper (also used by the new
+              // /api/connect/profile/username/:username/connections route) so both surfaces
+              // stay identical; rows without a public_username are excluded and no raw numeric
+              // id is returned, closing the identity leak this route previously had.
+              const sessionUser=await getSessionUserFromRequest(req);
+              const uid=sessionUser?Number(sessionUser.id):0;
+              const owner=Number(url.searchParams.get("ownerId")||uid),type=String(url.searchParams.get("type")||"followers").toLowerCase();
+              if(!uid)return sendJSON(res,401,{status:"error",message:"Login required"});
+              return loadConnectFollowListResponse(res,uid,owner,type);
             }
 
             if(req.method==="GET"&&pathname==="/api/connect/social-summary"){
-              const uid=Number(url.searchParams.get("userId")||0);if(!uid)return sendJSON(res,400,{status:"error",message:"Valid user required"});
+              // K5B FIX: this is always "my own" profile/privacy summary — identity must come
+              // from the session, never a client-supplied ?userId.
+              const sessionUser=await getSessionUserFromRequest(req);
+              if(!sessionUser)return sendJSON(res,401,{status:"error",message:"Login required"});
+              const uid=Number(sessionUser.id);
               const p=(await pool.query(`SELECT cp.public_username,cp.private_profile,cp.follower_list_visibility,cp.contact_permission,cp.mention_permission,cp.tag_permission,cp.activity_visible,cp.discoverable,cp.headline,cp.about,cp.avatar_data,cp.cover_data,cp.profession_title,cp.professional_category,u.full_name
                 FROM users u LEFT JOIN howdi_connect_profiles cp ON cp.user_id=u.id WHERE u.id=$1`,[uid])).rows[0]||{};
               const counts=(await pool.query(`SELECT (SELECT COUNT(*)::int FROM howdi_connect_follows WHERE following_user_id=$1) followers,(SELECT COUNT(*)::int FROM howdi_connect_follows WHERE follower_user_id=$1) following,(SELECT COUNT(*)::int FROM howdi_connect_follow_requests WHERE target_user_id=$1 AND status='PENDING') requests`,[uid])).rows[0];
@@ -45868,7 +46003,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 const allowVisit=profile.visitor_visibility!=='NO_ONE'&&(profile.visitor_visibility!=='FOLLOWERS'||viewerFollows);
                 if(allowVisit)await pool.query(`INSERT INTO howdi_connect_profile_visits(profile_user_id,viewer_user_id) VALUES($1,$2) ON CONFLICT(profile_user_id,viewer_user_id) DO UPDATE SET visit_count=howdi_connect_profile_visits.visit_count+1,last_visited_at=NOW()`,[target,viewer]);
               }
-              if(profile.private_profile&&target!==viewer&&!profile.viewer_following)return sendJSON(res,200,{status:"success",profile:{user_id:target,full_name:profile.full_name,public_username:profile.public_username||null,profile_image:profile.profile_image,private_profile:true,follower_count:profile.follower_count,following_count:profile.following_count,viewer_following:profile.viewer_following},private:true});
+              // K5B: never expose the raw numeric users.id — public identity is @public_username.
+              if(profile.private_profile&&target!==viewer&&!profile.viewer_following)return sendJSON(res,200,{status:"success",profile:{full_name:profile.full_name,public_username:profile.public_username||null,profile_image:profile.profile_image,private_profile:true,follower_count:profile.follower_count,following_count:profile.following_count,viewer_following:profile.viewer_following},private:true});
               const completionChecklist={
                 photo:Boolean(profile.avatar_data||profile.profile_image),
                 cover:Boolean(profile.cover_data),
@@ -45904,7 +46040,32 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   resolvedFeatured.push({...f,resolved:p||null});
                 }else resolvedFeatured.push(f);
               }
-              return sendJSON(res,200,{status:"success",profile,private:false,completion,completionChecklist,profileStrength,canSeeFollowerList,canMessage,recent_posts:recentPosts,featured:resolvedFeatured,projects,experience,education,skills,badges,verification});
+              // K5B: Vibes / Articles / Communities for the profile owner, plus creator links
+              // (portfolio_url / social_links already come through on the profile row itself).
+              // A private, non-followed profile already returned above, so these queries only
+              // ever run for a viewable profile.
+              const vibes=(await pool.query(`
+                SELECT vibe_code,vibe_type,caption,cover_url,published_at
+                FROM vibes WHERE creator_user_id=$1::text AND status='published' AND visibility='public' AND deleted_at IS NULL
+                ORDER BY published_at DESC LIMIT 12
+              `,[target])).rows;
+              const articles=(await pool.query(`
+                SELECT id,article_title,article_excerpt,article_cover_url,article_read_minutes,created_at
+                FROM howdi_community_posts WHERE user_id=$1 AND post_type='ARTICLE' AND post_status='PUBLISHED'
+                ORDER BY created_at DESC LIMIT 12
+              `,[target])).rows;
+              let communities=[];
+              try{
+                communities=(await pool.query(`
+                  SELECT c.id,c.name,c.description,c.community_type,c.category,
+                    (SELECT COUNT(*)::int FROM howdi_connect_community_members m WHERE m.community_id=c.id AND m.membership_status='ACTIVE') member_count
+                  FROM howdi_connect_communities c WHERE c.owner_user_id=$1 AND c.status='ACTIVE' AND c.privacy<>'PRIVATE'
+                  ORDER BY c.created_at DESC LIMIT 12
+                `,[target])).rows;
+              }catch(e){communities=[];}
+              // K5B: never expose the raw numeric users.id in the profile payload.
+              delete profile.user_id;
+              return sendJSON(res,200,{status:"success",profile,private:false,completion,completionChecklist,profileStrength,canSeeFollowerList,canMessage,recent_posts:recentPosts,featured:resolvedFeatured,projects,experience,education,skills,badges,verification,vibes,articles,communities});
             }
             if(req.method==="GET"&&/^\/api\/connect\/public-profile\/\d+\/?$/.test(pathname)){
               const target=Number(pathname.match(/public-profile\/(\d+)/)?.[1]);
@@ -46030,15 +46191,17 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               const sessionUser=await getSessionUserFromRequest(req);
               if(!sessionUser)return sendJSON(res,401,{status:"error",message:"Login required"});
               const requester=Number(pathname.match(/follow-requests\/(\d+)\/respond/)?.[1]),body=await getBody(req),target=Number(sessionUser.id),accept=Boolean(body.accept);
-              const row=(await pool.query(`UPDATE howdi_connect_follow_requests SET status=$3,updated_at=NOW() WHERE requester_user_id=$1 AND target_user_id=$2 AND status='PENDING' RETURNING *`,[requester,target,accept?'ACCEPTED':'DECLINED'])).rows[0];
-              if(!row)return sendJSON(res,404,{status:"error",message:"Follow request not found"});
-              if(accept)await pool.query(`INSERT INTO howdi_connect_follows(follower_user_id,following_user_id) VALUES($1,$2) ON CONFLICT DO NOTHING`,[requester,target]);
-              return sendJSON(res,200,{status:"success",accepted:accept});
+              // K5B: delegates to the shared helper (also used by the new username-addressed
+              // /api/connect/profile/username/:username/respond-follow-request route).
+              return respondConnectFollowRequestResponse(res,target,requester,accept);
             }
 
-            if(req.method==="POST"&&/^\/api\/connect\/profiles\/\d+\/block\/?$/.test(pathname)){
-              const blocked=Number(pathname.match(/profiles\/(\d+)\/block/)?.[1]),body=await getBody(req),uid=Number(body.userId);
-              if(!uid||!blocked||uid===blocked)return sendJSON(res,400,{status:"error",message:"Valid profile required"});
+            // K5B FIX: both actions previously trusted a client-supplied body.userId as the
+            // acting identity. Extracted into shared, session-authoritative functions and
+            // exposed via both the existing numeric routes and new username-addressed ones,
+            // so the public-profile screen never needs a raw numeric id to block / close-friend.
+            async function toggleConnectProfileBlockResponse(res,uid,blocked){
+              if(!Number.isInteger(uid)||uid<=0||!Number.isInteger(blocked)||blocked<=0||uid===blocked)return sendJSON(res,400,{status:"error",message:"Valid profile required"});
               const exists=(await pool.query(`SELECT 1 FROM howdi_connect_profile_blocks WHERE blocker_user_id=$1 AND blocked_user_id=$2`,[uid,blocked])).rows[0];
               if(exists)await pool.query(`DELETE FROM howdi_connect_profile_blocks WHERE blocker_user_id=$1 AND blocked_user_id=$2`,[uid,blocked]);
               else{
@@ -46047,15 +46210,43 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               }
               return sendJSON(res,200,{status:"success",blocked:!exists});
             }
-
-            if(req.method==="POST"&&/^\/api\/connect\/profiles\/\d+\/close-friend\/?$/.test(pathname)){
-              const friend=Number(pathname.match(/profiles\/(\d+)\/close-friend/)?.[1]),body=await getBody(req),uid=Number(body.userId);
+            async function toggleConnectCloseFriendResponse(res,uid,friend){
+              if(!Number.isInteger(uid)||uid<=0||!Number.isInteger(friend)||friend<=0||uid===friend)return sendJSON(res,400,{status:"error",message:"Valid profile required"});
               const follows=(await pool.query(`SELECT 1 FROM howdi_connect_follows WHERE follower_user_id=$1 AND following_user_id=$2`,[uid,friend])).rows[0];
               if(!follows)return sendJSON(res,403,{status:"error",message:"Follow this profile before adding Close Friend"});
               const exists=(await pool.query(`SELECT 1 FROM howdi_connect_close_friends WHERE user_id=$1 AND friend_user_id=$2`,[uid,friend])).rows[0];
               if(exists)await pool.query(`DELETE FROM howdi_connect_close_friends WHERE user_id=$1 AND friend_user_id=$2`,[uid,friend]);
               else await pool.query(`INSERT INTO howdi_connect_close_friends(user_id,friend_user_id) VALUES($1,$2)`,[uid,friend]);
               return sendJSON(res,200,{status:"success",close_friend:!exists});
+            }
+            if(req.method==="POST"&&/^\/api\/connect\/profiles\/\d+\/block\/?$/.test(pathname)){
+              const blocked=Number(pathname.match(/profiles\/(\d+)\/block/)?.[1]);
+              const sessionUser=await getSessionUserFromRequest(req);
+              if(!sessionUser)return sendJSON(res,401,{status:"error",message:"Login required"});
+              return toggleConnectProfileBlockResponse(res,Number(sessionUser.id),blocked);
+            }
+            if(req.method==="POST"&&/^\/api\/connect\/profile\/username\/[^\/?]+\/block\/?$/.test(pathname)){
+              const username=decodeURIComponent((pathname.match(/profile\/username\/([^\/?]+)\/block/)||[])[1]||"");
+              const sessionUser=await getSessionUserFromRequest(req);
+              if(!sessionUser)return sendJSON(res,401,{status:"error",message:"Login required"});
+              const blocked=await resolveConnectUsernameToId(username);
+              if(!blocked)return sendJSON(res,404,{status:"error",message:"Profile not found"});
+              return toggleConnectProfileBlockResponse(res,Number(sessionUser.id),blocked);
+            }
+
+            if(req.method==="POST"&&/^\/api\/connect\/profiles\/\d+\/close-friend\/?$/.test(pathname)){
+              const friend=Number(pathname.match(/profiles\/(\d+)\/close-friend/)?.[1]);
+              const sessionUser=await getSessionUserFromRequest(req);
+              if(!sessionUser)return sendJSON(res,401,{status:"error",message:"Login required"});
+              return toggleConnectCloseFriendResponse(res,Number(sessionUser.id),friend);
+            }
+            if(req.method==="POST"&&/^\/api\/connect\/profile\/username\/[^\/?]+\/close-friend\/?$/.test(pathname)){
+              const username=decodeURIComponent((pathname.match(/profile\/username\/([^\/?]+)\/close-friend/)||[])[1]||"");
+              const sessionUser=await getSessionUserFromRequest(req);
+              if(!sessionUser)return sendJSON(res,401,{status:"error",message:"Login required"});
+              const friend=await resolveConnectUsernameToId(username);
+              if(!friend)return sendJSON(res,404,{status:"error",message:"Profile not found"});
+              return toggleConnectCloseFriendResponse(res,Number(sessionUser.id),friend);
             }
 
             if(req.method==="GET"&&pathname==="/api/connect/profile-recommendations"){
@@ -47648,14 +47839,11 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             if(req.method==="POST"&&pathname==="/api/connect/conversations"){
               const sessionUser=await getSessionUserFromRequest(req);if(!sessionUser)return sendJSON(res,401,{status:"error",message:"Login required"});
               const body=await getBody(req);const userId=Number(sessionUser.id);const target=Number(body.targetUserId??body.target_user_id);
-              if(!Number.isInteger(userId)||!Number.isInteger(target)||userId<=0||target<=0||userId===target)return sendJSON(res,400,{status:"error",message:"Valid users are required"});
-              const existing=(await pool.query(`SELECT c.id FROM howdi_connect_conversations c
-                JOIN howdi_connect_conversation_members a ON a.conversation_id=c.id AND a.user_id=$1
-                JOIN howdi_connect_conversation_members b ON b.conversation_id=c.id AND b.user_id=$2
-                WHERE c.conversation_type='DIRECT' AND (SELECT COUNT(*) FROM howdi_connect_conversation_members x WHERE x.conversation_id=c.id)=2 LIMIT 1`,[userId,target])).rows[0];
-              let id=existing?.id;
-              if(!id){const client=await pool.connect();try{await client.query("BEGIN");id=(await client.query(`INSERT INTO howdi_connect_conversations(conversation_type) VALUES('DIRECT') RETURNING id`)).rows[0].id;await client.query(`INSERT INTO howdi_connect_conversation_members(conversation_id,user_id) VALUES($1,$2),($1,$3)`,[id,userId,target]);await client.query("COMMIT");}catch(e){await client.query("ROLLBACK");throw e;}finally{client.release();}}
-              return sendJSON(res,200,{status:"success",conversation_id:id});
+              // K5B: delegates to the shared helper (also used by the new username-addressed
+              // /api/connect/conversations/username/:username/start route) so both stay
+              // identical; this adds a bidirectional-block check that the profile Block
+              // feature already implies but this route did not previously enforce.
+              return startConnectConversationWith(res,userId,target);
             }
 
             if(req.method==="GET"&&/^\/api\/connect\/conversations\/\d+\/messages\/?$/.test(pathname)){

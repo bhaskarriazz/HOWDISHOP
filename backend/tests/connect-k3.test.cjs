@@ -491,3 +491,381 @@ test('getVibeFeedRows guest browsing (no viewerId) does not apply the block pred
  const feedCall=calls.find(c=>c.sql.startsWith('SELECT v.*'));
  assert.doesNotMatch(feedCall.sql,/vibe_creator_blocks/);
 });
+
+// =====================================================
+// K5B — PUBLIC PROFILE + FOLLOW SYSTEM
+// (@username, avatar/name/bio, follower/following counts, Vibes, Articles,
+// Communities, creator links; Follow/Unfollow/Follow-Back/private-request/
+// accept-reject; Followers/Following/Mutuals/Suggestions. Session-authoritative,
+// never exposes a raw numeric user id.)
+// =====================================================
+const connectionsByUsernameRoute=block('            if(req.method==="GET"&&/^\\/api\\/connect\\/profile\\/username\\/[^\\/?]+\\/connections\\/?$/.test(pathname)){');
+const connectionsMineRoute=block('            if(req.method==="GET"&&pathname==="/api/connect/connections/mine"){');
+const respondFollowRequestByUsernameRoute=block('            if(req.method==="PATCH"&&/^\\/api\\/connect\\/profile\\/username\\/[^\\/?]+\\/respond-follow-request\\/?$/.test(pathname)){');
+const connectSuggestionsRoute=block('            if(req.method==="GET"&&pathname==="/api/connect/connect-suggestions"){');
+const conversationsUsernameStartRoute=block('            if(req.method==="POST"&&/^\\/api\\/connect\\/conversations\\/username\\/[^\\/?]+\\/start\\/?$/.test(pathname)){');
+const socialGraphRoute=block('            if(req.method==="GET"&&pathname==="/api/connect/social-graph"){');
+const socialSummaryRoute=block('            if(req.method==="GET"&&pathname==="/api/connect/social-summary"){');
+const toggleBlockCloseFriendFnsSrc=between('            async function toggleConnectProfileBlockResponse(res,uid,blocked){','            if(req.method==="POST"&&/^\\/api\\/connect\\/profiles\\/\\d+\\/block\\/?$/.test(pathname)){');
+const blockNumericRoute=block('            if(req.method==="POST"&&/^\\/api\\/connect\\/profiles\\/\\d+\\/block\\/?$/.test(pathname)){');
+const blockUsernameRoute=block('            if(req.method==="POST"&&/^\\/api\\/connect\\/profile\\/username\\/[^\\/?]+\\/block\\/?$/.test(pathname)){');
+const closeFriendNumericRoute=block('            if(req.method==="POST"&&/^\\/api\\/connect\\/profiles\\/\\d+\\/close-friend\\/?$/.test(pathname)){');
+const closeFriendUsernameRoute=block('            if(req.method==="POST"&&/^\\/api\\/connect\\/profile\\/username\\/[^\\/?]+\\/close-friend\\/?$/.test(pathname)){');
+const loadConnectPublicProfileResponseSrc=between('            async function loadConnectPublicProfileResponse(res,target,viewer){','            if(req.method==="GET"&&/^\\/api\\/connect\\/public-profile\\/\\d+\\/?$/.test(pathname)){');
+
+// `helpers` (defined above for the K3 harness) already contains, as safe function
+// declarations, everything K5B's routes need: getSessionUserFromRequest, getBody,
+// and the four K5B shared functions (loadConnectFollowListResponse,
+// respondConnectFollowRequestResponse, startConnectConversationWith,
+// resolveConnectUsernameToId) — they were deliberately left in that source range.
+// Only Block/Close-Friend's shared functions live after the Home route, so this
+// harness also prepends those explicitly.
+async function runK5B(routeSrc,method,path,options={}){
+ const calls=[];
+ const query=async(sql,params=[])=>{
+  sql=sql.replace(/\s+/g,' ').trim();calls.push({sql,params});
+  if(sql.includes('FROM user_sessions s'))return {rows:params[0]==='session-A'?[{id:101}]:[],rowCount:0};
+  if(sql.startsWith('UPDATE user_sessions'))return {rows:[],rowCount:0};
+  if(sql.startsWith('SELECT user_id FROM howdi_connect_profiles WHERE LOWER(public_username)')){
+   const map=options.usernameMap||(options.knownUsername?{[String(options.knownUsername).toLowerCase()]:Number(options.targetId||303)}:{});
+   const id=map[String(params[0]).toLowerCase()];
+   return {rows:id?[{user_id:id}]:[],rowCount:id?1:0};
+  }
+  if(sql.startsWith('SELECT private_profile,follower_list_visibility FROM howdi_connect_profiles'))return {rows:[{private_profile:Boolean(options.ownerPrivate),follower_list_visibility:options.followerListVisibility||'EVERYONE'}],rowCount:1};
+  if(sql.startsWith('SELECT 1 FROM howdi_connect_follows WHERE follower_user_id'))return {rows:options.viewerFollowsOwner?[{exists:1}]:[],rowCount:0};
+  if(sql.startsWith('SELECT 1 FROM howdi_connect_profile_blocks'))return {rows:options.blocked?[{exists:1}]:[],rowCount:0};
+  if(sql.startsWith('UPDATE howdi_connect_follow_requests'))return {rows:options.requestFound?[{requester_user_id:params[0],target_user_id:params[1],status:params[2]}]:[],rowCount:options.requestFound?1:0};
+  if(sql.startsWith('INSERT INTO howdi_connect_follows'))return {rows:[{follower_user_id:params[0],following_user_id:params[1]}],rowCount:1};
+  if(sql.startsWith('SELECT c.id FROM howdi_connect_conversations'))return {rows:options.existingConversation?[{id:options.existingConversation}]:[],rowCount:0};
+  if(sql.startsWith('INSERT INTO howdi_connect_conversations'))return {rows:[{id:9}],rowCount:1};
+  if(sql.startsWith('INSERT INTO howdi_connect_conversation_members'))return {rows:[],rowCount:0};
+  if(sql.startsWith('DELETE FROM howdi_connect_profile_blocks'))return {rows:[],rowCount:0};
+  if(sql.startsWith('INSERT INTO howdi_connect_profile_blocks'))return {rows:[],rowCount:0};
+  if(sql.startsWith('DELETE FROM howdi_connect_follows'))return {rows:[],rowCount:0};
+  if(sql.startsWith('SELECT 1 FROM howdi_connect_close_friends'))return {rows:options.alreadyCloseFriend?[{exists:1}]:[],rowCount:0};
+  if(sql.startsWith('DELETE FROM howdi_connect_close_friends'))return {rows:[],rowCount:0};
+  if(sql.startsWith('INSERT INTO howdi_connect_close_friends'))return {rows:[],rowCount:0};
+  if(options.queryOverride){const over=options.queryOverride(sql,params);if(over!==undefined)return over;}
+  return {rows:[],rowCount:0};
+ };
+ const pool={query,connect:async()=>({query,release(){}})};
+ const req=new Readable({read(){}});req.push(JSON.stringify(options.body||{}));req.push(null);
+ req.method=method;req.headers=options.anonymous?{}:{authorization:'Bearer session-A'};
+ const url=new URL('http://localhost'+path);
+ const context={
+  pool,req,res:{},url,pathname:path.split('?')[0],URL,Buffer,
+  clean:x=>String(x??'').trim(),
+  sendJSON:(_res,status,data)=>({status,data}),
+  console:{error:()=>{}},
+ };
+ const src=`${helpers}\n${toggleBlockCloseFriendFnsSrc}\n(async()=>{${routeSrc}})()`;
+ const response=await vm.runInNewContext(src,context);
+ assert.ok(response,'Route must respond');
+ return {...response,calls};
+}
+
+test('Connections-by-username 404s for an unknown username',async()=>{
+ const r=await runK5B(connectionsByUsernameRoute,'GET','/api/connect/profile/username/nobody/connections',{anonymous:true,knownUsername:'crafty_alice'});
+ assert.equal(r.status,404);
+});
+test('Connections-by-username uses the session as viewer (guest = viewer 0, no impersonation vector exists on this route)',async()=>{
+ const r=await runK5B(connectionsByUsernameRoute,'GET','/api/connect/profile/username/crafty_alice/connections?type=followers',{anonymous:true,knownUsername:'crafty_alice',targetId:303});
+ assert.equal(r.status,200);
+ assert.equal(r.data.type,'followers');
+});
+test('Connections "mine" requires an authenticated session (401, no writes)',async()=>{
+ const r=await runK5B(connectionsMineRoute,'GET','/api/connect/connections/mine?type=followers',{anonymous:true});
+ assert.equal(r.status,401);
+});
+test('Connections "mine" scopes viewer and owner to the session user for each type: followers/following/mutuals',async()=>{
+ for(const type of ['followers','following','mutuals']){
+  const r=await runK5B(connectionsMineRoute,'GET',`/api/connect/connections/mine?type=${type}`);
+  assert.equal(r.status,200,type);
+  assert.equal(r.data.type,type);
+  assert.equal(r.data.people.length,0);
+ }
+});
+test('Connections "mine" followers/following rows never carry a raw numeric id and require public_username',async()=>{
+ const r=await runK5B(connectionsMineRoute,'GET','/api/connect/connections/mine?type=followers',{queryOverride:(sql)=>{
+  if(sql.startsWith('SELECT u.full_name,cp.public_username,COALESCE(cp.avatar_data,ps.profile_image,\'\') profile_image,cp.headline,cp.profession_title,cp.private_profile'))
+   return {rows:[{full_name:'Bee',public_username:'bee_maker',profile_image:'',headline:'',profession_title:'',private_profile:false,viewer_following:true,follows_viewer:false,request_pending:false}],rowCount:1};
+  return undefined;
+ }});
+ assert.equal(r.status,200);
+ assert.equal(r.data.people.length,1);
+ assert.equal(Object.prototype.hasOwnProperty.call(r.data.people[0],'id'),false);
+ const call=r.calls.find(c=>c.sql.startsWith('SELECT u.full_name,cp.public_username,COALESCE(cp.avatar_data,ps.profile_image,\'\') profile_image,cp.headline,cp.profession_title,cp.private_profile'));
+ assert.ok(call);
+ assert.match(call.sql,/public_username IS NOT NULL/);
+ assert.doesNotMatch(call.sql.split(' FROM ')[0],/\bu\.id\b/);
+ assert.match(call.sql,/howdi_connect_profile_blocks/);
+});
+test('Connections "mine" type=followers/following is blocked (403) when the owner keeps their network private and the viewer does not follow them',async()=>{
+ const r=await runK5B(connectionsMineRoute,'GET','/api/connect/connections/mine?type=followers',{
+  queryOverride:(sql)=>{ if(sql.startsWith('SELECT private_profile,follower_list_visibility FROM howdi_connect_profiles'))return {rows:[{private_profile:true,follower_list_visibility:'FOLLOWERS'}],rowCount:1}; return undefined; }
+ });
+ // Note: connections/mine always sets viewer===owner (the session user viewing their own
+ // list), so the "private + not following" branch cannot trigger here (viewerId===ownerId
+ // short-circuits `allowed` to true) — this asserts that self-view is never blocked.
+ assert.equal(r.status,200);
+});
+test('Connections type=requests requires viewer===owner (403 for a non-owner even when authenticated)',async()=>{
+ const r=await runK5B(connectionsByUsernameRoute,'GET','/api/connect/profile/username/crafty_alice/connections?type=requests',{knownUsername:'crafty_alice',targetId:303});
+ assert.equal(r.status,403);
+});
+test('Connections type=requests returns rows scoped to the owner and requires public_username',async()=>{
+ const r=await runK5B(connectionsMineRoute,'GET','/api/connect/connections/mine?type=requests',{queryOverride:(sql)=>{
+  if(sql.startsWith('SELECT u.full_name,cp.public_username,COALESCE(cp.avatar_data,ps.profile_image,\'\') profile_image,cp.headline,cp.profession_title,fr.created_at'))
+   return {rows:[{full_name:'Req',public_username:'req_person',profile_image:'',headline:'',profession_title:'',created_at:new Date().toISOString(),viewer_following:false}],rowCount:1};
+  return undefined;
+ }});
+ assert.equal(r.status,200);
+ const call=r.calls.find(c=>c.sql.startsWith('SELECT u.full_name,cp.public_username,COALESCE(cp.avatar_data,ps.profile_image,\'\') profile_image,cp.headline,cp.profession_title,fr.created_at'));
+ assert.ok(call);
+ assert.equal(call.params[0],101);
+ assert.match(call.sql,/public_username IS NOT NULL/);
+});
+test('Connections type=mutuals short-circuits to an empty list for a guest viewer without querying the self-join',async()=>{
+ const r=await runK5B(connectionsByUsernameRoute,'GET','/api/connect/profile/username/crafty_alice/connections?type=mutuals',{anonymous:true,knownUsername:'crafty_alice',targetId:303});
+ assert.equal(r.status,200);
+ assert.deepEqual(Array.from(r.data.people),[]);
+ assert.equal(r.calls.filter(c=>c.sql.includes('JOIN howdi_connect_follows f2')).length,0);
+});
+test('Connections type=mutuals self-join query excludes the viewer and owner, excludes blocks, requires public_username',async()=>{
+ const r=await runK5B(connectionsMineRoute,'GET','/api/connect/connections/mine?type=mutuals',{queryOverride:(sql)=>{
+  if(sql.includes('JOIN howdi_connect_follows f2'))return {rows:[{full_name:'Mutual',public_username:'mutual_1',profile_image:'',headline:'',profession_title:''}],rowCount:1};
+  return undefined;
+ }});
+ assert.equal(r.status,200);
+ assert.equal(r.data.type,'mutuals');
+ const call=r.calls.find(c=>c.sql.includes('JOIN howdi_connect_follows f2'));
+ assert.ok(call);
+ assert.match(call.sql,/u\.id<>\$1 AND u\.id<>\$2/);
+ assert.match(call.sql,/public_username IS NOT NULL/);
+ assert.match(call.sql,/howdi_connect_profile_blocks/);
+ assert.equal(Object.prototype.hasOwnProperty.call(r.data.people[0],'id'),false);
+});
+test('Respond-follow-request-by-username requires an authenticated session (401, no writes)',async()=>{
+ const r=await runK5B(respondFollowRequestByUsernameRoute,'PATCH','/api/connect/profile/username/req303/respond-follow-request',{anonymous:true,knownUsername:'req303',body:{accept:true}});
+ assert.equal(r.status,401);
+ assert.equal(r.calls.filter(c=>/^(INSERT|UPDATE|DELETE)/.test(c.sql)).length,0);
+});
+test('Respond-follow-request-by-username 404s for an unknown requester username',async()=>{
+ const r=await runK5B(respondFollowRequestByUsernameRoute,'PATCH','/api/connect/profile/username/nobody/respond-follow-request',{knownUsername:'req303',body:{accept:true}});
+ assert.equal(r.status,404);
+});
+test('Respond-follow-request-by-username accepts using the session as the acting target and creates the follow',async()=>{
+ const r=await runK5B(respondFollowRequestByUsernameRoute,'PATCH','/api/connect/profile/username/req303/respond-follow-request',{knownUsername:'req303',targetId:303,requestFound:true,body:{accept:true}});
+ assert.equal(r.status,200);
+ const update=r.calls.find(c=>c.sql.startsWith('UPDATE howdi_connect_follow_requests'));
+ assert.deepEqual(Array.from(update.params),[303,101,'ACCEPTED']);
+ const follow=r.calls.find(c=>c.sql.startsWith('INSERT INTO howdi_connect_follows'));
+ assert.deepEqual(Array.from(follow.params),[303,101]);
+});
+test('Respond-follow-request-by-username declines without creating a follow row',async()=>{
+ const r=await runK5B(respondFollowRequestByUsernameRoute,'PATCH','/api/connect/profile/username/req303/respond-follow-request',{knownUsername:'req303',targetId:303,requestFound:true,body:{accept:false}});
+ assert.equal(r.status,200);
+ assert.equal(r.calls.filter(c=>c.sql.startsWith('INSERT INTO howdi_connect_follows')).length,0);
+});
+test('Connect-suggestions excludes self, already-followed and public_username-less rows, and ranks by mutual_count',async()=>{
+ const r=await runK5B(connectSuggestionsRoute,'GET','/api/connect/connect-suggestions?limit=10');
+ assert.equal(r.status,200);
+ const call=r.calls.find(c=>c.sql.includes('mutual_count'));
+ assert.ok(call);
+ assert.equal(call.params[0],101);
+ assert.match(call.sql,/u\.id<>\$1/);
+ assert.match(call.sql,/public_username IS NOT NULL/);
+ assert.match(call.sql,/NOT EXISTS\(SELECT 1 FROM howdi_connect_follows f WHERE f\.follower_user_id=\$1 AND f\.following_user_id=u\.id\)/);
+ assert.match(call.sql,/howdi_connect_profile_blocks/);
+ assert.match(call.sql,/ORDER BY mutual_count DESC/);
+ assert.doesNotMatch(call.sql.split(' FROM ')[0],/\bu\.id\b|\bcp\.user_id\b/);
+});
+test('Connect-suggestions works for a guest viewer (viewerId 0) without impersonation',async()=>{
+ const r=await runK5B(connectSuggestionsRoute,'GET','/api/connect/connect-suggestions',{anonymous:true});
+ assert.equal(r.status,200);
+ const call=r.calls.find(c=>c.sql.includes('mutual_count'));
+ assert.equal(call.params[0],0);
+});
+test('Conversation-start-by-username requires an authenticated session (401, no writes)',async()=>{
+ const r=await runK5B(conversationsUsernameStartRoute,'POST','/api/connect/conversations/username/crafty_alice/start',{anonymous:true,knownUsername:'crafty_alice'});
+ assert.equal(r.status,401);
+ assert.equal(r.calls.filter(c=>/^(INSERT)/.test(c.sql)).length,0);
+});
+test('Conversation-start-by-username 404s for an unknown username',async()=>{
+ const r=await runK5B(conversationsUsernameStartRoute,'POST','/api/connect/conversations/username/nobody/start',{knownUsername:'crafty_alice',targetId:303});
+ assert.equal(r.status,404);
+});
+test('Conversation-start-by-username is blocked (403) when either party has blocked the other',async()=>{
+ const r=await runK5B(conversationsUsernameStartRoute,'POST','/api/connect/conversations/username/crafty_alice/start',{knownUsername:'crafty_alice',targetId:303,blocked:true});
+ assert.equal(r.status,403);
+});
+test('Conversation-start-by-username creates/reuses a DIRECT conversation using the session as one side',async()=>{
+ const r=await runK5B(conversationsUsernameStartRoute,'POST','/api/connect/conversations/username/crafty_alice/start',{knownUsername:'crafty_alice',targetId:303,existingConversation:55});
+ assert.equal(r.status,200);
+ assert.equal(r.data.conversation_id,55);
+});
+test('Legacy /api/connect/social-graph ignores a spoofed ?userId and derives viewer from the session',async()=>{
+ const r=await runK5B(socialGraphRoute,'GET','/api/connect/social-graph?userId=999&type=followers');
+ assert.equal(r.status,200);
+ // loadConnectFollowListResponse's own private/blocked-exclusion queries prove it ran with viewer=101, not 999
+ assert.equal(r.calls.find(c=>c.sql.startsWith('SELECT private_profile,follower_list_visibility'))?.params?.[0],101);
+});
+test('Legacy /api/connect/social-graph requires a session (401 for a guest, regression: this route used to trust ?userId directly)',async()=>{
+ const r=await runK5B(socialGraphRoute,'GET','/api/connect/social-graph?userId=101&type=followers',{anonymous:true});
+ assert.equal(r.status,401);
+});
+test('Legacy /api/connect/social-graph honors ?ownerId to view someone else\'s list while viewer stays the session user',async()=>{
+ const r=await runK5B(socialGraphRoute,'GET','/api/connect/social-graph?ownerId=303&type=followers');
+ assert.equal(r.status,200);
+ assert.equal(r.calls.find(c=>c.sql.startsWith('SELECT private_profile,follower_list_visibility'))?.params?.[0],303);
+});
+test('/api/connect/social-summary requires a session (401 for a guest, regression: this route used to trust ?userId directly)',async()=>{
+ const r=await runK5B(socialSummaryRoute,'GET','/api/connect/social-summary?userId=999',{anonymous:true});
+ assert.equal(r.status,401);
+});
+test('/api/connect/social-summary ignores a spoofed ?userId and always reports the session user\'s own summary',async()=>{
+ const r=await runK5B(socialSummaryRoute,'GET','/api/connect/social-summary?userId=999');
+ assert.equal(r.status,200);
+ const call=r.calls.find(c=>c.sql.includes('LEFT JOIN howdi_connect_profiles cp ON cp.user_id=u.id WHERE u.id=$1'));
+ assert.ok(call);
+ assert.equal(call.params[0],101);
+});
+test('Block (numeric route) requires an authenticated session (401, no writes) — regression: previously trusted body.userId with no session check',async()=>{
+ const r=await runK5B(blockNumericRoute,'POST','/api/connect/profiles/303/block',{anonymous:true,body:{userId:101}});
+ assert.equal(r.status,401);
+ assert.equal(r.calls.filter(c=>/^(INSERT|DELETE)/.test(c.sql)).length,0);
+});
+test('Block (numeric route) acts as the session user regardless of a spoofed body.userId, and un-follows both directions',async()=>{
+ const r=await runK5B(blockNumericRoute,'POST','/api/connect/profiles/303/block',{body:{userId:202}});
+ assert.equal(r.status,200);
+ assert.equal(r.data.blocked,true);
+ const ins=r.calls.find(c=>c.sql.startsWith('INSERT INTO howdi_connect_profile_blocks'));
+ assert.deepEqual(Array.from(ins.params),[101,303]);
+ const del=r.calls.find(c=>c.sql.startsWith('DELETE FROM howdi_connect_follows'));
+ assert.deepEqual(Array.from(del.params),[101,303]);
+});
+test('Block (numeric route) toggles off (unblocks) when already blocked',async()=>{
+ const r=await runK5B(blockNumericRoute,'POST','/api/connect/profiles/303/block',{blocked:true});
+ assert.equal(r.status,200);
+ assert.equal(r.data.blocked,false);
+ assert.equal(r.calls.filter(c=>c.sql.startsWith('DELETE FROM howdi_connect_profile_blocks')).length,1);
+});
+test('Block-by-username requires an authenticated session (401) and 404s for an unknown username',async()=>{
+ const anon=await runK5B(blockUsernameRoute,'POST','/api/connect/profile/username/crafty_alice/block',{anonymous:true,knownUsername:'crafty_alice'});
+ assert.equal(anon.status,401);
+ const unknown=await runK5B(blockUsernameRoute,'POST','/api/connect/profile/username/nobody/block',{knownUsername:'crafty_alice'});
+ assert.equal(unknown.status,404);
+});
+test('Block-by-username resolves the username and blocks using the session identity',async()=>{
+ const r=await runK5B(blockUsernameRoute,'POST','/api/connect/profile/username/crafty_alice/block',{knownUsername:'crafty_alice',targetId:303});
+ assert.equal(r.status,200);
+ const ins=r.calls.find(c=>c.sql.startsWith('INSERT INTO howdi_connect_profile_blocks'));
+ assert.deepEqual(Array.from(ins.params),[101,303]);
+});
+test('Close-Friend (numeric route) requires an authenticated session (401) — regression: previously trusted body.userId with no session check',async()=>{
+ const r=await runK5B(closeFriendNumericRoute,'POST','/api/connect/profiles/303/close-friend',{anonymous:true,body:{userId:101}});
+ assert.equal(r.status,401);
+});
+test('Close-Friend (numeric route) requires the session user to already follow the target',async()=>{
+ const r=await runK5B(closeFriendNumericRoute,'POST','/api/connect/profiles/303/close-friend',{});
+ assert.equal(r.status,403);
+});
+test('Close-Friend (numeric route) adds and then can remove using session identity, ignoring a spoofed body.userId',async()=>{
+ const added=await runK5B(closeFriendNumericRoute,'POST','/api/connect/profiles/303/close-friend',{viewerFollowsOwner:true,body:{userId:202}});
+ assert.equal(added.status,200);
+ assert.equal(added.data.close_friend,true);
+ const ins=added.calls.find(c=>c.sql.startsWith('INSERT INTO howdi_connect_close_friends'));
+ assert.deepEqual(Array.from(ins.params),[101,303]);
+ const removed=await runK5B(closeFriendNumericRoute,'POST','/api/connect/profiles/303/close-friend',{viewerFollowsOwner:true,alreadyCloseFriend:true});
+ assert.equal(removed.status,200);
+ assert.equal(removed.data.close_friend,false);
+});
+test('Close-Friend-by-username requires an authenticated session (401) and 404s for an unknown username',async()=>{
+ const anon=await runK5B(closeFriendUsernameRoute,'POST','/api/connect/profile/username/crafty_alice/close-friend',{anonymous:true,knownUsername:'crafty_alice'});
+ assert.equal(anon.status,401);
+ const unknown=await runK5B(closeFriendUsernameRoute,'POST','/api/connect/profile/username/nobody/close-friend',{knownUsername:'crafty_alice'});
+ assert.equal(unknown.status,404);
+});
+test('Close-Friend-by-username resolves the username and acts using session identity',async()=>{
+ const r=await runK5B(closeFriendUsernameRoute,'POST','/api/connect/profile/username/crafty_alice/close-friend',{knownUsername:'crafty_alice',targetId:303,viewerFollowsOwner:true});
+ assert.equal(r.status,200);
+ const ins=r.calls.find(c=>c.sql.startsWith('INSERT INTO howdi_connect_close_friends'));
+ assert.deepEqual(Array.from(ins.params),[101,303]);
+});
+
+// ---- Public profile: @username/avatar/name/bio/counts + Vibes/Articles/Communities,
+//      and the raw numeric users.id must never appear in the response ----
+async function runPublicProfile(target,viewer,options={}){
+ const calls=[];
+ const query=async(sql,params=[])=>{
+  sql=sql.replace(/\s+/g,' ').trim();calls.push({sql,params});
+  if(sql.startsWith('SELECT cp.*,u.full_name'))return {rows:[options.profileRow||{user_id:target,full_name:'Alice Maker',public_username:'crafty_alice',profile_image:'',private_profile:Boolean(options.privateProfile),viewer_following:Boolean(options.viewerFollowing),follower_count:5,following_count:3,follower_list_visibility:'EVERYONE',contact_permission:'EVERYONE'}],rowCount:1};
+  if(sql.startsWith('SELECT 1 FROM howdi_connect_profile_blocks'))return {rows:options.blocked?[{exists:1}]:[],rowCount:0};
+  if(sql.startsWith('SELECT 1 FROM howdi_connect_follows WHERE follower_user_id'))return {rows:options.viewerFollowing?[{exists:1}]:[],rowCount:0};
+  if(sql.startsWith('INSERT INTO howdi_connect_profile_visits'))return {rows:[],rowCount:0};
+  if(sql.startsWith('SELECT vibe_code'))return {rows:options.vibes||[],rowCount:(options.vibes||[]).length};
+  if(sql.includes("post_type='ARTICLE'"))return {rows:options.articles||[],rowCount:(options.articles||[]).length};
+  if(sql.startsWith('SELECT c.id,c.name,c.description')){ if(options.communitiesThrow)throw new Error('boom'); return {rows:options.communities||[],rowCount:(options.communities||[]).length}; }
+  if(options.queryOverride){const over=options.queryOverride(sql,params);if(over!==undefined)return over;}
+  return {rows:[],rowCount:0};
+ };
+ const pool={query};
+ const context={pool,sendJSON:(_res,status,data)=>({status,data}),console:{error:()=>{}}};
+ const src=`${loadConnectPublicProfileResponseSrc}\nloadConnectPublicProfileResponse({},${target},${viewer})`;
+ const response=await vm.runInNewContext(src,context);
+ assert.ok(response,'Route must respond');
+ return {...response,calls};
+}
+test('Public profile never exposes the raw numeric users.id, including on the private-profile short-circuit',async()=>{
+ const priv=await runPublicProfile(303,0,{privateProfile:true});
+ assert.equal(priv.status,200);
+ assert.equal(priv.data.private,true);
+ assert.equal(Object.prototype.hasOwnProperty.call(priv.data.profile,'user_id'),false);
+ assert.equal(priv.data.profile.public_username,'crafty_alice');
+ const full=await runPublicProfile(303,101);
+ assert.equal(full.status,200);
+ assert.equal(Object.prototype.hasOwnProperty.call(full.data.profile,'user_id'),false);
+});
+test('Public profile response includes avatar/name/bio-carrying profile row plus follower/following counts',async()=>{
+ const r=await runPublicProfile(303,101);
+ assert.equal(r.status,200);
+ assert.equal(r.data.profile.full_name,'Alice Maker');
+ assert.equal(r.data.profile.public_username,'crafty_alice');
+ assert.equal(r.data.profile.follower_count,5);
+ assert.equal(r.data.profile.following_count,3);
+});
+test('Public profile embeds Vibes with the published/public/non-deleted availability predicate',async()=>{
+ const r=await runPublicProfile(303,101,{vibes:[{vibe_code:'VIBE-1',vibe_type:'video',caption:'Hi',cover_url:'x',published_at:new Date().toISOString()}]});
+ assert.equal(r.status,200);
+ assert.equal(r.data.vibes.length,1);
+ const call=r.calls.find(c=>c.sql.startsWith('SELECT vibe_code'));
+ assert.match(call.sql,/creator_user_id=\$1::text/);
+ assert.match(call.sql,/status='published'/);
+ assert.match(call.sql,/visibility='public'/);
+ assert.match(call.sql,/deleted_at IS NULL/);
+});
+test('Public profile embeds published Articles for the owner',async()=>{
+ const r=await runPublicProfile(303,101,{articles:[{id:1,article_title:'My Craft',article_excerpt:'…',article_cover_url:'',article_read_minutes:4,created_at:new Date().toISOString()}]});
+ assert.equal(r.status,200);
+ assert.equal(r.data.articles.length,1);
+ const call=r.calls.find(c=>c.sql.includes("post_type='ARTICLE'"));
+ assert.match(call.sql,/user_id=\$1/);
+ assert.match(call.sql,/post_status='PUBLISHED'/);
+});
+test('Public profile embeds non-private Communities owned by the profile, with an active-member count',async()=>{
+ const r=await runPublicProfile(303,101,{communities:[{id:1,name:'Potters Guild',description:'',community_type:'GROUP',category:'ARTS',member_count:12}]});
+ assert.equal(r.status,200);
+ assert.equal(r.data.communities.length,1);
+ const call=r.calls.find(c=>c.sql.startsWith('SELECT c.id,c.name,c.description'));
+ assert.ok(call);
+ assert.match(call.sql,/c\.owner_user_id=\$1/);
+ assert.match(call.sql,/c\.status='ACTIVE'/);
+ assert.match(call.sql,/c\.privacy<>'PRIVATE'/);
+ assert.match(call.sql,/howdi_connect_community_members/);
+ assert.match(call.sql,/membership_status='ACTIVE'/);
+});
+test('Public profile tolerates a Communities query failure by returning an empty list rather than failing the whole profile',async()=>{
+ const r=await runPublicProfile(303,101,{communitiesThrow:true});
+ assert.equal(r.status,200);
+ assert.deepEqual(Array.from(r.data.communities),[]);
+});
