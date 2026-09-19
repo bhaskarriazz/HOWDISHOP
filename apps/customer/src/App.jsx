@@ -7599,6 +7599,9 @@ const [selectedCancellationOrder, setSelectedCancellationOrder] = useState(null)
   const [wishlist, setWishlist] = useState([]);
   const [wishlistLoading, setWishlistLoading] = useState(false);
   const [wishlistNotice, setWishlistNotice] = useState("");
+  // Shop S2: set when a saved (catalogue) product is opened from a wishlist screen; ShopCatalogue consumes it.
+  const [shopCatalogueProductId, setShopCatalogueProductId] = useState("");
+  const [cartCheck, setCartCheck] = useState({});
 
   // ==============================
   // SHOPPING CART
@@ -7808,6 +7811,50 @@ const [selectedCancellationOrder, setSelectedCancellationOrder] = useState(null)
     localStorage.setItem("howdiCart", JSON.stringify(cart));
   }, [cart]);
 
+  // Shop S2: while the cart is open, re-check every marketplace line against the server (visibility, option, stock and
+  // the exact price checkout will use). Prices/stock are refreshed, over-quantity lines are capped to what is
+  // available, and lines that can no longer be bought explain why. The server still re-validates at quote/order time.
+  useEffect(() => {
+    if (!cartOpen || !cart.length) return undefined;
+    const lines = cart
+      .map((item) => ({ item, productId: String(item.id ?? item.product_id ?? ""), variantId: item.selectedVariantId ? String(item.selectedVariantId) : null, quantity: Math.min(99, Math.max(1, Number(item.quantity) || 1)) }))
+      .filter((line) => /^\d{1,18}$/.test(line.productId))
+      .slice(0, 30);
+    if (!lines.length) return undefined;
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      try {
+        const response = await fetch(`${SHOP_API_BASE}/api/shop/cart/validate`, {
+          method: "POST", signal: controller.signal, headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ items: lines.map((l) => ({ productId: l.productId, variantId: l.variantId, quantity: l.quantity })) }),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || data.status !== "success" || !Array.isArray(data.lines)) return;
+        const checks = {};
+        data.lines.forEach((result, index) => { if (lines[index]) checks[lines[index].item.cartKey || lines[index].item.name] = result; });
+        setCartCheck(checks);
+        setCart((current) => {
+          let changed = false;
+          const next = current.map((item) => {
+            const result = checks[item.cartKey || item.name];
+            if (!result) return item;
+            const fromVibe = Boolean(item.vibeAttribution || item.vibe_attribution);
+            let updated = item;
+            if (result.status === "ok" && !fromVibe) {
+              const price = moneyFromApi(result.unitPrice);
+              if (item.price !== price || Number(item.stock) !== Number(result.available)) updated = { ...updated, price, numericPrice: result.unitPrice, stock: result.available };
+            }
+            if (result.status === "insufficient_stock" && result.available > 0 && (item.quantity || 1) > result.available) updated = { ...updated, quantity: result.available };
+            if (updated !== item) changed = true;
+            return updated;
+          });
+          return changed ? next : current;
+        });
+      } catch { /* the cart keeps working offline; checkout re-validates on the server */ }
+    }, 300);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [cartOpen, cart]);
+
   useEffect(() => {
     localStorage.setItem("howdiSavedForLater", JSON.stringify(savedForLater));
   }, [savedForLater]);
@@ -7907,12 +7954,52 @@ const [selectedCancellationOrder, setSelectedCancellationOrder] = useState(null)
     setCartOpen(true);
   };
 
+  // Shop S2: a catalogue line the server has just validated (price, option and stock are the server's own).
+  const catalogueLineToCartItem = (line) => ({
+    id: line.productId,
+    product_id: line.productId,
+    name: line.name,
+    icon: "🧶",
+    shop: line.creatorName || "HOWDI SHOP",
+    artisan: line.creatorName || "",
+    price: moneyFromApi(line.unitPrice),
+    oldPrice: moneyFromApi(line.listPrice > line.unitPrice ? line.listPrice : line.unitPrice),
+    numericPrice: line.unitPrice,
+    image: line.image || "",
+    imageUrls: line.image ? [line.image] : [],
+    images: line.image ? [line.image] : [],
+    stock: line.available,
+    category: line.category || "Handmade",
+    subcategory: line.subcategory || "",
+    selectedVariantId: line.variantId || null,
+    selectedColor: line.colour || "",
+    selectedSize: line.size || "",
+    liveProduct: true,
+    catalogueProduct: true,
+  });
+  const addCatalogueLineToCart = (line) => addToCart(catalogueLineToCartItem(line), line.quantity);
+  // "Buy now" on a catalogue product must not throw away what the shopper already has in the cart (the legacy Shop Home
+  // buyNow() replaces the whole cart): the line is merged in and the cart/checkout opens.
+  const buyCatalogueLine = (line) => {
+    addToCart(catalogueLineToCartItem(line), line.quantity);
+    setNotificationOpen(false);
+    setCartOpen(true);
+  };
+
   const setProductQuantity = (product, quantity) => {
     const qty = Math.max(1, Math.min(10, Number(quantity) || 1));
     setSelectedQuantities((current) => ({ ...current, [product.name]: qty }));
   };
 
+  const openCatalogueProduct = (id) => {
+    setShopCatalogueProductId(String(id));
+    setMyHowdiDrawer(null);
+    openNavigationOSArea("shop","catalogue");
+  };
+
   const openProductDetails = (product) => {
+    // Shop S2: wishlist cards are live catalogue products; they open the catalogue product page.
+    if (product?.catalogueProduct) { openCatalogueProduct(product.id); return; }
     rememberRecentlyViewed(product, currentUser?.id || "");
     recordTasteEvent({
       type: "view",
@@ -8587,9 +8674,10 @@ return () => window.clearInterval(timer);
     );
   };
 
-  const removeFromCart = (productName) => {
+  // Lines are identified by cartKey (product + option); name is only the fallback for keyless legacy lines.
+  const removeFromCart = (cartKeyOrName) => {
     setCart((current) =>
-      current.filter((item) => item.name !== productName)
+      current.filter((item) => (item.cartKey || item.name) !== cartKeyOrName)
     );
   };
 
@@ -8666,12 +8754,18 @@ return () => window.clearInterval(timer);
   const checkoutServerTotal=Number(checkoutQuote?.grandTotal??checkoutTotal);
 
 
+  // Shop S2 fix: getCartRecommendations() returns plain products; the cart card list destructures { product, reasons }
+  // (which threw when the cart opened). Normalise to that shape here.
   const cartRecommendations = getCartRecommendations(cart, products, {
     customerId: currentUser?.id,
     location: customerLocation,
     wishlist,
     recentlyViewed,
-  }).slice(0, 4);
+  })
+    .map((entry) => (entry && entry.product ? entry : { product: entry, reasons: [] }))
+    .filter(({ product }) => Boolean(product))
+    .map(({ product, reasons }) => ({ product, reasons: Array.isArray(reasons) ? reasons : [] }))
+    .slice(0, 4);
 
   const recommendationBudget = cartPromotion.tier === "ONE"
     ? 1500
@@ -9665,6 +9759,34 @@ return () => window.clearInterval(timer);
   const getWishlistProductId = (product) =>
     String(product?.product_id ?? product?.productId ?? product?.id ?? product?._id ?? product?.name ?? "");
 
+  // Shop S2: the wishlist is session-authoritative. The browser sends only a product id plus the session token;
+  // the server stores the id and returns live catalogue cards, which are mapped to the shape the existing
+  // wishlist screens (Shop hearts, My HOWDI drawer, profile tab) already render.
+  const wishlistCardToProduct = (card) => {
+    const current = Number(card?.price?.current ?? 0);
+    const original = Number(card?.price?.original ?? 0);
+    const image = card?.image || "";
+    return {
+      id: String(card?.id ?? ""),
+      product_id: String(card?.id ?? ""),
+      name: card?.name || "HOWDI Product",
+      icon: "🧶",
+      shop: card?.creator?.display_name || "HOWDI Creator",
+      artisan: card?.creator?.display_name || "HOWDI Creator",
+      category: card?.category || "Handmade",
+      subcategory: card?.subcategory || "",
+      productType: card?.productType || "",
+      price: moneyFromApi(current),
+      oldPrice: moneyFromApi(original > current ? original : current),
+      numericPrice: current,
+      image,
+      imageUrls: image ? [image] : [],
+      images: image ? [image] : [],
+      liveProduct: true,
+      catalogueProduct: true,
+    };
+  };
+
   const loadWishlist = async () => {
     if (!currentUser?.id) {
       setWishlist([]);
@@ -9673,32 +9795,19 @@ return () => window.clearInterval(timer);
 
     setWishlistLoading(true);
     try {
-      const response = await fetch(
-        `http://localhost:5000/api/wishlist/user/${encodeURIComponent(currentUser.id)}`,
-        { cache: "no-store" }
-      );
+      const response = await fetch(`${SHOP_API_BASE}/api/shop/wishlist`, { cache: "no-store", headers: customerSessionHeaders() });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.status !== "success") {
         throw new Error(data.message || "Unable to load wishlist.");
       }
-
-      const liveWishlist = Array.isArray(data.wishlist) ? data.wishlist : [];
-      setWishlist(liveWishlist);
-      setWishlistNotice("");
-      try {
-        localStorage.setItem(`howdiWishlist_${currentUser.id}`, JSON.stringify(liveWishlist));
-      } catch {}
+      setWishlist((Array.isArray(data.items) ? data.items : []).map(wishlistCardToProduct));
+      setWishlistNotice(data.unavailableCount > 0 ? `${data.unavailableCount} saved ${data.unavailableCount === 1 ? "item is" : "items are"} no longer available.` : "");
+      // The old client-side copy of this list (full product blobs) is no longer used.
+      try { localStorage.removeItem(`howdiWishlist_${currentUser.id}`); } catch {}
     } catch (error) {
       console.error("HOWDI LOAD WISHLIST ERROR:", error);
-      setWishlistNotice(
-        ""
-      );
-      try {
-        const saved = JSON.parse(localStorage.getItem(`howdiWishlist_${currentUser.id}`) || "[]");
-        setWishlist(Array.isArray(saved) ? saved : []);
-      } catch {
-        setWishlist([]);
-      }
+      setWishlist([]);
+      setWishlistNotice(error.message || "Unable to load wishlist.");
     } finally {
       setWishlistLoading(false);
     }
@@ -9720,8 +9829,9 @@ return () => window.clearInterval(timer);
     }
 
     const productId = getWishlistProductId(product);
-    if (!productId) {
-      setWishlistNotice("Unable to identify this product for your wishlist.");
+    // Only real marketplace products (numeric catalogue ids) can be saved; demo/legacy cards have no server record.
+    if (!/^\d{1,18}$/.test(productId)) {
+      setWishlistNotice("This item can't be saved to your wishlist.");
       return;
     }
 
@@ -9733,25 +9843,14 @@ return () => window.clearInterval(timer);
     setWishlistNotice("");
 
     try {
-      let response;
-      if (exists) {
-        response = await fetch(
-          `http://localhost:5000/api/wishlist/${encodeURIComponent(productId)}?user_id=${encodeURIComponent(currentUser.id)}`,
-          { method: "DELETE" }
-        );
-      } else {
-        response = await fetch("http://localhost:5000/api/wishlist", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            user_id: currentUser.id,
-            product,
-          }),
-        });
-      }
+      const response = await fetch(`${SHOP_API_BASE}/api/shop/wishlist/${encodeURIComponent(productId)}`, {
+        method: exists ? "DELETE" : "PUT",
+        headers: customerSessionHeaders(),
+      });
 
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.status !== "success") {
+        if (response.status === 401) openLogin();
         throw new Error(data.message || "Unable to update wishlist.");
       }
 
@@ -9776,7 +9875,7 @@ return () => window.clearInterval(timer);
           : (currentLikes.includes(product.name) ? currentLikes : [...currentLikes, product.name])
       );
 
-      setWishlistNotice(data.message || (exists ? "Removed from wishlist." : "Added to wishlist."));
+      setWishlistNotice(exists ? "Removed from wishlist." : "Added to wishlist.");
       await loadWishlist();
     } catch (error) {
       console.error("HOWDI WISHLIST ERROR:", error);
@@ -12505,7 +12604,7 @@ const removeNotification = async (notificationId) => {
                    const product = item.product || item;
                    return <article className="mh-card" key={getWishlistProductId(item) || index}>
                      <div className="mh-card-row">
-                       <div className="mh-card-main"><b>{product.name || product.title || "HOWDI Product"}</b><small>{product.category || "Saved in your HOWDI wishlist"}{product.price ? ` · ₹${Number(product.price).toLocaleString("en-IN")}` : ""}</small></div>
+                       <div className="mh-card-main"><b>{product.name || product.title || "HOWDI Product"}</b><small>{product.category || "Saved in your HOWDI wishlist"}{product.numericPrice || product.price ? ` · ₹${Number(product.numericPrice ?? String(product.price).replace(/[^0-9.]/g, "")).toLocaleString("en-IN")}` : ""}</small></div>
                        <span>♡</span>
                      </div>
                      <div className="mh-card-actions"><button onClick={() => {setMyHowdiDrawer(null);openNavigationOSArea("shop","home")}}>View in Shop</button><button className="mh-danger" onClick={() => toggleWishlist(product)}>Remove</button></div>
@@ -12767,7 +12866,7 @@ const removeNotification = async (notificationId) => {
 
                   <div style={{ display: "grid", gap: "12px" }}>
                     {cart.map((item) => (
-                      <article key={item.name} className="howdi-cart-item">
+                      <article key={item.cartKey||item.name} className="howdi-cart-item">
                         <div className="howdi-cart-item-top">
                           <div className="howdi-cart-thumb">
                             {item.image ? <img src={item.image} alt={item.name} /> : item.icon}
@@ -12776,6 +12875,9 @@ const removeNotification = async (notificationId) => {
                             <div className="howdi-cart-shop">{item.shop || "HOWDI SHOP"}</div>
                             <div className="howdi-cart-name">{item.name}</div>
                             <div className="howdi-cart-price">{item.price}</div>
+                            {cartCheck[item.cartKey||item.name] && cartCheck[item.cartKey||item.name].status !== "ok" ? (
+                              <div role="alert" style={{ marginTop: "4px", color: "#a32d2d", fontSize: "12px", fontWeight: 700 }}>{cartCheck[item.cartKey||item.name].message}</div>
+                            ) : null}
                           </div>
                           <button type="button" className="howdi-cart-remove" onClick={(event) => { event.stopPropagation(); removeFromCart(item.cartKey||item.name); }}>Remove</button>
                         </div>
@@ -18262,7 +18364,10 @@ const removeNotification = async (notificationId) => {
           id="shop"
           data-navigation-os={navigationOSArea==="shop"?"active":"inactive"}
         >
-          {shopOSView==="catalogue" && <ShopCatalogue apiBase={SHOP_API_BASE} onExit={()=>openNavigationOSArea("shop","home")} />}
+          {shopOSView==="catalogue" && <ShopCatalogue apiBase={SHOP_API_BASE} onExit={()=>openNavigationOSArea("shop","home")}
+            signedIn={Boolean(currentUser?.id)} getAuthHeaders={customerSessionHeaders} onRequireLogin={openLogin}
+            onAddToCart={addCatalogueLineToCart} onBuyNow={buyCatalogueLine}
+            openProductId={shopCatalogueProductId} onOpenProductHandled={()=>setShopCatalogueProductId("")} />}
           <div className="hs2-layout" style={shopOSView==="catalogue"?{display:"none"}:undefined}>
             <main className="hs2-main">
               <section className="hs2-hero">
@@ -18930,8 +19035,13 @@ const removeNotification = async (notificationId) => {
               .filter(Boolean),
           });
 
+          // Shop S2 fix: getPersonalizedProducts() returns plain products, but this section destructures
+          // { product, reasons } - which threw on every render with a non-empty product list and blanked the app.
+          // Accept either shape and never dereference a missing product.
           const visible = personalized
-            .filter(({ product }) => !cart.some((item) => item.name === product.name))
+            .map((entry) => (entry && entry.product ? entry : { product: entry, reasons: [] }))
+            .filter(({ product }) => product && !cart.some((item) => item.name === product.name))
+            .map(({ product, reasons }) => ({ product, reasons: Array.isArray(reasons) ? reasons : [] }))
             .slice(0, 6);
 
           if (!visible.length) return null;

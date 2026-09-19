@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./ShopCatalogue.css";
+import { ShopActionsContext, useShopWishlistActions, WishlistHeart, ActionNotice, ProductActions, WishlistPanel } from "./ShopProductActions";
 
 // HOWDI Shop S1 — Catalogue & Product Discovery.
 // Browse / search / filter / sort published products and open a product detail.
@@ -116,7 +117,7 @@ function ProductCard({ product, onOpen, onCreator }) {
             </span>
           </span>
         </button>
-        <div className="sc-card-foot"><CreatorLine creator={product.creator} onOpen={onCreator} /></div>
+        <div className="sc-card-foot"><CreatorLine creator={product.creator} onOpen={onCreator} /><WishlistHeart productId={product.id} name={product.name} /></div>
       </article>
     </li>
   );
@@ -214,6 +215,7 @@ function ProductDetail({ apiBase, productId, onBack, onOpenRelated, onCreator })
   return (
     <div className="sc-detail" onKeyDown={onKeyDown}>
       <button type="button" className="sc-btn sc-btn-ghost" onClick={onBack}>← Back to products</button>
+      <ActionNotice />
       <div className="sc-detail-grid">
         <section className="sc-gallery" aria-label="Product images">
           <ProductImage src={shownImage} alt={product.name} className="sc-gallery-main" />
@@ -277,6 +279,8 @@ function ProductDetail({ apiBase, productId, onBack, onOpenRelated, onCreator })
             </dl>
           ) : null}
 
+          <ProductActions product={product} selectedVariant={selectedVariant} needsChoice={needsChoice} availability={shownAvailability} />
+
           {product.description || product.shortDescription ? <div className="sc-block"><h3>About this piece</h3><p>{product.description || product.shortDescription}</p></div> : null}
           {product.highlights && product.highlights.length ? <ul className="sc-highlights">{product.highlights.map((h, i) => <li key={i}>{h}</li>)}</ul> : null}
 
@@ -301,8 +305,10 @@ function ProductDetail({ apiBase, productId, onBack, onOpenRelated, onCreator })
   );
 }
 
-export default function ShopCatalogue({ apiBase, onExit }) {
+export default function ShopCatalogue({ apiBase, onExit, signedIn = false, getAuthHeaders, onRequireLogin, onAddToCart, onBuyNow, openProductId, onOpenProductHandled }) {
   const base = String(apiBase || "").replace(/\/+$/, "");
+  const actions = useShopWishlistActions({ apiBase: base, signedIn, getAuthHeaders, onRequireLogin, onAddToCart, onBuyNow });
+  const [view, setView] = useState("browse");
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   const [searchText, setSearchText] = useState("");
   const [priceDraft, setPriceDraft] = useState({ minPrice: "", maxPrice: "" });
@@ -311,6 +317,15 @@ export default function ShopCatalogue({ apiBase, onExit }) {
   const [moreError, setMoreError] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
   const [detailId, setDetailId] = useState("");
+
+  // A saved product opened from a wishlist screen elsewhere in the app lands straight on its product page.
+  useEffect(() => {
+    if (!openProductId) return;
+    setView("browse");
+    setDetailId(String(openProductId));
+    window.scrollTo?.({ top: 0 });
+    if (onOpenProductHandled) onOpenProductHandled();
+  }, [openProductId]); // eslint-disable-line react-hooks/exhaustive-deps
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [priceError, setPriceError] = useState("");
   const lastOpened = useRef("");
@@ -389,13 +404,26 @@ export default function ShopCatalogue({ apiBase, onExit }) {
 
   if (detailId) {
     return (
-      <div className="sc-root" data-shop-catalogue="detail">
-        <ProductDetail apiBase={base} productId={detailId} onBack={closeDetail} onOpenRelated={openDetail} onCreator={showCreator} />
-      </div>
+      <ShopActionsContext.Provider value={actions}>
+        <div className="sc-root" data-shop-catalogue="detail">
+          <ProductDetail apiBase={base} productId={detailId} onBack={closeDetail} onOpenRelated={openDetail} onCreator={showCreator} />
+        </div>
+      </ShopActionsContext.Provider>
+    );
+  }
+
+  if (view === "wishlist") {
+    return (
+      <ShopActionsContext.Provider value={actions}>
+        <div className="sc-root" data-shop-catalogue="wishlist">
+          <WishlistPanel onBack={() => setView("browse")} renderCard={(p) => <ProductCard key={p.id} product={p} onOpen={openDetail} onCreator={showCreator} />} />
+        </div>
+      </ShopActionsContext.Provider>
     );
   }
 
   return (
+    <ShopActionsContext.Provider value={actions}>
     <div className="sc-root" data-shop-catalogue="browse">
       <header className="sc-header">
         <div>
@@ -403,8 +431,12 @@ export default function ShopCatalogue({ apiBase, onExit }) {
           <h2 className="sc-title">Shop handmade</h2>
           <p className="sc-sub">Browse pieces from real creators.</p>
         </div>
-        {onExit ? <button type="button" className="sc-btn sc-btn-ghost" onClick={onExit}>Shop home</button> : null}
+        <div className="sc-header-actions">
+          <button type="button" className="sc-btn" onClick={() => setView("wishlist")}>♡ Wishlist{signedIn && actions.wishlist.ids.length ? ` (${actions.wishlist.ids.length})` : ""}</button>
+          {onExit ? <button type="button" className="sc-btn sc-btn-ghost" onClick={onExit}>Shop home</button> : null}
+        </div>
       </header>
+      <ActionNotice />
 
       <form className="sc-search" role="search" onSubmit={submitSearch}>
         <label className="sc-sr" htmlFor="sc-search-input">Search products</label>
@@ -492,5 +524,6 @@ export default function ShopCatalogue({ apiBase, onExit }) {
         </div>
       </div>
     </div>
+    </ShopActionsContext.Provider>
   );
 }
