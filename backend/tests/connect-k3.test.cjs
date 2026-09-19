@@ -925,3 +925,46 @@ test('Discover still excludes bidirectionally blocked profiles for an authentica
  // The guard `$1::bigint=0 OR NOT EXISTS(...)` short-circuits the block predicate for a
  // guest (viewer 0) without erroring — this just re-confirms the route still returns 200.
 });
+
+// =====================================================
+// K5B UX CORRECTION — Public Profile modal Vibe/Community cards must open the
+// SPECIFIC clicked item, not just the generic Connect Vibe / Communities screen.
+// There is no JSX unit-test harness in this codebase, so — matching the existing
+// convention already used above (the "Article create/update…" test's
+// `assert.match(app,/coverMime:connectArticleCoverData\.match/)` source-pattern
+// check) — these are source-pattern regression tests against the built App.jsx
+// text, asserting the specific wiring exists rather than just "some handler".
+// =====================================================
+const connectAppSource=fs.readFileSync(require('node:path').join(__dirname,'../../apps/customer/src/App.jsx'),'utf8');
+test('Public Profile Vibe card sets the clicked vibe_code before opening the Vibe screen (not just a generic open)',()=>{
+ assert.match(connectAppSource,/setConnectVibeFocusCode\(v\.vibe_code\|\|""\);openNavigationOSArea\("connect","vibe"\);setConnectPublicProfile\(null\);/);
+});
+test('HowdiVibeCore focuses the exact vibe_code via the existing search + applyDiscoveryItems plumbing (no new backend route)',()=>{
+ assert.match(connectAppSource,/if\(!focusVibeCode\)return;/);
+ assert.match(connectAppSource,/api\/v1\/vibes\/search\?q=\$\{encodeURIComponent\(focusVibeCode\)\}/);
+ assert.match(connectAppSource,/applyDiscoveryItems\(\[match\],'Vibe'\)/);
+ // The vibe player component must actually declare and receive these two props.
+ assert.match(connectAppSource,/function HowdiVibeCore\(\{[^}]*focusVibeCode,onFocusVibeConsumed\}\)/);
+ assert.match(connectAppSource,/focusVibeCode=\{connectVibeFocusCode\} onFocusVibeConsumed=\{\(\)=>setConnectVibeFocusCode\(""\)\}/);
+});
+test('Public Profile Community card opens the exact clicked community via openConnectGCSpace(target), not only the generic Communities tab',()=>{
+ assert.match(connectAppSource,/const target=\{id:c\.id,name:c\.name,description:c\.description,space_type:String\(c\.community_type\|\|"GROUP"\)\.toUpperCase\(\),privacy:"PUBLIC",member_count:c\.member_count\};/);
+ assert.match(connectAppSource,/setTimeout\(\(\)=>openConnectGCSpace\(target\),0\);/);
+});
+test('Vibe/Community/Article cards keep keyboard support (role=button, tabIndex, Enter/Space) after being wired to specific-item handlers',()=>{
+ const section=connectAppSource.slice(connectAppSource.indexOf('K5B UX CORRECTION — see connectVibeFocusCode'),connectAppSource.indexOf('hc112-strength'));
+ for(const openFn of ['openThisVibe','openThisArticle','openThisCommunity']){
+  const re=new RegExp(`role="button" tabIndex=\\{0\\} onClick=\\{${openFn}\\} onKeyDown=\\{e=>\\{if\\(e\\.key==="Enter"\\|\\|e\\.key===" "\\)\\{e\\.preventDefault\\(\\);${openFn}\\(\\);\\}\\}\\}`);
+  assert.match(section,re,openFn);
+ }
+});
+test('Vibe/Community open handlers never reference a numeric user id (only content ids: vibe_code / community id)',()=>{
+ const vibeBlock=connectAppSource.slice(connectAppSource.indexOf('const openThisVibe=()=>{'),connectAppSource.indexOf('return <article key={v.vibe_code}'));
+ assert.doesNotMatch(vibeBlock,/currentUser|\.user_id|person\.id/);
+ const communityBlock=connectAppSource.slice(connectAppSource.indexOf('const openThisCommunity=()=>{const target='),connectAppSource.indexOf('return <article key={c.id}'));
+ assert.doesNotMatch(communityBlock,/currentUser\?\.(id|user_id)/);
+});
+test('Social tab two-line spacer fix (Mutuals/Suggestions) from the prior K5B closure is preserved',()=>{
+ assert.match(connectAppSource,/loadConnectSocialGraph\("mutuals"\)[\s\S]{0,120}<b aria-hidden="true">&nbsp;<\/b><span>Mutuals<\/span>/);
+ assert.match(connectAppSource,/loadConnectSuggestions\(\)[\s\S]{0,120}<b aria-hidden="true">&nbsp;<\/b><span>Suggestions<\/span>/);
+});
