@@ -3534,6 +3534,8 @@ function App() {
   const [hpayRecipient, setHpayRecipient] = useState("Maya Studio");
   const [hpayStatus, setHpayStatus] = useState(null);
   const [hpayPrivacyAccepted, setHpayPrivacyAccepted] = useState(true);
+  const [hpayHistoryFilter,setHpayHistoryFilter]=useState("all");
+  const [hpayRequestFilter,setHpayRequestFilter]=useState("all");
   const [hpayAccount,setHpayAccount]=useState(null);
   const [hpayRequests,setHpayRequests]=useState([]);
   const [hpayBanks,setHpayBanks]=useState([]);
@@ -19371,42 +19373,88 @@ const removeNotification = async (notificationId) => {
                   </div>}
                 </section>}
 
-                {connectView==="hpay" && <section className="hp-page hp-approved-home">
-                  <div className="hp-approved-heading">
-                    <div><h2>HPay</h2><b>Fast. Secure. For a Kinder Tomorrow.</b><p>{hpayAccount?.hpay_id?`${hpayAccount.hpay_id} · `:""}Wallet, requests and verified payment records in one place.</p>{hpayError&&<small role="alert">{hpayError}</small>}</div>
+                {connectView==="hpay" && <section className="hp-page hp-approved-home hp-stage3">
+                  <div className="hp-approved-heading hp-stage3-heading">
+                    <div>
+                      <div className="hp-stage3-kicker">HOWDI HPAY</div>
+                      <h2>{hpayView==="home"?"HPay":hpayView==="transactions"?"Transaction History":hpayView==="requests"?"Payment Requests":"HPay Account"}</h2>
+                      <b>{hpayAccount?.hpay_id||"Secure customer payments"}</b>
+                      <p>{hpayView==="home"?"Pay, request and review verified HPay activity in one place.":hpayView==="transactions"?"Your wallet and provider-confirmed HPay activity.":hpayView==="requests"?"Requests you created or received, without exposing internal account IDs.":"Your HPay identity, limits and masked linked-bank details."}</p>
+                    </div>
                     <div className="hp-purpose">Payments<br/>with Purpose <span>♡</span></div>
                   </div>
 
-                  <div className="hp-approved-grid">
-                    <main>
-                      <div className="hp-top-cards">
-                        <section className="hp-approved-balance">
-                          <div><small>Your HPay Balance</small><strong>{hpayLoading?"…":`₹${Number(walletBalance||0).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2})}`}</strong><span>⬡ &nbsp; {hpayAccount?.status||"Account state unavailable"}</span></div>
-                          <div className="hp-balance-actions"><button onClick={()=>{setHpayAction("self");setHpayAmount("");setHpayNote("")}}>＋ &nbsp; Add Money</button><button className="outline" onClick={()=>{setHpayAction("pay");setHpayAmount("");setHpayNote("")}}>➤ &nbsp; Send Money</button></div>
+                  <nav className="hp-stage3-tabs" aria-label="HPay views">
+                    {[["home","Overview"],["transactions","Transactions"],["requests","Requests"],["settings","Account & Bank"]].map(([id,label])=><button key={id} type="button" className={hpayView===id?"active":""} aria-current={hpayView===id?"page":undefined} onClick={()=>setHpayView(id)}>{label}</button>)}
+                  </nav>
+
+                  {hpayError&&<div className="hp-stage3-alert" role="alert"><b>HPay unavailable</b><span>{hpayError}</span><button type="button" onClick={loadHpayDashboard}>Retry</button></div>}
+
+                  {hpayView==="home"&&<>
+                    <div className="hp-approved-grid">
+                      <main>
+                        <div className="hp-top-cards">
+                          <section className="hp-approved-balance">
+                            <div><small>Your HPay Balance</small><strong>{hpayLoading?"…":`₹${Number(walletBalance||0).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2})}`}</strong><span>⬡ &nbsp; {hpayAccount?.status||"Account state unavailable"}</span></div>
+                            <div className="hp-balance-actions"><button type="button" onClick={()=>{setHpayAction("self");setHpayAmount("");setHpayNote("")}}>＋ &nbsp; Add Money</button><button type="button" className="outline" onClick={()=>{setHpayAction("pay");setHpayAmount("");setHpayNote("")}}>➤ &nbsp; Send Money</button></div>
+                          </section>
+                          <button className="hp-account-card" type="button" onClick={()=>setHpayView("settings")}><span>▣</span><div><b>HPay Account & Bank</b><small>{hpayBanks.length?`${hpayBanks.length} linked account${hpayBanks.length===1?"":"s"}`:"No linked bank shown"}</small><em>{hpayAccount?.hpay_id||"Open account details"}</em></div><i>›</i></button>
+                        </div>
+
+                        <div className="hp-section-head"><h3>Quick Actions</h3><button type="button" onClick={()=>setHpayView("transactions")}>View history →</button></div>
+                        <div className="hp-approved-actions">
+                          {[["scan","▦","Pay / Scan"],["pay","➤","Send Money"],["self","＋","Add Money"],["request","↓","Request Money"],["bank","▥","Pay to Bank"],["transactions","▤","Transaction History"]].map(([id,icon,label])=><button key={id} type="button" onClick={()=>id==="transactions"?setHpayView("transactions"):(setHpayAction(id),setHpayAmount(""),setHpayNote(""))}><i>{icon}</i><span>{label}</span></button>)}
+                        </div>
+
+                        <div className="hp-section-head"><h3>Recent Transactions</h3><button type="button" onClick={()=>setHpayView("transactions")}>View all →</button></div>
+                        <section className="hp-approved-transactions">
+                          {hpayLoading?<div className="hp-empty-transactions"><b>Loading HPay activity…</b><span>Your signed-in account is being refreshed.</span></div>:walletTransactions.length===0?<div className="hp-empty-transactions"><b>No HPay transactions yet</b><span>Your wallet and provider-confirmed HPay activity will appear here.</span></div>:walletTransactions.slice(0,5).map((item,idx)=>{const amount=Number(item.amount||0),debit=String(item.direction||item.type||"").toUpperCase().includes("DEBIT");return <article key={item.id||idx}><i>{debit?"↗":"＋"}</i><div><b>{item.description||item.title||item.transaction_type||"HPay transaction"}</b><small>{item.created_at?new Date(item.created_at).toLocaleString("en-IN"):item.date||""}</small></div><strong className={debit?"debit":"credit"}>{debit?"- ":"+ "}₹{Math.abs(amount).toLocaleString("en-IN")}</strong><em>{item.status||"Recorded"}</em></article>})}
                         </section>
-                        <button className="hp-account-card" type="button" onClick={()=>setHpayView("settings")}><span>▣</span><div><b>UPI & Bank Accounts</b><small>Manage your linked accounts</small><em>Link or manage account</em></div><i>›</i></button>
-                      </div>
 
-                      <div className="hp-section-head"><h3>Quick Actions</h3><button onClick={()=>setHpayView("transactions")}>View all →</button></div>
-                      <div className="hp-approved-actions">
-                        {[["scan","▦","Pay / Scan"],["pay","➤","Send Money"],["self","＋","Add Money"],["request","↓","Request Money"],["bank","▥","Pay to Bank"],["transactions","▤","Transaction History"]].map(([id,icon,label])=><button key={id} type="button" onClick={()=>id==="transactions"?setHpayView("transactions"):(setHpayAction(id),setHpayAmount(""),setHpayNote(""))}><i>{icon}</i><span>{label}</span></button>)}
-                      </div>
+                        <div className="hp-section-head"><h3>Payment Requests</h3><button type="button" onClick={()=>setHpayView("requests")}>View all →</button></div>
+                        <section className="hp-stage3-request-preview">
+                          {hpayRequests.length===0?<div className="hp-empty-transactions"><b>No payment requests yet</b><span>Create a request when you need someone to pay you.</span></div>:hpayRequests.slice(0,3).map(r=><article key={r.request_id}><div><b>{r.direction==="INCOMING"?"Incoming request":"Your request"}</b><small>{r.direction==="INCOMING"?(r.requester_hpay_id||"HPay member"):(r.payer_hpay_id||"Shareable request")}</small></div><strong>₹{Number(r.amount||0).toLocaleString("en-IN")}</strong><em>{r.status||"PENDING"}</em></article>)}
+                        </section>
+                      </main>
 
-                      <div className="hp-section-head"><h3>Recent Transactions</h3><button onClick={()=>setHpayView("transactions")}>View all →</button></div>
-                      <section className="hp-approved-transactions">
-                        {walletTransactions.length===0?<div className="hp-empty-transactions"><b>No HPay transactions yet</b><span>Your wallet and provider-confirmed HPay activity will appear here.</span></div>:walletTransactions.slice(0,5).map((item,idx)=>{const amount=Number(item.amount||0),debit=String(item.direction||item.type||"").toUpperCase().includes("DEBIT");return <article key={item.id||idx}><i>{debit?"↗":"＋"}</i><div><b>{item.description||item.title||item.transaction_type||"HPay transaction"}</b><small>{item.created_at?new Date(item.created_at).toLocaleString("en-IN"):item.date||""}</small></div><strong className={debit?"debit":"credit"}>{debit?"- ":"+ "}₹{Math.abs(amount).toLocaleString("en-IN")}</strong><em>{item.status||"Recorded"}</em></article>})}
-                      </section>
-                    </main>
+                      <aside className="hp-approved-side">
+                        <button className="hp-settings-card" type="button" onClick={()=>setHpayView("settings")}><i>⚙</i><div><b>Account & Security</b><small>Limits, status and masked bank details</small></div><span>›</span></button>
+                        <section className="hp-benefits"><h3>♕ &nbsp; HPay Safety</h3>{["Session-authoritative customer identity","No browser-selected account IDs","Provider-confirmed money movement","Masked linked-bank details","Public HPay IDs for requests"].map(x=><div key={x}><span>✓</span><b>{x}</b><i>›</i></div>)}</section>
+                        <section className="hp-help"><h3>◉ &nbsp; Need Help?</h3><p>Our support team is here for you.</p><button type="button" onClick={()=>setActiveSection("support")}>Contact Support</button></section>
+                      </aside>
+                    </div>
+                  </>}
 
-                    <aside className="hp-approved-side">
-                      <button className="hp-settings-card" type="button" onClick={()=>setHpayView("settings")}><i>⚙</i><div><b>Payment Settings</b><small>Limits, security, preferences</small></div><span>›</span></button>
-                      <section className="hp-benefits"><h3>♕ &nbsp; HPay Benefits</h3>{["Secure & Encrypted Payments","Fast & Hassle-Free Transactions","Support Creators & Local Workers","Easy Refunds & Disputes","Track All Transactions"].map(x=><div key={x}><span>✓</span><b>{x}</b><i>›</i></div>)}</section>
-                      <section className="hp-help"><h3>◉ &nbsp; Need Help?</h3><p>Our support team is here for you.</p><button type="button" onClick={()=>setActiveSection("support")}>Contact Support</button></section>
-                      <section className="hp-safe"><i>▣</i><div><b>Your Payments<br/>Stay Safe with HPay</b><p>Security controls help protect your payment activity and data.</p></div><span>›</span></section>
-                    </aside>
-                  </div>
+                  {hpayView==="transactions"&&<section className="hp-stage3-workspace" aria-label="HPay transaction history">
+                    <header className="hp-stage3-workspace-head"><div><button type="button" onClick={()=>setHpayView("home")}>← Overview</button><h3>Transaction history</h3><p>Recorded wallet activity and provider-confirmed HPay transactions for your signed-in account.</p></div><button type="button" className="hp-stage3-refresh" onClick={loadHpayDashboard} disabled={hpayLoading}>{hpayLoading?"Refreshing…":"Refresh"}</button></header>
+                    <div className="hp-stage3-filters" role="group" aria-label="Filter transaction history">{[["all","All"],["credit","Money in"],["debit","Money out"]].map(([id,label])=><button key={id} type="button" className={hpayHistoryFilter===id?"active":""} onClick={()=>setHpayHistoryFilter(id)}>{label}</button>)}</div>
+                    <div className="hp-stage3-list">
+                      {walletTransactions.filter(item=>hpayHistoryFilter==="all"||(hpayHistoryFilter==="debit"?String(item.direction||item.type||"").toUpperCase().includes("DEBIT"):!String(item.direction||item.type||"").toUpperCase().includes("DEBIT"))).length===0?<div className="hp-stage3-empty"><b>No transactions in this view</b><span>Only real wallet or provider-confirmed records appear here.</span></div>:walletTransactions.filter(item=>hpayHistoryFilter==="all"||(hpayHistoryFilter==="debit"?String(item.direction||item.type||"").toUpperCase().includes("DEBIT"):!String(item.direction||item.type||"").toUpperCase().includes("DEBIT"))).map((item,idx)=>{const debit=String(item.direction||item.type||"").toUpperCase().includes("DEBIT"),amount=Math.abs(Number(item.amount||0));return <article key={item.id||idx} className="hp-stage3-row"><div className="hp-stage3-row-icon">{debit?"↗":"＋"}</div><div className="hp-stage3-row-main"><b>{item.description||item.title||item.transaction_type||"HPay activity"}</b><small>{item.transaction_id&&<span>{item.transaction_id} · </span>}{item.created_at?new Date(item.created_at).toLocaleString("en-IN"):item.date||""}</small><span>{item.method||item.source||"HPay"}</span></div><div className="hp-stage3-row-value"><strong className={debit?"debit":"credit"}>{debit?"- ":"+ "}₹{amount.toLocaleString("en-IN")}</strong><em>{item.status||"Recorded"}</em></div></article>})}
+                    </div>
+                  </section>}
 
-                  <section className="hp-autopay"><i>❧</i><div><b>Enable Auto-Pay for a Hassle-Free Experience</b><span>Set up auto-pay for courses, subscriptions and more.</span></div><button type="button" onClick={()=>setHpayView("settings")}>Set Up Now &nbsp; →</button><em>Small Payments<br/>Big Impact ♡</em></section>
+                  {hpayView==="requests"&&<section className="hp-stage3-workspace" aria-label="HPay payment requests">
+                    <header className="hp-stage3-workspace-head"><div><button type="button" onClick={()=>setHpayView("home")}>← Overview</button><h3>Payment requests</h3><p>Incoming and outgoing requests are tied to your authenticated HPay account.</p></div><button type="button" className="hp-stage3-primary" onClick={()=>{setHpayAction("request");setHpayAmount("");setHpayNote("");setHpayRecipientHpayId("")}}>＋ New request</button></header>
+                    <div className="hp-stage3-filters" role="group" aria-label="Filter payment requests">{[["all","All"],["incoming","Incoming"],["outgoing","Outgoing"]].map(([id,label])=><button key={id} type="button" className={hpayRequestFilter===id?"active":""} onClick={()=>setHpayRequestFilter(id)}>{label}</button>)}</div>
+                    <div className="hp-stage3-list">
+                      {hpayRequests.filter(r=>hpayRequestFilter==="all"||String(r.direction||"").toLowerCase()===hpayRequestFilter).length===0?<div className="hp-stage3-empty"><b>No payment requests in this view</b><span>Requests you create or receive will appear here.</span></div>:hpayRequests.filter(r=>hpayRequestFilter==="all"||String(r.direction||"").toLowerCase()===hpayRequestFilter).map(r=><article key={r.request_id} className="hp-stage3-row"><div className="hp-stage3-row-icon">{r.direction==="INCOMING"?"↓":"↑"}</div><div className="hp-stage3-row-main"><b>{r.direction==="INCOMING"?`From ${r.requester_hpay_id||"HPay member"}`:(r.payer_hpay_id?`To ${r.payer_hpay_id}`:"Shareable request")}</b><small>{r.request_id} · {r.created_at?new Date(r.created_at).toLocaleString("en-IN"):""}</small><span>{r.note||"No note"}{r.expires_at?` · Expires ${new Date(r.expires_at).toLocaleDateString("en-IN")}`:""}</span></div><div className="hp-stage3-row-value"><strong>₹{Number(r.amount||0).toLocaleString("en-IN")}</strong><em>{r.status||"PENDING"}</em></div></article>)}
+                    </div>
+                  </section>}
+
+                  {hpayView==="settings"&&<section className="hp-stage3-workspace" aria-label="HPay account and linked banks">
+                    <header className="hp-stage3-workspace-head"><div><button type="button" onClick={()=>setHpayView("home")}>← Overview</button><h3>Account & linked bank details</h3><p>Only public HPay identity and masked bank information are shown here.</p></div><button type="button" className="hp-stage3-refresh" onClick={loadHpayDashboard} disabled={hpayLoading}>{hpayLoading?"Refreshing…":"Refresh"}</button></header>
+                    <div className="hp-stage3-account-grid">
+                      <section className="hp-stage3-account-card"><small>HPay ID</small><strong>{hpayAccount?.hpay_id||"Not available"}</strong><dl><div><dt>Account</dt><dd>{hpayAccount?.status||"—"}</dd></div><div><dt>KYC</dt><dd>{hpayAccount?.kyc_status||"—"}</dd></div><div><dt>Single limit</dt><dd>₹{Number(hpayAccount?.single_limit||0).toLocaleString("en-IN")}</dd></div><div><dt>Daily limit</dt><dd>₹{Number(hpayAccount?.daily_limit||0).toLocaleString("en-IN")}</dd></div></dl></section>
+                      <section className="hp-stage3-account-card"><small>Payment capabilities</small><strong>{hpayProviderConnected?"Provider connected":"Provider confirmation required"}</strong><dl><div><dt>Requests</dt><dd>{hpayAccount?.requests_enabled?"Enabled":"Unavailable"}</dd></div><div><dt>UPI</dt><dd>{hpayAccount?.upi_enabled?"Enabled":"Unavailable"}</dd></div><div><dt>Bank</dt><dd>{hpayAccount?.bank_enabled?"Enabled":"Unavailable"}</dd></div><div><dt>QR</dt><dd>{hpayAccount?.qr_enabled?"Enabled":"Unavailable"}</dd></div></dl></section>
+                    </div>
+                    <div className="hp-section-head"><h3>Linked bank accounts</h3><span>Masked details only</span></div>
+                    <div className="hp-stage3-banks">
+                      {hpayBanks.length===0?<div className="hp-stage3-empty"><b>No linked bank account is available</b><span>HOWDI will not simulate bank linking. A real provider-backed linking flow is required.</span></div>:hpayBanks.map((bank,idx)=><article key={`${bank.bank_name||"bank"}-${bank.account_number_masked||idx}`}><div className="hp-stage3-bank-icon">▥</div><div><b>{bank.bank_name||"Linked bank"}</b><small>{bank.account_holder_name||"Account holder"} · {bank.account_number_masked||"Masked account"}</small><span>{bank.ifsc?`IFSC ${bank.ifsc} · `:""}{bank.verification_status||"Verification unavailable"}</span></div><div><em>{bank.is_default?"Default":"Linked"}</em></div></article>)}
+                    </div>
+                    <div className="hp-stage3-provider-note"><b>No fabricated money movement</b><p>Send Money, Add Money, Bank and UPI actions remain provider-gated. HOWDI only records success after an authorized payment provider confirms the movement.</p></div>
+                  </section>}
+
+                  {hpayView==="home"&&<section className="hp-autopay"><i>❧</i><div><b>Payment provider confirmation protects your money</b><span>HPay does not invent a successful bank, UPI or wallet transfer.</span></div><button type="button" onClick={()=>setHpayView("settings")}>Account details &nbsp; →</button><em>Secure by<br/>design ♡</em></section>}
                 </section>}
 
                 {connectView==="subscriptions" && <section className="hc160e-page">
