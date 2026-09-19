@@ -42698,7 +42698,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               try{
                 const user=await getSessionUserFromRequest(req);
                 if(!user)return sendJSON(res,401,{status:"error",message:"Teacher sign in required"});
-                const teacher=(await pool.query(`SELECT id FROM learning_teacher_profiles WHERE user_id=$1 LIMIT 1`,[user.id])).rows[0];
+                const teacher=(await pool.query(`SELECT id FROM learning_teacher_profiles WHERE user_id=$1 AND application_status='APPROVED' LIMIT 1`,[user.id])).rows[0];
                 if(!teacher)return sendJSON(res,404,{status:"error",message:"Teacher profile not found"});
 
                 const practice=(await pool.query(`
@@ -42749,7 +42749,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               try{
                 const user=await getSessionUserFromRequest(req);
                 if(!user){client.release();return sendJSON(res,401,{status:"error",message:"Teacher sign in required"})}
-                const teacher=(await client.query(`SELECT id FROM learning_teacher_profiles WHERE user_id=$1 LIMIT 1`,[user.id])).rows[0];
+                const teacher=(await client.query(`SELECT id FROM learning_teacher_profiles WHERE user_id=$1 AND application_status='APPROVED' LIMIT 1`,[user.id])).rows[0];
                 if(!teacher){client.release();return sendJSON(res,404,{status:"error",message:"Teacher profile not found"})}
                 const evidenceType=proofReviewMatch[1].toUpperCase(),submissionId=proofReviewMatch[2];
                 const body=await getBody(req);
@@ -42819,7 +42819,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               try{
                 const user=await getSessionUserFromRequest(req);
                 if(!user)return sendJSON(res,401,{status:"error",message:"Teacher sign in required"});
-                const teacher=(await pool.query(`SELECT id FROM learning_teacher_profiles WHERE user_id=$1 LIMIT 1`,[user.id])).rows[0];
+                const teacher=(await pool.query(`SELECT id FROM learning_teacher_profiles WHERE user_id=$1 AND application_status='APPROVED' LIMIT 1`,[user.id])).rows[0];
                 if(!teacher)return sendJSON(res,404,{status:"error",message:"Teacher profile not found"});
                 const type=proofFileMatch[1].toUpperCase(),id=proofFileMatch[2];
                 const q=type==='PRACTICE'
