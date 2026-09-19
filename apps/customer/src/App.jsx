@@ -3,6 +3,9 @@ import { createPortal } from "react-dom";
 import "./App.css";
 import HowdiAuthPortal from "./components/HowdiAuthPortal";
 import ShopCatalogue from "./components/ShopCatalogue";
+import HowdiFor from "./howdi-for/HowdiFor";
+import { HowdiForMenuRow, HowdiForFeedCard, HowdiForEmptyStateLink, insertFeedCard } from "./howdi-for/HowdiForEntryPoints";
+import { parseForPath } from "./howdi-for/routes";
 import {
   recordTasteEvent,
   rememberRecentlyViewed,
@@ -2523,6 +2526,11 @@ function App() {
 
   const [activeSection, setActiveSection] = useState("home");
   const [navigationOSArea,setNavigationOSArea]=useState("connect");
+  // MP-56 — public segment landing pages. This is deliberately not a pillar:
+  // the existing shell remains the navigation owner and destinations resolve
+  // back into its current pillar/view state.
+  const [howdiForRoute,setHowdiForRoute]=useState(()=>typeof window!=="undefined"?parseForPath(window.location.pathname):null);
+  const [howdiForPendingTarget,setHowdiForPendingTarget]=useState(null);
   const [shopOSView,setShopOSView]=useState("home");
   const [slideIndex, setSlideIndex] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -9639,6 +9647,54 @@ return () => window.clearInterval(timer);
     }
   };
 
+  const navigateHowdiFor=(href,target)=>{
+    const url=new URL(String(href||"/for"),window.location.origin);
+    const forRoute=parseForPath(url.pathname);
+    if(forRoute){
+      window.history.pushState({},"",`${url.pathname}${url.search}`);
+      setHowdiForRoute(forRoute);
+      window.scrollTo({top:0,behavior:"smooth"});
+      return;
+    }
+    const needsLogin=target&&["learn.teach","shop.vendor","connect.create"].includes(`${target.pillar}.${target.view}`);
+    if(needsLogin&&!currentUser){
+      setHowdiForPendingTarget({href,target});
+      openLogin();
+      return;
+    }
+    setHowdiForRoute(null);
+    if(url.pathname==="/learn/teach"){
+      openRoleDestination("TEACHER");
+    }else if(url.pathname.startsWith("/learn/")){
+      openNavigationOSArea("learn",url.pathname.split("/")[2]||"discover");
+    }else if(url.pathname.startsWith("/works/")){
+      openNavigationOSArea("works",url.pathname.split("/")[2]||"find");
+    }else if(url.pathname==="/shop/vendor"){
+      openNavigationOSArea("shop","vendor");
+    }else if(url.pathname==="/connect/create"){
+      openNavigationOSArea("connect","home");
+      setConnectCreateType("post");
+      setConnectCreateOpen(true);
+    }else{
+      openNavigationOSArea("home");
+    }
+  };
+
+  useEffect(()=>{
+    const onPopState=()=>setHowdiForRoute(parseForPath(window.location.pathname));
+    window.addEventListener("popstate",onPopState);
+    return()=>window.removeEventListener("popstate",onPopState);
+  },[]);
+
+  // Reuse the existing login surface; the deferred destination is short-lived
+  // in memory and runs only after an authenticated user is available.
+  useEffect(()=>{
+    if(!currentUser||!howdiForPendingTarget)return;
+    const pending=howdiForPendingTarget;
+    setHowdiForPendingTarget(null);
+    navigateHowdiFor(pending.href,pending.target);
+  },[currentUser,howdiForPendingTarget]);
+
   const navigate = (section) => {
     if (["home", "connect", "shop", "works", "learn"].includes(section)) {
       openNavigationOSArea(section, section === "works" ? "find" : section === "learn" ? "discover" : "home");
@@ -12534,6 +12590,7 @@ const removeNotification = async (notificationId) => {
               <button type="button" onClick={() => routeFromMyHowdi("learning")}><i>🎓</i><b>My Learning</b></button>
               <button type="button" onClick={() => routeFromMyHowdi("notifications")}><i>🔔</i><b>Notifications</b></button>
             </div>
+            <div className="mh-links"><HowdiForMenuRow onNavigate={navigateHowdiFor} /></div>
           </div>
 
           {logoutNotice && <div className="mh-notice" role="alert">{logoutNotice}</div>}
@@ -17988,6 +18045,7 @@ const removeNotification = async (notificationId) => {
                             <div style={{ fontSize:"30px" }}>🛠️</div>
                             <strong style={{ display:"block", marginTop:"7px", color:"#365947" }}>No HOWDI Works bookings yet</strong>
                             <span style={{ fontSize:"12px" }}>Your service requests will appear here after booking.</span>
+                            <HowdiForEmptyStateLink context="works" onNavigate={navigateHowdiFor}/>
                           </div>
                         )}
 
@@ -19870,7 +19928,12 @@ const removeNotification = async (notificationId) => {
                       <span>✨ {connectPosts.filter(p=>p.intent_type==="COLLAB"&&p.intent_status==="OPEN").length} collaborations</span>
                       <span>📍 {connectPosts.filter(p=>p.intent_type==="LOCAL"&&p.intent_status==="OPEN").length} local calls</span>
                     </div>}
-                    {connectPosts.filter(post=>!connectMemberFeedOnly||post.subscribers_only).map(post=><article className="hc2-post" key={post.id} onMouseEnter={()=>registerConnectPostView(post.id)}>
+                    {insertFeedCard(
+                      connectPosts.filter(post=>!connectMemberFeedOnly||post.subscribers_only),
+                      <HowdiForFeedCard onNavigate={navigateHowdiFor} onDismiss={()=>setProfilePreferences(v=>({...v,howdiForFeedDismissed:true}))}/>
+                    ).filter(item=>!(item&&item.__howdi_for_card__)||!profilePreferences.howdiForFeedDismissed).map(post=>post&&post.__howdi_for_card__?
+                      <div key="__howdi_for_card__">{post.card}</div>:
+                      <article className="hc2-post" key={post.id} onMouseEnter={()=>registerConnectPostView(post.id)}>
                       <div className="hc2-post-head"><div className="hc2-avatar">{String(post.full_name||"H")[0]}</div><div><b>{post.full_name||"HOWDI Member"} {(post.verified||post.is_verified) && <i className="hc5-verified" title="Verified">✓</i>}</b><small>@{post.public_username||post.username||"member"} · {formatConnectDate(post.created_at)}</small></div><button>•••</button></div>
                       <div className="hc130-post-meta"><span>{connectProfileCategoryLabel(post.post_type||"POST")}</span>{post.knowledge_domain&&post.knowledge_domain!=="GENERAL"&&<span>{connectProfileCategoryLabel(post.knowledge_domain)}</span>}{post.target_audience&&post.target_audience!=="EVERYONE"&&<span>For {connectProfileCategoryLabel(post.target_audience)}</span>}{post.difficulty_level&&post.difficulty_level!=="ALL"&&<span>{connectProfileCategoryLabel(post.difficulty_level)}</span>}{post.location_name&&<span>📍 {post.location_name}</span>}</div>{post.subscribers_only&&<span className="hc104-post-badge">⭐ MEMBERS ONLY</span>}{post.article_title&&<h2 className="hc130-article-title">{post.article_title}</h2>}{["ARTICLE","EDUCATION","STUDENT_NOTE","TEACHER_LESSON"].includes(post.post_type)&&<div className="hc131-reader-meta"><span>📖 {connectReadingMinutes(`${post.article_title||""} ${post.content||""}`)} min read</span>{post.subject_name&&<span>{post.subject_name}</span>}{post.class_level&&<span>{post.class_level}</span>}{post.series_part&&<span>Part {post.series_part}</span>}</div>}{post.learning_objective&&<div className="hc131-learning-card"><b>🎯 Learning objective</b><p>{post.learning_objective}</p></div>}<p onClick={()=>logConnectPostView(post,false)}>{post.content}</p>{post.key_takeaway&&<div className="hc131-takeaway"><b>💡 Key takeaway</b><p>{post.key_takeaway}</p></div>}{post.media_data&&(String(post.media_type||"").startsWith("video/")?<video src={post.media_data} controls playsInline style={{display:"block",width:"100%",maxHeight:560,marginTop:12,borderRadius:16,background:"#111"}}/>:<img src={post.media_data} alt="HOWDI Connect post" style={{display:"block",width:"100%",maxHeight:560,objectFit:"contain",marginTop:12,borderRadius:16}}/>)}{Array.isArray(post.media_gallery)&&post.media_gallery.length>0&&<div className={`hc130-gallery-view n${Math.min(6,post.media_gallery.length)}`}>{post.media_gallery.map((src,i)=><img src={src} key={i} alt={`Post ${i+1}`}/>)}</div>}{post.topics&&<div className="hc130-topics">{String(post.topics).split(/[,#]/).map(x=>x.trim()).filter(Boolean).slice(0,8).map(x=><span key={x}>#{x.replace(/\s+/g,"")}</span>)}</div>}{post.resource_url&&<div className="hc130-resource"><span>📚</span><div><b>{post.resource_title||"Learning resource"}</b><small>{post.source_url?"Includes source/reference":"Shared resource"}</small></div><button onClick={()=>window.open(post.resource_url,"_blank","noopener,noreferrer")}>Open resource</button></div>}{post.source_url&&<div className="hc130-source">🔗 <button onClick={()=>window.open(post.source_url,"_blank","noopener,noreferrer")}>View source / reference</button></div>}{post.collaborator_name&&<div className="hc130-collab">🤝 With {post.collaborator_name} {post.collaboration_status==="ACCEPTED"?"✓":`· ${post.collaboration_status}`}</div>}<div className="hc131-credibility"><span>{post.source_kind==="SOURCE_PROVIDED"?"✓ Source provided":post.source_kind==="PERSONAL_OPINION"?"💬 Personal opinion":"🌐 Community knowledge"}</span>{Number(post.edit_count)>0&&<span>Edited {post.edit_count}×</span>}{Number(post.view_count)>0&&<span>👁 {post.view_count}</span>}</div><div className="hc132-intelligence">{post.discovery_score!==undefined&&<span>✦ Discovery {post.discovery_score}</span>}{post.knowledge_chain_label&&<span>🔗 {post.knowledge_chain_label}{post.series_part?` · Part ${post.series_part}`:""}</span>}{post.language_code&&post.language_code!=="en"&&<span>🌐 {String(post.language_code).toUpperCase()}</span>}{post.local_city&&<span>📍 {post.local_city}</span>}{post.opportunity_type&&<span className="opportunity">🎯 {connectProfileCategoryLabel(post.opportunity_type)} · {post.opportunity_location||"Open"}</span>}</div>{post.post_type==="QUIZ"&&post.quiz_question&&<div className="hc131-quiz"><b>🧠 {post.quiz_question}</b>{(post.quiz_options||[]).map((q,i)=><button key={i} disabled={!!connectQuizResult[post.id]} onClick={()=>attemptConnectQuiz(post,i)}>{String.fromCharCode(65+i)}. {q}</button>)}{connectQuizResult[post.id]&&<div className={connectQuizResult[post.id].correct?"ok":"bad"}>{connectQuizResult[post.id].correct?"✓ Correct":"✕ Try reviewing this concept"}{connectQuizResult[post.id].explanation&&<small>{connectQuizResult[post.id].explanation}</small>}</div>}</div>}<div className="hc132-value-actions"><button onClick={()=>voteConnectUsefulness(post,1)}>👍 Useful {post.useful_count||0}</button><button onClick={()=>voteConnectUsefulness(post,-1)}>👎 {post.not_useful_count||0}</button><button className={post.learn_later?"active":""} onClick={()=>toggleConnectLearnLater(post)}>⏳ {post.learn_later?"Learn later ✓":"Learn later"}</button>{["EDUCATION","ARTICLE","STUDENT_NOTE","TEACHER_LESSON","RESOURCE"].includes(post.post_type)&&<button onClick={()=>{setConnectTeachBackPost(post);setConnectTeachBackText("")}}>🗣 Teach Back {post.teachback_count||0}</button>}{post.learning_progress==="COMPLETED"&&<button onClick={()=>{setConnectProofPost(post);setConnectProofText("")}}>🏅 Proof of Learning</button>}{post.knowledge_domain&&post.knowledge_domain!=="GENERAL"&&<button onClick={()=>toggleConnectDomainFollow(post.knowledge_domain)}>＋ Follow {connectProfileCategoryLabel(post.knowledge_domain)}</button>}<button onClick={()=>{setConnectCorrectionPost(post);setConnectCorrectionText("");setConnectCorrectionEvidence("")}}>🧭 Correct knowledge</button><button onClick={()=>loadConnectFactCheckTrail(post)}>🔎 Fact-check trail</button>{post.opportunity_type&&<button onClick={()=>createConnectInviteLoop("OPPORTUNITY",post.id)}>👥 Invite</button>}</div>{["EDUCATION","STUDENT_NOTE","TEACHER_LESSON","ARTICLE","RESOURCE","FLASHCARD"].includes(post.post_type)&&<div className="hc131-progress"><span>Learning status: {connectProfileCategoryLabel(post.learning_progress||"NOT_STARTED")}</span><button onClick={()=>setConnectLearningProgress(post,"LEARNING")}>Learning</button><button onClick={()=>{setConnectLearningProgress(post,"COMPLETED");logConnectPostView(post,true)}}>✓ Completed</button></div>}
                       {post.intent_type&&post.intent_type!=="SHARE"&&<div className={`hc9-open-call ${String(post.intent_status||"OPEN").toLowerCase()}`}>
@@ -21017,7 +21080,7 @@ const removeNotification = async (notificationId) => {
                                       <div><b>{course.title}</b><small>{course.teacher_name} · {course.lesson_count||0} lessons</small><div className="hle-home-mini-progress"><i style={{width:`${Number(course.progress||0)}%`}}/></div></div>
                                       <strong>{Number(course.progress||0)}%</strong>
                                     </article>)}
-                                    {!learnerHomeBusy&&!(learnerHome?.courses||[]).length&&<div className="hle-home-empty compact"><span>🌱</span><div><b>Your learning space is ready</b><small>Pick one useful skill and begin.</small></div><button onClick={()=>setLearningPortalView("discover")}>Discover</button></div>}
+                                    {!learnerHomeBusy&&!(learnerHome?.courses||[]).length&&<div className="hle-home-empty compact"><span>🌱</span><div><b>Your learning space is ready</b><small>Pick one useful skill and begin.</small></div><button onClick={()=>setLearningPortalView("discover")}>Discover</button><HowdiForEmptyStateLink context="learn" onNavigate={navigateHowdiFor}/></div>}
                                   </div>
                                 </section>
                               </div>
@@ -21767,6 +21830,11 @@ const removeNotification = async (notificationId) => {
         />
 
       </main>
+
+      {howdiForRoute&&<div className="hf-app-overlay" role="dialog" aria-modal="true" aria-label="HOWDI for">
+        <header className="hf-app-overlay-head"><button type="button" onClick={()=>{window.history.pushState({},"","/");setHowdiForRoute(null);openNavigationOSArea("connect","home")}}>← Back to HOWDI</button></header>
+        <HowdiFor route={howdiForRoute} onNavigate={navigateHowdiFor}/>
+      </div>}
 
 
       {fitStudioOpen && selectedProduct && (
