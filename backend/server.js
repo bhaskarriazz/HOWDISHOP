@@ -52238,6 +52238,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               return sendJSON(res, 200, { status:"success", message:"HPay settings updated", settings:result.rows[0] });
             }
 
+            // HPAY_STAGE4_REVIEW_HARDENING
             // Customer HPay is session-authoritative. Browser supplied user/account IDs never select the actor.
             const hpayPublicAccount=(row)=>row?({
               hpay_id:row.hpay_id,status:row.status,kyc_status:row.kyc_status,
@@ -52277,7 +52278,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               const walletTx=walletRows.map(row=>({
                 id:`wallet:${row.id}`,transaction_id:row.reference_id||null,transaction_type:row.transaction_type||"WALLET",
                 amount:Number(row.amount||0),currency:wallet.currency||"INR",method:"WALLET",status:row.status||"COMPLETED",
-                description:row.description||row.title||"Wallet activity",direction:row.direction||(["DEBIT","REWARD_REDEMPTION"].includes(String(row.transaction_type||"").toUpperCase())?"DEBIT":"CREDIT"),
+                description:row.description||row.title||"Wallet activity",direction:row.direction||(["DEBIT","REWARD_REDEMPTION"].includes(String(row.transaction_type||"").toUpperCase())?"DEBIT":"UNKNOWN"),
                 created_at:row.created_at,completed_at:row.created_at,source:"WALLET"
               }));
               const hpayTx=hpayRows.map(row=>({...row,id:`hpay:${row.transaction_id}`,amount:Number(row.amount||0),source:"HPAY"}));
@@ -52337,12 +52338,29 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 if(!payer) return sendJSON(res,404,{status:"error",message:"Unable to create a request for that HPay ID"});
                 if(Number(payer.id)===Number(requester.id)) return sendJSON(res,400,{status:"error",message:"You cannot request money from your own HPay account"});
               }
+              const rawExpiresAt=body.expires_at||body.expiresAt||null;
+              let expiresAt=null;
+              if(rawExpiresAt!==null&&rawExpiresAt!==undefined&&String(rawExpiresAt).trim()!==""){
+                const parsedExpiresAt=new Date(rawExpiresAt);
+                if(Number.isNaN(parsedExpiresAt.getTime())) return sendJSON(res,400,{status:"error",message:"Expiry must be a valid date and time"});
+                if(parsedExpiresAt.getTime()<=Date.now()) return sendJSON(res,400,{status:"error",message:"Expiry must be in the future"});
+                expiresAt=parsedExpiresAt.toISOString();
+              }
               const requestId=`HPREQ-${Date.now()}-${crypto.randomBytes(4).toString("hex").toUpperCase()}`;
-              const row=(await pool.query(`
-                INSERT INTO hpay_payment_requests(request_id,requester_account_id,payer_account_id,amount,note,expires_at)
-                VALUES($1,$2,$3,$4,$5,COALESCE($6::timestamptz,NOW()+INTERVAL '7 days')) RETURNING request_id,amount,currency,note,status,expires_at,created_at,updated_at
-              `,[requestId,requester.id,payer?.id||null,amount,clean(body.note||"").slice(0,300),body.expires_at||body.expiresAt||null])).rows[0];
-              await pool.query(`INSERT INTO hpay_audit_logs(actor_type,actor_id,action,entity_type,entity_id,ip_address,metadata) VALUES('CUSTOMER',$1,'HPAY_REQUEST_CREATED','HPAY_REQUEST',$2,$3,$4::jsonb)`,[String(sessionUser.id),requestId,getRequestIp(req),JSON.stringify({amount,payer_hpay_id:payer?.hpay_id||null})]).catch(()=>{});
+              const client=await pool.connect();
+              let row;
+              try{
+                await client.query('BEGIN');
+                row=(await client.query(`
+                  INSERT INTO hpay_payment_requests(request_id,requester_account_id,payer_account_id,amount,note,expires_at)
+                  VALUES($1,$2,$3,$4,$5,COALESCE($6::timestamptz,NOW()+INTERVAL '7 days')) RETURNING request_id,amount,currency,note,status,expires_at,created_at,updated_at
+                `,[requestId,requester.id,payer?.id||null,amount,clean(body.note||"").slice(0,300),expiresAt])).rows[0];
+                await client.query(`INSERT INTO hpay_audit_logs(actor_type,actor_id,action,entity_type,entity_id,ip_address,metadata) VALUES('CUSTOMER',$1,'HPAY_REQUEST_CREATED','HPAY_REQUEST',$2,$3,$4::jsonb)`,[String(sessionUser.id),requestId,getRequestIp(req),JSON.stringify({amount,payer_hpay_id:payer?.hpay_id||null})]);
+                await client.query('COMMIT');
+              }catch(error){
+                try{await client.query('ROLLBACK');}catch{}
+                throw error;
+              }finally{client.release();}
               return sendJSON(res,201,{status:"success",request:{...row,amount:Number(row.amount||0),payer_hpay_id:payer?.hpay_id||null}});
             }
 
