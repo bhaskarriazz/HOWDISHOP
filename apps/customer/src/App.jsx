@@ -2,6 +2,7 @@ import { Component, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import "./App.css";
 import HowdiAuthPortal from "./components/HowdiAuthPortal";
+import ShopCatalogue from "./components/ShopCatalogue";
 import {
   recordTasteEvent,
   rememberRecentlyViewed,
@@ -9503,8 +9504,12 @@ return () => window.clearInterval(timer);
     }
     if(next==="shop"){
       setActiveSection("shop");
-      setShopOSView(view==="home"?"home":view);
-      if(view==="cart"){
+      // Shop S1: categories / product discovery are now the Catalogue workspace.
+      const shopView=view==="categories"||view==="discovery"?"catalogue":view;
+      setShopOSView(shopView==="home"?"home":shopView);
+      if(shopView==="catalogue"){
+        window.setTimeout(()=>window.scrollTo({top:0,behavior:"smooth"}),40);
+      }else if(view==="cart"){
         setCartToast(null);setCartOpen(true);
       }else if(view==="categories"){
         window.setTimeout(()=>document.querySelector(".hs2-categories")?.scrollIntoView({behavior:"smooth",block:"start"}),60);
@@ -12146,7 +12151,7 @@ const removeNotification = async (notificationId) => {
           <nav id="howdi-main-nav" aria-label="HOWDI Navigation OS" className={`main-nav howdi-simple-ecosystem-nav ${menuOpen ? "mobile-open" : ""}`}>
             <button type="button" className={navigationOSArea==="home"?"active":""} onClick={()=>openNavigationOSArea("home")}>⌂ Home</button>
             <button type="button" className={navigationOSArea==="connect"?"active":""} onClick={()=>openNavigationOSArea("connect","home")}>◉ Connect</button>
-            <button type="button" className={navigationOSArea==="shop"?"active":""} onClick={()=>openNavigationOSArea("shop","home")}>🛍 Shop</button>
+            <button type="button" className={navigationOSArea==="shop"?"active":""} onClick={()=>openNavigationOSArea("shop","catalogue")}>🛍 Shop</button>
             <button type="button" className={navigationOSArea==="works"?"active":""} onClick={()=>openNavigationOSArea("works","find")}>🛠 Works</button>
             <button type="button" className={navigationOSArea==="learn"?"active":""} onClick={()=>openNavigationOSArea("learn","discover")}>🎓 Learn & Earn</button>
           </nav>
@@ -12280,9 +12285,9 @@ const removeNotification = async (notificationId) => {
             })}
           </div>}
 
-          <button type="button" className={navigationOSArea==="shop"?"pillar active":"pillar"} onClick={()=>openNavigationOSArea("shop","home")}><span>▢</span><b>Shop</b></button>
+          <button type="button" className={navigationOSArea==="shop"?"pillar active":"pillar"} onClick={()=>openNavigationOSArea("shop","catalogue")}><span>▢</span><b>Shop</b></button>
           {navigationOSArea==="shop" && <div className="howdi-master-subnav">
-            {[["home","Shop Home"],["categories","Categories"],["discovery","Product Discovery"],["cart","Cart"],["vendor","Vendor / Creator"]].map(([id,label])=><button key={id} type="button" className={shopOSView===id?"active":""} onClick={()=>openNavigationOSArea("shop",id)}>{label}</button>)}
+            {[["catalogue","Catalogue"],["home","Shop Home"],["cart","Cart"],["vendor","Vendor / Creator"]].map(([id,label])=><button key={id} type="button" className={shopOSView===id?"active":""} onClick={()=>openNavigationOSArea("shop",id)}>{label}</button>)}
           </div>}
 
           <button type="button" className={navigationOSArea==="works"?"pillar active":"pillar"} onClick={()=>openNavigationOSArea("works","find")}><span>×</span><b>Works</b></button>
@@ -18256,7 +18261,8 @@ const removeNotification = async (notificationId) => {
           id="shop"
           data-navigation-os={navigationOSArea==="shop"?"active":"inactive"}
         >
-          <div className="hs2-layout">
+          {shopOSView==="catalogue" && <ShopCatalogue apiBase={SHOP_API_BASE} onExit={()=>openNavigationOSArea("shop","home")} />}
+          <div className="hs2-layout" style={shopOSView==="catalogue"?{display:"none"}:undefined}>
             <main className="hs2-main">
               <section className="hs2-hero">
                 <div className="hs2-hero-copy">

@@ -28390,7 +28390,9 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
     function customerProductPayload(row,variants=[]){
       const activeVariants=variants.filter(v=>String(v.status||"active").toLowerCase()==="active");
-      const stock=activeVariants.length?activeVariants.reduce((sum,v)=>sum+Number(v.stock||0),0):Number(row.stock||0);
+      // Shop S1: variant stock is authoritative. Once variant rows exist, parent stock is never used, even
+      // when every variant is inactive (then the product is simply unavailable).
+      const stock=variants.length?activeVariants.reduce((sum,v)=>sum+Math.max(0,Number(v.stock||0)),0):Number(row.stock||0);
       const prices=activeVariants.filter(v=>Number(v.price)>0).map(v=>Number(v.price));
       const mrps=activeVariants.filter(v=>Number(v.mrp)>0).map(v=>Number(v.mrp));
       const basePrice=prices.length?Math.min(...prices):Number(row.price||0);
@@ -28442,14 +28444,18 @@ async function ensureVibeReleaseReadinessV140LSchema(){
         variantOptions:row.variant_options||{colors:[],sizes:[]},
         variants:activeVariants.map(customerVariantPayload),
         offer,
+        // Shop S1: no vendor/user/HOWDI ids in public payloads; creator identity is public_username + display name + avatar.
         vendor:{
-          id:row.vendor_profile_id,
-          vendorCode:row.vendor_code||"",
           businessName:row.business_name||"HOWDI Vendor",
           city:row.vendor_city||"",
           state:row.vendor_state||"",
           rating:Number(row.vendor_rating||0),
           verified:String(row.vendor_kyc_status||"").toLowerCase()==="verified"
+        },
+        creator:{
+          public_username:row.creator_public_username||null,
+          display_name:row.business_name||row.creator_full_name||"HOWDI Creator",
+          avatar:shopS1Avatar(row.creator_avatar,30000)
         },
         publishedAt:row.published_at,
         updatedAt:row.updated_at
@@ -28457,20 +28463,37 @@ async function ensureVibeReleaseReadinessV140LSchema(){
     }
 
     async function getCustomerProductRows(whereSql="",params=[],limit=60,offset=0){
-      const q=await pool.query(`
+      // Shop S1: same visibility gate as the catalogue (published, active vendor, non-archived, not scheduled,
+      // not under moderation) plus public creator identity. Re-checked in JS on every returned row.
+      const build=(withModeration)=>`
         SELECT p.*,v.vendor_code,v.business_name,v.city AS vendor_city,v.state AS vendor_state,
-               v.rating AS vendor_rating,v.kyc_status AS vendor_kyc_status
+               v.rating AS vendor_rating,v.kyc_status AS vendor_kyc_status,COALESCE(v.status,'active') AS vendor_status,
+               u.full_name AS creator_full_name,cp.public_username AS creator_public_username,
+               COALESCE(cp.avatar_data,ps.profile_image,'') AS creator_avatar,
+               ${withModeration?SHOP_S1_MODERATION_SQL:"NULL::text"} AS moderation_status
         FROM vendor_products p
         JOIN vendor_profiles v ON v.id=p.vendor_profile_id
+        LEFT JOIN users u ON u.id=v.user_id
+        LEFT JOIN howdi_connect_profiles cp ON cp.user_id=v.user_id
+        LEFT JOIN user_profile_settings ps ON ps.user_id=v.user_id
         WHERE p.status='published'
           AND p.archived_at IS NULL
+          AND (p.published_at IS NULL OR p.published_at<=NOW())
           AND COALESCE(v.status,'active')='active'
+          ${withModeration?`AND COALESCE(UPPER(${SHOP_S1_MODERATION_SQL}),'APPROVED')='APPROVED'`:""}
           ${whereSql}
         ORDER BY p.published_at DESC NULLS LAST,p.updated_at DESC
         LIMIT $${params.length+1} OFFSET $${params.length+2}
-      `,[...params,limit,offset]);
-      await attachVendorVariants(q.rows);
-      return q.rows;
+      `;
+      let q;
+      try{q=await pool.query(build(true),[...params,limit,offset]);}
+      catch(error){
+        if(error&&error.code==="42P01")q=await pool.query(build(false),[...params,limit,offset]);
+        else throw error;
+      }
+      const rows=q.rows.filter(shopS1RowVisible);
+      await attachVendorVariants(rows);
+      return rows;
     }
 
     async function getCustomerVariantsForRow(row){
@@ -28482,6 +28505,499 @@ async function ensureVibeReleaseReadinessV140LSchema(){
       return q.rows;
     }
 
+
+
+    // =====================================================
+    // HOWDI SHOP S1 — CATALOGUE & PRODUCT DISCOVERY
+    // Read-only, public. Reuses vendor_products / vendor_product_variants / vendor_profiles and the
+    // Connect public profile (public_username + avatar) for creator identity.
+    //  - Visibility is enforced twice: in SQL (efficiency) and again in JS on every returned row.
+    //  - Variant stock is authoritative: once a product has variant rows, only ACTIVE variants with
+    //    stock>0 make it available; parent stock is never used as a fallback.
+    //  - Responses are built from explicit allow-lists. No vendor/user/owner/HOWDI ids leave the server;
+    //    product and variant ids are content ids and are allowed.
+    //  - No review/rating source exists for products, so reviews are reported as empty (never invented).
+    // =====================================================
+    const SHOP_S1_LIST_PARAMS = new Set(["q","category","subcategory","minPrice","maxPrice","inStock","colour","material","creator","sort","limit","offset"]);
+    const SHOP_S1_DETAIL_PARAMS = new Set(["variant","colour","size"]);
+    const SHOP_S1_SORTS = new Set(["newest","price_asc","price_desc","relevance"]);
+    const SHOP_S1_CANDIDATE_CAP = 1000;
+    const SHOP_S1_MODERATION_SQL = `(SELECT m.status FROM howdi_shop_product_moderation_v162c m WHERE m.product_id=p.id ORDER BY m.created_at DESC,m.id DESC LIMIT 1)`;
+
+    function shopS1Text(value, max = 500) {
+      return String(value ?? "").replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, max);
+    }
+    function shopS1Lower(value) { return shopS1Text(value, 400).toLowerCase(); }
+    function shopS1Money(value) { const n = Number(value); return Number.isFinite(n) ? Math.round(n * 100) / 100 : 0; }
+    function shopS1Int(value) { const n = Math.floor(Number(value)); return Number.isFinite(n) ? n : 0; }
+    function shopS1Url(value) { const u = shopS1Text(value, 2000); return /^https?:\/\//i.test(u) ? u : ""; }
+    function shopS1Avatar(value, maxLen) {
+      const v = String(value || "").trim();
+      if (!v) return "";
+      if (/^https?:\/\//i.test(v) || v.startsWith("/")) return v.slice(0, 2000);
+      return /^data:image\//i.test(v) && v.length <= maxLen ? v : "";
+    }
+    function shopS1List(value, max = 20, maxLen = 80) {
+      if (!Array.isArray(value)) return [];
+      const out = [];
+      for (const item of value) {
+        const t = shopS1Text(typeof item === "object" && item ? (item.name ?? item.label ?? "") : item, maxLen);
+        if (t && !out.some((x) => x.toLowerCase() === t.toLowerCase())) out.push(t);
+        if (out.length >= max) break;
+      }
+      return out;
+    }
+    function shopS1Record(value, maxKeys = 40) {
+      if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+      const out = {};
+      for (const [k, v] of Object.entries(value).slice(0, maxKeys)) {
+        if (["string", "number", "boolean"].includes(typeof v)) out[shopS1Text(k, 80)] = shopS1Text(v, 500);
+      }
+      return out;
+    }
+
+    // ---- visibility (JS layer; the SQL layer in loadShopS1Rows mirrors it) ----
+    function shopS1RowVisible(row) {
+      if (!row) return false;
+      if (String(row.status || "").toLowerCase() !== "published") return false;
+      if (row.archived_at) return false;
+      if (String(row.vendor_status || "active").toLowerCase() !== "active") return false;
+      const at = row.published_at ? new Date(row.published_at).getTime() : null;
+      if (at && Number.isFinite(at) && at > Date.now()) return false;
+      const moderation = row.moderation_status;
+      if (moderation && String(moderation).trim().toUpperCase() !== "APPROVED") return false;
+      return true;
+    }
+
+    // ---- strict query validation ----
+    function parseShopCatalogueQuery(searchParams) {
+      const seen = new Set();
+      for (const key of searchParams.keys()) {
+        if (!SHOP_S1_LIST_PARAMS.has(key)) return { error: "Unsupported query parameter" };
+        if (seen.has(key)) return { error: "Duplicate query parameter" };
+        seen.add(key);
+      }
+      const f = { q: "", category: "", subcategory: "", colour: "", material: "", creator: "", minPrice: null, maxPrice: null, inStock: false, sort: "newest", limit: 24, offset: 0 };
+      const text = (name, max) => {
+        const raw = searchParams.get(name);
+        if (raw === null || raw.trim() === "") return "";
+        const v = shopS1Text(raw, max + 1);
+        return v.length > max ? null : v;
+      };
+      for (const [name, max] of [["q", 80], ["category", 120], ["subcategory", 120], ["colour", 120], ["material", 120]]) {
+        const v = text(name, max);
+        if (v === null) return { error: `${name} is too long` };
+        f[name] = v;
+      }
+      const creator = text("creator", 60);
+      if (creator === null || (creator && !/^[A-Za-z0-9_.-]{1,60}$/.test(creator))) return { error: "Invalid creator" };
+      f.creator = creator;
+      for (const name of ["minPrice", "maxPrice"]) {
+        const raw = searchParams.get(name);
+        if (raw === null || raw === "") continue;
+        if (!/^\d{1,8}(\.\d{1,2})?$/.test(raw)) return { error: `Invalid ${name}` };
+        f[name] = Number(raw);
+      }
+      if (f.minPrice !== null && f.maxPrice !== null && f.minPrice > f.maxPrice) return { error: "minPrice cannot exceed maxPrice" };
+      const stock = searchParams.get("inStock");
+      if (stock !== null && stock !== "") {
+        if (!["true", "false", "1", "0"].includes(stock)) return { error: "Invalid inStock" };
+        f.inStock = stock === "true" || stock === "1";
+      }
+      const sort = searchParams.get("sort");
+      if (sort !== null && sort !== "") {
+        if (!SHOP_S1_SORTS.has(sort)) return { error: "Invalid sort" };
+        f.sort = sort;
+      } else if (f.q) f.sort = "relevance";
+      if (f.sort === "relevance" && !f.q) return { error: "Relevance sort requires a search query" };
+      const limit = searchParams.get("limit");
+      if (limit !== null && limit !== "") {
+        if (!/^\d{1,3}$/.test(limit) || Number(limit) < 1 || Number(limit) > 48) return { error: "limit must be between 1 and 48" };
+        f.limit = Number(limit);
+      }
+      const offset = searchParams.get("offset");
+      if (offset !== null && offset !== "") {
+        if (!/^\d{1,5}$/.test(offset) || Number(offset) > 10000) return { error: "offset must be between 0 and 10000" };
+        f.offset = Number(offset);
+      }
+      return { filters: f };
+    }
+
+    // ---- data loading (published + active + non-archived + non-hidden + non-moderated only) ----
+    async function loadShopS1Rows(opts = {}) {
+      const build = (withModeration) => {
+        const params = [];
+        const add = (v) => { params.push(v); return `$${params.length}`; };
+        const where = [];
+        if (opts.id) where.push(`p.id=${add(opts.id)}`);
+        if (opts.relatedCategory || opts.relatedCreator) {
+          const ors = [];
+          if (opts.relatedCategory) ors.push(`LOWER(p.category)=${add(String(opts.relatedCategory).toLowerCase())}`);
+          if (opts.relatedCreator) ors.push(`LOWER(cp.public_username)=${add(String(opts.relatedCreator).toLowerCase())}`);
+          where.push(`(${ors.join(" OR ")})`);
+        }
+        const moderationExpr = withModeration ? SHOP_S1_MODERATION_SQL : "NULL::text";
+        const sql = `
+          SELECT p.id,p.name,p.category,p.subcategory,p.product_type,p.short_description,p.description,
+                 p.mrp,p.price,p.stock,p.low_stock_threshold,p.variant_options,p.image_urls,p.video_url,
+                 p.highlights,p.materials,p.specifications,p.size_chart,p.care_instructions,
+                 p.personalisation_enabled,p.personalisation_details,p.processing_days,
+                 p.vendor_offer_enabled,p.vendor_offer_type,p.vendor_offer_value,p.vendor_offer_start,p.vendor_offer_end,p.offer_stock,
+                 p.status,p.archived_at,p.published_at,p.updated_at,
+                 v.business_name,COALESCE(v.status,'active') vendor_status,
+                 u.full_name creator_full_name,cp.public_username creator_public_username,
+                 COALESCE(cp.avatar_data,ps.profile_image,'') creator_avatar,
+                 ${moderationExpr} moderation_status
+          FROM vendor_products p
+          JOIN vendor_profiles v ON v.id=p.vendor_profile_id
+          LEFT JOIN users u ON u.id=v.user_id
+          LEFT JOIN howdi_connect_profiles cp ON cp.user_id=v.user_id
+          LEFT JOIN user_profile_settings ps ON ps.user_id=v.user_id
+          WHERE p.status='published'
+            AND p.archived_at IS NULL
+            AND (p.published_at IS NULL OR p.published_at<=NOW())
+            AND COALESCE(v.status,'active')='active'
+            ${withModeration ? `AND COALESCE(UPPER(${SHOP_S1_MODERATION_SQL}),'APPROVED')='APPROVED'` : ""}
+            ${where.length ? "AND " + where.join(" AND ") : ""}
+          ORDER BY p.published_at DESC NULLS LAST,p.updated_at DESC,p.id DESC
+          LIMIT ${SHOP_S1_CANDIDATE_CAP}`;
+        return { sql, params };
+      };
+      let result;
+      try {
+        const q = build(true);
+        result = await pool.query(q.sql, q.params);
+      } catch (error) {
+        // Moderation table not created yet => nothing has been moderated; every other error still surfaces.
+        if (error && error.code === "42P01") { const q = build(false); result = await pool.query(q.sql, q.params); }
+        else throw error;
+      }
+      const rows = result.rows.filter(shopS1RowVisible);
+      const truncated = result.rows.length >= SHOP_S1_CANDIDATE_CAP;
+      const byProduct = new Map();
+      if (rows.length) {
+        const variants = await pool.query(
+          `SELECT id,product_id,colour,size_value,mrp,price,stock,low_stock_threshold,image_urls,status,sort_order
+           FROM vendor_product_variants WHERE product_id=ANY($1::bigint[]) ORDER BY product_id,sort_order,id`,
+          [rows.map((r) => String(r.id))]
+        );
+        for (const v of variants.rows) {
+          const key = String(v.product_id);
+          if (!byProduct.has(key)) byProduct.set(key, []);
+          byProduct.get(key).push(v);
+        }
+      }
+      return { rows, variantsByProduct: byProduct, truncated };
+    }
+
+    // ---- product model: single source of truth for price / stock / variants ----
+    function shopS1Model(row, variantRows) {
+      const variants = (variantRows || []).map((v) => ({
+        id: String(v.id), colour: shopS1Text(v.colour, 120), size: shopS1Text(v.size_value, 120),
+        mrp: shopS1Money(v.mrp), price: shopS1Money(v.price), stock: Math.max(0, shopS1Int(v.stock)),
+        threshold: Math.max(0, shopS1Int(v.low_stock_threshold)) || 5,
+        images: (Array.isArray(v.image_urls) ? v.image_urls : []).map(shopS1Url).filter(Boolean),
+        active: String(v.status || "active").toLowerCase() === "active"
+      }));
+      const hasVariantRows = variants.length > 0;
+      const parentThreshold = Math.max(0, shopS1Int(row.low_stock_threshold)) || 5;
+      // Variant rows present => ONLY active variants count. Parent stock is used solely when no variant rows exist.
+      const source = hasVariantRows
+        ? variants.filter((v) => v.active)
+        : [{ id: null, colour: "", size: "", mrp: shopS1Money(row.mrp), price: shopS1Money(row.price), stock: Math.max(0, shopS1Int(row.stock)), threshold: parentThreshold, images: [], active: true }];
+      const options = source.map((o) => {
+        const offer = activeVendorOfferForCustomer({ ...row, price: o.price });
+        const finalPrice = shopS1Money(offer ? offer.customerPrice : o.price);
+        const original = o.mrp > finalPrice ? o.mrp : null;
+        return {
+          ...o, finalPrice, original,
+          discountPercent: original ? Math.round(((original - finalPrice) / original) * 100) : 0,
+          available: o.stock > 0, lowStock: o.stock > 0 && o.stock <= o.threshold
+        };
+      });
+      const availableOptions = options.filter((o) => o.available);
+      const totalStock = availableOptions.reduce((s, o) => s + o.stock, 0);
+      const inStock = availableOptions.length > 0;
+      const lowStock = inStock && totalStock <= parentThreshold;
+      const pricePool = availableOptions.length ? availableOptions : options;
+      let price;
+      if (pricePool.length) {
+        const cheapest = pricePool.reduce((a, b) => (b.finalPrice < a.finalPrice ? b : a));
+        price = {
+          current: cheapest.finalPrice, original: cheapest.original,
+          discountPercent: cheapest.discountPercent, onSale: Boolean(cheapest.original),
+          max: Math.max(...pricePool.map((o) => o.finalPrice))
+        };
+      } else {
+        price = { current: shopS1Money(row.price), original: null, discountPercent: 0, onSale: false, max: shopS1Money(row.price) };
+      }
+      if (price.max <= price.current) price.max = null;
+      const declared = row.variant_options && typeof row.variant_options === "object" ? row.variant_options : {};
+      const colours = hasVariantRows
+        ? shopS1List(variants.filter((v) => v.active).map((v) => v.colour))
+        : shopS1List(declared.colors || declared.colours);
+      const sizes = hasVariantRows
+        ? shopS1List(variants.filter((v) => v.active).map((v) => v.size))
+        : shopS1List(declared.sizes);
+      let materials = shopS1List(row.materials, 12);
+      if (!materials.length) {
+        const spec = shopS1Record(row.specifications);
+        const m = spec["Material / Yarn"] || spec.Material || spec.material;
+        if (m) materials = shopS1List([m], 1, 120);
+      }
+      const images = [];
+      for (const u of [...(Array.isArray(row.image_urls) ? row.image_urls : []).map(shopS1Url), ...options.flatMap((o) => o.images)]) {
+        if (u && !images.includes(u)) images.push(u);
+        if (images.length >= 12) break;
+      }
+      const displayName = shopS1Text(row.business_name, 180) || shopS1Text(row.creator_full_name, 180) || "HOWDI Creator";
+      return {
+        id: String(row.id),
+        slug: `${String(row.name || "product").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "product"}-${row.id}`,
+        name: shopS1Text(row.name, 220), shortDescription: shopS1Text(row.short_description, 700),
+        description: String(row.description || "").slice(0, 8000),
+        category: shopS1Text(row.category, 120), subcategory: shopS1Text(row.subcategory, 120), productType: shopS1Text(row.product_type, 120),
+        hasVariantRows, options, variants, price, inStock, lowStock, totalStock, colours, sizes, materials, images,
+        publishedAt: row.published_at || null, updatedAt: row.updated_at || null,
+        creator: { public_username: shopS1Text(row.creator_public_username, 60) || null, display_name: displayName, avatarRaw: row.creator_avatar || "" },
+        raw: row
+      };
+    }
+
+    // ---- filtering / sorting / search ----
+    function shopS1Haystack(m) {
+      return [m.name, m.shortDescription, m.description, m.category, m.subcategory, m.productType, m.materials.join(" "), m.colours.join(" "), m.creator.display_name, shopS1List(m.raw.highlights, 8, 200).join(" ")]
+        .join(" ").toLowerCase();
+    }
+    function shopS1Tokens(q) { return shopS1Lower(q).split(" ").filter(Boolean).slice(0, 6); }
+    function shopS1Matches(m, f, skip = []) {
+      const lc = (v) => String(v || "").toLowerCase();
+      if (!skip.includes("category") && f.category && lc(m.category) !== lc(f.category)) return false;
+      if (!skip.includes("subcategory") && f.subcategory && lc(m.subcategory) !== lc(f.subcategory)) return false;
+      if (f.creator && lc(m.creator.public_username) !== lc(f.creator)) return false;
+      if (!skip.includes("q") && f.q) {
+        const hay = shopS1Haystack(m);
+        if (!shopS1Tokens(f.q).every((t) => hay.includes(t))) return false;
+      }
+      if (!skip.includes("material") && f.material && !m.materials.some((x) => lc(x) === lc(f.material))) return false;
+      const needColour = !skip.includes("colour") && Boolean(f.colour);
+      const needPrice = !skip.includes("price") && (f.minPrice !== null || f.maxPrice !== null);
+      const needStock = !skip.includes("stock") && f.inStock === true;
+      if (needColour || needPrice || needStock) {
+        // Variant-level predicate: one variant must satisfy colour + price + stock together.
+        if (needColour && !m.hasVariantRows && !m.colours.some((c) => lc(c) === lc(f.colour))) return false;
+        const pool = m.options.length ? m.options : [{ colour: "", finalPrice: m.price.current, available: false }];
+        const ok = pool.some((o) => {
+          if (needColour && m.hasVariantRows && lc(o.colour) !== lc(f.colour)) return false;
+          if (needPrice && ((f.minPrice !== null && o.finalPrice < f.minPrice) || (f.maxPrice !== null && o.finalPrice > f.maxPrice))) return false;
+          if (needStock && !o.available) return false;
+          return true;
+        });
+        if (!ok) return false;
+      }
+      return true;
+    }
+    function shopS1Relevance(m, f) {
+      const phrase = shopS1Lower(f.q), name = m.name.toLowerCase();
+      let score = name === phrase ? 100 : name.startsWith(phrase) ? 60 : name.includes(phrase) ? 40 : 0;
+      const meta = [m.category, m.subcategory, m.productType].join(" ").toLowerCase();
+      const attrs = [m.materials.join(" "), m.colours.join(" ")].join(" ").toLowerCase();
+      for (const t of shopS1Tokens(f.q)) {
+        if (name.includes(t)) score += 10;
+        if (meta.includes(t)) score += 6;
+        if (attrs.includes(t)) score += 4;
+        if (m.shortDescription.toLowerCase().includes(t)) score += 3;
+        if (m.description.toLowerCase().includes(t)) score += 1;
+        if (m.creator.display_name.toLowerCase().includes(t)) score += 2;
+      }
+      return score;
+    }
+    function shopS1Newest(a, b) {
+      const ta = a.publishedAt ? new Date(a.publishedAt).getTime() : 0, tb = b.publishedAt ? new Date(b.publishedAt).getTime() : 0;
+      if (tb !== ta) return tb - ta;
+      const ua = a.updatedAt ? new Date(a.updatedAt).getTime() : 0, ub = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+      if (ub !== ua) return ub - ua;
+      return Number(b.id) - Number(a.id);
+    }
+    function shopS1Sort(models, f) {
+      const list = [...models];
+      if (f.sort === "price_asc") return list.sort((a, b) => a.price.current - b.price.current || shopS1Newest(a, b));
+      if (f.sort === "price_desc") return list.sort((a, b) => b.price.current - a.price.current || shopS1Newest(a, b));
+      if (f.sort === "relevance") {
+        const scored = new Map(list.map((m) => [m.id, shopS1Relevance(m, f)]));
+        return list.sort((a, b) => scored.get(b.id) - scored.get(a.id) || shopS1Newest(a, b));
+      }
+      return list.sort(shopS1Newest);
+    }
+    function shopS1Facets(models, f) {
+      const count = (arr) => { const map = new Map(); for (const v of arr) { const k = v.toLowerCase(); const cur = map.get(k) || { name: v, count: 0 }; cur.count += 1; map.set(k, cur); } return [...map.values()].sort((a, b) => a.name.localeCompare(b.name)); };
+      const catBase = models.filter((m) => shopS1Matches(m, f, ["category", "subcategory"]));
+      const cats = new Map();
+      for (const m of catBase) {
+        if (!m.category) continue;
+        const key = m.category.toLowerCase();
+        const c = cats.get(key) || { name: m.category, count: 0, subs: [] };
+        c.count += 1; if (m.subcategory) c.subs.push(m.subcategory);
+        cats.set(key, c);
+      }
+      const priceBase = models.filter((m) => shopS1Matches(m, f, ["price"]));
+      const prices = priceBase.map((m) => m.price.current);
+      return {
+        categories: [...cats.values()].sort((a, b) => a.name.localeCompare(b.name)).map((c) => ({ name: c.name, count: c.count, subcategories: count(c.subs) })),
+        colours: count(models.filter((m) => shopS1Matches(m, f, ["colour"])).flatMap((m) => m.colours)),
+        materials: count(models.filter((m) => shopS1Matches(m, f, ["material"])).flatMap((m) => m.materials)),
+        price: prices.length ? { min: Math.min(...prices), max: Math.max(...prices) } : { min: 0, max: 0 }
+      };
+    }
+
+    // ---- public payloads (explicit allow-lists) ----
+    function shopS1Availability(inStock, lowStock, units) {
+      const state = !inStock ? "out_of_stock" : lowStock ? "low_stock" : "in_stock";
+      const label = state === "out_of_stock" ? "Out of stock" : state === "low_stock" ? (units ? `Only ${units} left` : "Low stock") : "In stock";
+      return { state, inStock, lowStock, label };
+    }
+    function shopS1PublicPrice(p) {
+      return { current: p.current, original: p.original, discountPercent: p.discountPercent, onSale: p.onSale, max: p.max };
+    }
+    function shopS1Creator(m, avatarMax) {
+      return { public_username: m.creator.public_username, display_name: m.creator.display_name, avatar: shopS1Avatar(m.creator.avatarRaw, avatarMax) };
+    }
+    const SHOP_S1_NO_REVIEWS = { count: 0, average: null, label: "No reviews yet" };
+    function shopS1Card(m) {
+      return {
+        id: m.id, slug: m.slug, name: m.name, shortDescription: m.shortDescription,
+        category: m.category, subcategory: m.subcategory, productType: m.productType,
+        image: m.images[0] || "", price: shopS1PublicPrice(m.price),
+        availability: shopS1Availability(m.inStock, m.lowStock, 0),
+        colours: m.colours.slice(0, 8), materials: m.materials.slice(0, 4),
+        creator: shopS1Creator(m, 30000), reviews: SHOP_S1_NO_REVIEWS, publishedAt: m.publishedAt
+      };
+    }
+    function shopS1VariantPayload(o) {
+      return {
+        id: o.id, colour: o.colour, size: o.size, images: o.images,
+        price: { current: o.finalPrice, original: o.original, discountPercent: o.discountPercent, onSale: Boolean(o.original), max: null },
+        stock: o.stock, availability: shopS1Availability(o.available, o.lowStock, o.stock)
+      };
+    }
+    function shopS1Detail(m, related, selection) {
+      const r = m.raw;
+      return {
+        id: m.id, slug: m.slug, name: m.name, shortDescription: m.shortDescription, description: m.description,
+        category: m.category, subcategory: m.subcategory, productType: m.productType,
+        images: m.images, videoUrl: shopS1Url(r.video_url),
+        price: shopS1PublicPrice(m.price),
+        availability: shopS1Availability(m.inStock, m.lowStock, 0),
+        colours: m.colours, sizes: m.sizes, materials: m.materials,
+        highlights: shopS1List(r.highlights, 8, 200), specifications: shopS1Record(r.specifications),
+        sizeChart: (Array.isArray(r.size_chart) ? r.size_chart : []).slice(0, 30).map((row) => shopS1Record(row, 12)).filter((row) => Object.keys(row).length),
+        careInstructions: shopS1Text(r.care_instructions, 3000),
+        personalisation: { enabled: r.personalisation_enabled === true, details: r.personalisation_enabled === true ? shopS1Text(r.personalisation_details, 3000) : "" },
+        processingDays: Math.max(0, shopS1Int(r.processing_days)),
+        variants: m.hasVariantRows ? m.options.map(shopS1VariantPayload) : [],
+        selection, creator: shopS1Creator(m, 250000), reviews: SHOP_S1_NO_REVIEWS,
+        related: related.map(shopS1Card), publishedAt: m.publishedAt
+      };
+    }
+    function shopS1Related(model, models) {
+      const lc = (v) => String(v || "").toLowerCase();
+      return models
+        .filter((o) => o.id !== model.id)
+        .map((o) => ({
+          o,
+          score: (model.subcategory && lc(o.subcategory) === lc(model.subcategory) ? 4 : 0)
+            + (model.category && lc(o.category) === lc(model.category) ? 3 : 0)
+            + (model.creator.public_username && lc(o.creator.public_username) === lc(model.creator.public_username) ? 1 : 0)
+        }))
+        .filter((x) => x.score > 0)
+        .sort((a, b) => b.score - a.score || Number(b.o.inStock) - Number(a.o.inStock) || shopS1Newest(a.o, b.o))
+        .slice(0, 8).map((x) => x.o);
+    }
+    function shopS1ResolveSelection(model, searchParams) {
+      const seen = new Set();
+      for (const key of searchParams.keys()) {
+        if (!SHOP_S1_DETAIL_PARAMS.has(key) || seen.has(key)) return { status: 400, message: "Unsupported query parameter" };
+        seen.add(key);
+      }
+      const variantId = searchParams.get("variant"), colour = shopS1Text(searchParams.get("colour"), 121), size = shopS1Text(searchParams.get("size"), 121);
+      if (variantId !== null && !/^\d{1,18}$/.test(variantId)) return { status: 400, message: "Invalid variant" };
+      if (colour.length > 120 || size.length > 120) return { status: 400, message: "Invalid variant selection" };
+      if (variantId === null && !colour && !size) return { selection: null };
+      if (!model.hasVariantRows) return { status: 404, message: "Variant not available" };
+      const lc = (v) => String(v || "").toLowerCase();
+      const active = model.options; // active variants only; inactive ones are indistinguishable from missing
+      let matches;
+      if (variantId !== null) matches = active.filter((o) => o.id === variantId);
+      else matches = active.filter((o) => (!colour || lc(o.colour) === lc(colour)) && (!size || lc(o.size) === lc(size)));
+      if (!matches.length) return { status: 404, message: "Variant not available" };
+      if (matches.length > 1) return { status: 400, message: "Select both colour and size" };
+      return { selection: shopS1VariantPayload(matches[0]) };
+    }
+    function shopS1CategoryTree(models) {
+      const cats = new Map();
+      for (const m of models) {
+        const key = (m.category || "Other").toLowerCase();
+        const c = cats.get(key) || { name: m.category || "Other", count: 0, image: "", subs: new Map() };
+        c.count += 1; if (!c.image && m.images[0]) c.image = m.images[0];
+        const sk = (m.subcategory || "Other").toLowerCase();
+        const s = c.subs.get(sk) || { name: m.subcategory || "Other", count: 0, types: new Map() };
+        s.count += 1;
+        const tk = (m.productType || "General Product").toLowerCase();
+        const t = s.types.get(tk) || { name: m.productType || "General Product", count: 0 };
+        t.count += 1; s.types.set(tk, t); c.subs.set(sk, s); cats.set(key, c);
+      }
+      return [...cats.values()].sort((a, b) => a.name.localeCompare(b.name)).map((c) => ({
+        name: c.name, count: c.count, image: c.image,
+        subcategories: [...c.subs.values()].sort((a, b) => a.name.localeCompare(b.name)).map((s) => ({ name: s.name, count: s.count, productTypes: [...s.types.values()] }))
+      }));
+    }
+
+    // ---- routes ----
+    if (req.method === "GET" && pathname === "/api/shop/catalogue/products") {
+      try {
+        const parsed = parseShopCatalogueQuery(url.searchParams);
+        if (parsed.error) return sendJSON(res, 400, { status: "error", message: parsed.error });
+        const f = parsed.filters;
+        // One bounded load of the visible catalogue; every filter/sort/facet is then applied by the same JS
+        // predicates, so results and facet counts can never disagree.
+        const { rows, variantsByProduct, truncated } = await loadShopS1Rows();
+        const models = rows.map((r) => shopS1Model(r, variantsByProduct.get(String(r.id))));
+        const matched = shopS1Sort(models.filter((m) => shopS1Matches(m, f)), f);
+        const page = matched.slice(f.offset, f.offset + f.limit);
+        return sendJSON(res, 200, {
+          status: "success", total: matched.length, count: page.length, limit: f.limit, offset: f.offset,
+          hasMore: f.offset + page.length < matched.length, truncated,
+          sort: f.sort,
+          filters: { q: f.q, category: f.category, subcategory: f.subcategory, colour: f.colour, material: f.material, creator: f.creator, minPrice: f.minPrice, maxPrice: f.maxPrice, inStock: f.inStock },
+          products: page.map(shopS1Card),
+          facets: shopS1Facets(models, f)
+        });
+      } catch (error) {
+        console.error("❌ Shop catalogue list error:", error);
+        return sendJSON(res, 500, { status: "error", message: "Unable to load products" });
+      }
+    }
+
+    const shopS1DetailMatch = pathname.match(/^\/api\/shop\/catalogue\/products\/([^/]+)\/?$/);
+    if (req.method === "GET" && shopS1DetailMatch) {
+      try {
+        const idText = shopS1DetailMatch[1];
+        if (!/^\d{1,18}$/.test(idText)) return sendJSON(res, 400, { status: "error", message: "Invalid product id" });
+        const { rows, variantsByProduct } = await loadShopS1Rows({ id: idText });
+        // Hidden / unpublished / archived / moderated / unknown all look identical to the caller.
+        const row = rows.find((r) => String(r.id) === idText);
+        if (!row) return sendJSON(res, 404, { status: "error", message: "Product not found" });
+        const model = shopS1Model(row, variantsByProduct.get(String(row.id)));
+        const resolved = shopS1ResolveSelection(model, url.searchParams);
+        if (resolved.status) return sendJSON(res, resolved.status, { status: "error", message: resolved.message });
+        const relatedSet = await loadShopS1Rows({ relatedCategory: model.category, relatedCreator: model.creator.public_username });
+        const relatedModels = shopS1Related(model, relatedSet.rows.map((r) => shopS1Model(r, relatedSet.variantsByProduct.get(String(r.id)))));
+        return sendJSON(res, 200, { status: "success", product: shopS1Detail(model, relatedModels, resolved.selection) });
+      } catch (error) {
+        console.error("❌ Shop catalogue detail error:", error);
+        return sendJSON(res, 500, { status: "error", message: "Unable to load product" });
+      }
+    }
 
 
     // Public customer catalogue — no login required.
@@ -28552,23 +29068,10 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
     if(req.method==="GET" && pathname==="/api/shop/catalogue"){
       try{
-        const q=await pool.query(`
-          SELECT category,subcategory,product_type,COUNT(*)::int AS product_count
-          FROM vendor_products
-          WHERE status='published' AND archived_at IS NULL
-          GROUP BY category,subcategory,product_type
-          ORDER BY category,subcategory,product_type
-        `);
-        const categories={};
-        for(const r of q.rows){
-          if(!categories[r.category])categories[r.category]={name:r.category,count:0,subcategories:{}};
-          categories[r.category].count+=Number(r.product_count||0);
-          const sub=r.subcategory||"Other";
-          if(!categories[r.category].subcategories[sub])categories[r.category].subcategories[sub]={name:sub,count:0,productTypes:[]};
-          categories[r.category].subcategories[sub].count+=Number(r.product_count||0);
-          categories[r.category].subcategories[sub].productTypes.push({name:r.product_type||"General Product",count:Number(r.product_count||0)});
-        }
-        return sendJSON(res,200,{status:"success",categories:Object.values(categories).map(c=>({...c,subcategories:Object.values(c.subcategories)}))});
+        // Shop S1: category tree over VISIBLE products only (same gate as the catalogue list/detail).
+        const {rows,variantsByProduct}=await loadShopS1Rows();
+        const models=rows.map(r=>shopS1Model(r,variantsByProduct.get(String(r.id))));
+        return sendJSON(res,200,{status:"success",categories:shopS1CategoryTree(models)});
       }catch(error){
         console.error("❌ Public catalogue error:",error);
         return sendJSON(res,500,{status:"error",message:"Unable to load catalogue"});
