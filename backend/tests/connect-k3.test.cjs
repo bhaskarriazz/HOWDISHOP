@@ -1121,11 +1121,11 @@ async function runK5CCall(routeSrc,method,path,options={}){
   if(sql.startsWith('SELECT user_id FROM howdi_connect_call_participants WHERE call_id=$1 AND participant_token=$2'))return options.unknownToken?{rows:[],rowCount:0}:{rows:[{user_id:options.toUserId??202}],rowCount:1};
   if(sql.startsWith('SELECT 1 FROM howdi_connect_call_participants'))return {rows:options.notAParticipant?[]:[{exists:1}],rowCount:options.notAParticipant?0:1};
   if(sql.startsWith('SELECT id,call_code,call_type,status,caller_user_id'))return {rows:options.callFound===false?[]:[{id:55,call_code:'HCALL-X',call_type:'VOICE',status:'ACTIVE',caller_user_id:options.callerUserId??101}],rowCount:1};
-  if(sql.startsWith('SELECT p.participant_token'))return {rows:options.participants||[{token:'tok-host',participant_role:'HOST',invite_status:'JOINED',is_viewer:true}],rowCount:1};
+  if(sql.startsWith('SELECT p.participant_token')||sql.startsWith('SELECT CASE WHEN p.user_id=$2'))return {rows:options.participants||[{token:'tok-host',participant_role:'HOST',invite_status:'JOINED',is_viewer:true}],rowCount:1};
   if(sql.startsWith('SELECT COUNT(*)::int n FROM howdi_connect_call_participants p JOIN howdi_connect_calls c ON c.id=p.call_id WHERE p.call_id=$1 AND p.user_id=ANY'))return {rows:[{n:options.participantPairCount??2}],rowCount:1};
   if(sql.startsWith('INSERT INTO howdi_connect_call_signals'))return {rows:[{id:1,created_at:new Date().toISOString()}],rowCount:1};
   if(sql.startsWith('SELECT s.id,cp.participant_token'))return {rows:options.signals||[],rowCount:(options.signals||[]).length};
-  if(sql.startsWith('UPDATE howdi_connect_call_participants SET invite_status=\'LEFT\''))return {rows:[],rowCount:0};
+  if(sql.startsWith('UPDATE howdi_connect_call_participants SET invite_status=\'LEFT\''))return options.notAParticipant?{rows:[],rowCount:0}:{rows:[{call_id:55}],rowCount:1};
   if(sql.startsWith('SELECT COUNT(*)::int n FROM howdi_connect_call_participants WHERE call_id=$1 AND invite_status=\'JOINED\''))return {rows:[{n:options.stillActive??0}],rowCount:1};
   if(sql.startsWith('UPDATE howdi_connect_calls SET status=\'ENDED\''))return {rows:[],rowCount:0};
   if(options.queryOverride){const over=options.queryOverride(sql,params);if(over!==undefined)return over;}
@@ -1246,4 +1246,10 @@ test('POST /api/connect/calls/:id/leave requires a session (401) and ignores a s
  assert.equal(r.status,200);
  const upd=r.calls.find(c=>c.sql.startsWith('UPDATE howdi_connect_call_participants SET invite_status=\'LEFT\''));
  assert.equal(Number(upd.params[1]),101,'must mark the session user (101) as having left, not the spoofed body.userId=999');
+});
+
+test('K5E: POST /api/connect/calls/:id/leave by someone who is not a participant is a 404 and never ends the call',async()=>{
+ const r=await runK5CCall(callsLeaveRoute,'POST','/api/connect/calls/55/leave',{body:{},notAParticipant:true});
+ assert.equal(r.status,404);
+ assert.equal(r.calls.filter(c=>c.sql.startsWith('UPDATE howdi_connect_calls SET status=\'ENDED\'')).length,0,'the call is left untouched');
 });

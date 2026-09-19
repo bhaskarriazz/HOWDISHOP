@@ -34,7 +34,7 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   }
   if(!up){console.error('server did not start:\n'+log.slice(-3000));server.kill();process.exit(2);}
   let failed=0;
-  const suites=fs.readdirSync(__dirname).filter(f=>/^\d\d-.*\.cjs$/.test(f)).sort();
+  const suites=fs.readdirSync(__dirname).filter(f=>/^\d\d-.*\.cjs$/.test(f)).sort().filter(f=>!process.env.K5E_ONLY||f.startsWith(process.env.K5E_ONLY));
   for(const f of suites){
     const r=spawnSync(process.execPath,[path.join(__dirname,f)],{env:{...process.env,K5E_BASE_URL:base},encoding:'utf8',timeout:15*60*1000});
     const out=(r.stdout||'')+(r.stderr||'');

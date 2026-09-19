@@ -9251,6 +9251,9 @@
     let k5eRefKeyCache = null;
     function k5eRefKey() {
       if (!k5eRefKeyCache) {
+        if (!process.env.HOWDI_CONNECT_REF_SECRET && process.env.NODE_ENV === "production") {
+          console.warn("[HOWDI Connect] HOWDI_CONNECT_REF_SECRET is not set: member references are keyed from DATABASE_URL. Set a dedicated long random secret.");
+        }
         k5eRefKeyCache = crypto.createHash("sha256")
           .update("howdi-connect-user-ref-v2|" + String(process.env.HOWDI_CONNECT_REF_SECRET || process.env.DATABASE_URL || "howdi-local-development-only"))
           .digest();
@@ -9309,7 +9312,10 @@
       return sessionId && Number.isSafeInteger(n) && n === sessionId ? n : 0;
     }
     function k5eNormaliseBody(req, body) {
-      if (!req.__k5eConnect || !body || typeof body !== "object" || Array.isArray(body)) return body;
+      if (!req.__k5eConnect) return body;
+      // A JSON `null` / number / string body is not an object of fields: treat it as an empty one (400/validation, never a 500).
+      if (body === null || typeof body !== "object") body = {};
+      if (Array.isArray(body)) return body;
       const sid = Number(req.__k5eViewerId || 0);
       const out = { ...body };
       for (const k of K5E_ACTOR_KEYS) delete out[k];
@@ -9397,6 +9403,11 @@
     }
     // K5E: one shared definition of "this member may see this post" (status, audience, subscribers-only, block).
     // `alias` is the posts table alias, `viewer` an SQL expression for the session viewer (e.g. "$2").
+    // K5E: a private profile's content is visible only to its owner and to accepted followers.
+    function k5ePrivateProfileOkSql(owner, viewer) {
+      return `(${owner}=${viewer} OR NOT EXISTS(SELECT 1 FROM howdi_connect_profiles ppr WHERE ppr.user_id=${owner} AND COALESCE(ppr.private_profile,FALSE)=TRUE)
+          OR EXISTS(SELECT 1 FROM howdi_connect_follows ppf WHERE ppf.follower_user_id=${viewer} AND ppf.following_user_id=${owner}))`;
+    }
     function connectPostVisibleSql(alias, viewer) {
       return `((${alias}.post_status='PUBLISHED' OR (${alias}.post_status='SCHEDULED' AND ${alias}.scheduled_for IS NOT NULL AND ${alias}.scheduled_for<=NOW()) OR ${alias}.user_id=${viewer})
         AND (COALESCE(${alias}.audience_scope,'EVERYONE')='EVERYONE' OR ${alias}.user_id=${viewer}
@@ -9404,7 +9415,8 @@
           OR (${alias}.audience_scope='CLOSE_FRIENDS' AND EXISTS(SELECT 1 FROM howdi_connect_close_friends vcf WHERE vcf.user_id=${alias}.user_id AND vcf.friend_user_id=${viewer})))
         AND (COALESCE(${alias}.subscribers_only,FALSE)=FALSE OR ${alias}.user_id=${viewer}
           OR EXISTS(SELECT 1 FROM howdi_connect_creator_subscriptions vcs WHERE vcs.creator_user_id=${alias}.user_id AND vcs.subscriber_user_id=${viewer} AND vcs.status='ACTIVE' AND (vcs.current_period_end IS NULL OR vcs.current_period_end>NOW())))
-        AND (${alias}.user_id=${viewer} OR NOT ${K5E_BLOCKED_BETWEEN_SQL(viewer, alias + ".user_id")}))`;
+        AND (${alias}.user_id=${viewer} OR NOT ${K5E_BLOCKED_BETWEEN_SQL(viewer, alias + ".user_id")})
+        AND ${k5ePrivateProfileOkSql(alias + ".user_id", viewer)})`;
     }
     // K5E: "this member may know this room exists / open it": PUBLIC rooms, or the owner, an active member, or
     // someone who already holds a participant row (e.g. an accepted co-host invite) — and never across a
@@ -9431,7 +9443,8 @@
               AND EXISTS(SELECT 1 FROM howdi_connect_follows sf2 WHERE sf2.follower_user_id=${alias}.user_id AND sf2.following_user_id=${viewer}))
           OR (${viewer}>0 AND ${alias}.audience='Close friends'
               AND EXISTS(SELECT 1 FROM howdi_connect_close_friends scf WHERE scf.user_id=${alias}.user_id AND scf.friend_user_id=${viewer})))
-        AND (${viewer}=0 OR ${alias}.user_id=${viewer} OR NOT ${K5E_BLOCKED_BETWEEN_SQL(viewer, alias + ".user_id")}))`;
+        AND (${viewer}=0 OR ${alias}.user_id=${viewer} OR NOT ${K5E_BLOCKED_BETWEEN_SQL(viewer, alias + ".user_id")})
+        AND ${k5ePrivateProfileOkSql(alias + ".user_id", viewer)})`;
     }
     // K5E: members are addressed by public @username in the browser; this resolves one to an internal id (0 = unknown).
     async function k5eResolveUsername(raw) {
@@ -9439,6 +9452,29 @@
       if (!/^[A-Za-z0-9._]{1,60}$/.test(u)) return 0;
       const r = (await pool.query(`SELECT user_id FROM howdi_connect_profiles WHERE LOWER(public_username)=LOWER($1) LIMIT 1`, [u])).rows[0];
       return r ? Number(r.user_id) : 0;
+    }
+    // K5E: "this member is currently inside this room AND may still be": an active participant row, and the room is still
+    // visible to them (so a later profile block or Space block ends their ability to chat / react / ask / tip / signal).
+    async function k5eActiveRoomMember(communityId, userId) {
+      const id = Number(communityId), viewer = Number(userId || 0);
+      if (!Number.isInteger(id) || id <= 0 || !viewer) return false;
+      return Boolean((await pool.query(`SELECT 1 FROM howdi_connect_realtime_participants p JOIN howdi_connect_communities r ON r.id=p.community_id
+        WHERE p.community_id=$1 AND p.user_id=$2::bigint AND p.left_at IS NULL AND r.status='ACTIVE' AND ${connectRoomVisibleSql("r", "$2::bigint")} LIMIT 1`, [id, viewer])).rows[0]);
+    }
+    // K5E: a member's `contact_permission` decides who may open a DM with them or ring them.
+    // EVERYONE: anyone; FOLLOWERS: only people who follow them; FOLLOWING: only people they follow; NO_ONE: nobody.
+    // Mirrors the `canMessage` flag the public profile already reports.
+    async function connectCanContact(viewerId, targetId) {
+      const viewer = Number(viewerId || 0), target = Number(targetId || 0);
+      if (!viewer || !target) return false;
+      if (viewer === target) return true;
+      const row = (await pool.query(`SELECT COALESCE(contact_permission,'EVERYONE') AS cp FROM howdi_connect_profiles WHERE user_id=$1::bigint`, [target])).rows[0];
+      const mode = String(row?.cp || "EVERYONE").toUpperCase();
+      if (mode === "EVERYONE") return true;
+      if (mode === "NO_ONE") return false;
+      if (mode === "FOLLOWERS") return Boolean((await pool.query(`SELECT 1 FROM howdi_connect_follows WHERE follower_user_id=$1::bigint AND following_user_id=$2::bigint`, [viewer, target])).rows[0]);
+      if (mode === "FOLLOWING") return Boolean((await pool.query(`SELECT 1 FROM howdi_connect_follows WHERE follower_user_id=$1::bigint AND following_user_id=$2::bigint`, [target, viewer])).rows[0]);
+      return false;
     }
     // K5E: gift values are decided by the server catalogue, never by the client.
     const K5E_SPACE_GIFTS = { HEART: 0, STAR: 10, COFFEE: 25, YARN: 50, BOUQUET: 100, TROPHY: 250, DIAMOND: 500 };
@@ -44228,6 +44264,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                     )
                   )
                     AND (p.user_id=$1 OR NOT ${K5E_BLOCKED_BETWEEN_SQL("$1","p.user_id")})
+                    AND ${k5ePrivateProfileOkSql("p.user_id","$1::bigint")}
                   GROUP BY
                     p.id, p.user_id, p.content, p.category, p.visibility, p.subscribers_only,
                     p.created_at, p.updated_at,
@@ -44745,11 +44782,15 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               if(!Number.isInteger(userId)||!Number.isInteger(target)||userId<=0||target<=0||userId===target)return sendJSON(res,400,{status:"error",message:"Valid users are required"});
               const blocked=(await pool.query(`SELECT 1 FROM howdi_connect_profile_blocks WHERE (blocker_user_id=$1 AND blocked_user_id=$2) OR (blocker_user_id=$2 AND blocked_user_id=$1)`,[userId,target])).rows[0];
               if(blocked)return sendJSON(res,403,{status:"error",message:"Messaging is unavailable for this profile"});
+              if(!(await pool.query(`SELECT 1 FROM users WHERE id=$1`,[target])).rows[0])return sendJSON(res,404,{status:"error",message:"Profile not found"});
               const existing=(await pool.query(`SELECT c.id FROM howdi_connect_conversations c
                 JOIN howdi_connect_conversation_members a ON a.conversation_id=c.id AND a.user_id=$1
                 JOIN howdi_connect_conversation_members b ON b.conversation_id=c.id AND b.user_id=$2
                 WHERE c.conversation_type='DIRECT' AND (SELECT COUNT(*) FROM howdi_connect_conversation_members x WHERE x.conversation_id=c.id)=2 LIMIT 1`,[userId,target])).rows[0];
               let id=existing?.id;
+              // K5E: honour the target's contact_permission when opening a NEW conversation (an existing thread is
+              // governed at send time, where a peer who already wrote first may always be answered).
+              if(!id&&!(await connectCanContact(userId,target)))return sendJSON(res,403,{status:"error",message:"This member is not accepting new messages from you"});
               if(!id){const client=await pool.connect();try{await client.query("BEGIN");id=(await client.query(`INSERT INTO howdi_connect_conversations(conversation_type) VALUES('DIRECT') RETURNING id`)).rows[0].id;await client.query(`INSERT INTO howdi_connect_conversation_members(conversation_id,user_id) VALUES($1,$2),($1,$3)`,[id,userId,target]);await client.query("COMMIT");}catch(e){await client.query("ROLLBACK");throw e;}finally{client.release();}}
               return sendJSON(res,200,{status:"success",conversation_id:id});
             }
@@ -45458,12 +45499,12 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             if(req.method==="POST"&&/^\/api\/connect\/realtime\/\d+\/poll\/\d+\/vote\/?$/.test(pathname)){const m=pathname.match(/realtime\/(\d+)\/poll\/(\d+)\/vote/),cid=Number(m?.[1]),pid=Number(m?.[2]),body=await getBody(req),uid=Number(body.userId),oi=Number(body.optionIndex),poll=(await pool.query(`SELECT po.options,po.is_open FROM howdi_connect_space_polls po WHERE po.id=$1 AND po.community_id=$2 AND EXISTS(SELECT 1 FROM howdi_connect_realtime_participants p WHERE p.community_id=po.community_id AND p.user_id=$3 AND p.left_at IS NULL)`,[pid,cid,uid])).rows[0];/* K5E: only an active participant of THIS room can vote on its poll */if(!poll?.is_open||!Number.isInteger(oi)||oi<0||oi>=poll.options.length)return sendJSON(res,400,{status:"error",message:"Invalid vote"});await pool.query(`INSERT INTO howdi_connect_space_poll_votes(poll_id,user_id,option_index) VALUES($1,$2,$3) ON CONFLICT(poll_id,user_id) DO UPDATE SET option_index=EXCLUDED.option_index,created_at=NOW()`,[pid,uid,oi]);return sendJSON(res,200,{status:"success"});}
             if(req.method==="POST"&&/^\/api\/connect\/realtime\/\d+\/chat\/\d+\/pin\/?$/.test(pathname)){const m=pathname.match(/realtime\/(\d+)\/chat\/(\d+)\/pin/),cid=Number(m?.[1]),mid=Number(m?.[2]),body=await getBody(req),uid=Number(body.userId),room=(await pool.query(`SELECT owner_user_id FROM howdi_connect_communities WHERE id=$1`,[cid])).rows[0];if(Number(room?.owner_user_id)!==uid)return sendJSON(res,403,{status:"error",message:"Host required"});if(!(await pool.query(`SELECT 1 FROM howdi_connect_space_chat WHERE community_id=$1 AND id=$2`,[cid,mid])).rows[0])return sendJSON(res,404,{status:"error",message:"Message not found"});await pool.query(`UPDATE howdi_connect_space_chat SET is_pinned=FALSE WHERE community_id=$1`,[cid]);await pool.query(`UPDATE howdi_connect_space_chat SET is_pinned=TRUE WHERE community_id=$1 AND id=$2`,[cid,mid]);return sendJSON(res,200,{status:"success"});}
             if(req.method==="PATCH"&&/^\/api\/connect\/realtime\/\d+\/experience\/?$/.test(pathname)){const cid=Number(pathname.match(/realtime\/(\d+)\/experience/)?.[1]),body=await getBody(req),uid=Number(body.userId),room=(await pool.query(`SELECT owner_user_id FROM howdi_connect_communities WHERE id=$1`,[cid])).rows[0];if(Number(room?.owner_user_id)!==uid)return sendJSON(res,403,{status:"error",message:"Host required"});await pool.query(`UPDATE howdi_connect_communities SET space_rules=$2,host_announcement=$3,audience_goal=$4,updated_at=NOW() WHERE id=$1`,[cid,clean(body.rules||"").slice(0,1000),clean(body.announcement||"").slice(0,500),Math.max(0,Math.min(100000,Number(body.audienceGoal)||0))]);return sendJSON(res,200,{status:"success"});}
-            if(req.method==="POST"&&/^\/api\/connect\/spaces\/\d+\/rating\/?$/.test(pathname)){const cid=Number(pathname.match(/spaces\/(\d+)\/rating/)?.[1]),body=await getBody(req),uid=Number(body.userId),rating=Number(body.rating);if(!Number.isInteger(rating)||rating<1||rating>5)return sendJSON(res,400,{status:"error",message:"Choose 1-5 stars"});if(!(await pool.query(`SELECT 1 FROM howdi_connect_realtime_participants p JOIN howdi_connect_communities c ON c.id=p.community_id WHERE p.community_id=$1 AND p.user_id=$2 AND c.owner_user_id<>$2`,[cid,uid])).rows[0])return sendJSON(res,403,{status:"error",message:"Only attendees can rate a Space"});await pool.query(`INSERT INTO howdi_connect_space_ratings(community_id,user_id,rating,feedback) VALUES($1,$2,$3,$4) ON CONFLICT(community_id,user_id) DO UPDATE SET rating=EXCLUDED.rating,feedback=EXCLUDED.feedback,created_at=NOW()`,[cid,uid,rating,clean(body.feedback||"").slice(0,500)]);return sendJSON(res,200,{status:"success"});}
+            if(req.method==="POST"&&/^\/api\/connect\/spaces\/\d+\/rating\/?$/.test(pathname)){const cid=Number(pathname.match(/spaces\/(\d+)\/rating/)?.[1]),body=await getBody(req),uid=Number(body.userId),rating=Number(body.rating);if(!Number.isInteger(rating)||rating<1||rating>5)return sendJSON(res,400,{status:"error",message:"Choose 1-5 stars"});if(!(await pool.query(`SELECT 1 FROM howdi_connect_realtime_participants p JOIN howdi_connect_communities c ON c.id=p.community_id WHERE p.community_id=$1 AND p.user_id=$2::bigint AND c.owner_user_id<>$2::bigint AND ${connectRoomVisibleSql("c","$2::bigint")}`,[cid,uid])).rows[0])return sendJSON(res,403,{status:"error",message:"Only attendees can rate a Space"});await pool.query(`INSERT INTO howdi_connect_space_ratings(community_id,user_id,rating,feedback) VALUES($1,$2,$3,$4) ON CONFLICT(community_id,user_id) DO UPDATE SET rating=EXCLUDED.rating,feedback=EXCLUDED.feedback,created_at=NOW()`,[cid,uid,rating,clean(body.feedback||"").slice(0,500)]);return sendJSON(res,200,{status:"success"});}
 
             if(req.method==="POST"&&/^\/api\/connect\/realtime\/\d+\/questions\/?$/.test(pathname)){
               const cid=Number(pathname.match(/realtime\/(\d+)\/questions/)?.[1]),body=await getBody(req),uid=Number(body.userId),text=clean(body.question||"").trim().slice(0,500);
               if(!uid||!text)return sendJSON(res,400,{status:"error",message:"Question is required"});
-              const member=(await pool.query(`SELECT 1 FROM howdi_connect_realtime_participants WHERE community_id=$1 AND user_id=$2 AND left_at IS NULL`,[cid,uid])).rows[0];
+              const member=await k5eActiveRoomMember(cid,uid);
               if(!member)return sendJSON(res,403,{status:"error",message:"Join the Space before asking"});
               const roomQ=(await pool.query(`SELECT owner_user_id,subscribers_only FROM howdi_connect_communities WHERE id=$1`,[cid])).rows[0];
               if(roomQ?.subscribers_only&&Number(roomQ.owner_user_id)!==uid){
@@ -45529,7 +45570,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               if(value>0){const fee=Number((value*0.05).toFixed(2));await pool.query(`INSERT INTO howdi_connect_creator_revenue_ledger(creator_user_id,source_type,source_id,gross_amount,platform_fee,net_amount,status) VALUES($1,'GIFT',$2,$3,$4,$5,'COMPLETED')`,[room.owner_user_id,String(g.id),value,fee,value-fee]);}
               return sendJSON(res,201,{status:"success",message:"Gift sent"});
             }
-            if(req.method==="POST"&&/^\/api\/connect\/spaces\/\d+\/quest\/?$/.test(pathname)){const cid=Number(pathname.match(/spaces\/(\d+)\/quest/)?.[1]),body=await getBody(req),uid=Number(body.userId),code=clean(body.questCode||"").slice(0,60);if(!code)return sendJSON(res,400,{status:"error",message:"Quest required"});if(!(await pool.query(`SELECT 1 FROM howdi_connect_realtime_participants WHERE community_id=$1 AND user_id=$2`,[cid,uid])).rows[0])return sendJSON(res,403,{status:"error",message:"Join the Space first"});await pool.query(`INSERT INTO howdi_connect_space_quests(community_id,user_id,quest_code) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`,[cid,uid,code]);return sendJSON(res,200,{status:"success"});}
+            if(req.method==="POST"&&/^\/api\/connect\/spaces\/\d+\/quest\/?$/.test(pathname)){const cid=Number(pathname.match(/spaces\/(\d+)\/quest/)?.[1]),body=await getBody(req),uid=Number(body.userId),code=clean(body.questCode||"").slice(0,60);if(!code)return sendJSON(res,400,{status:"error",message:"Quest required"});if(!(await pool.query(`SELECT 1 FROM howdi_connect_realtime_participants p JOIN howdi_connect_communities c ON c.id=p.community_id WHERE p.community_id=$1 AND p.user_id=$2::bigint AND ${connectRoomVisibleSql("c","$2::bigint")}`,[cid,uid])).rows[0])return sendJSON(res,403,{status:"error",message:"Join the Space first"});await pool.query(`INSERT INTO howdi_connect_space_quests(community_id,user_id,quest_code) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`,[cid,uid,code]);return sendJSON(res,200,{status:"success"});}
             if(req.method==="POST"&&/^\/api\/connect\/spaces\/\d+\/referral\/?$/.test(pathname)){const cid=Number(pathname.match(/spaces\/(\d+)\/referral/)?.[1]),body=await getBody(req),uid=Number(body.userId);if(!(await connectRoomVisibleToViewer(cid,uid)))return sendJSON(res,404,{status:"error",message:"Space not found"});const code=`HSP-${cid}-${crypto.randomBytes(5).toString("hex").toUpperCase()}`;const r=(await pool.query(`INSERT INTO howdi_connect_space_referrals(community_id,referrer_user_id,invite_code) VALUES($1,$2,$3) RETURNING id,community_id,invite_code`,[cid,uid,code])).rows[0];return sendJSON(res,201,{status:"success",referral:r});}
             if(req.method==="PATCH"&&/^\/api\/connect\/spaces\/\d+\/premium\/?$/.test(pathname)){const cid=Number(pathname.match(/spaces\/(\d+)\/premium/)?.[1]),body=await getBody(req),uid=Number(body.userId),room=(await pool.query(`SELECT owner_user_id FROM howdi_connect_communities WHERE id=$1`,[cid])).rows[0];if(Number(room?.owner_user_id)!==uid)return sendJSON(res,403,{status:"error",message:"Host required"});await pool.query(`UPDATE howdi_connect_communities SET premium_enabled=$2,premium_price=$3 WHERE id=$1`,[cid,Boolean(body.enabled),Math.max(0,Number(body.price)||0)]);return sendJSON(res,200,{status:"success"});}
             if(req.method==="POST"&&/^\/api\/connect\/spaces\/\d+\/premium-access\/?$/.test(pathname)){const cid=Number(pathname.match(/spaces\/(\d+)\/premium-access/)?.[1]),body=await getBody(req),uid=Number(body.userId),room=(await pool.query(`SELECT r.premium_enabled,r.premium_price FROM howdi_connect_communities r WHERE r.id=$1 AND r.status='ACTIVE' AND ${connectRoomVisibleSql("r","$2::bigint")}`,[cid,uid])).rows[0];if(!room)return sendJSON(res,404,{status:"error",message:"Space not found"});if(!room?.premium_enabled)return sendJSON(res,400,{status:"error",message:"This is not a premium Space"});await pool.query(`INSERT INTO howdi_connect_space_premium_access(community_id,user_id,access_status,amount) VALUES($1,$2,'PENDING',$3) ON CONFLICT(community_id,user_id) DO UPDATE SET amount=EXCLUDED.amount`,[cid,uid,room.premium_price]);return sendJSON(res,200,{status:"success",amount:room.premium_price,message:"Premium access created. Complete through HPay."});}
@@ -46288,7 +46329,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               const cid=Number(pathname.match(/spaces\/(\d+)\/feedback/)?.[1]),body=await getBody(req),uid=Number(body.userId),score=Math.max(0,Math.min(10,Number(body.npsScore))),tag=clean(body.feedbackTag||"").slice(0,80),comment=clean(body.comment||"").slice(0,1200);
               if(!Number.isFinite(score))return sendJSON(res,400,{status:"error",message:"NPS score required"});
               /* K5E: feedback comes from attendees of THIS Space (not the host, not somebody who never joined). */
-              if(!(await pool.query(`SELECT 1 FROM howdi_connect_realtime_participants p JOIN howdi_connect_communities c ON c.id=p.community_id WHERE p.community_id=$1 AND p.user_id=$2 AND c.owner_user_id<>$2`,[cid,uid])).rows[0])return sendJSON(res,403,{status:"error",message:"Only attendees can leave feedback"});
+              if(!(await pool.query(`SELECT 1 FROM howdi_connect_realtime_participants p JOIN howdi_connect_communities c ON c.id=p.community_id WHERE p.community_id=$1 AND p.user_id=$2::bigint AND c.owner_user_id<>$2::bigint AND ${connectRoomVisibleSql("c","$2::bigint")}`,[cid,uid])).rows[0])return sendJSON(res,403,{status:"error",message:"Only attendees can leave feedback"});
               await pool.query(`INSERT INTO howdi_connect_space_feedback(community_id,user_id,nps_score,feedback_tag,comment) VALUES($1,$2,$3,$4,$5) ON CONFLICT(community_id,user_id) DO UPDATE SET nps_score=EXCLUDED.nps_score,feedback_tag=EXCLUDED.feedback_tag,comment=EXCLUDED.comment,updated_at=NOW()`,[cid,uid,score,tag,comment]);
               return sendJSON(res,200,{status:"success"});
             }
@@ -46951,6 +46992,10 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
             if(req.method==="POST"&&/^\/api\/connect\/live\/\d+\/report\/?$/.test(pathname)){
               const cid=Number(pathname.match(/live\/(\d+)\/report/)?.[1]),body=await getBody(req),uid=Number(body.userId),target=Number(body.targetUserId||0),reason=clean(body.reason||"OTHER").toUpperCase().slice(0,80);
+              // K5E: only a member who can see the room may report in it, and the reported member must actually be in it
+              // (uniform 404 for a hidden or missing room, so private room ids cannot be probed and the queue cannot be polluted).
+              if(!uid||!(await connectRoomVisibleToViewer(cid,uid)))return sendJSON(res,404,{status:"error",message:"Room not found"});
+              if(target&&!(await pool.query(`SELECT 1 FROM howdi_connect_realtime_participants WHERE community_id=$1 AND user_id=$2 UNION SELECT 1 FROM howdi_connect_communities WHERE id=$1 AND owner_user_id=$2 LIMIT 1`,[cid,target])).rows[0])return sendJSON(res,400,{status:"error",message:"Reported member is not in this room"});
               const row=(await pool.query(`INSERT INTO howdi_connect_live_moderation_queue(community_id,reporter_user_id,target_user_id,reason,details) VALUES($1,$2,$3,$4,$5) RETURNING *`,
                 [cid,uid,target||null,reason,clean(body.details||"").slice(0,1000)])).rows[0];
               return sendJSON(res,201,{status:"success",report:row});
@@ -47561,7 +47606,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
             if(req.method==="GET"&&pathname==="/api/connect/network-graph"){
               const uid=Number(url.searchParams.get("userId")||0);
-              const people=(await pool.query(`SELECT u.id,u.full_name,cpx.public_username,
+              const people=(await pool.query(`SELECT u.id AS user_id,u.full_name,cpx.public_username,
                 COUNT(DISTINCT p.id)::int posts,
                 COUNT(DISTINCT uv.user_id)::int useful_votes,
                 COUNT(DISTINCT tb.id)::int teachbacks,
@@ -47855,7 +47900,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
             if(req.method==="GET"&&pathname==="/api/connect/relationship-intelligence"){
               const uid=Number(url.searchParams.get("userId")||0);
-              const people=(await pool.query(`SELECT u.id,u.full_name,cpx.public_username,
+              const people=(await pool.query(`SELECT u.id AS user_id,u.full_name,cpx.public_username,
                 COALESCE(rs.strength_score,0)::int strength_score,
                 COALESCE(rs.reasons,'[]'::jsonb) reasons,
                 COALESCE(rep.reputation_score,0)::int reputation_score,
@@ -48177,7 +48222,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   if(activeAudience>=Number(room.max_audience))return sendJSON(res,409,{status:"error",code:"SPACE_FULL",message:"This Space is at audience capacity. Join the waitlist."});
                 }
               }
-              if(room.community_type==='SPACE'&&Number(room.owner_user_id)!==userId){
+              if(Number(room.owner_user_id)!==userId){
                 const accessRules=(await pool.query(`SELECT premium_enabled,premium_price,subscribers_only FROM howdi_connect_communities WHERE id=$1`,[communityId])).rows[0];
                 if(accessRules?.subscribers_only){
                   const sub=(await pool.query(`SELECT status,current_period_end FROM howdi_connect_creator_subscriptions WHERE creator_user_id=$1 AND subscriber_user_id=$2`,[room.owner_user_id,userId])).rows[0];
@@ -48206,7 +48251,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               const body=await getBody(req),userId=Number(body.userId??body.user_id);
               // K5E: a heartbeat only refreshes an ACTIVE participant; it can no longer revive a removed / blocked / ended member
               // (re-entry goes through /join, which enforces every rule).
-              const beat=await pool.query(`UPDATE howdi_connect_realtime_participants SET last_seen_at=NOW() WHERE community_id=$1 AND user_id=$2 AND left_at IS NULL AND NOT EXISTS(SELECT 1 FROM howdi_connect_space_blocks sb WHERE sb.community_id=$1 AND sb.blocked_user_id=$2) RETURNING 1`,[communityId,userId]);
+              const beat=await pool.query(`UPDATE howdi_connect_realtime_participants SET last_seen_at=NOW() WHERE community_id=$1 AND user_id=$2 AND left_at IS NULL AND NOT EXISTS(SELECT 1 FROM howdi_connect_space_blocks sb WHERE sb.community_id=$1 AND sb.blocked_user_id=$2) AND EXISTS(SELECT 1 FROM howdi_connect_communities hr WHERE hr.id=$1 AND ${connectRoomVisibleSql("hr","$2::bigint")}) RETURNING 1`,[communityId,userId]);
               if(!beat.rows.length)return sendJSON(res,403,{status:"error",code:"NOT_IN_ROOM",message:"You are not in this room"});
               return sendJSON(res,200,{status:"success"});
             }
@@ -48311,6 +48356,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               if(!Number.isInteger(fromUserId)||fromUserId<=0||!Number.isInteger(toUserId)||toUserId<=0||toUserId===fromUserId)return sendJSON(res,404,{status:"error",message:"Participant not found"});
               const ends=Number((await pool.query(`SELECT COUNT(*)::int c FROM howdi_connect_realtime_participants WHERE community_id=$1 AND user_id IN($2,$3) AND left_at IS NULL`,[communityId,fromUserId,toUserId])).rows[0]?.c||0);
               if(ends!==2)return sendJSON(res,404,{status:"error",message:"Participant not found"});
+              if((await pool.query(`SELECT 1 WHERE ${K5E_BLOCKED_BETWEEN_SQL("$1::bigint","$2::bigint")}`,[fromUserId,toUserId])).rows[0])return sendJSON(res,404,{status:"error",message:"Participant not found"});
               const row=(await pool.query(`INSERT INTO howdi_connect_realtime_signals(community_id,from_user_id,to_user_id,signal_type,payload) VALUES($1,$2,$3,$4,$5::jsonb) RETURNING id,created_at`,[communityId,fromUserId,toUserId,signalType,payloadJson])).rows[0];
               return sendJSON(res,201,{status:"success",signal:row});
             }
@@ -48329,7 +48375,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               const body=await getBody(req),userId=Number(body.userId??body.user_id);
               const room=(await pool.query(`SELECT community_type FROM howdi_connect_communities WHERE id=$1`,[communityId])).rows[0];
               if(!room||room.community_type!=='SPACE')return sendJSON(res,400,{status:"error",message:"Raise Hand is only available in Spaces"});
-              if(!(await pool.query(`SELECT 1 FROM howdi_connect_realtime_participants WHERE community_id=$1 AND user_id=$2 AND left_at IS NULL`,[communityId,userId])).rows[0])return sendJSON(res,403,{status:"error",message:"Join the Space first"});
+              if(!(await k5eActiveRoomMember(communityId,userId)))return sendJSON(res,403,{status:"error",message:"Join the Space first"});
               await pool.query(`INSERT INTO howdi_connect_space_requests(community_id,user_id,request_status,created_at,updated_at)
                 VALUES($1,$2,'PENDING',NOW(),NOW())
                 ON CONFLICT(community_id,user_id) DO UPDATE SET request_status='PENDING',updated_at=NOW()`,[communityId,userId]);
@@ -48423,7 +48469,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               const communityId=Number(pathname.match(/^\/api\/connect\/realtime\/(\d+)\/reaction\/?$/)?.[1]);
               const body=await getBody(req),userId=Number(body.userId??body.user_id),emoji=clean(body.emoji||"").trim().slice(0,16);
               if(!["👏","❤️","🔥","😂","💡"].includes(emoji))return sendJSON(res,400,{status:"error",message:"Unsupported reaction"});
-              const member=(await pool.query(`SELECT 1 FROM howdi_connect_realtime_participants WHERE community_id=$1 AND user_id=$2 AND left_at IS NULL`,[communityId,userId])).rows[0];
+              const member=await k5eActiveRoomMember(communityId,userId);
               if(!member)return sendJSON(res,403,{status:"error",message:"Join the Space before reacting"});
               const row=(await pool.query(`INSERT INTO howdi_connect_space_reactions(community_id,user_id,emoji) VALUES($1,$2,$3) RETURNING id,user_id,emoji,created_at`,[communityId,userId,emoji])).rows[0];
               return sendJSON(res,201,{status:"success",reaction:row});
@@ -48434,7 +48480,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               const body=await getBody(req),userId=Number(body.userId??body.user_id),text=clean(body.messageText??body.message_text??"").trim();
               if(!text||text.length>1000)return sendJSON(res,400,{status:"error",message:"Message must contain 1 to 1000 characters"});
               const roomChat=(await pool.query(`SELECT owner_user_id,chat_mode,chat_slow_seconds FROM howdi_connect_communities WHERE id=$1`,[communityId])).rows[0];
-              const memberRow=(await pool.query(`SELECT participant_role FROM howdi_connect_realtime_participants WHERE community_id=$1 AND user_id=$2 AND left_at IS NULL`,[communityId,userId])).rows[0];
+              const memberRow=(await k5eActiveRoomMember(communityId,userId))?(await pool.query(`SELECT participant_role FROM howdi_connect_realtime_participants WHERE community_id=$1 AND user_id=$2 AND left_at IS NULL`,[communityId,userId])).rows[0]:null;
               if(!memberRow)return sendJSON(res,403,{status:"error",message:"Join the session before chatting"});
               const isMod=Number(roomChat?.owner_user_id)===userId||memberRow.participant_role==='COHOST';
               if(roomChat?.chat_mode==='HOST_ONLY'&&!isMod)return sendJSON(res,403,{status:"error",message:"Chat is currently host-only"});
@@ -48469,10 +48515,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               if(!room||room.community_type!=='SPACE')return sendJSON(res,404,{status:"error",message:"Space not found"});
               if(Number(room.owner_user_id)===fromUserId)return sendJSON(res,400,{status:"error",message:"You cannot tip your own Space"});
 
-              const joined=(await pool.query(`
-                SELECT 1 FROM howdi_connect_realtime_participants
-                WHERE community_id=$1 AND user_id=$2 AND left_at IS NULL
-              `,[communityId,fromUserId])).rows[0];
+              const joined=await k5eActiveRoomMember(communityId,fromUserId);
               if(!joined)return sendJSON(res,403,{status:"error",message:"Join the Space before sending a tip"});
 
               const referenceCode=`HOWDI-SPACE-TIP-${Date.now()}-${Math.random().toString(36).slice(2,8).toUpperCase()}`;
@@ -48554,6 +48597,14 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 JOIN howdi_connect_conversation_members cm ON cm.conversation_id=$1 AND cm.user_id<>$2
                 WHERE (b.blocker_user_id=$2 AND b.blocked_user_id=cm.user_id) OR (b.blocker_user_id=cm.user_id AND b.blocked_user_id=$2) LIMIT 1`,[id,userId])).rows[0];
               if(blockedInConvo)return sendJSON(res,403,{status:"error",message:"Messaging is unavailable for this profile"});
+              // K5E: contact_permission applies to DIRECT threads at send time; a peer who has already written in this
+              // thread has opened contact themselves, so answering them is always allowed.
+              const directPeer=(await pool.query(`SELECT cm.user_id FROM howdi_connect_conversations c JOIN howdi_connect_conversation_members cm ON cm.conversation_id=c.id AND cm.user_id<>$2 WHERE c.id=$1 AND c.conversation_type='DIRECT' LIMIT 1`,[id,userId])).rows[0];
+              if(directPeer){
+                const peerId=Number(directPeer.user_id);
+                const peerWroteFirst=(await pool.query(`SELECT 1 FROM howdi_connect_messages WHERE conversation_id=$1 AND sender_user_id=$2 LIMIT 1`,[id,peerId])).rows[0];
+                if(!peerWroteFirst&&!(await connectCanContact(userId,peerId)))return sendJSON(res,403,{status:"error",message:"This member is not accepting new messages from you"});
+              }
               const expiresAt=expireMode==="24 hours" ? new Date(Date.now()+24*60*60*1000) : null;
               const row=(await pool.query(`INSERT INTO howdi_connect_messages(conversation_id,sender_user_id,message_text,expires_at,attachment_type,attachment_data,attachment_meta) VALUES($1,$2,$3,$4,$5,$6,$7::jsonb) RETURNING *`,[id,userId,text,expiresAt,attachmentType||null,attachmentData,JSON.stringify(attachmentMeta)])).rows[0];
               await pool.query(`UPDATE howdi_connect_conversations SET updated_at=NOW() WHERE id=$1`,[id]);
@@ -48989,6 +49040,11 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 const gm=Number.isInteger(groupSpaceId)&&groupSpaceId>0?(await pool.query(`SELECT 1 FROM howdi_connect_community_members WHERE community_id=$1 AND user_id=$2 AND membership_status='ACTIVE'`,[groupSpaceId,callerId])).rows[0]:null;
                 if(!gm)return sendJSON(res,403,{status:'error',message:'You can only start a call inside a group you belong to'});
               }
+              // K5E: honour each invitee's contact_permission (people who share the group the call is placed in are exempt).
+              for(const inv of invitees){
+                const sharedGroup=groupSpaceId?(await pool.query(`SELECT 1 FROM howdi_connect_community_members WHERE community_id=$1 AND user_id=$2 AND membership_status='ACTIVE'`,[groupSpaceId,inv])).rows[0]:null;
+                if(!sharedGroup&&!(await connectCanContact(callerId,inv)))return sendJSON(res,403,{status:'error',message:'This member is not accepting calls from you'});
+              }
               const ringing=Number((await pool.query(`SELECT COUNT(*)::int n FROM howdi_connect_calls WHERE caller_user_id=$1 AND status='RINGING' AND created_at>NOW()-INTERVAL '2 minutes'`,[callerId])).rows[0]?.n||0);
               if(ringing>=5)return sendJSON(res,429,{status:'error',message:'Too many unanswered calls. Please wait a moment.'});
               const code='HCALL-'+Date.now().toString(36).toUpperCase()+'-'+Math.random().toString(36).slice(2,8).toUpperCase();
@@ -49036,7 +49092,9 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               const {caller_user_id,...call}={...callRow,is_caller:Number(callRow.caller_user_id)===userId};
               // Each participant is addressed by its own opaque per-call token, never by
               // user_id; is_viewer (also viewer-relative) replaces the old "pid===uid" self-check.
-              const participants=(await pool.query(`SELECT p.participant_token token,p.participant_role,p.invite_status,p.joined_at,p.left_at,(p.user_id=$2) is_viewer,u.full_name,cp.public_username,cp.profile_image FROM howdi_connect_call_participants p JOIN users u ON u.id=p.user_id LEFT JOIN howdi_connect_profiles cp ON cp.user_id=p.user_id WHERE p.call_id=$1 ORDER BY p.participant_role='HOST' DESC,p.joined_at NULLS LAST`,[callId,userId])).rows;
+              // K5E: routing tokens are only handed to a viewer who is still ringing/joined, and only for participants who are too
+              // (a member who declined or left no longer learns the tokens of the people still on the call).
+              const participants=(await pool.query(`SELECT CASE WHEN p.user_id=$2 OR (p.invite_status IN('RINGING','JOINED') AND EXISTS(SELECT 1 FROM howdi_connect_call_participants me WHERE me.call_id=p.call_id AND me.user_id=$2 AND me.invite_status IN('RINGING','JOINED'))) THEN p.participant_token ELSE NULL END token,p.participant_role,p.invite_status,p.joined_at,p.left_at,(p.user_id=$2) is_viewer,u.full_name,cp.public_username,cp.profile_image FROM howdi_connect_call_participants p JOIN users u ON u.id=p.user_id LEFT JOIN howdi_connect_profiles cp ON cp.user_id=p.user_id WHERE p.call_id=$1 ORDER BY p.participant_role='HOST' DESC,p.joined_at NULLS LAST`,[callId,userId])).rows;
               return sendJSON(res,200,{status:'success',call,participants});
             }
             if(req.method==="POST"&&/^\/api\/connect\/calls\/\d+\/signal\/?$/.test(pathname)){
@@ -49056,6 +49114,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               // K5E: both ends must still be live participants (not DECLINED/LEFT) of a live call; you cannot signal yourself;
               // the payload is a WebRTC SDP/ICE blob and is size-capped so the table cannot be flooded with arbitrary data.
               if(to===from)return sendJSON(res,400,{status:'error',message:'Invalid signal target'});
+              if((await pool.query(`SELECT 1 WHERE ${K5E_BLOCKED_BETWEEN_SQL("$1::bigint","$2::bigint")}`,[from,to])).rows[0])return sendJSON(res,403,{status:'error',message:'Participants only'});
               const ok=(await pool.query(`SELECT COUNT(*)::int n FROM howdi_connect_call_participants p JOIN howdi_connect_calls c ON c.id=p.call_id WHERE p.call_id=$1 AND p.user_id=ANY($2::bigint[]) AND p.invite_status IN('RINGING','JOINED') AND c.status IN('RINGING','ACTIVE')`,[callId,[from,to]])).rows[0]?.n;if(Number(ok)!==2)return sendJSON(res,403,{status:'error',message:'Participants only'});
               const payloadJson=JSON.stringify(body.payload&&typeof body.payload==='object'?body.payload:{});
               if(payloadJson.length>32000)return sendJSON(res,413,{status:'error',message:'Signal too large'});
@@ -49080,7 +49139,9 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               const sessionUser=await getSessionUserFromRequest(req);if(!sessionUser)return sendJSON(res,401,{status:'error',message:'Login required'});
               await getBody(req);
               const callId=Number(pathname.match(/calls\/(\d+)\/leave/)?.[1]),userId=Number(sessionUser.id);
-              await pool.query(`UPDATE howdi_connect_call_participants SET invite_status='LEFT',left_at=NOW() WHERE call_id=$1 AND user_id=$2`,[callId,userId]);
+              // K5E: only a participant of the call can leave it (a non-participant used to be able to end anybody's call).
+              const leftRow=(await pool.query(`UPDATE howdi_connect_call_participants SET invite_status='LEFT',left_at=NOW() WHERE call_id=$1 AND user_id=$2 RETURNING call_id`,[callId,userId])).rows[0];
+              if(!leftRow)return sendJSON(res,404,{status:"error",message:"Call not found"});
               const active=Number((await pool.query(`SELECT COUNT(*)::int n FROM howdi_connect_call_participants WHERE call_id=$1 AND invite_status='JOINED' AND left_at IS NULL`,[callId])).rows[0]?.n||0);
               if(active<2)await pool.query(`UPDATE howdi_connect_calls SET status='ENDED',ended_at=NOW(),updated_at=NOW() WHERE id=$1 AND status<>'ENDED'`,[callId]);
               return sendJSON(res,200,{status:'success'});
