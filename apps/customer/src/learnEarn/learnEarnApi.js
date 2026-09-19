@@ -43,7 +43,7 @@ export async function enrolInCourse(courseId) {
 }
 
 export async function loadMyLearning() {
-  const data = await request("/api/learn/v163a/my-learning");
+  const data = await request("/api/learning/my-learning");
   return Array.isArray(data.courses) ? data.courses : [];
 }
 
