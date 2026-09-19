@@ -19374,6 +19374,7 @@ const removeNotification = async (notificationId) => {
                 </section>}
 
                 {/* HPAY_STAGE4_REVIEW_HARDENING */}
+                {/* HPAY_STAGE4A_FINAL_CORRECTION */}
                 {connectView==="hpay" && <section className="hp-page hp-approved-home hp-stage3">
                   <div className="hp-approved-heading hp-stage3-heading">
                     <div>
@@ -19382,7 +19383,7 @@ const removeNotification = async (notificationId) => {
                       <b>{hpayAccount?.hpay_id||"Secure customer payments"}</b>
                       <p>{hpayView==="home"?"Pay, request and review verified HPay activity in one place.":hpayView==="transactions"?"Your wallet and provider-confirmed HPay activity.":hpayView==="requests"?"Requests you created or received, without exposing internal account IDs.":"Your HPay identity, limits and masked linked-bank details."}</p>
                     </div>
-                    <div className="hp-purpose">Payments<br/>with Purpose <span>♡</span></div>
+                    <div className="hp-purpose">Payments<br/>with Purpose <span aria-hidden="true">♡</span></div>
                   </div>
 
                   <nav className="hp-stage3-tabs" aria-label="HPay views">
@@ -19419,9 +19420,9 @@ const removeNotification = async (notificationId) => {
                       </main>
 
                       <aside className="hp-approved-side">
-                        <button className="hp-settings-card" type="button" onClick={()=>setHpayView("settings")}><i>⚙</i><div><b>Account & Security</b><small>Limits, status and masked bank details</small></div><span>›</span></button>
-                        <section className="hp-benefits"><h3>♕ &nbsp; HPay Safety</h3>{["Session-authoritative customer identity","No browser-selected account IDs","Provider-confirmed money movement","Masked linked-bank details","Public HPay IDs for requests"].map(x=><div key={x}><span>✓</span><b>{x}</b><i>›</i></div>)}</section>
-                        <section className="hp-help"><h3>◉ &nbsp; Need Help?</h3><p>Our support team is here for you.</p><button type="button" onClick={()=>setActiveSection("support")}>Contact Support</button></section>
+                        <button className="hp-settings-card" type="button" onClick={()=>setHpayView("settings")}><i aria-hidden="true">⚙</i><div><b>Account & Security</b><small>Limits, status and masked bank details</small></div><span>›</span></button>
+                        <section className="hp-benefits"><h3><span aria-hidden="true">♕</span> &nbsp; HPay Safety</h3>{["Session-authoritative customer identity","No browser-selected account IDs","Provider-confirmed money movement","Masked linked-bank details","Public HPay IDs for requests"].map(x=><div key={x}><span aria-hidden="true">✓</span><b>{x}</b><i aria-hidden="true">›</i></div>)}</section>
+                        <section className="hp-help"><h3><span aria-hidden="true">◉</span> &nbsp; Need Help?</h3><p>Our support team is here for you.</p><button type="button" onClick={()=>setActiveSection("support")}>Contact Support</button></section>
                       </aside>
                     </div>
                   </>}
@@ -19430,7 +19431,7 @@ const removeNotification = async (notificationId) => {
                     <header className="hp-stage3-workspace-head"><div><button type="button" onClick={()=>setHpayView("home")}>← Overview</button><h3>Transaction history</h3><p>Recorded wallet activity and provider-confirmed HPay transactions for your signed-in account.</p></div><button type="button" className="hp-stage3-refresh" onClick={loadHpayDashboard} disabled={hpayLoading}>{hpayLoading?"Refreshing…":"Refresh"}</button></header>
                     <div className="hp-stage3-filters" role="group" aria-label="Filter transaction history">{[["all","All"],["credit","Money in"],["debit","Money out"]].map(([id,label])=><button key={id} type="button" className={hpayHistoryFilter===id?"active":""} onClick={()=>setHpayHistoryFilter(id)}>{label}</button>)}</div>
                     <div className="hp-stage3-list">
-                      {walletTransactions.filter(item=>hpayHistoryFilter==="all"||(hpayHistoryFilter==="debit"?String(item.direction||item.type||"").toUpperCase().includes("DEBIT"):String(item.direction||item.type||"").toUpperCase().includes("CREDIT"))).length===0?<div className="hp-stage3-empty"><b>No transactions in this view</b><span>Only real wallet or provider-confirmed records appear here.</span></div>:walletTransactions.filter(item=>hpayHistoryFilter==="all"||(hpayHistoryFilter==="debit"?String(item.direction||item.type||"").toUpperCase().includes("DEBIT"):String(item.direction||item.type||"").toUpperCase().includes("CREDIT"))).map((item,idx)=>{const debit=String(item.direction||item.type||"").toUpperCase().includes("DEBIT"),amount=Math.abs(Number(item.amount||0));return <article key={item.id||idx} className="hp-stage3-row"><div className="hp-stage3-row-icon" aria-hidden="true">{debit?"↗":"＋"}</div><div className="hp-stage3-row-main"><b>{item.description||item.title||item.transaction_type||"HPay activity"}</b><small>{item.transaction_id&&<span>{item.transaction_id} · </span>}{item.created_at?new Date(item.created_at).toLocaleString("en-IN"):item.date||""}</small><span>{item.method||item.source||"HPay"}</span></div><div className="hp-stage3-row-value"><strong className={debit?"debit":"credit"}>{debit?"- ":"+ "}₹{amount.toLocaleString("en-IN")}</strong><em>{item.status||"Recorded"}</em></div></article>})}
+                      {walletTransactions.filter(item=>hpayHistoryFilter==="all"||(hpayHistoryFilter==="debit"?String(item.direction||item.type||"").toUpperCase().includes("DEBIT"):String(item.direction||item.type||"").toUpperCase().includes("CREDIT"))).length===0?<div className="hp-stage3-empty"><b>No transactions in this view</b><span>Only real wallet or provider-confirmed records appear here.</span></div>:walletTransactions.filter(item=>hpayHistoryFilter==="all"||(hpayHistoryFilter==="debit"?String(item.direction||item.type||"").toUpperCase().includes("DEBIT"):String(item.direction||item.type||"").toUpperCase().includes("CREDIT"))).map((item,idx)=>{const dir=String(item.direction||item.type||"").toUpperCase(),debit=dir.includes("DEBIT"),credit=dir.includes("CREDIT"),amount=Math.abs(Number(item.amount||0));return <article key={item.id||idx} className="hp-stage3-row"><div className="hp-stage3-row-icon" aria-hidden="true">{debit?"↗":credit?"＋":"•"}</div><div className="hp-stage3-row-main"><b>{item.description||item.title||item.transaction_type||"HPay activity"}</b><small>{item.transaction_id&&<span>{item.transaction_id} · </span>}{item.created_at?new Date(item.created_at).toLocaleString("en-IN"):item.date||""}</small><span>{item.method||item.source||"HPay"}</span></div><div className="hp-stage3-row-value"><strong className={debit?"debit":credit?"credit":"unknown"}>{debit?"- ":credit?"+ ":""}₹{amount.toLocaleString("en-IN")}</strong><em>{item.status||"Recorded"}</em></div></article>})}
                     </div>
                   </section>}
 
@@ -19455,7 +19456,7 @@ const removeNotification = async (notificationId) => {
                     <div className="hp-stage3-provider-note"><b>No fabricated money movement</b><p>Send Money, Add Money, Bank and UPI actions remain provider-gated. HOWDI only records success after an authorized payment provider confirms the movement.</p></div>
                   </section>}
 
-                  {hpayView==="home"&&<section className="hp-autopay"><i>❧</i><div><b>Payment provider confirmation protects your money</b><span>HPay does not invent a successful bank, UPI or wallet transfer.</span></div><button type="button" onClick={()=>setHpayView("settings")}>Account details &nbsp; →</button><em>Secure by<br/>design ♡</em></section>}
+                  {hpayView==="home"&&<section className="hp-autopay"><i aria-hidden="true">❧</i><div><b>Payment provider confirmation protects your money</b><span>HPay does not invent a successful bank, UPI or wallet transfer.</span></div><button type="button" onClick={()=>setHpayView("settings")}>Account details &nbsp; →</button><em>Secure by<br/>design ♡</em></section>}
                 </section>}
 
                 {connectView==="subscriptions" && <section className="hc160e-page">

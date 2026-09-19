@@ -12480,3 +12480,7 @@ body:has(.howdi-profile-overlay) .howdi-connect-vibe{
   .hp-stage3-tabs::-webkit-scrollbar{display:none}
   .hp-stage3-tabs button{scroll-snap-align:start;flex:0 0 auto}
 }
+
+
+/* HPAY_STAGE4A_FINAL_CORRECTION */
+.hp-stage3-row-value strong.unknown{color:#64748b}
