@@ -113,3 +113,54 @@ test('K5E closure 7: the ref secret is documented and warned about when unset',(
   assert.match(source,/HOWDI_CONNECT_REF_SECRET/);
   const env=fs.readFileSync(path.join(__dirname,'../.env.example'),'utf8');assert.match(env,/HOWDI_CONNECT_REF_SECRET=/);
 });
+
+// ---- second review ----------------------------------------------------------------------------------------------
+test('K5E closure 8: free trials are the creator\'s offer (plan.trial_days) — a subscriber cannot choose their own',()=>{
+  assert.match(source,/ALTER TABLE howdi_connect_creator_plans ADD COLUMN IF NOT EXISTS trial_days INT NOT NULL DEFAULT 0/);
+  const sub=handler('POST','creator-plans\\/\\d+\\/subscribe');
+  assert.match(sub,/plan\.trial_days/,'the trial length is read from the plan');
+  assert.doesNotMatch(sub,/Math\.min\(30,Number\(body\.trialDays\)/,'the raw client value is never the trial length');
+  assert.match(handler('POST','creator-plans\\/\\d+\\/subscribe'),/k5eBlockedPair\(uid,creator\)/,'no subscribing across a block');
+  assert.match(source,/pathname==="\/api\/connect\/creator-plans"\)\{[\s\S]{0,1800}benefits,trial_days\) VALUES/,'creators set trial_days on their plan');
+  assert.match(app,/trialDays:Number\(connectCreatorPlanTrial\)\|\|0/,'the creator form sends the offered trial');
+  assert.match(app,/<input type="text" autoCapitalize="none" value=\{connectGiftRecipientId\}/,'the gift recipient is typed as a @username');
+});
+
+test('K5E closure 9: blocks and private profiles reach the plan, resource, skill, home, profile-article and sibling profile routes',()=>{
+  const at=(needle)=>{const i=source.indexOf(needle);assert.notEqual(i,-1,needle);return source.slice(i,i+1600);};
+  assert.match(at('if(req.method==="GET"&&/^\\/api\\/connect\\/creator-plans\\/\\d+\\/?$/'),/k5eBlockedPair\(viewer,creator\)/);
+  assert.match(at('if(req.method==="GET"&&/^\\/api\\/connect\\/creator-resources\\/\\d+\\/?$/'),/k5eBlockedPair\(viewer,creator\)/);
+  assert.match(at('if(req.method==="POST"&&/^\\/api\\/connect\\/profile-skills\\/\\d+\\/endorse\\/?$/'),/k5eBlockedPair\(uid,skill\.user_id\)/);
+  const home=between('const BLOCK_FILTER_ON_AUTHOR=(col)=>','const encodeForYouCursor');
+  assert.match(home,/subscribers_only/);assert.match(home,/k5ePrivateProfileOkSql\(col/);
+  assert.match(between('await run(\'stories\'','await run(\'forYou\''),/k5ePrivateProfileOkSql\("s\.user_id"/);
+  assert.match(between('const articles=(await pool.query(`','let communities=[]'),/connectPostVisibleSql\("p","\$2::bigint"\)/,'public-profile articles');
+  for(const [needle,fn] of [['profiles\\/\\d+\\/skill-passport','passportViewer'],['profiles\\/\\d+\\/trust-trail','trailViewer'],['profiles\\/\\d+\\/public-knowledge-dna','dnaViewer']])
+    assert.match(at(`if(req.method==="GET"&&/^\\/api\\/connect\\/${needle}`),new RegExp(`k5eProfileHiddenFrom\\(${fn},target\\)`),needle);
+  const list=between('async function loadConnectFollowListResponse(','if(type==="requests")');
+  assert.match(list,/k5eBlockedPair\(viewerId,ownerId\)/);assert.match(list,/privateHidden/);
+  for(const needle of ['pathname==="/api/connect/ask-feed"','pathname==="/api/connect/city-knowledge"'])assert.match(at(needle),/k5ePrivateProfileOkSql\("r\.user_id"/,needle);
+  assert.match(source,/asks=\(await pool\.query\(`[^`]*k5ePrivateProfileOkSql\("r\.user_id","\$1::bigint"\)/,'community-intelligence asks');
+});
+
+test('K5E closure 10: every in-room action re-checks that the member can still see the room (poll, upvote, captions, invites) and the state hides blocked members',()=>{
+  assert.match(handler('POST','realtime\\/\\d+\\/poll\\/\\d+\\/vote'),/connectRoomVisibleSql\("pr"/);
+  assert.match(handler('POST','realtime\\/\\d+\\/questions\\/\\d+\\/upvote'),/connectRoomVisibleSql\("qr"/);
+  assert.match(handler('POST','realtime\\/\\d+\\/captions'),/k5eActiveRoomMember\(cid,uid\)/);
+  assert.match(handler('POST','realtime\\/\\d+\\/cohost-invites\\/\\d+\\/respond'),/connectRoomVisibleToViewer\(cid,uid\)/);
+  assert.match(handler('PATCH','live\\/costream-invites\\/\\d+\\/respond'),/connectRoomVisibleSql\("cr"/);
+  const state=handler('GET','realtime\\/\\d+\\/state');
+  for(const f of ['participants','chat','questions','captions','reactions'])assert.match(state,new RegExp(`${f}:(?:modOnly\\()?${f}(?:,\\[\\]\\))?\\.filter\\(seen\\)`),f);
+  assert.match(source,/FROM howdi_connect_social_messages m JOIN users u ON u\.id=m\.sender_user_id[^`]*K5E_BLOCKED_BETWEEN_SQL\("\$2::bigint","m\.sender_user_id"\)/,'group/channel messages hide blocked senders');
+});
+
+test('K5E closure 11: calls — no shared-group contact bypass, inbox/accept respect blocks, a ringing invitee cannot end a group call; follow requests and story replies',()=>{
+  const create=between('if(req.method==="POST"&&pathname==="/api/connect/calls"){','if(req.method==="GET"&&pathname==="/api/connect/calls/inbox"');
+  assert.match(create,/for\(const inv of invitees\)\{\s*if\(!\(await connectCanContact\(callerId,inv\)\)\)/);
+  assert.doesNotMatch(create,/sharedGroup/,'no group exemption');
+  assert.match(between('if(req.method==="GET"&&pathname==="/api/connect/calls/inbox"','if(req.method==="PATCH"&&/^\\/api\\/connect\\/calls'),/K5E_BLOCKED_BETWEEN_SQL\("\$1::bigint","c\.caller_user_id"\)/);
+  assert.match(handler('PATCH','calls\\/\\d+\\/respond'),/NOT \$4::boolean OR NOT \$\{K5E_BLOCKED_BETWEEN_SQL\("\$2::bigint","c\.caller_user_id"\)\}/,'accepting across a block is refused; declining is not');
+  assert.match(handler('POST','calls\\/\\d+\\/leave'),/leftRow\.participant_role==='HOST'\|\|ringingLeft===0/);
+  assert.match(source,/alreadyPending/,'a pending follow request is not re-notified');
+  assert.match(handler('POST','stories\\/\\d+\\/reply'),/connectCanContact\(Number\(sessionUser\.id\),Number\(owner\.user_id\)\)/);
+});
