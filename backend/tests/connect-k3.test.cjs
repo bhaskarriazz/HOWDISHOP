@@ -29,6 +29,7 @@ async function run(method,path,body={},options={}){
   else if(sql.startsWith('UPDATE howdi_community_posts')){Object.assign(db.article,{article_cover_url:params[4],article_cover_data:params[5]});rows=[db.article];}
   else if(sql.includes('SELECT * FROM howdi_connect_social_spaces'))rows=[{id:7,space_type:db.spaceType,privacy:options.privacy||'PUBLIC',owner_user_id:303}];
   else if(sql.includes('SELECT role,status FROM howdi_connect_social_space_members'))rows=options.notAMember?[]:[{role:options.role||'ADMIN',status:options.membershipStatus||'ACTIVE'}];
+  else if(sql.startsWith('SELECT m.role,m.status,m.joined_at'))rows=options.members||[{role:'OWNER',status:'ACTIVE',joined_at:new Date().toISOString(),is_self:true,full_name:'Session A',public_username:'session_a',profile_image:''}];
   else if(sql.includes('FROM howdi_connect_social_invite_links i'))rows=[{id:9,space_id:7,space_type:db.spaceType,requires_approval:false}];
   else if(sql.startsWith('INSERT INTO howdi_connect_social_invite_links'))rows=[{id:9,space_id:params[0],created_by:params[1],token:params[2],label:params[3],max_uses:params[5],requires_approval:params[6]}];
   else if(sql.startsWith('UPDATE howdi_connect_social_invite_links SET revoked_at'))rows=options.inviteFound===false?[]:[{id:params[0]}];
@@ -1021,6 +1022,25 @@ test('Groups/Channels list route ignores a spoofed ?userId, derives viewer from 
  assert.equal(Object.prototype.hasOwnProperty.call(r.data.spaces[0],'owner_user_id'),false);
 });
 
+test('Group/Channel members list never returns the raw numeric m.user_id — public_username plus a viewer-relative is_self flag replace it',async()=>{
+ const r=await run('GET','/api/connect/groups-channels/7/members',{},{members:[
+  {role:'OWNER',status:'ACTIVE',joined_at:new Date().toISOString(),is_self:true,full_name:'Session A',public_username:'session_a',profile_image:''},
+  {role:'MEMBER',status:'ACTIVE',joined_at:new Date().toISOString(),is_self:false,full_name:'Bob',public_username:'bob',profile_image:''},
+ ]});
+ assert.equal(r.status,200);
+ assert.equal(r.data.members.length,2);
+ for(const m of r.data.members){
+  assert.equal(Object.prototype.hasOwnProperty.call(m,'user_id'),false,'members list must not expose a raw numeric user id');
+  assert.ok(m.public_username,'each member row must carry public_username');
+ }
+ assert.equal(r.data.members[0].is_self,true);
+ assert.equal(r.data.members[1].is_self,false);
+ const call=r.calls.find(c=>c.sql.startsWith('SELECT m.role,m.status,m.joined_at'));
+ assert.ok(call);
+ assert.doesNotMatch(call.sql.split(' FROM ')[0],/m\.user_id\s*,|,\s*m\.user_id\s*$/,'SELECT list must not project the raw numeric m.user_id as a column (using it inside a computed is_self boolean is fine)');
+ assert.equal(Number(call.params[1]),101,'is_self must be computed against the session user (101)');
+});
+
 test('Invite-link creation forces requires_approval=true server-side for a PRIVATE space even when the client sends requiresApproval:false (closes the private-space bypass)',async()=>{
  const r=await run('POST','/api/connect/groups-channels/7/invite-links',{requiresApproval:false},{privacy:'PRIVATE'});
  assert.equal(r.status,201);
@@ -1091,12 +1111,15 @@ async function runK5CCall(routeSrc,method,path,options={}){
   if(sql.startsWith('SELECT c.id,c.call_code'))return {rows:options.inbox||[],rowCount:(options.inbox||[]).length};
   if(sql.startsWith('UPDATE howdi_connect_call_participants SET invite_status=$3'))return {rows:options.inviteFound===false?[]:[{call_id:55,user_id:params[1]}],rowCount:options.inviteFound===false?0:1};
   if(sql.startsWith('UPDATE howdi_connect_calls SET status=\'ACTIVE\''))return {rows:[],rowCount:0};
+  // K5C CORRECTION: signal target resolution — the browser sends an opaque toToken, the
+  // route looks up the real user_id scoped to this call.
+  if(sql.startsWith('SELECT user_id FROM howdi_connect_call_participants WHERE call_id=$1 AND participant_token=$2'))return options.unknownToken?{rows:[],rowCount:0}:{rows:[{user_id:options.toUserId??202}],rowCount:1};
   if(sql.startsWith('SELECT 1 FROM howdi_connect_call_participants'))return {rows:options.notAParticipant?[]:[{exists:1}],rowCount:options.notAParticipant?0:1};
-  if(sql.startsWith('SELECT id,call_code,call_type,status,caller_user_id'))return {rows:options.callFound===false?[]:[{id:55,call_code:'HCALL-X',call_type:'VOICE',status:'ACTIVE',caller_user_id:101}],rowCount:1};
-  if(sql.startsWith('SELECT p.user_id,p.participant_role'))return {rows:options.participants||[{user_id:101,participant_role:'HOST',invite_status:'JOINED'}],rowCount:1};
+  if(sql.startsWith('SELECT id,call_code,call_type,status,caller_user_id'))return {rows:options.callFound===false?[]:[{id:55,call_code:'HCALL-X',call_type:'VOICE',status:'ACTIVE',caller_user_id:options.callerUserId??101}],rowCount:1};
+  if(sql.startsWith('SELECT p.participant_token'))return {rows:options.participants||[{token:'tok-host',participant_role:'HOST',invite_status:'JOINED',is_viewer:true}],rowCount:1};
   if(sql.startsWith('SELECT COUNT(*)::int n FROM howdi_connect_call_participants WHERE call_id=$1 AND user_id=ANY'))return {rows:[{n:options.participantPairCount??2}],rowCount:1};
   if(sql.startsWith('INSERT INTO howdi_connect_call_signals'))return {rows:[{id:1,created_at:new Date().toISOString()}],rowCount:1};
-  if(sql.startsWith('SELECT id,from_user_id,to_user_id,signal_type'))return {rows:options.signals||[],rowCount:(options.signals||[]).length};
+  if(sql.startsWith('SELECT s.id,cp.participant_token'))return {rows:options.signals||[],rowCount:(options.signals||[]).length};
   if(sql.startsWith('UPDATE howdi_connect_call_participants SET invite_status=\'LEFT\''))return {rows:[],rowCount:0};
   if(sql.startsWith('SELECT COUNT(*)::int n FROM howdi_connect_call_participants WHERE call_id=$1 AND invite_status=\'JOINED\''))return {rows:[{n:options.stillActive??0}],rowCount:1};
   if(sql.startsWith('UPDATE howdi_connect_calls SET status=\'ENDED\''))return {rows:[],rowCount:0};
@@ -1107,22 +1130,28 @@ async function runK5CCall(routeSrc,method,path,options={}){
  const req=new Readable({read(){}});req.push(JSON.stringify(options.body||{}));req.push(null);
  req.method=method;req.headers=options.anonymous?{}:{authorization:'Bearer session-A'};
  const url=new URL('http://localhost'+path);
- const context={pool,req,res:{},url,pathname:path.split('?')[0],URL,Buffer,clean:x=>String(x??'').trim(),sendJSON:(_res,status,data)=>({status,data}),console:{error:()=>{}}};
+ const context={pool,req,res:{},url,pathname:path.split('?')[0],URL,Buffer,crypto:require('node:crypto'),clean:x=>String(x??'').trim(),sendJSON:(_res,status,data)=>({status,data}),console:{error:()=>{}}};
  const src=`${helpers}\n(async()=>{${routeSrc}})()`;
  const response=await vm.runInNewContext(src,context);
  assert.ok(response,'Route must respond');
  return {...response,calls};
 }
+function noRawCallIds(value){assert.doesNotMatch(JSON.stringify(value),/"user_id"|"caller_user_id"|"from_user_id"|"to_user_id"/);}
 
-test('POST /api/connect/calls requires a session (401) and ignores a spoofed body.userId, using the session as caller',async()=>{
+test('POST /api/connect/calls requires a session (401), ignores a spoofed body.userId (session is the caller), and never returns a raw caller id — only is_caller/my_token',async()=>{
  const anon=await runK5CCall(callsCreateRoute,'POST','/api/connect/calls',{anonymous:true,body:{userId:999,callType:'VOICE',inviteeUsernames:['bob']}});
  assert.equal(anon.status,401);
  assert.equal(anon.calls.filter(c=>c.sql.startsWith('INSERT INTO howdi_connect_calls')).length,0);
  const r=await runK5CCall(callsCreateRoute,'POST','/api/connect/calls',{body:{userId:999,callType:'VOICE',inviteeUsernames:['bob']},usernames:['bob'],inviteeIds:[202]});
  assert.equal(r.status,201);
- assert.equal(r.data.call.caller_user_id,101,'caller must be the session user (101), never the spoofed body.userId=999');
+ noRawCallIds(r.data);
+ assert.equal(r.data.call.is_caller,true);
+ assert.equal(typeof r.data.call.my_token,'string');
+ assert.ok(r.data.call.my_token.length>0);
  const ins=r.calls.find(c=>c.sql.startsWith('INSERT INTO howdi_connect_calls'));
- assert.equal(Number(ins.params[2]),101);
+ assert.equal(Number(ins.params[2]),101,'caller must be the session user (101), never the spoofed body.userId=999');
+ const hostParticipant=r.calls.find(c=>c.sql.startsWith('INSERT INTO howdi_connect_call_participants')&&c.sql.includes("'HOST'"));
+ assert.equal(hostParticipant.params[2],r.data.call.my_token,'my_token returned to the caller must be the exact token stored for their own participant row');
 });
 
 test('POST /api/connect/calls is blocked (403) when caller and invitee have a bidirectional block',async()=>{
@@ -1131,13 +1160,15 @@ test('POST /api/connect/calls is blocked (403) when caller and invitee have a bi
  assert.equal(r.calls.filter(c=>c.sql.startsWith('INSERT INTO howdi_connect_calls')).length,0);
 });
 
-test('GET /api/connect/calls/inbox requires a session (401) and ignores a spoofed ?userId, scoping to the session user',async()=>{
+test('GET /api/connect/calls/inbox requires a session (401), ignores a spoofed ?userId, scopes to the session user, and never returns a raw caller id',async()=>{
  const anon=await runK5CCall(callsInboxRoute,'GET','/api/connect/calls/inbox?userId=999',{anonymous:true});
  assert.equal(anon.status,401);
- const r=await runK5CCall(callsInboxRoute,'GET','/api/connect/calls/inbox?userId=999');
+ const r=await runK5CCall(callsInboxRoute,'GET','/api/connect/calls/inbox?userId=999',{inbox:[{id:1,call_code:'HCALL-X',call_type:'VOICE',status:'RINGING',full_name:'Bob',public_username:'bob',profile_image:'',participant_count:2}]});
  assert.equal(r.status,200);
  const call=r.calls.find(c=>c.sql.startsWith('SELECT c.id,c.call_code'));
  assert.equal(Number(call.params[0]),101,'must scope to the session user (101), not the spoofed ?userId=999');
+ assert.doesNotMatch(call.sql.split(' FROM ')[0],/\bc\.caller_user_id\b/,'SELECT list must not project the raw numeric caller id');
+ noRawCallIds(r.data);
 });
 
 test('PATCH /api/connect/calls/:id/respond requires a session (401) and ignores a spoofed body.userId, acting as the session user',async()=>{
@@ -1149,39 +1180,58 @@ test('PATCH /api/connect/calls/:id/respond requires a session (401) and ignores 
  assert.equal(Number(upd.params[1]),101,'must respond as the session user (101), not the spoofed body.userId=999');
 });
 
-test('GET /api/connect/calls/:id/state requires a session (401) and ignores a spoofed ?userId for the membership/participant check',async()=>{
+test('GET /api/connect/calls/:id/state requires a session (401), ignores a spoofed ?userId for the membership check, and returns is_caller/participant tokens instead of any raw numeric id',async()=>{
  const anon=await runK5CCall(callsStateRoute,'GET','/api/connect/calls/55/state?userId=999',{anonymous:true});
  assert.equal(anon.status,401);
  const notMine=await runK5CCall(callsStateRoute,'GET','/api/connect/calls/55/state?userId=999',{notAParticipant:true});
  assert.equal(notMine.status,403,'the spoofed ?userId=999 must not be used to satisfy the participant check');
- const r=await runK5CCall(callsStateRoute,'GET','/api/connect/calls/55/state?userId=999');
+ const r=await runK5CCall(callsStateRoute,'GET','/api/connect/calls/55/state?userId=999',{callerUserId:101,participants:[
+  {token:'tok-host',participant_role:'HOST',invite_status:'JOINED',is_viewer:true,full_name:'Session A',public_username:'session_a'},
+  {token:'tok-bob',participant_role:'MEMBER',invite_status:'JOINED',is_viewer:false,full_name:'Bob',public_username:'bob'},
+ ]});
  assert.equal(r.status,200);
  const member=r.calls.find(c=>c.sql.startsWith('SELECT 1 FROM howdi_connect_call_participants'));
  assert.equal(Number(member.params[1]),101,'must check participation for the session user (101), not the spoofed ?userId=999');
+ assert.equal(r.data.call.is_caller,true,'session user (101) is the caller (101) so is_caller must be true');
+ assert.equal(Object.prototype.hasOwnProperty.call(r.data.call,'caller_user_id'),false);
+ assert.equal(r.data.participants.find(p=>p.is_viewer).token,'tok-host');
+ noRawCallIds(r.data);
 });
 
-test('POST /api/connect/calls/:id/signal requires a session (401) and forces the "from" side to the session user, ignoring a spoofed body.userId (previously anyone could inject a signal claiming to be another participant)',async()=>{
- const anon=await runK5CCall(callsSignalRoute,'POST','/api/connect/calls/55/signal',{anonymous:true,body:{userId:999,toUserId:202,signalType:'OFFER',payload:{}}});
+test('POST /api/connect/calls/:id/signal requires a session (401), forces the "from" side to the session user (ignoring a spoofed body.userId), and resolves the target from an opaque toToken instead of a raw toUserId',async()=>{
+ const anon=await runK5CCall(callsSignalRoute,'POST','/api/connect/calls/55/signal',{anonymous:true,body:{userId:999,toToken:'tok-bob',signalType:'OFFER',payload:{}}});
  assert.equal(anon.status,401);
- const r=await runK5CCall(callsSignalRoute,'POST','/api/connect/calls/55/signal',{body:{userId:999,toUserId:202,signalType:'OFFER',payload:{}}});
+ const r=await runK5CCall(callsSignalRoute,'POST','/api/connect/calls/55/signal',{body:{userId:999,toToken:'tok-bob',signalType:'OFFER',payload:{}},toUserId:202});
  assert.equal(r.status,201);
+ const target=r.calls.find(c=>c.sql.startsWith('SELECT user_id FROM howdi_connect_call_participants WHERE call_id=$1 AND participant_token=$2'));
+ assert.equal(target.params[1],'tok-bob');
  const ins=r.calls.find(c=>c.sql.startsWith('INSERT INTO howdi_connect_call_signals'));
  assert.equal(Number(ins.params[1]),101,'the from_user_id must be the session user (101), never the spoofed body.userId=999');
- assert.equal(Number(ins.params[2]),202);
+ assert.equal(Number(ins.params[2]),202,'the to_user_id must be resolved from the toToken, not trusted directly');
+ noRawCallIds(r.data);
 });
 
-test('POST /api/connect/calls/:id/signal rejects when the (session, target) pair are not both call participants',async()=>{
- const r=await runK5CCall(callsSignalRoute,'POST','/api/connect/calls/55/signal',{body:{toUserId:202,signalType:'OFFER',payload:{}},participantPairCount:1});
+test('POST /api/connect/calls/:id/signal rejects an unknown/invalid toToken (400) before ever touching the signals table',async()=>{
+ const r=await runK5CCall(callsSignalRoute,'POST','/api/connect/calls/55/signal',{body:{toToken:'not-a-real-token',signalType:'OFFER',payload:{}},unknownToken:true});
+ assert.equal(r.status,400);
+ assert.equal(r.calls.filter(c=>c.sql.startsWith('INSERT INTO howdi_connect_call_signals')).length,0);
+});
+
+test('POST /api/connect/calls/:id/signal rejects when the (session, resolved target) pair are not both call participants',async()=>{
+ const r=await runK5CCall(callsSignalRoute,'POST','/api/connect/calls/55/signal',{body:{toToken:'tok-bob',signalType:'OFFER',payload:{}},toUserId:202,participantPairCount:1});
  assert.equal(r.status,403);
 });
 
-test('GET /api/connect/calls/:id/signals requires a session (401) and ignores a spoofed ?userId — previously a client could read another participant\'s inbound signaling traffic by passing a different userId',async()=>{
+test('GET /api/connect/calls/:id/signals requires a session (401), ignores a spoofed ?userId, and returns from_token instead of from_user_id/to_user_id — previously a client could read another participant\'s inbound signaling traffic by passing a different userId, and the raw sender/recipient ids were both exposed',async()=>{
  const anon=await runK5CCall(callsSignalsRoute,'GET','/api/connect/calls/55/signals?userId=999',{anonymous:true});
  assert.equal(anon.status,401);
- const r=await runK5CCall(callsSignalsRoute,'GET','/api/connect/calls/55/signals?userId=999&after=0');
+ const r=await runK5CCall(callsSignalsRoute,'GET','/api/connect/calls/55/signals?userId=999&after=0',{signals:[{id:2,from_token:'tok-bob',signal_type:'OFFER',payload:{},created_at:new Date().toISOString()}]});
  assert.equal(r.status,200);
- const call=r.calls.find(c=>c.sql.startsWith('SELECT id,from_user_id,to_user_id,signal_type'));
+ const call=r.calls.find(c=>c.sql.startsWith('SELECT s.id,cp.participant_token'));
  assert.equal(Number(call.params[1]),101,'must fetch signals addressed to the session user (101), not the spoofed ?userId=999');
+ assert.doesNotMatch(call.sql.split(' FROM ')[0],/\bs\.from_user_id\b|\bs\.to_user_id\b/,'SELECT list must not project the raw numeric from/to ids (using them in the JOIN/WHERE to scope the query is fine)');
+ assert.equal(r.data.signals[0].from_token,'tok-bob');
+ noRawCallIds(r.data);
 });
 
 test('POST /api/connect/calls/:id/leave requires a session (401) and ignores a spoofed body.userId — previously any caller could force another participant to be marked as having left',async()=>{
