@@ -43,6 +43,8 @@ async function run(method,path,body={},options={}){
   else if(sql.startsWith('INSERT INTO howdi_community_reactions'))rows=[{post_id:7}];
   else if(sql.startsWith('INSERT INTO howdi_community_comments'))rows=[{id:7}];
   else if(sql.startsWith('INSERT INTO howdi_connect_post_saves'))rows=[{post_id:7}];
+  else if(sql.startsWith('SELECT 1 FROM users WHERE id'))rows=[{exists:1}];
+  else if(sql.startsWith('SELECT 1 FROM howdi_community_posts p WHERE p.id'))rows=[{exists:1}];
   else if(sql.startsWith('SELECT 1 FROM howdi_connect_profile_blocks'))rows=options.blocked?[{exists:1}]:[];
   else if(sql.startsWith('SELECT 1 FROM howdi_connect_follows WHERE follower_user_id'))rows=options.alreadyFollowing?[{exists:1}]:[];
   else if(sql.startsWith('SELECT private_profile FROM howdi_connect_profiles'))rows=[{private_profile:Boolean(options.privateTarget)}];
@@ -515,6 +517,7 @@ const blockNumericRoute=block('            if(req.method==="POST"&&/^\\/api\\/co
 const blockUsernameRoute=block('            if(req.method==="POST"&&/^\\/api\\/connect\\/profile\\/username\\/[^\\/?]+\\/block\\/?$/.test(pathname)){');
 const closeFriendNumericRoute=block('            if(req.method==="POST"&&/^\\/api\\/connect\\/profiles\\/\\d+\\/close-friend\\/?$/.test(pathname)){');
 const closeFriendUsernameRoute=block('            if(req.method==="POST"&&/^\\/api\\/connect\\/profile\\/username\\/[^\\/?]+\\/close-friend\\/?$/.test(pathname)){');
+const k5eBlockSrc=between('    // =====================================================================================\n    // K5E — HOWDI CONNECT IDENTITY GUARD','    function adminTokenHash(');
 const loadConnectPublicProfileResponseSrc=between('            async function loadConnectPublicProfileResponse(res,target,viewer){','            if(req.method==="GET"&&/^\\/api\\/connect\\/public-profile\\/\\d+\\/?$/.test(pathname)){');
 
 // `helpers` (defined above for the K3 harness) already contains, as safe function
@@ -537,6 +540,8 @@ async function runK5B(routeSrc,method,path,options={}){
   }
   if(sql.startsWith('SELECT private_profile,follower_list_visibility FROM howdi_connect_profiles'))return {rows:[{private_profile:Boolean(options.ownerPrivate),follower_list_visibility:options.followerListVisibility||'EVERYONE'}],rowCount:1};
   if(sql.startsWith('SELECT 1 FROM howdi_connect_follows WHERE follower_user_id'))return {rows:options.viewerFollowsOwner?[{exists:1}]:[],rowCount:0};
+  if(sql.startsWith('SELECT 1 FROM users WHERE id'))return {rows:[{exists:1}],rowCount:1};
+  if(sql.startsWith('DELETE FROM howdi_connect_follow_requests'))return {rows:[],rowCount:0};
   if(sql.startsWith('SELECT 1 FROM howdi_connect_profile_blocks'))return {rows:options.blocked?[{exists:1}]:[],rowCount:0};
   if(sql.startsWith('UPDATE howdi_connect_follow_requests'))return {rows:options.requestFound?[{requester_user_id:params[0],target_user_id:params[1],status:params[2]}]:[],rowCount:options.requestFound?1:0};
   if(sql.startsWith('INSERT INTO howdi_connect_follows'))return {rows:[{follower_user_id:params[0],following_user_id:params[1]}],rowCount:1};
@@ -803,7 +808,7 @@ async function runPublicProfile(target,viewer,options={}){
  const calls=[];
  const query=async(sql,params=[])=>{
   sql=sql.replace(/\s+/g,' ').trim();calls.push({sql,params});
-  if(sql.startsWith('SELECT cp.*,u.full_name'))return {rows:[options.profileRow||{user_id:target,full_name:'Alice Maker',public_username:'crafty_alice',profile_image:'',private_profile:Boolean(options.privateProfile),viewer_following:Boolean(options.viewerFollowing),follower_count:5,following_count:3,follower_list_visibility:'EVERYONE',contact_permission:'EVERYONE'}],rowCount:1};
+  if(sql.startsWith('SELECT cp.headline')&&sql.includes(',u.full_name'))return {rows:[options.profileRow||{user_id:target,full_name:'Alice Maker',public_username:'crafty_alice',profile_image:'',private_profile:Boolean(options.privateProfile),viewer_following:Boolean(options.viewerFollowing),follower_count:5,following_count:3,follower_list_visibility:'EVERYONE',contact_permission:'EVERYONE'}],rowCount:1};
   if(sql.startsWith('SELECT 1 FROM howdi_connect_profile_blocks'))return {rows:options.blocked?[{exists:1}]:[],rowCount:0};
   if(sql.startsWith('SELECT 1 FROM howdi_connect_follows WHERE follower_user_id'))return {rows:options.viewerFollowing?[{exists:1}]:[],rowCount:0};
   if(sql.startsWith('INSERT INTO howdi_connect_profile_visits'))return {rows:[],rowCount:0};
@@ -814,8 +819,8 @@ async function runPublicProfile(target,viewer,options={}){
   return {rows:[],rowCount:0};
  };
  const pool={query};
- const context={pool,sendJSON:(_res,status,data)=>({status,data}),console:{error:()=>{}}};
- const src=`${loadConnectPublicProfileResponseSrc}\nloadConnectPublicProfileResponse({},${target},${viewer})`;
+ const context={pool,sendJSON:(_res,status,data)=>({status,data}),console:{error:()=>{}},crypto:require('node:crypto'),process,Buffer,URL,clean:x=>String(x??'').trim()};
+ const src=`${k5eBlockSrc}\n${loadConnectPublicProfileResponseSrc}\nloadConnectPublicProfileResponse({},${target},${viewer})`;
  const response=await vm.runInNewContext(src,context);
  assert.ok(response,'Route must respond');
  return {...response,calls};
@@ -1109,7 +1114,7 @@ async function runK5CCall(routeSrc,method,path,options={}){
   if(sql.startsWith('INSERT INTO howdi_connect_calls'))return {rows:[{id:55,call_code:'HCALL-X',call_type:params[1],status:'RINGING'}],rowCount:1};
   if(sql.startsWith('INSERT INTO howdi_connect_call_participants'))return {rows:[],rowCount:0};
   if(sql.startsWith('SELECT c.id,c.call_code'))return {rows:options.inbox||[],rowCount:(options.inbox||[]).length};
-  if(sql.startsWith('UPDATE howdi_connect_call_participants SET invite_status=$3'))return {rows:options.inviteFound===false?[]:[{call_id:55,user_id:params[1]}],rowCount:options.inviteFound===false?0:1};
+  if(sql.startsWith('UPDATE howdi_connect_call_participants cp SET invite_status=$3'))return {rows:options.inviteFound===false?[]:[{call_id:55,user_id:params[1]}],rowCount:options.inviteFound===false?0:1};
   if(sql.startsWith('UPDATE howdi_connect_calls SET status=\'ACTIVE\''))return {rows:[],rowCount:0};
   // K5C CORRECTION: signal target resolution — the browser sends an opaque toToken, the
   // route looks up the real user_id scoped to this call.
@@ -1117,7 +1122,7 @@ async function runK5CCall(routeSrc,method,path,options={}){
   if(sql.startsWith('SELECT 1 FROM howdi_connect_call_participants'))return {rows:options.notAParticipant?[]:[{exists:1}],rowCount:options.notAParticipant?0:1};
   if(sql.startsWith('SELECT id,call_code,call_type,status,caller_user_id'))return {rows:options.callFound===false?[]:[{id:55,call_code:'HCALL-X',call_type:'VOICE',status:'ACTIVE',caller_user_id:options.callerUserId??101}],rowCount:1};
   if(sql.startsWith('SELECT p.participant_token'))return {rows:options.participants||[{token:'tok-host',participant_role:'HOST',invite_status:'JOINED',is_viewer:true}],rowCount:1};
-  if(sql.startsWith('SELECT COUNT(*)::int n FROM howdi_connect_call_participants WHERE call_id=$1 AND user_id=ANY'))return {rows:[{n:options.participantPairCount??2}],rowCount:1};
+  if(sql.startsWith('SELECT COUNT(*)::int n FROM howdi_connect_call_participants p JOIN howdi_connect_calls c ON c.id=p.call_id WHERE p.call_id=$1 AND p.user_id=ANY'))return {rows:[{n:options.participantPairCount??2}],rowCount:1};
   if(sql.startsWith('INSERT INTO howdi_connect_call_signals'))return {rows:[{id:1,created_at:new Date().toISOString()}],rowCount:1};
   if(sql.startsWith('SELECT s.id,cp.participant_token'))return {rows:options.signals||[],rowCount:(options.signals||[]).length};
   if(sql.startsWith('UPDATE howdi_connect_call_participants SET invite_status=\'LEFT\''))return {rows:[],rowCount:0};
@@ -1176,7 +1181,7 @@ test('PATCH /api/connect/calls/:id/respond requires a session (401) and ignores 
  assert.equal(anon.status,401);
  const r=await runK5CCall(callsRespondRoute,'PATCH','/api/connect/calls/55/respond',{body:{userId:999,accept:true}});
  assert.equal(r.status,200);
- const upd=r.calls.find(c=>c.sql.startsWith('UPDATE howdi_connect_call_participants SET invite_status=$3'));
+ const upd=r.calls.find(c=>c.sql.startsWith('UPDATE howdi_connect_call_participants cp SET invite_status=$3'));
  assert.equal(Number(upd.params[1]),101,'must respond as the session user (101), not the spoofed body.userId=999');
 });
 

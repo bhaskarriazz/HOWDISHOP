@@ -312,13 +312,15 @@ test('unread count and read state stay consistent across list, unread-count, mar
 });
 
 // ---------------------------------------------------------------- 7. bootstrap count guard
-test('GET /api/connect/bootstrap only reveals the notification count to the authenticated owner',async()=>{
+test('GET /api/connect/bootstrap derives the viewer only from the session (K5E: ?userId is ignored)',async()=>{
   const boot=(userId,opts)=>get(`/api/connect/bootstrap?userId=${userId}`,{...opts,route_src:bootstrapRoute});
   const own=await boot(A,{});assert.equal(own.status,200,JSON.stringify(own.data));assert.equal(own.data.unread_notifications,2);
-  const spoof=await boot(A,{token:'session-B'});assert.equal(spoof.status,200);assert.equal(spoof.data.unread_notifications,0,"another user's count must not be revealed");
+  const dbB=seed();dbB.notifications.find(n=>n.id===9005).is_read=true; // B has 1 unread, A has 2
+  const spoof=await boot(A,{token:'session-B',db:dbB});assert.equal(spoof.status,200);assert.equal(spoof.data.unread_notifications,1,"a spoofed ?userId=A on B's session yields B's own count, never A's");
+  assert.equal(JSON.stringify(notifSql(spoof.calls).filter(c=>c.sql.startsWith('SELECT COUNT')).map(c=>c.params)),JSON.stringify([[B]]),'the count query only ever runs for the session user');
   const anon=await boot(A,{anonymous:true});assert.equal(anon.data.unread_notifications,0);
   const bad=await boot(A,{token:'not-a-real-session'});assert.equal(bad.data.unread_notifications,0);
-  assert.equal(notifSql(spoof.calls).filter(c=>c.sql.startsWith('SELECT COUNT')).length,0,'count query is not even run for a non-owner');
+  assert.equal(notifSql(anon.calls).filter(c=>c.sql.startsWith('SELECT COUNT')).length,0,'no count query for a guest');
 });
 
 // ---------------------------------------------------------------- 8. preserved behaviour
