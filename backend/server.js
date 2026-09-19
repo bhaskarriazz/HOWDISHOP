@@ -20553,11 +20553,48 @@ async function ensureVibeReleaseReadinessV140LSchema(){
       return res;
     }
 
+    // Shop S2 — deny-by-default guard for the V16.2A-D "Shop packs" (/api/shop/v162*).
+    // Those routes trusted client-supplied user ids, had no authentication, wrote to tables keyed by UUID user ids the
+    // session cannot satisfy, and no HOWDI UI calls them. One of them (product moderation) is also the source of the
+    // catalogue visibility gate, so it must never be publicly writable. Only public reads and admin-token routes stay.
+    const SHOP_V162_PUBLIC_READS=[
+      /^\/api\/shop\/v162[abcd]\/capabilities\/?$/,
+      /^\/api\/shop\/v162d\/merchandising\/[^/]+\/?$/,
+      /^\/api\/shop\/v162a\/products\/[^/]+\/questions\/?$/
+    ];
+    const SHOP_V162_ADMIN_ROUTES=[
+      {method:"POST",re:/^\/api\/shop\/v162c\/products\/[^/]+\/moderation\/?$/},
+      {method:"GET",re:/^\/api\/shop\/v162d\/admin\/queues\/?$/}
+    ];
+    const SHOP_V162_SUPERSEDED_READS=/^\/api\/shop\/v162a\/(discover|home)\/?$/;
+    async function shopV162GuardR2(req,pathname){
+      if(!/^\/api\/shop\/v162[a-z]?\//.test(pathname))return null;
+      if(req.method==="GET"&&SHOP_V162_SUPERSEDED_READS.test(pathname)){
+        return {status:410,body:{ok:false,error:"This endpoint has been replaced by /api/shop/catalogue/products"}};
+      }
+      if(req.method==="GET"&&SHOP_V162_PUBLIC_READS.some(re=>re.test(pathname)))return null;
+      if(SHOP_V162_ADMIN_ROUTES.some(r=>r.method===req.method&&r.re.test(pathname))){
+        let session=null;
+        try{session=await getAdminSessionFromRequest(req);}catch(e){session=null;}
+        if(!session)return {status:401,body:{ok:false,error:"Admin sign-in required"}};
+        req.adminSession=session;
+        return null;
+      }
+      return {status:403,body:{ok:false,error:"This endpoint is retired. Use the authenticated HOWDI Shop APIs."}};
+    }
+
     async function howdiDispatchAppRouteR2(req,res){
       const u=new URL(req.url,"http://localhost");
       const pathname=u.pathname;
       const route=howdiAppRoutesR2.find(r=>r.method===req.method && r.regex.test(pathname));
       if(!route) return false;
+
+      const denied=await shopV162GuardR2(req,pathname);
+      if(denied){
+        howdiEnhanceResponseR2(res);
+        res.status(denied.status).json(denied.body);
+        return true;
+      }
 
       const match=pathname.match(route.regex);
       req.params={};
@@ -28630,6 +28667,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
         const add = (v) => { params.push(v); return `$${params.length}`; };
         const where = [];
         if (opts.id) where.push(`p.id=${add(opts.id)}`);
+        if (Array.isArray(opts.ids)) where.push(`p.id=ANY(${add(opts.ids.map(String))}::bigint[])`);
         if (opts.relatedCategory || opts.relatedCreator) {
           const ors = [];
           if (opts.relatedCategory) ors.push(`LOWER(p.category)=${add(String(opts.relatedCategory).toLowerCase())}`);
@@ -28694,7 +28732,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
     function shopS1Model(row, variantRows) {
       const variants = (variantRows || []).map((v) => ({
         id: String(v.id), colour: shopS1Text(v.colour, 120), size: shopS1Text(v.size_value, 120),
-        mrp: shopS1Money(v.mrp), price: shopS1Money(v.price), stock: Math.max(0, shopS1Int(v.stock)),
+        // A variant without its own price inherits the product price (never a free item).
+        mrp: shopS1Money(v.mrp), price: shopS1Money(v.price) > 0 ? shopS1Money(v.price) : shopS1Money(row.price), stock: Math.max(0, shopS1Int(v.stock)),
         threshold: Math.max(0, shopS1Int(v.low_stock_threshold)) || 5,
         images: (Array.isArray(v.image_urls) ? v.image_urls : []).map(shopS1Url).filter(Boolean),
         active: String(v.status || "active").toLowerCase() === "active"
@@ -28996,6 +29035,213 @@ async function ensureVibeReleaseReadinessV140LSchema(){
       } catch (error) {
         console.error("❌ Shop catalogue detail error:", error);
         return sendJSON(res, 500, { status: "error", message: "Unable to load product" });
+      }
+    }
+
+
+    // =====================================================
+    // HOWDI SHOP S2 — PRODUCT ACTIONS & PURCHASE-PATH INTEGRITY
+    //  - One purchase resolver (shopS2Resolve) is the single source of truth for "can this product/variant be
+    //    bought, in what quantity, at what price". The catalogue, cart validation, pricing-quote and order
+    //    creation all use it, so a shopper is never shown a price/availability that checkout will not honour.
+    //  - Same visibility gate as S1 (published, not archived, released, active vendor, not moderated away).
+    //  - Variant rows present => a variant MUST be chosen; only active variants count; parent stock is never used.
+    //  - Wishlist is session-authoritative: the actor is the session user, the client sends nothing but a product
+    //    id, and only the product id is stored. Responses are S1 catalogue cards (no user/vendor ids).
+    //  - Cart stays client-side (localStorage); POST /api/shop/cart/validate returns live status + purchase price.
+    // =====================================================
+    const SHOP_S2_MAX_WISHLIST = 200;
+    const SHOP_S2_MAX_CART_LINES = 30;
+    const SHOP_S2_MAX_QTY = 99;
+    const SHOP_S2_ID = /^\d{1,18}$/;
+
+    async function shopS2ModerationSql(db) {
+      // to_regclass never raises, so a missing moderation table cannot abort an open order transaction.
+      const r = await db.query(`SELECT to_regclass('howdi_shop_product_moderation_v162c') IS NOT NULL AS ok`);
+      return r.rows[0] && r.rows[0].ok ? SHOP_S1_MODERATION_SQL : "NULL::text";
+    }
+
+    async function shopS2LoadPurchasable(db, productId, { lock = false } = {}) {
+      const moderation = await shopS2ModerationSql(db);
+      const product = await db.query(
+        `SELECT p.*,v.vendor_code,v.business_name,COALESCE(v.status,'active') vendor_status,${moderation} moderation_status
+           FROM vendor_products p JOIN vendor_profiles v ON v.id=p.vendor_profile_id
+          WHERE p.id=$1::bigint ${lock ? "FOR UPDATE OF p" : ""}`,
+        [String(productId)]
+      );
+      const row = product.rows[0];
+      if (!row) return null;
+      const variants = await db.query(
+        `SELECT * FROM vendor_product_variants WHERE product_id=$1::bigint ORDER BY sort_order,id ${lock ? "FOR UPDATE" : ""}`,
+        [String(productId)]
+      );
+      return { row, variants: variants.rows };
+    }
+
+    function shopS2Resolve(row, variantRows, { variantId = null, quantity = 1, applyOffer = true } = {}) {
+      const fail = (code, message, extra = {}) => ({ ok: false, code, message, ...extra });
+      if (!shopS1RowVisible(row)) return fail("UNAVAILABLE", "This product is unavailable");
+      const variants = Array.isArray(variantRows) ? variantRows : [];
+      const wantsVariant = variantId !== null && variantId !== undefined && variantId !== "";
+      let variant = null;
+      if (variants.length) {
+        const active = variants.filter((v) => String(v.status || "active").toLowerCase() === "active");
+        if (!active.length) return fail("UNAVAILABLE", "This product is unavailable");
+        if (!wantsVariant) return fail("VARIANT_REQUIRED", `${shopS1Text(row.name, 120)}: choose an option first`);
+        variant = active.find((v) => String(v.id) === String(variantId));
+        if (!variant) return fail("VARIANT_UNAVAILABLE", `${shopS1Text(row.name, 120)}: selected option is unavailable`);
+      } else if (wantsVariant) {
+        return fail("VARIANT_UNAVAILABLE", `${shopS1Text(row.name, 120)}: selected option is unavailable`);
+      }
+      const stock = Math.max(0, shopS1Int((variant || row).stock));
+      const own = variant ? shopS1Money(variant.price) : 0;
+      const listPrice = own > 0 ? own : shopS1Money(row.price);
+      const offer = activeVendorOfferForCustomer({ ...row, price: listPrice });
+      const unitPrice = shopS1Money(offer && applyOffer ? offer.customerPrice : listPrice);
+      // Never a free (or unpriced) item: a missing/zero price or an offer that takes it to zero is not purchasable.
+      if (!(unitPrice > 0)) return fail("UNAVAILABLE", "This product is unavailable");
+      const label = variant ? [shopS1Text(variant.colour, 120), shopS1Text(variant.size_value, 120)].filter(Boolean).join(" / ") : "";
+      const name = shopS1Text(row.name, 120);
+      if (stock <= 0) return fail("OUT_OF_STOCK", `${name}${label ? ` ${label}` : ""}: out of stock`, { available: 0 });
+      if (quantity > stock) return fail("INSUFFICIENT_STOCK", `${name}${label ? ` ${label}` : ""}: only ${stock} left in stock`, { available: stock });
+      return { ok: true, product: row, variant, variantLabel: label, quantity, unitPrice, listPrice, offerApplied: Boolean(offer && applyOffer), stock };
+    }
+
+    // ---- cart validation (public: reads only the catalogue) ----
+    function parseShopCartValidate(body) {
+      if (!body || typeof body !== "object" || Array.isArray(body)) return { error: "Invalid request" };
+      const unknown = Object.keys(body).filter((k) => k !== "items");
+      if (unknown.length) return { error: "Unsupported field" };
+      if (!Array.isArray(body.items) || !body.items.length) return { error: "At least one item is required" };
+      if (body.items.length > SHOP_S2_MAX_CART_LINES) return { error: `A cart can hold at most ${SHOP_S2_MAX_CART_LINES} lines` };
+      const lines = [];
+      for (const item of body.items) {
+        if (!item || typeof item !== "object" || Array.isArray(item)) return { error: "Invalid cart line" };
+        if (Object.keys(item).some((k) => !["productId", "variantId", "quantity"].includes(k))) return { error: "Unsupported field" };
+        const productId = String(item.productId ?? "");
+        if (!SHOP_S2_ID.test(productId)) return { error: "Invalid product id" };
+        let variantId = null;
+        if (item.variantId !== undefined && item.variantId !== null && item.variantId !== "") {
+          variantId = String(item.variantId);
+          if (!SHOP_S2_ID.test(variantId)) return { error: "Invalid variant id" };
+        }
+        const quantity = item.quantity === undefined ? 1 : Number(item.quantity);
+        if (!Number.isInteger(quantity) || quantity < 1 || quantity > SHOP_S2_MAX_QTY) return { error: `Quantity must be between 1 and ${SHOP_S2_MAX_QTY}` };
+        lines.push({ productId, variantId, quantity });
+      }
+      return { lines };
+    }
+
+    function shopS2CartLine(line, loaded) {
+      const base = { productId: line.productId, variantId: line.variantId, quantity: line.quantity };
+      if (!loaded) return { ...base, status: "unavailable", message: "This product is no longer available" };
+      const model = shopS1Model(loaded.row, loaded.variants);
+      const r = shopS2Resolve(loaded.row, loaded.variants, line);
+      const option = r.ok && r.variant ? model.options.find((o) => o.id === String(r.variant.id)) : null;
+      const shown = {
+        name: model.name,
+        image: (option && option.images[0]) || model.images[0] || "",
+        creator: { public_username: model.creator.public_username, display_name: model.creator.display_name }
+      };
+      if (!r.ok) {
+        const status = { UNAVAILABLE: "unavailable", VARIANT_REQUIRED: "variant_required", VARIANT_UNAVAILABLE: "variant_unavailable", OUT_OF_STOCK: "out_of_stock", INSUFFICIENT_STOCK: "insufficient_stock" }[r.code] || "unavailable";
+        return { ...base, ...shown, status, message: r.message, available: typeof r.available === "number" ? r.available : null };
+      }
+      return {
+        ...base, ...shown, status: "ok", message: "", variantLabel: r.variantLabel, available: r.stock, maxQuantity: Math.min(r.stock, SHOP_S2_MAX_QTY),
+        unitPrice: r.unitPrice, listPrice: r.listPrice, onOffer: r.offerApplied, lineTotal: shopS1Money(r.unitPrice * r.quantity)
+      };
+    }
+
+    if (req.method === "POST" && pathname === "/api/shop/cart/validate") {
+      try {
+        let body;
+        try { body = await getBody(req); } catch { return sendJSON(res, 400, { status: "error", message: "Invalid request body" }); }
+        const parsed = parseShopCartValidate(body);
+        if (parsed.error) return sendJSON(res, 400, { status: "error", message: parsed.error });
+        const ids = [...new Set(parsed.lines.map((l) => l.productId))];
+        const { rows, variantsByProduct } = await loadShopS1Rows({ ids });
+        const byId = new Map(rows.map((r) => [String(r.id), { row: r, variants: variantsByProduct.get(String(r.id)) || [] }]));
+        const lines = parsed.lines.map((l) => shopS2CartLine(l, byId.get(l.productId)));
+        const ok = lines.filter((l) => l.status === "ok");
+        return sendJSON(res, 200, {
+          status: "success", lines,
+          summary: { lineCount: lines.length, okCount: ok.length, itemCount: ok.reduce((s, l) => s + l.quantity, 0), subtotal: shopS1Money(ok.reduce((s, l) => s + l.lineTotal, 0)), allOk: ok.length === lines.length }
+        });
+      } catch (error) {
+        console.error("❌ Shop cart validate error:", error);
+        return sendJSON(res, 500, { status: "error", message: "Unable to check your cart" });
+      }
+    }
+
+    // ---- wishlist (session-authoritative) ----
+    async function shopS2WishlistSnapshot(userId) {
+      const saved = (await pool.query(
+        `SELECT product_id,created_at FROM user_wishlist WHERE user_id=$1 ORDER BY created_at DESC LIMIT ${SHOP_S2_MAX_WISHLIST}`, [userId]
+      )).rows;
+      const numeric = saved.filter((r) => SHOP_S2_ID.test(String(r.product_id)));
+      const loaded = numeric.length ? await loadShopS1Rows({ ids: numeric.map((r) => String(r.product_id)) }) : { rows: [], variantsByProduct: new Map() };
+      const models = new Map(loaded.rows.map((r) => [String(r.id), shopS1Model(r, loaded.variantsByProduct.get(String(r.id)))]));
+      const items = [];
+      for (const r of saved) {
+        const m = models.get(String(r.product_id));
+        if (m) items.push({ ...shopS1Card(m), savedAt: r.created_at });
+      }
+      // Gone / hidden / legacy non-catalogue entries are counted, never listed.
+      return { items, ids: items.map((i) => i.id), unavailableCount: saved.length - items.length };
+    }
+    async function shopS2WishlistAdd(userId, idText) {
+      if (!SHOP_S2_ID.test(String(idText))) return { http: 400, body: { status: "error", message: "Valid product id is required" } };
+      const loaded = await loadShopS1Rows({ id: String(idText) });
+      const row = loaded.rows.find((r) => String(r.id) === String(idText));
+      if (!row) return { http: 404, body: { status: "error", message: "Product not found" } };
+      const existing = await pool.query(`SELECT 1 FROM user_wishlist WHERE user_id=$1 AND product_id=$2`, [userId, String(row.id)]);
+      if (!existing.rows.length) {
+        const count = Number((await pool.query(`SELECT COUNT(*)::int n FROM user_wishlist WHERE user_id=$1`, [userId])).rows[0].n);
+        if (count >= SHOP_S2_MAX_WISHLIST) return { http: 409, body: { status: "error", message: `Your wishlist is full (${SHOP_S2_MAX_WISHLIST} items). Remove something to save more.` } };
+      }
+      await pool.query(
+        `INSERT INTO user_wishlist(user_id,product_id,product_name,product_data,updated_at) VALUES($1,$2,$3,'{}'::jsonb,NOW())
+         ON CONFLICT(user_id,product_id) DO UPDATE SET updated_at=NOW()`,
+        [userId, String(row.id), shopS1Text(row.name, 255) || "Product"]
+      );
+      const model = shopS1Model(row, loaded.variantsByProduct.get(String(row.id)));
+      return { http: 200, body: { status: "success", saved: true, productId: String(row.id), item: shopS1Card(model) } };
+    }
+    async function shopS2WishlistRemove(userId, idText) {
+      const r = await pool.query(`DELETE FROM user_wishlist WHERE user_id=$1 AND product_id=$2`, [userId, String(idText)]);
+      return { removed: r.rowCount > 0 };
+    }
+
+    if (req.method === "GET" && pathname === "/api/shop/wishlist") {
+      try {
+        const customer = await requireCustomerSessionV152X(req);
+        if (!customer) return sendJSON(res, 401, { status: "error", message: "Sign in to see your wishlist" });
+        if ([...url.searchParams.keys()].length) return sendJSON(res, 400, { status: "error", message: "Unsupported query parameter" });
+        const snap = await shopS2WishlistSnapshot(Number(customer.id));
+        return sendJSON(res, 200, { status: "success", items: snap.items, ids: snap.ids, count: snap.items.length, unavailableCount: snap.unavailableCount });
+      } catch (error) {
+        console.error("❌ Shop wishlist error:", error);
+        return sendJSON(res, 500, { status: "error", message: "Unable to load your wishlist" });
+      }
+    }
+    const shopS2WishlistItemMatch = pathname.match(/^\/api\/shop\/wishlist\/([^/]+)\/?$/);
+    if ((req.method === "PUT" || req.method === "DELETE") && shopS2WishlistItemMatch) {
+      try {
+        const customer = await requireCustomerSessionV152X(req);
+        if (!customer) return sendJSON(res, 401, { status: "error", message: "Sign in to save products" });
+        let idText;
+        try { idText = decodeURIComponent(shopS2WishlistItemMatch[1]); } catch { return sendJSON(res, 400, { status: "error", message: "Valid product id is required" }); }
+        if (req.method === "PUT") {
+          const out = await shopS2WishlistAdd(Number(customer.id), idText);
+          return sendJSON(res, out.http, out.body);
+        }
+        if (!idText || idText.length > 150) return sendJSON(res, 400, { status: "error", message: "Valid product id is required" });
+        const out = await shopS2WishlistRemove(Number(customer.id), idText);
+        return sendJSON(res, 200, { status: "success", saved: false, removed: out.removed });
+      } catch (error) {
+        console.error("❌ Shop wishlist update error:", error);
+        return sendJSON(res, 500, { status: "error", message: "Unable to update your wishlist" });
       }
     }
 
@@ -32877,100 +33123,88 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
 
 
+            // Shop S2: quote and order share ONE resolver (shopS2Resolve) with the catalogue and cart validation:
+            // same visibility gate, variant-required + variant-authoritative stock, and the same vendor-offer price.
+            function shopS2PurchaseError(productId,resolved){
+              const message=resolved.code==="UNAVAILABLE"?`Product ${productId} is unavailable`:resolved.message;
+              return Object.assign(new Error(message),{statusCode:409,code:resolved.code});
+            }
+            function shopS2RawLine(raw){
+              const quantity=Math.max(1,Math.floor(Number(raw.quantity??raw.qty??1))||1);
+              const productNumber=Number(raw.product_id??raw.productId??raw.id);
+              const productId=Number.isSafeInteger(productNumber)?productNumber:NaN; // 1e21 etc. must not reach a ::bigint cast
+              const variantNumber=Number(raw.variant_id??raw.variantId??raw.selectedVariantId);
+              // A Vibe-campaign line is priced by the campaign engine on the LIST price; the vendor offer is not stacked on it.
+              const campaign=Boolean((raw.vibe_attribution||raw.vibeAttribution)?.vibeId);
+              return {quantity,productId,campaign,variantId:Number.isSafeInteger(variantNumber)&&variantNumber>0?String(variantNumber):null};
+            }
+
             async function prepareMarketplaceOrderItems(client,rawItems){
               const prepared=[];
+              // Lock every distinct product up front in ascending id order, so two carts holding the same products in
+              // opposite order cannot deadlock on the per-line FOR UPDATE below.
+              const lockIds=[...new Set(rawItems.map((raw)=>shopS2RawLine(raw).productId).filter((n)=>Number.isInteger(n)&&n>0))].sort((a,b)=>a-b).map(String);
+              if(lockIds.length)await client.query(`SELECT id FROM vendor_products WHERE id=ANY($1::bigint[]) ORDER BY id FOR UPDATE`,[lockIds]);
               for(const raw of rawItems){
-                const quantity=Math.max(1,Math.floor(Number(raw.quantity??raw.qty??1)));
-                const productId=Number(raw.product_id??raw.productId??raw.id);
-                const variantId=Number(raw.variant_id??raw.variantId??raw.selectedVariantId);
+                const {quantity,productId,variantId,campaign}=shopS2RawLine(raw);
                 const selectedColour=clean(raw.selected_colour??raw.selectedColor??raw.colour??raw.color??"").slice(0,120);
                 const selectedSize=clean(raw.selected_size??raw.selectedSize??raw.size??"").slice(0,120);
 
                 // Live HOWDI marketplace product: price and stock are server-authoritative.
-                if(Number.isInteger(productId)&&productId>0){
-                  const productQ=await client.query(
-                    `SELECT p.*,v.vendor_code,v.business_name
-                       FROM vendor_products p
-                       JOIN vendor_profiles v ON v.id=p.vendor_profile_id
-                      WHERE p.id=$1 AND p.status='published' AND p.archived_at IS NULL AND COALESCE(v.status,'active')='active'
-                      FOR UPDATE OF p`,
-                    [productId]
+                if(!Number.isInteger(productId)||productId<=0){
+                  throw Object.assign(new Error("Checkout requires a live published HOWDI marketplace product ID"),{statusCode:409});
+                }
+                const loaded=await shopS2LoadPurchasable(client,productId,{lock:true});
+                if(!loaded)throw Object.assign(new Error(`Product ${productId} is unavailable`),{statusCode:409,code:"UNAVAILABLE"});
+                const resolved=shopS2Resolve(loaded.row,loaded.variants,{variantId,quantity,applyOffer:!campaign});
+                if(!resolved.ok)throw shopS2PurchaseError(productId,resolved);
+                const product=resolved.product,variant=resolved.variant,unitPrice=resolved.unitPrice;
+                const variantName=variant
+                  ?[variant.colour||selectedColour,variant.size_value||selectedSize].filter(Boolean).join(" / ")
+                  :[selectedColour,selectedSize].filter(Boolean).join(" / ");
+                const productImage=Array.isArray(product.image_urls)?(product.image_urls[0]||""):"";
+                const imageUrl=variant&&Array.isArray(variant.image_urls)&&variant.image_urls[0]?variant.image_urls[0]:productImage;
+
+                if(variant){
+                  await client.query(
+                    `UPDATE vendor_product_variants SET stock=stock-$1,updated_at=NOW() WHERE id=$2`,
+                    [quantity,variant.id]
                   );
-                  const product=productQ.rows[0];
-                  if(!product)throw Object.assign(new Error(`Product ${productId} is unavailable`),{statusCode:409});
-
-                  let unitPrice=Number(product.price||0);
-                  let stock=Number(product.stock||0);
-                  let sku=product.sku||"";
-                  let imageUrl=Array.isArray(product.image_urls)?(product.image_urls[0]||""):"";
-                  let resolvedVariantId=null;
-                  let variantName=[selectedColour,selectedSize].filter(Boolean).join(" / ");
-
-                  if(Number.isInteger(variantId)&&variantId>0){
-                    const variantQ=await client.query(
-                      `SELECT * FROM vendor_product_variants
-                        WHERE id=$1 AND product_id=$2 AND vendor_profile_id=$3
-                        FOR UPDATE`,
-                      [variantId,product.id,product.vendor_profile_id]
-                    );
-                    const variant=variantQ.rows[0];
-                    if(!variant||String(variant.status||"active").toLowerCase()!=="active"){
-                      throw Object.assign(new Error(`${product.name}: selected variant is unavailable`),{statusCode:409});
-                    }
-                    stock=Number(variant.stock||0);
-                    unitPrice=Number(variant.price||product.price||0);
-                    sku=variant.sku||product.sku||"";
-                    imageUrl=Array.isArray(variant.image_urls)&&variant.image_urls[0]
-                      ?variant.image_urls[0]:imageUrl;
-                    resolvedVariantId=Number(variant.id);
-                    variantName=[variant.colour||selectedColour,variant.size_value||selectedSize].filter(Boolean).join(" / ");
-                    if(stock<quantity)throw Object.assign(new Error(`${product.name} ${variantName}: only ${stock} left in stock`),{statusCode:409});
-
-                    await client.query(
-                      `UPDATE vendor_product_variants SET stock=stock-$1,updated_at=NOW() WHERE id=$2`,
-                      [quantity,variant.id]
-                    );
-                    // Keep parent product stock as aggregate discovery stock when variants exist.
-                    await client.query(
-                      `UPDATE vendor_products p SET stock=COALESCE((
-                         SELECT SUM(vx.stock)::int FROM vendor_product_variants vx
-                          WHERE vx.product_id=p.id AND vx.status='active'
-                       ),0),updated_at=NOW() WHERE p.id=$1`,
-                      [product.id]
-                    );
-                  }else{
-                    if(stock<quantity)throw Object.assign(new Error(`${product.name}: only ${stock} left in stock`),{statusCode:409});
-                    await client.query(`UPDATE vendor_products SET stock=stock-$1,updated_at=NOW() WHERE id=$2`,[quantity,product.id]);
-                  }
-
-                  prepared.push({
-                    product_id:String(product.id),
-                    vendor_profile_id:Number(product.vendor_profile_id),
-                    variant_id:resolvedVariantId,
-                    product_name:product.name,
-                    sku,
-                    image_url:imageUrl,
-                    variant_name:variantName,
-                    selected_colour:selectedColour,
-                    selected_size:selectedSize,
-                    quantity,
-                    unit_price:unitPrice,
-                    discount_amount:0,
-                    line_total:unitPrice*quantity,
-                    reserved_at:new Date(),
-                    fulfillment_mode:product.fulfillment_mode||"vendor_dispatch",
-                    commercial_owner:product.commercial_owner||"vendor",
-                    package_weight_kg:product.package_weight_kg,
-                    package_length_cm:product.package_length_cm,
-                    package_width_cm:product.package_width_cm,
-                    package_height_cm:product.package_height_cm,
-                    vibe_attribution:raw.vibe_attribution??raw.vibeAttribution??null
-                  });
-                  continue;
+                  // Keep parent product stock as aggregate discovery stock when variants exist.
+                  await client.query(
+                    `UPDATE vendor_products p SET stock=COALESCE((
+                       SELECT SUM(vx.stock)::int FROM vendor_product_variants vx
+                        WHERE vx.product_id=p.id AND vx.status='active'
+                     ),0),updated_at=NOW() WHERE p.id=$1`,
+                    [product.id]
+                  );
+                }else{
+                  await client.query(`UPDATE vendor_products SET stock=stock-$1,updated_at=NOW() WHERE id=$2`,[quantity,product.id]);
                 }
 
-                throw Object.assign(new Error("Checkout requires a live published HOWDI marketplace product ID"),{statusCode:409});
-
+                prepared.push({
+                  product_id:String(product.id),
+                  vendor_profile_id:Number(product.vendor_profile_id),
+                  variant_id:variant?Number(variant.id):null,
+                  product_name:product.name,
+                  sku:(variant&&variant.sku)||product.sku||"",
+                  image_url:imageUrl,
+                  variant_name:variantName,
+                  selected_colour:selectedColour,
+                  selected_size:selectedSize,
+                  quantity,
+                  unit_price:unitPrice,
+                  discount_amount:0,
+                  line_total:Math.round(unitPrice*quantity*100)/100,
+                  reserved_at:new Date(),
+                  fulfillment_mode:product.fulfillment_mode||"vendor_dispatch",
+                  commercial_owner:product.commercial_owner||"vendor",
+                  package_weight_kg:product.package_weight_kg,
+                  package_length_cm:product.package_length_cm,
+                  package_width_cm:product.package_width_cm,
+                  package_height_cm:product.package_height_cm,
+                  vibe_attribution:raw.vibe_attribution??raw.vibeAttribution??null
+                });
               }
               return prepared;
             }
@@ -32979,22 +33213,15 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             async function prepareMarketplaceQuoteItemsV153D(client,rawItems){
               const prepared=[];
               for(const raw of rawItems){
-                const quantity=Math.max(1,Math.floor(Number(raw.quantity??raw.qty??1)));
-                const productId=Number(raw.product_id??raw.productId??raw.id),variantId=Number(raw.variant_id??raw.variantId??raw.selectedVariantId);
+                const {quantity,productId,variantId,campaign}=shopS2RawLine(raw);
                 if(!Number.isInteger(productId)||productId<=0)throw Object.assign(new Error("Pricing quote requires a live product ID"),{statusCode:409});
-                const product=(await client.query(`SELECT p.* FROM vendor_products p JOIN vendor_profiles v ON v.id=p.vendor_profile_id
-                  WHERE p.id=$1 AND p.status='published' AND p.archived_at IS NULL AND COALESCE(v.status,'active')='active'`,[productId])).rows[0];
-                if(!product)throw Object.assign(new Error(`Product ${productId} is unavailable`),{statusCode:409});
-                let unitPrice=Number(product.price||0),stock=Number(product.stock||0),resolvedVariantId=null;
-                if(Number.isInteger(variantId)&&variantId>0){
-                  const variant=(await client.query(`SELECT * FROM vendor_product_variants WHERE id=$1 AND product_id=$2 AND vendor_profile_id=$3`,
-                    [variantId,product.id,product.vendor_profile_id])).rows[0];
-                  if(!variant||String(variant.status||'active').toLowerCase()!=='active')throw Object.assign(new Error(`${product.name}: selected variant is unavailable`),{statusCode:409});
-                  unitPrice=Number(variant.price||product.price||0);stock=Number(variant.stock||0);resolvedVariantId=Number(variant.id);
-                }
-                if(stock<quantity)throw Object.assign(new Error(`${product.name}: only ${stock} left in stock`),{statusCode:409});
-                prepared.push({product_id:String(product.id),vendor_profile_id:Number(product.vendor_profile_id),variant_id:resolvedVariantId,
-                  product_name:product.name,quantity,unit_price:unitPrice,discount_amount:0,line_total:unitPrice*quantity});
+                const loaded=await shopS2LoadPurchasable(client,productId);
+                if(!loaded)throw Object.assign(new Error(`Product ${productId} is unavailable`),{statusCode:409,code:"UNAVAILABLE"});
+                const resolved=shopS2Resolve(loaded.row,loaded.variants,{variantId,quantity,applyOffer:!campaign});
+                if(!resolved.ok)throw shopS2PurchaseError(productId,resolved);
+                const product=resolved.product;
+                prepared.push({product_id:String(product.id),vendor_profile_id:Number(product.vendor_profile_id),variant_id:resolved.variant?Number(resolved.variant.id):null,
+                  product_name:product.name,quantity,unit_price:resolved.unitPrice,discount_amount:0,line_total:Math.round(resolved.unitPrice*quantity*100)/100});
               }return prepared;
             }
 
@@ -51641,82 +51868,47 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             // HOWDI WISHLIST — POSTGRESQL LIVE API
             // =====================================================
 
+            // Shop S2: the legacy wishlist routes keep their URLs but are session-authoritative. The actor is the
+            // authenticated user; a client-supplied user id is only accepted when it names that same user, the
+            // client product blob is ignored (only a catalogue product id is used), and the stored/returned data is
+            // built by the server from the live catalogue. The customer app now uses /api/shop/wishlist instead.
             if (req.method === "GET" && /^\/api\/wishlist\/user\/[^/]+\/?$/.test(pathname)) {
-              const userId = Number(pathname.match(/^\/api\/wishlist\/user\/([^/]+)\/?$/)?.[1]);
-              if (!Number.isInteger(userId) || userId <= 0) {
-                return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
+              const customer = await requireCustomerSessionV152X(req);
+              if (!customer) return sendJSON(res,401,{status:"error",message:"Sign in to see your wishlist"});
+              const pathUserId = Number(pathname.match(/^\/api\/wishlist\/user\/([^/]+)\/?$/)?.[1]);
+              if (!Number.isInteger(pathUserId) || pathUserId !== Number(customer.id)) {
+                return sendJSON(res,403,{status:"error",message:"Not allowed"});
               }
-              const result = await pool.query(
-                `SELECT id,user_id,product_id,product_name,product_data,created_at,updated_at
-                 FROM user_wishlist WHERE user_id=$1 ORDER BY created_at DESC`,
-                [userId]
-              );
-              const wishlist = result.rows.map((row) => ({
-                ...(row.product_data && typeof row.product_data === "object" ? row.product_data : {}),
-                wishlist_id: row.id,
-                product_id: row.product_id,
-                id: row.product_data?.id ?? row.product_id,
-                name: row.product_data?.name ?? row.product_name,
-                created_at: row.created_at,
-              }));
+              const snap = await shopS2WishlistSnapshot(Number(customer.id));
+              const wishlist = snap.items.map((item) => ({ ...item, product_id: item.id }));
               return sendJSON(res,200,{status:"success",wishlist,count:wishlist.length});
             }
 
             if (req.method === "POST" && pathname === "/api/wishlist") {
+              const customer = await requireCustomerSessionV152X(req);
+              if (!customer) return sendJSON(res,401,{status:"error",message:"Sign in to save products"});
               const body = await getBody(req);
-              const userId = Number(body.user_id ?? body.userId ?? body.customer_id ?? body.customerId);
-              if (!Number.isInteger(userId) || userId <= 0) {
-                return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
+              const claimed = body.user_id ?? body.userId ?? body.customer_id ?? body.customerId;
+              if (claimed !== undefined && claimed !== null && claimed !== "" && Number(claimed) !== Number(customer.id)) {
+                return sendJSON(res,403,{status:"error",message:"Not allowed"});
               }
-
               const product = body.product && typeof body.product === "object" ? body.product : body;
-              const productId = clean(product.product_id ?? product.productId ?? product.id ?? product._id ?? product.name);
-              const productName = clean(product.name ?? product.product_name ?? product.productName ?? "");
-              if (!productId || !productName) {
-                return sendJSON(res,400,{status:"error",message:"Product ID and product name are required"});
-              }
-
-              const user = await pool.query(`SELECT id FROM users WHERE id=$1`,[userId]);
-              if (!user.rows.length) return sendJSON(res,404,{status:"error",message:"HOWDI user not found"});
-
-              const productData = {
-                ...product,
-                id: product.id ?? productId,
-                product_id: product.product_id ?? productId,
-                name: productName,
-              };
-
-              const result = await pool.query(
-                `INSERT INTO user_wishlist (user_id,product_id,product_name,product_data,updated_at)
-                 VALUES ($1,$2,$3,$4::jsonb,NOW())
-                 ON CONFLICT (user_id,product_id)
-                 DO UPDATE SET product_name=EXCLUDED.product_name,product_data=EXCLUDED.product_data,updated_at=NOW()
-                 RETURNING *`,
-                [userId,productId,productName,JSON.stringify(productData)]
-              );
-
-              return sendJSON(res,201,{
-                status:"success",
-                message:"Added to wishlist",
-                wishlist_item:{
-                  ...productData,
-                  wishlist_id:result.rows[0].id,
-                  created_at:result.rows[0].created_at
-                }
-              });
+              const productId = String(product.product_id ?? product.productId ?? product.id ?? "");
+              const out = await shopS2WishlistAdd(Number(customer.id), productId);
+              if (out.http !== 200) return sendJSON(res,out.http,out.body);
+              return sendJSON(res,201,{status:"success",message:"Added to wishlist",wishlist_item:{...out.body.item,product_id:out.body.item.id}});
             }
 
             if (req.method === "DELETE" && /^\/api\/wishlist\/[^/]+\/?$/.test(pathname)) {
-              const productId = decodeURIComponent(pathname.match(/^\/api\/wishlist\/([^/]+)\/?$/)?.[1] || "");
-              const userId = Number(url.searchParams.get("user_id") || url.searchParams.get("customer_id"));
-              if (!Number.isInteger(userId) || userId <= 0) {
-                return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
-              }
-              const result = await pool.query(
-                `DELETE FROM user_wishlist WHERE user_id=$1 AND product_id=$2 RETURNING id`,
-                [userId,productId]
-              );
-              if (!result.rows.length) return sendJSON(res,404,{status:"error",message:"Wishlist item not found"});
+              const customer = await requireCustomerSessionV152X(req);
+              if (!customer) return sendJSON(res,401,{status:"error",message:"Sign in to update your wishlist"});
+              const claimed = url.searchParams.get("user_id") || url.searchParams.get("customer_id");
+              if (claimed && Number(claimed) !== Number(customer.id)) return sendJSON(res,403,{status:"error",message:"Not allowed"});
+              let productId = "";
+              try { productId = decodeURIComponent(pathname.match(/^\/api\/wishlist\/([^/]+)\/?$/)?.[1] || ""); } catch { productId = ""; }
+              if (!productId || productId.length > 150) return sendJSON(res,400,{status:"error",message:"Valid product id is required"});
+              const out = await shopS2WishlistRemove(Number(customer.id), productId);
+              if (!out.removed) return sendJSON(res,404,{status:"error",message:"Wishlist item not found"});
               return sendJSON(res,200,{status:"success",message:"Removed from wishlist"});
             }
 
@@ -56446,7 +56638,7 @@ app.get("/api/shop/v162a/products/:productId/questions",async(req,res)=>{
   const r=await pool.query(`SELECT id,product_id,question,answer,status,created_at,answered_at
    FROM howdi_shop_product_questions WHERE product_id=$1 ORDER BY created_at DESC LIMIT 100`,[req.params.productId]);
   res.json({ok:true,questions:r.rows});
- }catch(e){res.status(500).json({ok:false,error:e.message});}
+ }catch(e){res.status(500).json({ok:false,error:"Unable to load"});}
 });
 
 app.post("/api/shop/v162a/save-for-later/:productId",async(req,res)=>{
@@ -56747,13 +56939,24 @@ app.get("/api/shop/v162c/seller/settlements",async(req,res)=>{
 });
 
 app.post("/api/shop/v162c/products/:productId/moderation",async(req,res)=>{
+ // Admin-only (guarded in shopV162GuardR2). The seller is derived from the product, never taken from the client.
  try{
-  const b=req.body||{};
+  const productId=String(req.params.productId||"");
+  if(!/^\d{1,18}$/.test(productId))return res.status(400).json({ok:false,error:"Valid product id required"});
+  const b=req.body||{}; const status=String(b.status||"").toUpperCase();
+  if(!["PENDING","APPROVED","REJECTED","SUSPENDED"].includes(status))
+   return res.status(400).json({ok:false,error:"Status must be PENDING, APPROVED, REJECTED or SUSPENDED"});
+  const reason=b.reason===undefined||b.reason===null?null:String(b.reason).slice(0,500);
+  const owner=await pool.query(`SELECT u.identity_uuid FROM vendor_products p
+   JOIN vendor_profiles v ON v.id=p.vendor_profile_id JOIN users u ON u.id=v.user_id WHERE p.id=$1::bigint`,[productId]);
+  if(!owner.rows[0]||!owner.rows[0].identity_uuid)return res.status(404).json({ok:false,error:"Product not found"});
   const r=await pool.query(`INSERT INTO howdi_shop_product_moderation_v162c
-   (product_id,seller_user_id,status,reason) VALUES($1,$2,$3,$4) RETURNING id,product_id,status,reason,created_at`,
-   [req.params.productId,b.sellerUserId||req.user?.id,b.status||"PENDING",b.reason||null]);
+   (product_id,seller_user_id,status,reason,reviewed_by,reviewed_at) VALUES($1::bigint,$2::uuid,$3,$4,$5::uuid,NOW())
+   RETURNING id,product_id,status,reason,created_at`,
+   [productId,owner.rows[0].identity_uuid,status,reason,req.adminSession?.id||null]);
+  await auditAdminSecurity(req,req.adminSession,"SHOP_PRODUCT_MODERATION",{productId,status});
   res.json({ok:true,moderation:r.rows[0]});
- }catch(e){res.status(500).json({ok:false,error:e.message});}
+ }catch(e){console.error("[V16.2C] moderation",e.message);res.status(500).json({ok:false,error:"Unable to record moderation"});}
 });
 
 app.get("/api/shop/v162c/seller/notifications",async(req,res)=>{
@@ -56922,7 +57125,7 @@ app.get("/api/shop/v162d/admin/queues",async(req,res)=>{
   const d=await pool.query(`SELECT * FROM howdi_shop_disputes_v162d WHERE status NOT IN ('RESOLVED','CLOSED') ORDER BY created_at DESC LIMIT 100`);
   const risk=await pool.query(`SELECT * FROM howdi_shop_risk_events_v162d WHERE status='REVIEW' ORDER BY risk_score DESC,created_at DESC LIMIT 100`);
   res.json({ok:true,disputes:d.rows,risk:risk.rows});
- }catch(e){res.status(500).json({ok:false,error:e.message});}
+ }catch(e){res.status(500).json({ok:false,error:"Unable to load"});}
 });
 
 app.get("/api/shop/v162d/merchandising/:placement",async(req,res)=>{
@@ -56932,7 +57135,7 @@ app.get("/api/shop/v162d/merchandising/:placement",async(req,res)=>{
    AND (starts_at IS NULL OR starts_at<=NOW()) AND (ends_at IS NULL OR ends_at>=NOW())
    ORDER BY priority DESC,id DESC LIMIT 100`,[req.params.placement]);
   res.json({ok:true,items:r.rows});
- }catch(e){res.status(500).json({ok:false,error:e.message});}
+ }catch(e){res.status(500).json({ok:false,error:"Unable to load"});}
 });
 
 console.log("[HOWDI] V16.2D Shop Final Functional Completion 60+ Pack active");

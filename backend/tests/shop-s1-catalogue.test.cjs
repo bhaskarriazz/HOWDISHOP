@@ -20,7 +20,8 @@ function between(a,b){const s=source.indexOf(a);assert.notEqual(s,-1,a);const e=
 
 const attachSrc=between('    async function attachVendorVariants(productRows){','    function parseVendorProductId');
 const shopSrc=between('    function customerVariantPayload(v){','    // =====================================================\n    // VENDOR PRODUCT MEDIA UPLOAD');
-const s1Block=between('    // HOWDI SHOP S1 — CATALOGUE & PRODUCT DISCOVERY','    // =====================================================\n    // VENDOR PRODUCT MEDIA UPLOAD');
+// S1 ends where the Shop S2 (product actions) block begins; S2 is pinned by shop-s2-product-actions.test.cjs.
+const s1Block=between('    // HOWDI SHOP S1 — CATALOGUE & PRODUCT DISCOVERY','    // =====================================================\n    // HOWDI SHOP S2 — PRODUCT ACTIONS');
 const loaderSrc=between('    async function loadShopS1Rows(opts = {}) {','    // ---- product model');
 const legacyRowsSrc=between('    async function getCustomerProductRows(','    async function getCustomerVariantsForRow');
 
@@ -503,7 +504,9 @@ test('UI: product cards, chips and controls are real buttons with accessible nam
 test('UI: no demo fallback, no purchase behaviour, only the public catalogue endpoints',async()=>{
   const code=jsx.replace(/\/\*[\s\S]*?\*\//g,'').replace(/^\s*\/\/.*$/gm,'');
   assert.doesNotMatch(code,/fallbackProducts|demoProducts|sampleProducts|Math\.random|localStorage|sessionStorage/);
-  assert.doesNotMatch(code,/addToCart|buyNow|wishlist|coupon|checkout|payment|razorpay|\/api\/cart|\/api\/orders|\/api\/checkout/i);
+  // Shop S2 adds Wishlist/Add to cart/Buy now, but they live in ShopProductActions.jsx (see shop-s2-product-actions.test.cjs);
+  // this component itself still never touches coupons, checkout, payment, orders or the cart API.
+  assert.doesNotMatch(code,/coupon|checkout|payment|razorpay|\/api\/cart|\/api\/orders|\/api\/checkout/i);
   const apis=code.match(/\/api\/[A-Za-z0-9/_${}.-]+/g)||[];
   assert.ok(apis.length>=3);
   for(const a of apis)assert.match(a,/^\/api\/shop\/catalogue\/products/,'unexpected endpoint '+a);
@@ -527,7 +530,7 @@ test('UI: styles are scoped to .sc- and the layout is mobile-safe',async()=>{
 });
 test('App wiring: only the Shop entry points open the catalogue and the legacy Shop home is preserved',async()=>{
   assert.match(app,/import ShopCatalogue from "\.\/components\/ShopCatalogue";/);
-  assert.equal((app.match(/openNavigationOSArea\("shop","catalogue"\)/g)||[]).length,2,'header Shop button + sidebar Shop pillar');
+  assert.equal((app.match(/openNavigationOSArea\("shop","catalogue"\)/g)||[]).length,3,'header Shop button + sidebar Shop pillar + (S2) opening a saved product');
   assert.match(app,/<ShopCatalogue apiBase=\{SHOP_API_BASE\}/);
   assert.match(app,/shopOSView==="catalogue" && <ShopCatalogue/);
   assert.match(app,/className="hs2-layout" style=\{shopOSView==="catalogue"\?\{display:"none"\}:undefined\}/,'legacy Shop home is hidden, not deleted');
