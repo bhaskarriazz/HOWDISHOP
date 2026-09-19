@@ -2304,9 +2304,20 @@
             is_active BOOLEAN DEFAULT TRUE,
             created_at TIMESTAMPTZ DEFAULT NOW(),
             last_seen_at TIMESTAMPTZ DEFAULT NOW(),
+            expires_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '30 days'),
             revoked_at TIMESTAMPTZ,
             revoked_reason VARCHAR(255)
           );
+        `);
+
+        // HPAY_STAGE4C_SESSION_EXPIRY — migrate legacy customer sessions to an explicit expiry.
+        await pool.query(`
+          ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
+          UPDATE user_sessions
+          SET expires_at = created_at + INTERVAL '30 days'
+          WHERE expires_at IS NULL;
+          ALTER TABLE user_sessions ALTER COLUMN expires_at SET DEFAULT (NOW() + INTERVAL '30 days');
+          ALTER TABLE user_sessions ALTER COLUMN expires_at SET NOT NULL;
         `);
 
         await pool.query(`
@@ -8999,13 +9010,17 @@
     async function createUserSession(userId, req) {
       const userAgent = String(req.headers["user-agent"] || "");
       const sessionToken = createSessionToken(userId);
+      const configuredSessionHours = Number(process.env.USER_SESSION_HOURS || 720);
+      const sessionHours = Number.isFinite(configuredSessionHours)
+        ? Math.max(1, Math.min(2160, configuredSessionHours))
+        : 720;
 
       const result = await pool.query(
         `
           INSERT INTO user_sessions
-          (user_id, session_token, device_name, browser_name, ip_address)
-          VALUES ($1, $2, $3, $4, $5)
-          RETURNING id, user_id, device_name, browser_name, ip_address, created_at, last_seen_at
+          (user_id, session_token, device_name, browser_name, ip_address, expires_at)
+          VALUES ($1, $2, $3, $4, $5, NOW() + ($6 || ' hours')::interval)
+          RETURNING id, user_id, device_name, browser_name, ip_address, created_at, last_seen_at, expires_at
         `,
         [
           userId,
@@ -9013,6 +9028,7 @@
           getDeviceName(userAgent),
           getBrowserName(userAgent),
           getRequestIp(req),
+          String(sessionHours),
         ]
       );
 
@@ -9032,7 +9048,9 @@
         SELECT u.*
         FROM user_sessions s
         JOIN users u ON u.id=s.user_id
-        WHERE s.session_token=$1 AND s.is_active=TRUE
+        WHERE s.session_token=$1
+          AND s.is_active=TRUE
+          AND s.expires_at > NOW()
         LIMIT 1
       `,[token]);
       if (!result.rows[0]) return null;
@@ -9166,8 +9184,29 @@
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
 
-        -- HPay IDs are public handles and lookups are case-insensitive. Fail closed on
-        -- legacy case-only collisions rather than allowing ambiguous payer resolution.
+        -- HPAY_STAGE4C_HPAY_ID_PREFLIGHT
+        -- HPay IDs are public handles and lookups are case-insensitive. Detect legacy
+        -- case-only collisions explicitly before creating the unique functional index.
+        -- Do not silently rename public financial handles during startup.
+        DO $$
+        DECLARE
+          collision_count INTEGER;
+        BEGIN
+          SELECT COUNT(*) INTO collision_count
+          FROM (
+            SELECT LOWER(hpay_id)
+            FROM hpay_accounts
+            GROUP BY LOWER(hpay_id)
+            HAVING COUNT(*) > 1
+          ) collisions;
+          IF collision_count > 0 THEN
+            RAISE EXCEPTION USING
+              ERRCODE = '23505',
+              MESSAGE = 'HPay case-insensitive handle collisions require operator resolution before startup',
+              DETAIL = 'Resolve duplicate LOWER(hpay_id) values before restarting HOWDI.';
+          END IF;
+        END $$;
+
         CREATE UNIQUE INDEX IF NOT EXISTS hpay_accounts_hpay_id_ci_unique
           ON hpay_accounts (LOWER(hpay_id));
 
