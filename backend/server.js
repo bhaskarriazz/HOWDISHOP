@@ -45719,7 +45719,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             }
             if(req.method==="GET"&&/^\/api\/connect\/creator-plans\/\d+\/?$/.test(pathname)){
               const creator=Number(pathname.match(/creator-plans\/(\d+)/)?.[1]),viewer=Number(url.searchParams.get("userId")||0);
-              if(await k5eBlockedPair(viewer,creator))return sendJSON(res,200,{status:"success",plan:null,subscription:null});
+              if(await k5eBlockedPair(viewer,creator)||await k5eProfileHiddenFrom(viewer,creator))return sendJSON(res,200,{status:"success",plan:null,subscription:null});
               const plan=(await pool.query(`SELECT * FROM howdi_connect_creator_plans WHERE creator_user_id=$1 AND is_active=TRUE ORDER BY id DESC LIMIT 1`,[creator])).rows[0]||null;
               const subscription=viewer?(await pool.query(`SELECT * FROM howdi_connect_creator_subscriptions WHERE creator_user_id=$1 AND subscriber_user_id=$2`,[creator,viewer])).rows[0]||null:null;
               return sendJSON(res,200,{status:"success",plan,subscription});
@@ -45727,7 +45727,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             if(req.method==="POST"&&/^\/api\/connect\/creator-plans\/\d+\/subscribe\/?$/.test(pathname)){
               const creator=Number(pathname.match(/creator-plans\/(\d+)\/subscribe/)?.[1]),body=await getBody(req),uid=Number(body.userId);
               if(creator===uid)return sendJSON(res,400,{status:"error",message:"You cannot subscribe to yourself"});
-              const plan=(await k5eBlockedPair(uid,creator))?null:(await pool.query(`SELECT * FROM howdi_connect_creator_plans WHERE creator_user_id=$1 AND is_active=TRUE ORDER BY id DESC LIMIT 1`,[creator])).rows[0];
+              const plan=(await k5eBlockedPair(uid,creator)||await k5eProfileHiddenFrom(uid,creator))?null:(await pool.query(`SELECT * FROM howdi_connect_creator_plans WHERE creator_user_id=$1 AND is_active=TRUE ORDER BY id DESC LIMIT 1`,[creator])).rows[0];
               if(!plan)return sendJSON(res,404,{status:"error",message:"Creator membership is not available"});
               let amount=Number(plan.price||0),couponApplied=null;
               const couponCode=clean(body.couponCode||"").trim().toUpperCase();
@@ -45857,10 +45857,12 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
             if(req.method==="POST"&&/^\/api\/connect\/creator-subscriptions\/\d+\/renew\/?$/.test(pathname)){
               const creator=Number(pathname.match(/creator-subscriptions\/(\d+)\/renew/)?.[1]),body=await getBody(req),uid=Number(body.userId);
-              const plan=(await pool.query(`SELECT * FROM howdi_connect_creator_plans WHERE creator_user_id=$1 AND is_active=TRUE ORDER BY id DESC LIMIT 1`,[creator])).rows[0];
+              if(creator===uid)return sendJSON(res,400,{status:"error",message:"You cannot subscribe to yourself"});
+              const plan=(await k5eBlockedPair(uid,creator)||await k5eProfileHiddenFrom(uid,creator))?null:(await pool.query(`SELECT * FROM howdi_connect_creator_plans WHERE creator_user_id=$1 AND is_active=TRUE ORDER BY id DESC LIMIT 1`,[creator])).rows[0];
               if(!plan)return sendJSON(res,404,{status:"error",message:"Membership plan not found"});
+              // K5E: renewing never downgrades a membership that is still running (it used to flip ACTIVE to PENDING and lock the member out).
               await pool.query(`INSERT INTO howdi_connect_creator_subscriptions(creator_user_id,subscriber_user_id,plan_id,status,amount) VALUES($1,$2,$3,'PENDING',$4)
-                ON CONFLICT(creator_user_id,subscriber_user_id) DO UPDATE SET plan_id=EXCLUDED.plan_id,status='PENDING',amount=EXCLUDED.amount,updated_at=NOW()`,[creator,uid,plan.id,plan.price]);
+                ON CONFLICT(creator_user_id,subscriber_user_id) DO UPDATE SET plan_id=EXCLUDED.plan_id,status=CASE WHEN howdi_connect_creator_subscriptions.status='ACTIVE' AND (howdi_connect_creator_subscriptions.current_period_end IS NULL OR howdi_connect_creator_subscriptions.current_period_end>NOW()) THEN 'ACTIVE' ELSE 'PENDING' END,amount=EXCLUDED.amount,updated_at=NOW()`,[creator,uid,plan.id,plan.price]);
               return sendJSON(res,200,{status:"success",amount:Number(plan.price||0),plan,message:"Renewal created. Complete through HPay."});
             }
 
@@ -46271,7 +46273,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
             if(req.method==="GET"&&/^\/api\/connect\/creator-resources\/\d+\/?$/.test(pathname)){
               const creator=Number(pathname.match(/creator-resources\/(\d+)/)?.[1]),viewer=Number(url.searchParams.get("userId")||0);
-              if(await k5eBlockedPair(viewer,creator))return sendJSON(res,200,{status:"success",resources:[],subscriber_access:false});
+              if(await k5eBlockedPair(viewer,creator)||await k5eProfileHiddenFrom(viewer,creator))return sendJSON(res,200,{status:"success",resources:[],subscriber_access:false});
               const active=viewer===creator||Boolean((await pool.query(`SELECT 1 FROM howdi_connect_creator_subscriptions WHERE creator_user_id=$1 AND subscriber_user_id=$2 AND status='ACTIVE' AND (current_period_end IS NULL OR current_period_end>NOW())`,[creator,viewer])).rows[0]);
               const rows=(await pool.query(`SELECT * FROM howdi_connect_creator_resources WHERE creator_user_id=$1 AND (subscribers_only=FALSE OR $2::boolean=TRUE) ORDER BY created_at DESC LIMIT 50`,[creator,active])).rows;
               return sendJSON(res,200,{status:"success",resources:rows,subscriber_access:active});
@@ -46773,7 +46775,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             if(req.method==="POST"&&/^\/api\/connect\/profile-skills\/\d+\/endorse\/?$/.test(pathname)){
               const sid=Number(pathname.match(/profile-skills\/(\d+)\/endorse/)?.[1]),body=await getBody(req),uid=Number(body.userId);
               const skill=(await pool.query(`SELECT user_id FROM howdi_connect_profile_skills WHERE id=$1`,[sid])).rows[0];
-              if(!skill||Number(skill.user_id)===uid||await k5eBlockedPair(uid,skill.user_id))return sendJSON(res,400,{status:"error",message:"Skill endorsement unavailable"});
+              if(!skill||Number(skill.user_id)===uid||await k5eBlockedPair(uid,skill.user_id)||await k5eProfileHiddenFrom(uid,skill.user_id))return sendJSON(res,400,{status:"error",message:"Skill endorsement unavailable"});
               const exists=(await pool.query(`SELECT 1 FROM howdi_connect_skill_endorsements WHERE skill_id=$1 AND endorser_user_id=$2`,[sid,uid])).rows[0];
               if(exists)await pool.query(`DELETE FROM howdi_connect_skill_endorsements WHERE skill_id=$1 AND endorser_user_id=$2`,[sid,uid]);
               else await pool.query(`INSERT INTO howdi_connect_skill_endorsements(skill_id,endorser_user_id) VALUES($1,$2)`,[sid,uid]);
@@ -47421,7 +47423,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             if(req.method==="POST"&&/^\/api\/connect\/skill-passport\/\d+\/validate\/?$/.test(pathname)){
               const sid=Number(pathname.match(/skill-passport\/(\d+)\/validate/)?.[1]),body=await getBody(req),uid=Number(body.userId);
               /* K5E: you validate somebody else's skill (not your own), and not across a block. */
-              if(!(await pool.query(`SELECT 1 FROM howdi_connect_skill_passport sp WHERE sp.id=$1 AND sp.user_id<>$2 AND NOT ${K5E_BLOCKED_BETWEEN_SQL("$2::bigint","sp.user_id")}`,[sid,uid])).rows[0])return sendJSON(res,404,{status:"error",message:"Skill not found"});
+              if(!(await pool.query(`SELECT 1 FROM howdi_connect_skill_passport sp WHERE sp.id=$1 AND sp.user_id<>$2 AND NOT ${K5E_BLOCKED_BETWEEN_SQL("$2::bigint","sp.user_id")} AND ${k5ePrivateProfileOkSql("sp.user_id","$2::bigint")}`,[sid,uid])).rows[0])return sendJSON(res,404,{status:"error",message:"Skill not found"});
               const exists=(await pool.query(`SELECT 1 FROM howdi_connect_skill_validations WHERE passport_skill_id=$1 AND validator_user_id=$2`,[sid,uid])).rows[0];
               if(exists)await pool.query(`DELETE FROM howdi_connect_skill_validations WHERE passport_skill_id=$1 AND validator_user_id=$2`,[sid,uid]);else await pool.query(`INSERT INTO howdi_connect_skill_validations(passport_skill_id,validator_user_id) VALUES($1,$2)`,[sid,uid]);
               await pool.query(`UPDATE howdi_connect_skill_passport SET validation_count=(SELECT COUNT(*) FROM howdi_connect_skill_validations WHERE passport_skill_id=$1) WHERE id=$1`,[sid]);
@@ -49072,6 +49074,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 const gm=Number.isInteger(groupSpaceId)&&groupSpaceId>0?(await pool.query(`SELECT 1 FROM howdi_connect_community_members WHERE community_id=$1 AND user_id=$2 AND membership_status='ACTIVE'`,[groupSpaceId,callerId])).rows[0]:null;
                 if(!gm)return sendJSON(res,403,{status:'error',message:'You can only start a call inside a group you belong to'});
               }
+              // K5E: two invitees who block each other cannot be put on the same call (they would see each other's names and routing tokens).
+              if(invitees.length>1&&(await pool.query(`SELECT 1 FROM howdi_connect_profile_blocks WHERE blocker_user_id=ANY($1::bigint[]) AND blocked_user_id=ANY($1::bigint[]) LIMIT 1`,[invitees])).rows[0])return sendJSON(res,403,{status:'error',message:'This call cannot be created because a participant is blocked.'});
               // K5E: honour each invitee's contact_permission. There is deliberately NO group exemption: any public group can be joined by anyone,
               // so "shares a group" would let a caller sidestep NO_ONE / FOLLOWERS / FOLLOWING simply by joining the same community first.
               for(const inv of invitees){

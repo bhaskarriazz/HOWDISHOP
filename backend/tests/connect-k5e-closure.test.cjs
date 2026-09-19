@@ -164,3 +164,14 @@ test('K5E closure 11: calls — no shared-group contact bypass, inbox/accept res
   assert.match(source,/alreadyPending/,'a pending follow request is not re-notified');
   assert.match(handler('POST','stories\\/\\d+\\/reply'),/connectCanContact\(Number\(sessionUser\.id\),Number\(owner\.user_id\)\)/);
 });
+
+test('K5E closure 12: renew never downgrades a running membership; invitees who block each other; private creators\' plan/skill routes',()=>{
+  const renew=handler('POST','creator-subscriptions\\/\\d+\\/renew');
+  assert.match(renew,/k5eBlockedPair\(uid,creator\)\|\|await k5eProfileHiddenFrom\(uid,creator\)/);
+  assert.match(renew,/CASE WHEN howdi_connect_creator_subscriptions\.status='ACTIVE' AND/);
+  assert.doesNotMatch(renew,/status='PENDING',amount=EXCLUDED\.amount/,'the unconditional downgrade is gone');
+  assert.match(between('if(req.method==="POST"&&pathname==="/api/connect/calls"){','if(req.method==="GET"&&pathname==="/api/connect/calls/inbox"'),/blocker_user_id=ANY\(\$1::bigint\[\]\) AND blocked_user_id=ANY\(\$1::bigint\[\]\)/);
+  for(const re of ['creator-plans\\/\\d+\\/?$/','creator-resources\\/\\d+\\/?$/'])assert.match(source.slice(source.indexOf(`if(req.method==="GET"&&/^\\/api\\/connect\\/${re}`)).slice(0,900),/k5eProfileHiddenFrom\(viewer,creator\)/,re);
+  assert.match(handler('POST','profile-skills\\/\\d+\\/endorse'),/k5eProfileHiddenFrom\(uid,skill\.user_id\)/);
+  assert.match(handler('POST','skill-passport\\/\\d+\\/validate'),/k5ePrivateProfileOkSql\("sp\.user_id","\$2::bigint"\)/);
+});

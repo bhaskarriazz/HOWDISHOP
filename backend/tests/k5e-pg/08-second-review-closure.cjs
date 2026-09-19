@@ -159,5 +159,37 @@ const S=r=>r.status;const q=async(sql,p)=>(await pool.query(sql,p)).rows;
   await pool.query("UPDATE howdi_connect_profiles SET contact_permission='EVERYONE' WHERE user_id=$1",[C.id]);
   ok(S(await api('POST','/api/connect/stories/'+cs+'/reply',{...t(D),body:{reply:'hello'}}))===201,'…and work again when the inbox is open');
 
+  // ---- 7. third-pass items: renew keeps a running membership, blocks between invitees, private creators' plans / skills
+  await pool.query("UPDATE howdi_connect_profiles SET contact_permission='EVERYONE'");
+  await api('POST','/api/connect/creator-plans',{...t(A),body:{planName:'Gold',price:99,billingPeriod:'MONTHLY',benefits:'x'}});
+  await pool.query("INSERT INTO howdi_connect_creator_subscriptions(creator_user_id,subscriber_user_id,plan_id,status,amount,current_period_end) SELECT $1,$2,id,'ACTIVE',99,NOW()+INTERVAL '10 days' FROM howdi_connect_creator_plans WHERE creator_user_id=$1 AND is_active LIMIT 1 ON CONFLICT(creator_user_id,subscriber_user_id) DO UPDATE SET status='ACTIVE',current_period_end=NOW()+INTERVAL '10 days'",[A.id,D.id]);
+  ok(S(await api('POST','/api/connect/creator-subscriptions/'+aR+'/renew',{...t(D),body:{}}))===200,'renew works');
+  ok((await q('SELECT status FROM howdi_connect_creator_subscriptions WHERE creator_user_id=$1 AND subscriber_user_id=$2',[A.id,D.id]))[0].status==='ACTIVE','renewing a running membership keeps it ACTIVE (it used to downgrade to PENDING)');
+  await pool.query("UPDATE howdi_connect_creator_subscriptions SET status='EXPIRED',current_period_end=NOW()-INTERVAL '1 day' WHERE creator_user_id=$1 AND subscriber_user_id=$2",[A.id,D.id]);
+  await api('POST','/api/connect/creator-subscriptions/'+aR+'/renew',{...t(D),body:{}});
+  ok((await q('SELECT status FROM howdi_connect_creator_subscriptions WHERE creator_user_id=$1 AND subscriber_user_id=$2',[A.id,D.id]))[0].status==='PENDING','an expired membership renews to PENDING (until paid)');
+  ok(S(await api('POST','/api/connect/creator-subscriptions/'+aR+'/renew',{...t(A),body:{}}))===400,'a creator cannot renew their own membership');
+  await api('POST','/api/connect/profile/username/'+B.username+'/block',t(A));
+  ok(S(await api('POST','/api/connect/creator-subscriptions/'+aR+'/renew',{...t(B),body:{}}))===404,'a blocked member cannot renew against the blocker');
+  await pool.query('DELETE FROM howdi_connect_profile_blocks WHERE blocker_user_id=$1',[A.id]);
+  // invitees who block each other cannot share a call
+  await api('POST','/api/connect/profile/username/'+C.username+'/block',t(B));
+  ok(S(await api('POST','/api/connect/calls',{...t(A),body:{callType:'VOICE',inviteeUsernames:[B.username,C.username]}}))===403,'two invitees who block each other cannot be put on one call');
+  ok(S(await api('POST','/api/connect/calls',{...t(A),body:{callType:'VOICE',inviteeUsernames:[B.username,D.username]}}))===201,'…but unrelated invitees can');
+  await pool.query('DELETE FROM howdi_connect_profile_blocks WHERE blocker_user_id=$1',[B.id]);
+  // private creator: plan / resources / endorse / validate need an accepted follow
+  await pool.query('UPDATE howdi_connect_profiles SET private_profile=TRUE WHERE user_id=$1',[A.id]);
+  const psk=(await q('SELECT id FROM howdi_connect_profile_skills WHERE user_id=$1 LIMIT 1',[A.id]))[0];
+  const pps=(await q('SELECT id FROM howdi_connect_skill_passport WHERE user_id=$1 LIMIT 1',[A.id]))[0];
+  r=await api('GET','/api/connect/creator-plans/'+aR,t(B));ok(S(r)===200&&r.json.plan===null,'a private creator\'s plan is hidden from non-followers');
+  ok(S(await api('POST','/api/connect/creator-plans/'+aR+'/subscribe',{...t(B),body:{}}))===404,'…and cannot be subscribed to without following');
+  r=await api('GET','/api/connect/creator-resources/'+aR,t(B));ok((r.json.resources||[]).length===0,'…nor their resources read');
+  if(psk)ok(S(await api('POST','/api/connect/profile-skills/'+psk.id+'/endorse',{...t(B),body:{}}))===400,'…nor their skill endorsed');
+  if(pps)ok(S(await api('POST','/api/connect/skill-passport/'+pps.id+'/validate',{...t(B),body:{}}))===404,'…nor their passport skill validated');
+  await follow(B,A);
+  r=await api('GET','/api/connect/creator-plans/'+aR,t(B));ok(S(r)===200&&!!r.json.plan,'a follower sees the plan');
+  if(pps)ok(S(await api('POST','/api/connect/skill-passport/'+pps.id+'/validate',{...t(B),body:{}}))===200,'…and can validate the passport skill');
+  await pool.query('UPDATE howdi_connect_profiles SET private_profile=FALSE WHERE user_id=$1',[A.id]);
+
   console.log(`PASS ${pass}  FAIL ${fail}`);await pool.end();process.exit(fail?1:0);
 })().catch(e=>{console.error('CRASH',e);process.exit(2)});
