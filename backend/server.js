@@ -36571,7 +36571,10 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             if(req.method==="POST" && learnerBatchLeaveMatch){
               const client=await pool.connect();
               try{
-                const body=await getBody(req);const userId=Number(body.user_id);
+                await getBody(req);
+                const learner=await getSessionUserFromRequest(req);
+                if(!learner)return sendJSON(res,401,{status:'error',message:'Learner sign in required',code:'LEARNER_SESSION_REQUIRED'});
+                const userId=Number(learner.id);
                 await client.query('BEGIN');
                 const member=(await client.query(`UPDATE learning_batch_memberships SET membership_status='CANCELLED',left_at=NOW(),updated_at=NOW() WHERE batch_id=$1::uuid AND user_id=$2 AND membership_status IN ('ENROLLED','WAITLISTED') RETURNING *`,[learnerBatchLeaveMatch[1],userId])).rows[0];
                 if(!member){await client.query('ROLLBACK');return sendJSON(res,404,{status:'error',message:'Active batch membership not found'});}
@@ -36853,7 +36856,10 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             const learnerGroupRoomJoinMatch=pathname.match(/^\/api\/learning\/batch-sessions\/([0-9a-f-]+)\/classroom\/join\/?$/i);
             if(req.method==="POST" && learnerGroupRoomJoinMatch){
               try{
-                const body=await getBody(req);const userId=Number(body.user_id);
+                await getBody(req);
+                const learner=await getSessionUserFromRequest(req);
+                if(!learner)return sendJSON(res,401,{status:'error',message:'Learner sign in required',code:'LEARNER_SESSION_REQUIRED'});
+                const userId=Number(learner.id);
                 if(!Number.isInteger(userId)||userId<=0)return sendJSON(res,400,{status:'error',message:'Valid learner is required'});
                 const row=(await pool.query(`
                   SELECT a.id AS attendance_id,a.joined_at,a.left_at,s.id AS session_id,s.status,s.batch_id,b.title AS batch_title
@@ -36878,7 +36884,9 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             const learnerGroupRoomMatch=pathname.match(/^\/api\/learning\/batch-sessions\/([0-9a-f-]+)\/classroom\/?$/i);
             if(req.method==="GET" && learnerGroupRoomMatch){
               try{
-                const urlObj=new URL(req.url,'http://localhost');const userId=Number(urlObj.searchParams.get('user_id'));
+                const learner=await getSessionUserFromRequest(req);
+                if(!learner)return sendJSON(res,401,{status:'error',message:'Learner sign in required',code:'LEARNER_SESSION_REQUIRED'});
+                const userId=Number(learner.id);
                 const access=(await pool.query(`SELECT 1 FROM learning_batch_session_attendance WHERE batch_session_id=$1::uuid AND user_id=$2::bigint`,[learnerGroupRoomMatch[1],userId])).rowCount;
                 if(!access)return sendJSON(res,403,{status:'error',message:'You are not assigned to this group classroom'});
                 const session=(await pool.query(`
@@ -36910,7 +36918,10 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             const learnerGroupRoomLeaveMatch=pathname.match(/^\/api\/learning\/batch-sessions\/([0-9a-f-]+)\/classroom\/leave\/?$/i);
             if(req.method==="POST" && learnerGroupRoomLeaveMatch){
               try{
-                const body=await getBody(req);const userId=Number(body.user_id);
+                await getBody(req);
+                const learner=await getSessionUserFromRequest(req);
+                if(!learner)return sendJSON(res,401,{status:'error',message:'Learner sign in required',code:'LEARNER_SESSION_REQUIRED'});
+                const userId=Number(learner.id);
                 const att=(await pool.query(`SELECT id,joined_at FROM learning_batch_session_attendance WHERE batch_session_id=$1::uuid AND user_id=$2::bigint LIMIT 1`,[learnerGroupRoomLeaveMatch[1],userId])).rows[0];
                 if(!att)return sendJSON(res,403,{status:'error',message:'Not assigned to this group classroom'});
                 await pool.query(`UPDATE learning_group_classroom_participants SET left_at=NOW(),last_seen_at=NOW(),connection_status='LEFT',updated_at=NOW() WHERE batch_session_id=$1::uuid AND user_id=$2::bigint`,[learnerGroupRoomLeaveMatch[1],userId]);
@@ -36927,7 +36938,10 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             const learnerGroupRoomMessageMatch=pathname.match(/^\/api\/learning\/batch-sessions\/([0-9a-f-]+)\/classroom\/message\/?$/i);
             if(req.method==="POST" && learnerGroupRoomMessageMatch){
               try{
-                const body=await getBody(req);const userId=Number(body.user_id);const message=clean(body.message);
+                const body=await getBody(req);
+                const learner=await getSessionUserFromRequest(req);
+                if(!learner)return sendJSON(res,401,{status:'error',message:'Learner sign in required',code:'LEARNER_SESSION_REQUIRED'});
+                const userId=Number(learner.id),message=clean(body.message);
                 const access=(await pool.query(`SELECT 1 FROM learning_batch_session_attendance WHERE batch_session_id=$1::uuid AND user_id=$2::bigint`,[learnerGroupRoomMessageMatch[1],userId])).rowCount;
                 if(!access)return sendJSON(res,403,{status:'error',message:'Not assigned to this group classroom'});
                 if(!message)return sendJSON(res,400,{status:'error',message:'Message is required'});
@@ -36941,16 +36955,26 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             if(groupSignalMatch && ['GET','POST'].includes(req.method)){
               try{
                 const sessionId=groupSignalMatch[1];
-                const urlObj=new URL(req.url,'http://localhost');
+                const actor=await getSessionUserFromRequest(req);
+                if(!actor)return sendJSON(res,401,{status:'error',message:'Sign in required'});
+                const actorUserId=Number(actor.id);
+                const attendance=(await pool.query(`SELECT 1 FROM learning_batch_session_attendance WHERE batch_session_id=$1::uuid AND user_id=$2::bigint`,[sessionId,actorUserId])).rowCount;
+                const actorTeacher=(await pool.query(`SELECT tp.id FROM learning_teacher_profiles tp JOIN learning_batches b ON b.teacher_profile_id=tp.id JOIN learning_batch_sessions s ON s.batch_id=b.id WHERE s.id=$1::uuid AND tp.user_id=$2 LIMIT 1`,[sessionId,actorUserId])).rows[0];
+                if(!attendance&&!actorTeacher)return sendJSON(res,403,{status:'error',message:'Not assigned to this group classroom'});
                 if(req.method==='POST'){
-                  const body=await getBody(req);const senderUserId=Number(body.user_id);const receiverUserId=body.receiver_user_id?Number(body.receiver_user_id):null;
-                  const senderRole=clean(body.sender_role).toUpperCase();const signalType=clean(body.signal_type).toUpperCase();
-                  if(!Number.isInteger(senderUserId)||!['TEACHER','LEARNER'].includes(senderRole)||!signalType)return sendJSON(res,400,{status:'error',message:'Invalid group classroom signal'});
+                  const body=await getBody(req);
+                  const senderUserId=actorUserId;
+                  const receiverUserId=body.receiver_user_id?Number(body.receiver_user_id):null;
+                  const senderRole=actorTeacher?'TEACHER':'LEARNER';const signalType=clean(body.signal_type).toUpperCase();
+                  if(!signalType)return sendJSON(res,400,{status:'error',message:'Invalid group classroom signal'});
+                  if(receiverUserId){
+                    const receiverAllowed=(await pool.query(`SELECT 1 FROM learning_group_classroom_participants WHERE batch_session_id=$1::uuid AND user_id=$2::bigint`,[sessionId,receiverUserId])).rowCount;
+                    if(!receiverAllowed)return sendJSON(res,403,{status:'error',message:'Signal receiver is not in this classroom'});
+                  }
                   const row=(await pool.query(`INSERT INTO learning_group_classroom_signals(batch_session_id,sender_user_id,receiver_user_id,sender_role,signal_type,payload) VALUES($1::uuid,$2::bigint,$3::bigint,$4,$5,$6::jsonb) RETURNING *`,[sessionId,senderUserId,receiverUserId,senderRole,signalType,JSON.stringify(body.payload||{})])).rows[0];
                   return sendJSON(res,201,{status:'success',signal:row});
                 }
-                const receiverUserId=Number(urlObj.searchParams.get('user_id'));
-                if(!Number.isInteger(receiverUserId))return sendJSON(res,400,{status:'error',message:'Valid signal receiver is required'});
+                const receiverUserId=actorUserId;
                 const rows=(await pool.query(`
                   SELECT * FROM learning_group_classroom_signals
                   WHERE batch_session_id=$1::uuid AND consumed_at IS NULL
@@ -43121,8 +43145,10 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 const match=pathname.match(/^\/api\/learning\/course\/([^/]+)\/lesson\/([^/]+)\/open\/?$/);
                 const courseId=decodeURIComponent(match?.[1]||"");
                 const lessonId=decodeURIComponent(match?.[2]||"");
-                const body=await getBody(req);
-                const userId=Number(body.user_id??body.userId);
+                await getBody(req);
+                const learner=await getSessionUserFromRequest(req);
+                if(!learner)return sendJSON(res,401,{status:"error",message:"Learner sign in required",code:"LEARNER_SESSION_REQUIRED"});
+                const userId=Number(learner.id);
                 if(!Number.isInteger(userId)||userId<=0)return sendJSON(res,400,{status:"error",message:"Valid learner is required"});
 
                 const enrolled=(await pool.query(`SELECT id FROM user_course_enrollments WHERE user_id=$1 AND course_id=$2::uuid LIMIT 1`,[userId,courseId])).rows[0];
