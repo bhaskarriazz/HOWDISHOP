@@ -9682,6 +9682,103 @@
     }
 
     // =====================================================
+    // HPAY PUBLIC HANDLE — the customer-facing HPay ID is built from the member's public @username
+    // (howdi_connect_profiles.public_username), never from the internal users.howdi_id.
+    // =====================================================
+    function hpayHandleFromUsername(publicUsername) {
+      const base = clean(String(publicUsername || "").toLowerCase()).replace(/[^a-z0-9._-]/g, "").slice(0, 70);
+      return base ? `${base}@hpay` : "";
+    }
+    // What the pre-fix code issued: a handle derived from the INTERNAL howdi_id (used only to recognise legacy rows).
+    function hpayLegacyInternalHandle(userId, howdiId) {
+      const base = clean((howdiId || `user${userId}`).toLowerCase()).replace(/[^a-z0-9._-]/g, "").slice(0, 70) || `user${userId}`;
+      return `${base}@hpay`;
+    }
+    function hpayHttpError(status, code, message) {
+      return Object.assign(new Error(message), { hpayHttp: { status, code, message } });
+    }
+
+    // One-shot, all-or-nothing migration of legacy handles (`<internal howdi_id>@hpay`) to `<public_username>@hpay`.
+    //  * Only accounts whose hpay_id equals their own legacy internal-id handle are touched.
+    //  * Every such account needs a usable public_username and a new lowercase handle that collides with NO other
+    //    account handle (and with no other migrated account). If even one does not, NOTHING is changed and startup
+    //    stops with a message naming the accounts, for operator resolution. Nothing is renamed silently.
+    //  * Stored display copies of the old handle (metadata keys on audit / transaction / status-history rows) are
+    //    rewritten in the same transaction; request rows have no stored handle (it is joined live).
+    const HPAY_HANDLE_META_TABLES = ["hpay_audit_logs", "hpay_transactions", "hpay_status_history"];
+    const HPAY_HANDLE_META_KEYS = ["payer_hpay_id", "requester_hpay_id", "sender_hpay_id", "receiver_hpay_id", "hpay_id"];
+    async function migrateHpayLegacyHandles() {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query(`SELECT pg_advisory_xact_lock(hashtext('howdi_hpay_public_handle_migration'))`);
+        const rows = (await client.query(`
+          SELECT a.id AS account_id, a.user_id, a.hpay_id, u.howdi_id, p.public_username
+            FROM hpay_accounts a
+            JOIN users u ON u.id = a.user_id
+            LEFT JOIN howdi_connect_profiles p ON p.user_id = a.user_id
+           ORDER BY a.id
+             FOR UPDATE OF a
+        `)).rows;
+        const owner = new Map(rows.map((r) => [String(r.hpay_id).toLowerCase(), Number(r.account_id)]));
+        const planned = new Map();
+        const plan = [];
+        const problems = [];
+        for (const r of rows) {
+          const current = String(r.hpay_id).toLowerCase();
+          if (current !== hpayLegacyInternalHandle(r.user_id, r.howdi_id)) continue; // not a legacy internal-id handle
+          const next = hpayHandleFromUsername(r.public_username);
+          if (!next) { problems.push(`account ${r.account_id}: NO_PUBLIC_USERNAME`); continue; }
+          if (next === current) continue; // the chosen public username already yields this exact handle
+          if (owner.has(next) || planned.has(next)) { problems.push(`account ${r.account_id}: HANDLE_COLLISION`); continue; }
+          planned.set(next, Number(r.account_id));
+          plan.push({ accountId: Number(r.account_id), oldHandle: current, newHandle: next });
+        }
+        if (problems.length) {
+          throw Object.assign(new Error(
+            `HPay public-handle migration requires operator resolution before startup (${problems.length} account(s), nothing was changed): ${problems.join("; ")}. ` +
+            `Give each account a public @username in Connect or resolve the colliding handle, then restart HOWDI.`
+          ), { code: "23505" });
+        }
+        if (plan.length) {
+          const ids = plan.map((x) => String(x.accountId));
+          const olds = plan.map((x) => x.oldHandle);
+          const news = plan.map((x) => x.newHandle);
+          await client.query(
+            `UPDATE hpay_accounts a SET hpay_id = m.new_handle, updated_at = NOW()
+               FROM unnest($1::bigint[], $2::text[]) AS m(account_id, new_handle)
+              WHERE a.id = m.account_id`,
+            [ids, news]
+          );
+          for (const table of HPAY_HANDLE_META_TABLES) {
+            for (const key of HPAY_HANDLE_META_KEYS) {
+              await client.query(
+                `UPDATE ${table} t SET metadata = jsonb_set(t.metadata, ARRAY[$3::text], to_jsonb(m.new_handle))
+                   FROM unnest($1::text[], $2::text[]) AS m(old_handle, new_handle)
+                  WHERE jsonb_typeof(t.metadata) = 'object' AND LOWER(t.metadata ->> $3::text) = m.old_handle`,
+                [olds, news, key]
+              );
+            }
+          }
+          // Audit trail without the old (internal-id) handle.
+          await client.query(
+            `INSERT INTO hpay_audit_logs(actor_type, actor_id, action, entity_type, entity_id, metadata)
+             SELECT 'SYSTEM', 'HPAY_HANDLE_MIGRATION', 'HPAY_HANDLE_MIGRATED', 'HPAY_ACCOUNT', x, '{"reason":"public_username_handle"}'::jsonb
+               FROM unnest($1::text[]) AS x`,
+            [ids]
+          );
+        }
+        await client.query("COMMIT");
+        if (plan.length) console.log(`✅ HPay public-handle migration: ${plan.length} account(s) moved from internal-id handles to public @username handles`);
+      } catch (error) {
+        try { await client.query("ROLLBACK"); } catch {}
+        throw error;
+      } finally {
+        client.release();
+      }
+    }
+
+    // =====================================================
     // HPAY — POSTGRESQL FOUNDATION V1
     // Ledger/operations foundation only.
     // Real money movement must be confirmed by an authorized payment provider.
@@ -9872,6 +9969,7 @@
         CREATE INDEX IF NOT EXISTS hpay_requests_status_idx ON hpay_payment_requests(status);
         CREATE INDEX IF NOT EXISTS hpay_risk_status_idx ON hpay_risk_events(status, severity);
       `);
+      await migrateHpayLegacyHandles();
     }
 
 
@@ -54695,15 +54793,24 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               created_at:row.created_at,updated_at:row.updated_at
             }):null;
             const ensureSessionHpayAccount=async(user)=>{
-              const publicBase=clean((user.public_username||"").toLowerCase()).replace(/[^a-z0-9._-]/g,"").slice(0,70);
-              const legacyBase=clean((user.howdi_id||`user${user.id}`).toLowerCase()).replace(/[^a-z0-9._-]/g,"").slice(0,70)||`user${user.id}`;
-              const desiredId=`${publicBase||legacyBase}@hpay`;
-              return (await pool.query(`
-                INSERT INTO hpay_accounts(user_id,hpay_id)
-                VALUES($1,$2)
-                ON CONFLICT(user_id) DO UPDATE SET updated_at=NOW()
-                RETURNING *
-              `,[user.id,desiredId])).rows[0];
+              // An existing account keeps its handle. A new account's handle comes ONLY from the member's public
+              // @username (howdi_connect_profiles); the internal howdi_id is never used.
+              const found=(await pool.query(`UPDATE hpay_accounts SET updated_at=NOW() WHERE user_id=$1 RETURNING *`,[user.id])).rows[0];
+              if(found) return found;
+              const profile=(await pool.query(`SELECT public_username FROM howdi_connect_profiles WHERE user_id=$1 LIMIT 1`,[user.id])).rows[0];
+              const desiredId=hpayHandleFromUsername(profile?.public_username);
+              if(!desiredId) throw hpayHttpError(409,"HPAY_USERNAME_REQUIRED","Set your HOWDI @username to activate HPay");
+              try{
+                return (await pool.query(`
+                  INSERT INTO hpay_accounts(user_id,hpay_id)
+                  VALUES($1,$2)
+                  ON CONFLICT(user_id) DO UPDATE SET updated_at=NOW()
+                  RETURNING *
+                `,[user.id,desiredId])).rows[0];
+              }catch(error){
+                if(error&&error.code==="23505") throw hpayHttpError(409,"HPAY_ID_UNAVAILABLE","This HPay ID is not available. Please contact HOWDI support.");
+                throw error;
+              }
             };
 
             if (req.method === "GET" && (pathname === "/api/hpay/me" || pathname === "/api/hpay/me/")) {
@@ -55436,6 +55543,9 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             // HPay may surface PostgreSQL/provider failures. Keep diagnostics server-side
             // and never return raw exception messages to the customer.
             if (pathname === "/api/hpay" || pathname.startsWith("/api/hpay/")) {
+              if (error && error.hpayHttp) {
+                return sendJSON(res, error.hpayHttp.status, { status: "error", code: error.hpayHttp.code, message: error.hpayHttp.message });
+              }
               return sendJSON(res, 500, {
                 status: "error",
                 message: "Unable to complete the HPay request right now",
