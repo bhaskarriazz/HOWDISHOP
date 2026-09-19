@@ -9128,6 +9128,76 @@
 
 
 
+    // =====================================================
+    // K5D — HOWDI CONNECT NOTIFICATIONS: session-scoped queries + ID-free public payload.
+    // The acting user is ALWAYS the authenticated session user (never a client-supplied
+    // userId). Public payloads are built from an explicit allow-list: user_id,
+    // actor_user_id, howdi_id and user-typed entity_id values are never returned.
+    // Users are referenced by @public_username; content by its content id (authorized
+    // by construction, because only the recipient's own rows are ever selected).
+    // =====================================================
+    const CONNECT_NOTIFICATION_USER_ENTITIES = new Set(["USER", "CREATOR", "PROFILE"]);
+    const CONNECT_NOTIFICATION_CONTENT_KINDS = {
+      POST: "POST", ARTICLE: "ARTICLE", VIBE: "VIBE", STORY: "STORY", SPACE: "SPACE", LIVE: "LIVE",
+      GROUP: "GROUP", CHANNEL: "CHANNEL", SOCIAL_SPACE: "GROUP_CHANNEL", GROUP_CHANNEL: "GROUP_CHANNEL",
+      CALL: "CALL", KNOWLEDGE_REQUEST: "KNOWLEDGE_REQUEST", MENTOR_REQUEST: "MENTOR_REQUEST",
+    };
+    // Hide notifications whose actor is blocked in either direction (same rule as K5A recentActivity).
+    const CONNECT_NOTIFICATION_VISIBLE_SQL = `(n.actor_user_id IS NULL OR NOT EXISTS(
+      SELECT 1 FROM howdi_connect_profile_blocks b
+      WHERE (b.blocker_user_id=n.user_id AND b.blocked_user_id=n.actor_user_id)
+         OR (b.blocker_user_id=n.actor_user_id AND b.blocked_user_id=n.user_id)))`;
+    const CONNECT_NOTIFICATION_LIST_SQL = `
+      SELECT n.id,n.notification_type,n.entity_type,
+        CASE WHEN UPPER(COALESCE(n.entity_type,'')) IN('USER','CREATOR','PROFILE') THEN NULL ELSE n.entity_id END entity_ref,
+        n.message,n.is_read,n.created_at,
+        u.full_name actor_name,acp.public_username actor_public_username,
+        COALESCE(acp.avatar_data,aps.profile_image,'') actor_avatar,
+        tcp.public_username target_public_username
+      FROM howdi_connect_notifications n
+      LEFT JOIN users u ON u.id=n.actor_user_id
+      LEFT JOIN howdi_connect_profiles acp ON acp.user_id=n.actor_user_id
+      LEFT JOIN user_profile_settings aps ON aps.user_id=n.actor_user_id
+      LEFT JOIN howdi_connect_profiles tcp ON tcp.user_id=(CASE WHEN UPPER(COALESCE(n.entity_type,'')) IN('USER','CREATOR','PROFILE') AND n.entity_id ~ '^[0-9]{1,18}$' THEN n.entity_id::bigint END)
+        AND NOT EXISTS(SELECT 1 FROM howdi_connect_profile_blocks tb
+          WHERE (tb.blocker_user_id=n.user_id AND tb.blocked_user_id=tcp.user_id)
+             OR (tb.blocker_user_id=tcp.user_id AND tb.blocked_user_id=n.user_id))
+      WHERE n.user_id=$1
+        AND ($3::text[] IS NULL OR n.notification_type=ANY($3::text[]))
+        AND ($4::int IS NULL OR n.created_at>NOW()-($4::int*INTERVAL '1 hour'))
+        AND ${CONNECT_NOTIFICATION_VISIBLE_SQL}
+      ORDER BY n.created_at DESC,n.id DESC LIMIT $2`;
+    function connectNotificationTarget(row) {
+      const type = String(row?.entity_type || "").trim().toUpperCase();
+      if (CONNECT_NOTIFICATION_USER_ENTITIES.has(type)) {
+        const username = String(row?.target_public_username || "").trim();
+        return username ? { kind: "PROFILE", username } : null;
+      }
+      const kind = CONNECT_NOTIFICATION_CONTENT_KINDS[type];
+      const ref = String(row?.entity_ref ?? "").trim();
+      return kind && /^\d{1,18}$/.test(ref) ? { kind, id: ref } : null;
+    }
+    function publicConnectNotification(row) {
+      return {
+        id: String(row.id),
+        notification_type: String(row.notification_type || ""),
+        message: String(row.message || ""),
+        is_read: Boolean(row.is_read),
+        created_at: row.created_at,
+        actor_name: row.actor_name || null,
+        actor_public_username: row.actor_public_username || null,
+        actor_avatar: row.actor_avatar || "",
+        target: connectNotificationTarget(row),
+      };
+    }
+    async function listConnectNotifications(userId, { limit = 100, types = null, sinceHours = null } = {}) {
+      const rows = (await pool.query(CONNECT_NOTIFICATION_LIST_SQL, [userId, Math.min(100, Math.max(1, Number(limit) || 100)), types, sinceHours])).rows;
+      return rows.map(publicConnectNotification);
+    }
+    async function countConnectUnreadNotifications(userId) {
+      return Number((await pool.query(`SELECT COUNT(*)::int n FROM howdi_connect_notifications n WHERE n.user_id=$1 AND n.is_read=FALSE AND ${CONNECT_NOTIFICATION_VISIBLE_SQL}`, [userId])).rows[0]?.n || 0);
+    }
+
     async function getSessionUserFromRequest(req) {
       const auth = String(req.headers.authorization || "");
       const token = auth.toLowerCase().startsWith("bearer ") ? auth.slice(7).trim() : "";
@@ -44217,7 +44287,10 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 LEFT JOIN howdi_connect_community_members cm ON cm.community_id=c.id AND cm.membership_status='ACTIVE'
                 WHERE c.status='ACTIVE' GROUP BY c.id,u.full_name ORDER BY c.created_at DESC LIMIT 60`,[userId])).rows;
               const saved=(await pool.query(`SELECT post_id FROM howdi_connect_post_saves WHERE user_id=$1`,[userId])).rows.map(r=>String(r.post_id));
-              const unread=Number((await pool.query(`SELECT COUNT(*)::int n FROM howdi_connect_notifications WHERE user_id=$1 AND is_read=FALSE`,[userId])).rows[0]?.n||0);
+              // K5D: this route still addresses the profile by ?userId (out of Notifications scope), but the
+              // notification COUNT is only ever revealed to the authenticated owner; a spoofed id gets 0.
+              const bootSession=await getSessionUserFromRequest(req).catch(()=>null);
+              const unread=bootSession&&Number(bootSession.id)===userId?await countConnectUnreadNotifications(userId):0;
               const membership=(await pool.query(`
                 SELECT us.id subscription_id,us.status,us.started_at,us.ends_at,us.auto_renew,
                        mp.plan_code,mp.name plan_name,mp.price,mp.billing_cycle,mp.benefits
@@ -47374,8 +47447,10 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             }
 
             if(req.method==="GET"&&pathname==="/api/connect/reminders/due"){
-              const userId=Number(url.searchParams.get("userId")||0);
-              if(!Number.isInteger(userId)||userId<=0)return sendJSON(res,400,{status:"error",message:"Valid user is required"});
+              // K5D: session-authoritative. Previously a client-supplied ?userId both CREATED reminder
+              // notifications for, and returned raw notification rows of, any user.
+              const sessionUser=await getSessionUserFromRequest(req);if(!sessionUser)return sendJSON(res,401,{status:"error",message:"Login required"});
+              const userId=Number(sessionUser.id);
               await pool.query(`
                 INSERT INTO howdi_connect_notifications(user_id,actor_user_id,notification_type,entity_type,entity_id,message)
                 SELECT sr.user_id,c.owner_user_id,'SPACE_STARTING_SOON','SPACE',c.id::text,
@@ -47392,14 +47467,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                       AND n.entity_type='SPACE' AND n.entity_id=c.id::text
                   )
               `,[userId]);
-              const rows=(await pool.query(`
-                SELECT n.*,u.full_name actor_name
-                FROM howdi_connect_notifications n LEFT JOIN users u ON u.id=n.actor_user_id
-                WHERE n.user_id=$1 AND n.notification_type IN('SPACE_STARTING_SOON','SPACE_REMINDER_LIVE','SPACE_LIVE')
-                  AND n.created_at>NOW()-INTERVAL '24 hours'
-                ORDER BY n.created_at DESC LIMIT 20
-              `,[userId])).rows;
-              return sendJSON(res,200,{status:"success",notifications:rows});
+              const notifications=await listConnectNotifications(userId,{limit:20,types:['SPACE_STARTING_SOON','SPACE_REMINDER_LIVE','SPACE_LIVE'],sinceHours:24});
+              return sendJSON(res,200,{status:"success",notifications});
             }
 
             if(req.method==="POST"&&/^\/api\/connect\/spaces\/\d+\/replay\/?$/.test(pathname)){
@@ -47970,9 +48039,34 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             }
 
             if(req.method==="GET"&&pathname==="/api/connect/notifications"){
-              const userId=Number(url.searchParams.get("userId")||0);
-              const rows=(await pool.query(`SELECT n.*,u.full_name actor_name,u.howdi_id actor_howdi_id FROM howdi_connect_notifications n LEFT JOIN users u ON u.id=n.actor_user_id WHERE n.user_id=$1 ORDER BY n.created_at DESC LIMIT 100`,[userId])).rows;
-              return sendJSON(res,200,{status:"success",notifications:rows});
+              // K5D: session-authoritative. Any client-supplied userId (query/body) is ignored;
+              // rows are always scoped to the authenticated user and returned ID-free.
+              const sessionUser=await getSessionUserFromRequest(req);if(!sessionUser)return sendJSON(res,401,{status:"error",message:"Login required"});
+              const userId=Number(sessionUser.id);
+              const notifications=await listConnectNotifications(userId,{limit:url.searchParams.get("limit")||100});
+              const unread_count=await countConnectUnreadNotifications(userId);
+              return sendJSON(res,200,{status:"success",notifications,unread_count});
+            }
+
+            if(req.method==="GET"&&pathname==="/api/connect/notifications/unread-count"){
+              const sessionUser=await getSessionUserFromRequest(req);if(!sessionUser)return sendJSON(res,401,{status:"error",message:"Login required"});
+              return sendJSON(res,200,{status:"success",unread_count:await countConnectUnreadNotifications(Number(sessionUser.id))});
+            }
+
+            if((req.method==="PATCH"||req.method==="POST")&&/^\/api\/connect\/notifications\/read-all\/?$/.test(pathname)){
+              const sessionUser=await getSessionUserFromRequest(req);if(!sessionUser)return sendJSON(res,401,{status:"error",message:"Login required"});
+              const userId=Number(sessionUser.id);
+              const marked=(await pool.query(`UPDATE howdi_connect_notifications SET is_read=TRUE WHERE user_id=$1 AND is_read=FALSE`,[userId])).rowCount||0;
+              return sendJSON(res,200,{status:"success",marked,unread_count:await countConnectUnreadNotifications(userId)});
+            }
+
+            if((req.method==="PATCH"||req.method==="POST")&&/^\/api\/connect\/notifications\/\d{1,18}\/read\/?$/.test(pathname)){
+              const sessionUser=await getSessionUserFromRequest(req);if(!sessionUser)return sendJSON(res,401,{status:"error",message:"Login required"});
+              const userId=Number(sessionUser.id);const notificationId=pathname.match(/^\/api\/connect\/notifications\/(\d{1,18})\/read\/?$/)[1];
+              // Ownership is enforced in the WHERE clause. Someone else's (or a missing) id is a plain 404, so ids cannot be probed.
+              const row=(await pool.query(`UPDATE howdi_connect_notifications SET is_read=TRUE WHERE id=$1 AND user_id=$2 RETURNING id`,[notificationId,userId])).rows[0];
+              if(!row)return sendJSON(res,404,{status:"error",message:"Notification not found"});
+              return sendJSON(res,200,{status:"success",unread_count:await countConnectUnreadNotifications(userId)});
             }
 
 

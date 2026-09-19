@@ -4454,7 +4454,10 @@ function App() {
     }catch(e){setConnectNotice(e.message||"Unable to react.");}
   };
 
-  const loadConnectNotifications=async()=>{const userId=Number(currentUser?.id||currentUser?.user_id||0);if(!userId)return;try{const d=await connectApi(`/api/connect/notifications?userId=${userId}`);setConnectNotifications(d.notifications||[]);}catch(e){setConnectNotice(e.message||"Notifications load failed.");}};
+  // K5D: the server derives the user from the session; no user id is sent or needed.
+  const loadConnectNotifications=async()=>{if(!currentUser)return;try{const d=await connectApi(`/api/connect/notifications?limit=30`);setConnectNotifications(d.notifications||[]);if(typeof d.unread_count==="number")setConnectBootstrap(b=>({...b,unread_notifications:d.unread_count}));}catch(e){setConnectNotice(e.message||"Notifications load failed.");}};
+  const markConnectNotificationRead=async(id)=>{setConnectNotifications(prev=>prev.map(n=>String(n.id)===String(id)?{...n,is_read:true}:n));try{const d=await connectApi(`/api/connect/notifications/${encodeURIComponent(id)}/read`,{method:"PATCH"});if(typeof d.unread_count==="number")setConnectBootstrap(b=>({...b,unread_notifications:d.unread_count}));}catch{}};
+  const markAllConnectNotificationsRead=async()=>{setConnectNotifications(prev=>prev.map(n=>({...n,is_read:true})));try{const d=await connectApi(`/api/connect/notifications/read-all`,{method:"PATCH"});setConnectBootstrap(b=>({...b,unread_notifications:typeof d.unread_count==="number"?d.unread_count:0}));}catch{}};
   const createConnectCommunity=async()=>{
     const userId=Number(currentUser?.id||currentUser?.user_id||0),name=connectCommunityName.trim();
     if(!userId||!name)return setConnectNotice("Enter a name.");
@@ -4552,12 +4555,11 @@ function App() {
   useEffect(()=>{if(connectView==="communities"&&connectCommunityView==="live")loadConnectLiveDiscovery();},[connectView,connectCommunityView,connectLiveFilterFormat,connectLiveFilterLanguage,currentUser?.id,currentUser?.user_id]);
 
   useEffect(()=>{
-    const userId=Number(currentUser?.id||currentUser?.user_id||0);
-    if(!userId)return;
+    if(!currentUser)return;
     let active=true;
     const check=async()=>{
       try{
-        const d=await connectApi(`/api/connect/reminders/due?userId=${userId}`);
+        const d=await connectApi(`/api/connect/reminders/due`);
         if(!active)return;
         if(Array.isArray(d.notifications)&&d.notifications.length){
           setConnectNotifications(prev=>{
@@ -5078,15 +5080,28 @@ function App() {
     try{await connectApi(`/api/connect/spaces/${connectRealtimeRoom.id}/premium-grant/${person.user_id}`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId()})});setConnectNotice(`Premium access granted to ${person.full_name}.`);}catch(e){setConnectRealtimeError(e.message||"Unable to grant premium access.");}
   };
 
+  // K5D: notifications carry an ID-free `target` ({kind,id}|{kind:"PROFILE",username}); map each kind to an existing Connect view.
   const openConnectNotification=async(n)=>{
-    if(String(n.entity_type||"").toUpperCase()==="SPACE"&&n.entity_id){
-      const room=(connectBootstrap.communities||[]).find(c=>Number(c.id)===Number(n.entity_id));
-      setConnectNotificationsOpen(false);setConnectView("communities");setConnectCommunityView("spaces");
-      if(room)await openConnectSpacePreflight(room);
-      else{
-        try{const d=await connectApi(`/api/connect/spaces/${n.entity_id}/preflight?userId=${connectRealtimeUserId()}`);if(d.room)await openConnectSpacePreflight(d.room);}catch{}
+    if(!n)return;
+    if(!n.is_read)markConnectNotificationRead(n.id);
+    const t=n.target;if(!t)return;
+    setConnectNotificationsOpen(false);
+    try{
+      if(t.kind==="PROFILE"&&t.username){await openConnectPublicProfile({public_username:t.username});}
+      else if(t.kind==="SPACE"){
+        const room=(connectBootstrap.communities||[]).find(c=>String(c.id)===String(t.id));
+        setConnectView("communities");setConnectCommunityView("spaces");
+        if(room)await openConnectSpacePreflight(room);
+        else{const d=await connectApi(`/api/connect/spaces/${t.id}/preflight?userId=${connectRealtimeUserId()}`);if(d.room)await openConnectSpacePreflight(d.room);}
       }
-    }
+      else if(t.kind==="LIVE"){setConnectView("communities");setConnectCommunityView("live");}
+      else if(t.kind==="ARTICLE"){setConnectView("articles");await openConnectArticle({id:t.id});}
+      else if(t.kind==="VIBE"){setConnectView("feed");setConnectContentMode("vibe");}
+      else if(t.kind==="POST"){setConnectView("feed");setConnectContentMode("posts");}
+      else if(t.kind==="STORY"){setConnectView("stories");}
+      else if(t.kind==="GROUP"||t.kind==="CHANNEL"||t.kind==="GROUP_CHANNEL"){setConnectView("communities");setConnectCommunityView("groups");await openConnectGCSpace({id:t.id});}
+      else if(t.kind==="CALL"){setConnectView("messages");loadConnectCallInbox();}
+    }catch(e){setConnectNotice(e.message||"Unable to open this notification.");}
   };
 
   const saveConnectSpaceChatControls=async()=>{try{await connectApi(`/api/connect/realtime/${connectRealtimeRoom.id}/chat-controls`,{method:"PATCH",body:JSON.stringify({userId:connectRealtimeUserId(),chatMode:connectSpaceChatMode,slowSeconds:Number(connectSpaceSlowSeconds)||0})});await connectRealtimePoll();setConnectNotice("Chat controls updated.");}catch(e){setConnectRealtimeError(e.message||"Chat controls failed.");}};
@@ -19394,7 +19409,8 @@ const removeNotification = async (notificationId) => {
               {connectNotificationsOpen&&<div style={{position:"absolute",right:64,top:64,zIndex:50,width:340,maxHeight:430,overflow:"auto",background:"#fff",border:"1px solid #e4e8e5",borderRadius:16,boxShadow:"0 18px 50px rgba(20,45,30,.18)",padding:12}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}><b>Notifications</b><button type="button" onClick={()=>setConnectNotificationsOpen(false)}>×</button></div>
                 {!connectNotifications.length&&<p>No Connect notifications yet.</p>}
-                {connectNotifications.slice(0,20).map(n=><article key={n.id} onClick={()=>openConnectNotification(n)} style={{padding:"10px 4px",borderTop:"1px solid #eef1ef",cursor:String(n.entity_type||"").toUpperCase()==="SPACE"?"pointer":"default"}}><b>{n.actor_name||"HOWDI"}</b><div>{n.message}</div><small>{formatConnectDate(n.created_at)}{String(n.entity_type||"").toUpperCase()==="SPACE"?" · Open Space":""}</small></article>)}
+                {connectNotifications.some(n=>!n.is_read)&&<button type="button" onClick={markAllConnectNotificationsRead} style={{margin:"6px 0",fontSize:12}}>Mark all read</button>}
+                {connectNotifications.slice(0,20).map(n=><article key={n.id} onClick={()=>openConnectNotification(n)} style={{padding:"10px 4px",borderTop:"1px solid #eef1ef",cursor:n.target?"pointer":"default",background:n.is_read?"transparent":"#f3faf5"}}><b>{n.actor_name||"HOWDI"}</b>{n.actor_public_username&&<small style={{marginLeft:6,color:"#6b7a70"}}>@{n.actor_public_username}</small>}<div>{n.message}</div><small>{formatConnectDate(n.created_at)}{n.target?" · Open":""}</small></article>)}
               </div>}
 
               <div className="hc2-scroll">
