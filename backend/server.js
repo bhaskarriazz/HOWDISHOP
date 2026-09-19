@@ -8373,7 +8373,7 @@
             "GET,POST,PUT,PATCH,DELETE,OPTIONS",
 
           "Access-Control-Allow-Headers":
-            "Content-Type, Authorization, x-howdi-admin-token, x-howdi-worker-id",
+            "Content-Type, Authorization, x-howdi-admin-token",
         }
       );
 
@@ -13031,6 +13031,7 @@
         active BOOLEAN DEFAULT TRUE, sort_order INTEGER DEFAULT 100, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW())`);
       await pool.query(`CREATE TABLE IF NOT EXISTS works_workers (
         id BIGSERIAL PRIMARY KEY, worker_code VARCHAR(60) UNIQUE NOT NULL, full_name VARCHAR(160) NOT NULL, phone VARCHAR(30) NOT NULL,
+        user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
         email VARCHAR(255), city VARCHAR(120), pincode VARCHAR(12), requested_skill VARCHAR(120), experience_years NUMERIC(6,2) DEFAULT 0,
         service_radius_km NUMERIC(8,2) DEFAULT 0, starting_price NUMERIC(12,2) DEFAULT 0, kyc_status VARCHAR(30) DEFAULT 'pending',
         skill_status VARCHAR(30) DEFAULT 'pending', account_status VARCHAR(30) DEFAULT 'registered', availability VARCHAR(30) DEFAULT 'offline',
@@ -13121,6 +13122,8 @@
       console.log("✅ HOWDI Works stale DB triggers/rules cleared");
 
       await pool.query(`ALTER TABLE works_workers ADD COLUMN IF NOT EXISTS availability_status VARCHAR(20) NOT NULL DEFAULT 'online'`);
+      await pool.query(`ALTER TABLE works_workers ADD COLUMN IF NOT EXISTS user_id BIGINT REFERENCES users(id) ON DELETE SET NULL`);
+      await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS works_workers_user_id_unique ON works_workers(user_id) WHERE user_id IS NOT NULL`);
       await pool.query(`ALTER TABLE works_workers ADD COLUMN IF NOT EXISTS availability_until TIMESTAMPTZ`);
       await pool.query(`ALTER TABLE works_workers ADD COLUMN IF NOT EXISTS preferred_radius_km NUMERIC(8,2)`);
       await pool.query(`ALTER TABLE works_workers ADD COLUMN IF NOT EXISTS availability_updated_at TIMESTAMPTZ DEFAULT NOW()`);
@@ -13513,6 +13516,17 @@
     }
     function worksServiceRow(r){return{id:String(r.id),serviceCode:r.service_code,name:r.name,icon:r.icon||'🛠️',description:r.description||'',visible:r.customer_visible!==false,active:r.active!==false,sortOrder:Number(r.sort_order||0)}}
     function worksWorkerRow(r){return{id:String(r.id),workerCode:r.worker_code,fullName:r.full_name,phone:r.phone,email:r.email||'',city:r.city||'',pincode:r.pincode||'',requestedSkill:r.requested_skill||'',experienceYears:Number(r.experience_years||0),serviceRadiusKm:Number(r.service_radius_km||0),startingPrice:Number(r.starting_price||0),kycStatus:r.kyc_status,skillStatus:r.skill_status,accountStatus:r.account_status,availability:r.availability,availabilityStatus:r.availability_status||'online',rating:Number(r.rating||0),completedJobs:Number(r.completed_jobs||0),active:r.active!==false,createdAt:r.created_at,updatedAt:r.updated_at}}
+    function worksPortalWorkerRow(r){const {id,user_id,...worker}=worksWorkerRow(r);return worker}
+    async function requireActiveSessionWorker(req,res){
+      const sessionUser=await getSessionUserFromRequest(req);
+      if(!sessionUser){sendJSON(res,401,{status:'error',message:'Worker session is required',code:'WORKER_SESSION_REQUIRED'});return null;}
+      const worker=(await pool.query(`SELECT id,user_id,active,kyc_status,skill_status,account_status FROM works_workers WHERE user_id=$1 LIMIT 1`,[sessionUser.id])).rows[0];
+      if(!worker){sendJSON(res,403,{status:'error',message:'No Worker Portal account is linked to this session',code:'WORKER_ACCOUNT_NOT_LINKED'});return null;}
+      if(worker.active===false||String(worker.kyc_status||'').toLowerCase()!=='verified'||String(worker.skill_status||'').toLowerCase()!=='verified'||String(worker.account_status||'').toLowerCase()!=='active'){
+        sendJSON(res,403,{status:'error',message:'Worker account is not active and fully verified',code:'WORKER_ACCOUNT_INELIGIBLE'});return null;
+      }
+      return String(worker.id);
+    }
     function worksOrderRow(r){return{
       id:String(r.id),workCode:r.work_code,title:r.title,category:r.service_name||'',serviceId:r.service_id?String(r.service_id):'',
       workType:r.work_type||'one_time',city:r.city||'',pincode:r.pincode||'',budget:Number(r.budget||0),
@@ -21025,7 +21039,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
       if(!res.headersSent){
         res.setHeader("Access-Control-Allow-Origin","*");
         res.setHeader("Access-Control-Allow-Methods","GET,POST,PUT,PATCH,DELETE,OPTIONS");
-        res.setHeader("Access-Control-Allow-Headers","Content-Type, Authorization, x-howdi-admin-token, x-howdi-worker-id");
+        res.setHeader("Access-Control-Allow-Headers","Content-Type, Authorization, x-howdi-admin-token");
       }
       res.status=function(code){res.statusCode=Number(code)||500;return res;};
       res.json=function(payload){
@@ -21140,7 +21154,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   "GET,POST,PUT,PATCH,DELETE,OPTIONS",
 
                 "Access-Control-Allow-Headers":
-                  "Content-Type, Authorization, x-howdi-admin-token, x-howdi-worker-id",
+                  "Content-Type, Authorization, x-howdi-admin-token",
               }
             );
 
@@ -24512,10 +24526,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
             if(req.method==="GET" && (pathname==="/api/worker/hpay/summary" || pathname==="/api/worker/hpay/summary/")){
               try{
-                const workerId=Number(req.headers["x-howdi-worker-id"]);
-                if(!Number.isInteger(workerId)||workerId<=0)return sendJSON(res,401,{status:"error",message:"Worker session is required"});
-                const exists=(await pool.query(`SELECT id FROM works_workers WHERE id=$1 LIMIT 1`,[workerId])).rows[0];
-                if(!exists)return sendJSON(res,404,{status:"error",message:"Worker not found"});
+                const workerId=await requireActiveSessionWorker(req,res);if(!workerId)return;
                 return sendJSON(res,200,{status:"success",summary:await getWorkerHpaySummary(workerId)});
               }catch(error){
                 return sendJSON(res,500,{status:"error",message:"Unable to load Worker HPay",detail:error.message||null});
@@ -27332,58 +27343,16 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
             // =====================================================
             // HOWDI WORKER PORTAL — JOB OFFERS + ACTIVE JOURNEY
-            // Prototype identity = workerCode + phone. Replace with
-            // full account/session auth before production.
+            // Every protected action is tied to the HOWDI session.
             // =====================================================
-            if (req.method === "POST" && pathname === "/api/worker/session") {
-              const body = await getBody(req);
-              const workerCode = clean(body.workerCode);
-              const phone = clean(body.phone);
-
-              if (!workerCode || !phone) {
-                return sendJSON(res, 400, {
-                  status: "error",
-                  message: "Worker ID and phone are required",
-                });
-              }
-
-              const q = await pool.query(
-                `SELECT * FROM works_workers
-                 WHERE LOWER(worker_code)=LOWER($1)
-                   AND regexp_replace(COALESCE(phone,''),'\\D','','g') =
-                       regexp_replace($2,'\\D','','g')
-                 LIMIT 1`,
-                [workerCode, phone]
-              );
-
-              const worker = q.rows[0];
-              if (!worker) {
-                return sendJSON(res, 401, {
-                  status: "error",
-                  message: "Worker ID or phone does not match",
-                });
-              }
-
-              if (
-                String(worker.kyc_status || "").toLowerCase() !== "verified" ||
-                String(worker.skill_status || "").toLowerCase() !== "verified" ||
-                String(worker.account_status || "").toLowerCase() !== "active"
-              ) {
-                return sendJSON(res, 403, {
-                  status: "error",
-                  message: "Worker account is not active and fully verified",
-                });
-              }
-
-              return sendJSON(res, 200, {
-                status: "success",
-                worker: worksWorkerRow(worker),
-              });
+            if ((req.method === "GET" || req.method === "POST") && (pathname === "/api/worker/me" || pathname === "/api/worker/session")) {
+              const workerId=await requireActiveSessionWorker(req,res);if(!workerId)return;
+              const q=await pool.query(`SELECT * FROM works_workers WHERE id=$1 LIMIT 1`,[workerId]);
+              return sendJSON(res,200,{status:"success",worker:worksPortalWorkerRow(q.rows[0])});
             }
 
             if (req.method === "GET" && pathname === "/api/worker/works/availability") {
-              const workerId=clean(req.headers["x-howdi-worker-id"]);
-              if(!workerId||!/^\d+$/.test(workerId))return sendJSON(res,401,{status:"error",message:"Worker identity required"});
+              const workerId=await requireActiveSessionWorker(req,res);if(!workerId)return;
               const q=await pool.query(`SELECT id,availability_status,availability_until,preferred_radius_km,availability_updated_at FROM works_workers WHERE id=$1 LIMIT 1`,[workerId]);
               if(!q.rows[0])return sendJSON(res,404,{status:"error",message:"Worker not found"});
 
@@ -27442,8 +27411,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             }
 
             if (req.method === "PUT" && pathname === "/api/worker/works/availability") {
-              const workerId=clean(req.headers["x-howdi-worker-id"]);
-              if(!workerId||!/^\d+$/.test(workerId))return sendJSON(res,401,{status:"error",message:"Worker identity required"});
+              const workerId=await requireActiveSessionWorker(req,res);if(!workerId)return;
               const body=await getBody(req);
               const blocking=await getWorkerBlockingWork(workerId);
               const onWork=!!blocking && ['accepted','assigned','en_route','arrived','in_progress'].includes(String(blocking.journey_stage||blocking.status||'').toLowerCase());
@@ -27485,8 +27453,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             // Restores endpoints already used by the frozen Worker Portal.
             // =====================================================
             if(req.method==="GET" && pathname==="/api/worker/works/notifications"){
-              const workerId=clean(req.headers["x-howdi-worker-id"]);
-              if(!workerId||!/^\d+$/.test(workerId))return sendJSON(res,401,{status:"error",message:"Worker identity required"});
+              const workerId=await requireActiveSessionWorker(req,res);if(!workerId)return;
               const q=await pool.query(
                 `SELECT n.*,wo.work_code
                  FROM works_notifications n
@@ -27501,8 +27468,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             }
 
             if(req.method==="PATCH" && pathname==="/api/worker/works/notifications/read-all"){
-              const workerId=clean(req.headers["x-howdi-worker-id"]);
-              if(!workerId||!/^\d+$/.test(workerId))return sendJSON(res,401,{status:"error",message:"Worker identity required"});
+              const workerId=await requireActiveSessionWorker(req,res);if(!workerId)return;
               await pool.query(
                 `UPDATE works_notifications
                  SET is_read=TRUE,read_at=COALESCE(read_at,NOW())
@@ -27511,8 +27477,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             }
 
             if(req.method==="PATCH" && /^\/api\/worker\/works\/notifications\/\d+\/read\/?$/.test(pathname)){
-              const workerId=clean(req.headers["x-howdi-worker-id"]);
-              if(!workerId||!/^\d+$/.test(workerId))return sendJSON(res,401,{status:"error",message:"Worker identity required"});
+              const workerId=await requireActiveSessionWorker(req,res);if(!workerId)return;
               const id=pathname.split("/").filter(Boolean).slice(-2,-1)[0];
               const q=await pool.query(
                 `UPDATE works_notifications
@@ -27526,8 +27491,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
             // =====================================================
             if (req.method === "GET" && pathname === "/api/worker/profile") {
-              const workerId=clean(req.headers["x-howdi-worker-id"]);
-              if(!workerId||!/^\d+$/.test(workerId))return sendJSON(res,401,{status:"error",message:"Worker identity required"});
+              const workerId=await requireActiveSessionWorker(req,res);if(!workerId)return;
               const workerQ=await pool.query(`SELECT * FROM works_workers WHERE id=$1 LIMIT 1`,[workerId]);
               if(!workerQ.rows[0])return sendJSON(res,404,{status:"error",message:"Worker not found"});
               const servicesQ=await pool.query(`
@@ -27536,12 +27500,11 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 JOIN works_services s ON s.id=ws.service_id
                 WHERE ws.worker_id=$1 AND LOWER(TRIM(ws.status))='approved'
                 ORDER BY ws.is_primary DESC,s.name ASC`,[workerId]);
-              return sendJSON(res,200,{status:"success",worker:worksWorkerRow(workerQ.rows[0]),services:servicesQ.rows.map(r=>({id:String(r.id),name:r.name,status:r.status,isPrimary:r.is_primary===true}))});
+              return sendJSON(res,200,{status:"success",worker:worksPortalWorkerRow(workerQ.rows[0]),services:servicesQ.rows.map(r=>({id:String(r.id),name:r.name,status:r.status,isPrimary:r.is_primary===true}))});
             }
 
             if (req.method === "PUT" && pathname === "/api/worker/profile") {
-              const workerId=clean(req.headers["x-howdi-worker-id"]);
-              if(!workerId||!/^\d+$/.test(workerId))return sendJSON(res,401,{status:"error",message:"Worker identity required"});
+              const workerId=await requireActiveSessionWorker(req,res);if(!workerId)return;
               const b=await getBody(req);
               const fullName=clean(b.fullName),email=clean(b.email),city=clean(b.city),pincode=clean(b.pincode);
               const radius=b.serviceRadiusKm==null||b.serviceRadiusKm===''?0:Number(b.serviceRadiusKm);
@@ -27551,7 +27514,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               if(!Number.isFinite(radius)||radius<0||radius>200)return sendJSON(res,400,{status:"error",message:"Service radius must be between 0 and 200 km"});
               const q=await pool.query(`UPDATE works_workers SET full_name=$2,email=$3,city=$4,pincode=$5,service_radius_km=$6,updated_at=NOW() WHERE id=$1 RETURNING *`,[workerId,fullName,email||null,city,pincode,radius]);
               if(!q.rows[0])return sendJSON(res,404,{status:"error",message:"Worker not found"});
-              return sendJSON(res,200,{status:"success",message:"Profile updated",worker:worksWorkerRow(q.rows[0])});
+              return sendJSON(res,200,{status:"success",message:"Profile updated",worker:worksPortalWorkerRow(q.rows[0])});
             }
 
             if (req.method === "GET" && pathname === "/api/worker/connect/health") {
@@ -27562,8 +27525,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                     // HOWDI WORKER CONNECT — LIVE COMMUNITY
             // =====================================================
             if (req.method === "GET" && pathname === "/api/worker/connect/feed") {
-              const workerId = Number(url.searchParams.get("workerId") || req.headers["x-howdi-worker-id"] || 0);
-              if(!Number.isInteger(workerId)||workerId<=0)return sendJSON(res,400,{status:"error",message:"Valid worker identity required"});
+              const workerId = await requireActiveSessionWorker(req,res);if(!workerId)return;
               const q=await pool.query(`
                 SELECT p.id,p.content,p.category,p.created_at,
                        w.id AS worker_id,w.worker_code,w.full_name,
@@ -27583,8 +27545,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             }
 
             if (req.method === "POST" && pathname === "/api/worker/connect/posts") {
-              const b=await getBody(req),workerId=Number(b.workerId||req.headers["x-howdi-worker-id"]||0),content=clean(b.content),category=(clean(b.category)||"WORK").toUpperCase();
-              if(!Number.isInteger(workerId)||workerId<=0)return sendJSON(res,400,{status:"error",message:"Valid worker identity required"});
+              const b=await getBody(req),workerId=await requireActiveSessionWorker(req,res);if(!workerId)return;const content=clean(b.content),category=(clean(b.category)||"WORK").toUpperCase();
               if(!content||content.length>1200)return sendJSON(res,400,{status:"error",message:"Post must contain 1 to 1200 characters"});
               if(!["WORK","LEARNING","GENERAL"].includes(category))return sendJSON(res,400,{status:"error",message:"Invalid Connect category"});
               const worker=await pool.query(`SELECT id FROM works_workers WHERE id=$1 AND LOWER(account_status)='active' LIMIT 1`,[workerId]);
@@ -27595,8 +27556,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
             if (req.method === "POST" && /^\/api\/worker\/connect\/posts\/\d+\/reaction\/?$/.test(pathname)) {
               const postId=Number(pathname.match(/^\/api\/worker\/connect\/posts\/(\d+)\/reaction\/?$/)?.[1]);
-              const b=await getBody(req),workerId=Number(b.workerId||req.headers["x-howdi-worker-id"]||0);
-              if(!Number.isInteger(postId)||postId<=0||!Number.isInteger(workerId)||workerId<=0)return sendJSON(res,400,{status:"error",message:"Valid post and worker required"});
+              const workerId=await requireActiveSessionWorker(req,res);if(!workerId)return;
+              if(!Number.isInteger(postId)||postId<=0)return sendJSON(res,400,{status:"error",message:"Valid post required"});
               const existing=await pool.query(`SELECT 1 FROM works_connect_reactions WHERE post_id=$1 AND worker_id=$2`,[postId,workerId]);
               let reacted=false;
               if(existing.rows[0])await pool.query(`DELETE FROM works_connect_reactions WHERE post_id=$1 AND worker_id=$2`,[postId,workerId]);
@@ -27610,13 +27571,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             }
 
     if (req.method === "GET" && pathname === "/api/worker/works/offers") {
-              const workerId = clean(req.headers["x-howdi-worker-id"]);
-              if (!workerId || !/^\d+$/.test(workerId)) {
-                return sendJSON(res, 401, {
-                  status: "error",
-                  message: "Worker identity required",
-                });
-              }
+              const workerId=await requireActiveSessionWorker(req,res);if(!workerId)return;
 
               const q = await pool.query(
                 `SELECT
@@ -27662,19 +27617,13 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             }
 
             if (req.method === "PUT" && /^\/api\/worker\/works\/offers\/\d+\/status\/?$/.test(pathname)) {
-              const workerId = clean(req.headers["x-howdi-worker-id"]);
+              const workerId = await requireActiveSessionWorker(req,res);if(!workerId)return;
               const parts = pathname.split("/").filter(Boolean);
               const offerId = parts[parts.length - 2];
               const body = await getBody(req);
               const status = clean(body.status).toLowerCase();
               const reason = clean(body.reason);
 
-              if (!workerId || !/^\d+$/.test(workerId)) {
-                return sendJSON(res, 401, {
-                  status: "error",
-                  message: "Worker identity required",
-                });
-              }
               if (!["accepted","rejected"].includes(status)) {
                 return sendJSON(res, 400, {
                   status: "error",
@@ -27831,10 +27780,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             }
 
             if (req.method === "GET" && pathname === "/api/worker/works/debug-lifecycle") {
-              const workerId = clean(req.headers["x-howdi-worker-id"]);
-              if (!workerId || !/^\d+$/.test(workerId)) {
-                return sendJSON(res,401,{status:"error",message:"Worker identity required"});
-              }
+              const workerId=await requireActiveSessionWorker(req,res);if(!workerId)return;
               const q = await pool.query(
                 `SELECT o.id offer_id,o.status offer_status,o.response_reason,o.responded_at,
                         wo.id work_order_id,wo.work_code,wo.status work_status,wo.customer_user_id,
@@ -27848,17 +27794,11 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                  WHERE o.worker_id=$1
                  ORDER BY COALESCE(o.responded_at,o.offered_at,o.created_at) DESC,o.id DESC
                  LIMIT 30`,[workerId]);
-              return sendJSON(res,200,{status:"success",workerId:String(workerId),rows:q.rows});
+              return sendJSON(res,200,{status:"success",rows:q.rows});
             }
 
             if (req.method === "GET" && pathname === "/api/worker/works/history") {
-              const workerId = clean(req.headers["x-howdi-worker-id"]);
-              if (!workerId || !/^\d+$/.test(workerId)) {
-                return sendJSON(res, 401, {
-                  status: "error",
-                  message: "Worker identity required",
-                });
-              }
+              const workerId=await requireActiveSessionWorker(req,res);if(!workerId)return;
 
               const rejected = await pool.query(
                 `SELECT
@@ -27958,13 +27898,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             }
 
             if (req.method === "GET" && pathname === "/api/worker/works/jobs") {
-              const workerId = clean(req.headers["x-howdi-worker-id"]);
-              if (!workerId || !/^\d+$/.test(workerId)) {
-                return sendJSON(res, 401, {
-                  status: "error",
-                  message: "Worker identity required",
-                });
-              }
+              const workerId=await requireActiveSessionWorker(req,res);if(!workerId)return;
 
               const q = await pool.query(
                 `SELECT
@@ -55396,8 +55330,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
             if(req.method==="POST"&&/^\/api\/worker\/works\/jobs\/\d+\/location\/?$/.test(pathname)){
               const parts=pathname.split("/").filter(Boolean),workId=parts[parts.length-2],b=await getBody(req);
-              const workerId=clean(req.headers["x-howdi-worker-id"]);
-              if(!workerId)return sendJSON(res,401,{status:"error",message:"Worker identity required"});
+              const workerId=await requireActiveSessionWorker(req,res);if(!workerId)return;
               const current=await getJourneyByWorkId(workId);
               if(!current||String(current.worker_id)!==String(workerId))return sendJSON(res,403,{status:"error",message:"This job is not assigned to this worker"});
               if(!['accepted','en_route','arrived','in_progress'].includes(current.stage))return sendJSON(res,409,{status:"error",message:"Location sharing is only allowed during the active job journey"});
@@ -55412,8 +55345,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
             if(req.method==="PUT"&&/^\/api\/worker\/works\/jobs\/\d+\/stage\/?$/.test(pathname)){
               const parts=pathname.split("/").filter(Boolean),workId=parts[parts.length-2],b=await getBody(req);
-              const workerId=clean(req.headers["x-howdi-worker-id"]),next=clean(b.stage).toLowerCase(),note=clean(b.note);
-              if(!workerId)return sendJSON(res,401,{status:"error",message:"Worker identity required"});
+              const workerId=await requireActiveSessionWorker(req,res);if(!workerId)return;
+              const next=clean(b.stage).toLowerCase(),note=clean(b.note);
               const current=await getJourneyByWorkId(workId);
               if(!current||String(current.worker_id)!==String(workerId))return sendJSON(res,403,{status:"error",message:"This job is not assigned to this worker"});
               const transitions={accepted:['en_route','cancelled'],en_route:['arrived','cancelled'],arrived:['in_progress','cancelled'],in_progress:['completed','cancelled'],completed:[]};
@@ -55530,8 +55463,9 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             if(req.method==="PUT"&&/^\/api\/admin\/works\/applications\/\d+\/status\/?$/.test(pathname)){
               const parts=pathname.split("/").filter(Boolean),id=parts[parts.length-2],b=await getBody(req),status=clean(b.status).toLowerCase();if(!['new','in_review','approved','rejected'].includes(status))return sendJSON(res,400,{status:"error",message:"Invalid status"});
               const client=await pool.connect();try{await client.query("BEGIN");const f=await client.query(`SELECT * FROM works_worker_applications WHERE id=$1 FOR UPDATE`,[id]);if(!f.rows[0]){await client.query("ROLLBACK");return sendJSON(res,404,{status:"error",message:"Application not found"});}let workerId=f.rows[0].converted_worker_id;
-                if(status==='approved'&&!workerId){const w=await client.query(`INSERT INTO works_workers(worker_code,full_name,phone,email,city,pincode,requested_skill,experience_years,service_radius_km,starting_price,kyc_status,skill_status,account_status,availability,rating,completed_jobs,active) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'pending','pending','registered','offline',0,0,TRUE) RETURNING id`,
-                [`HOWDI-WRK-${Date.now().toString().slice(-8)}`,f.rows[0].full_name,f.rows[0].phone,f.rows[0].email,f.rows[0].city,f.rows[0].pincode,f.rows[0].claimed_skill,f.rows[0].experience_years,f.rows[0].service_radius_km,f.rows[0].expected_starting_price]);workerId=w.rows[0].id;}
+                if(status==='approved'&&!workerId){const w=await client.query(`INSERT INTO works_workers(user_id,worker_code,full_name,phone,email,city,pincode,requested_skill,experience_years,service_radius_km,starting_price,kyc_status,skill_status,account_status,availability,rating,completed_jobs,active) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'pending','pending','registered','offline',0,0,TRUE) RETURNING id`,
+                [f.rows[0].user_id||null,`HOWDI-WRK-${Date.now().toString().slice(-8)}`,f.rows[0].full_name,f.rows[0].phone,f.rows[0].email,f.rows[0].city,f.rows[0].pincode,f.rows[0].claimed_skill,f.rows[0].experience_years,f.rows[0].service_radius_km,f.rows[0].expected_starting_price]);workerId=w.rows[0].id;}
+                if(status==='approved'&&workerId&&f.rows[0].user_id)await client.query(`UPDATE works_workers SET user_id=COALESCE(user_id,$2),updated_at=NOW() WHERE id=$1`,[workerId,f.rows[0].user_id]);
                 const q=await client.query(`UPDATE works_worker_applications SET status=$2,converted_worker_id=$3,updated_at=NOW() WHERE id=$1 RETURNING *`,[id,status,workerId||null]);
                 if(f.rows[0].user_id){await client.query(`INSERT INTO user_roles(user_id,role_id,is_primary,role_status,requested_at,decided_at,onboarding_state,rejection_reason) SELECT $1,id,FALSE,$2,COALESCE($3,NOW()),NOW(),$4,$5 FROM roles WHERE code='WORKER' ON CONFLICT(user_id,role_id) DO UPDATE SET role_status=EXCLUDED.role_status,decided_at=NOW(),onboarding_state=EXCLUDED.onboarding_state,rejection_reason=EXCLUDED.rejection_reason,updated_at=NOW()`,[f.rows[0].user_id,status==='rejected'?'REJECTED':'PENDING',f.rows[0].created_at,status==='approved'?'VERIFICATION':'SUBMITTED',status==='rejected'?(clean(b.reviewNote)||'Worker application rejected'):null]);}
                 await client.query("COMMIT");return sendJSON(res,200,{status:"success",application:workerApplicationRow(q.rows[0])});
