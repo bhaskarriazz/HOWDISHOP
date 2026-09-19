@@ -32,7 +32,7 @@ function CourseCard({ course, onOpen }) {
   const icon = cat.includes("crochet") ? "🧶" : cat.includes("embroid") ? "🪡" : "🎓";
   return (
     <button className="le-course-card" onClick={() => onOpen(course)} aria-label={"Open course " + course.title}>
-      <div className="le-course-art">{course.thumbnailUrl ? <img src={course.thumbnailUrl} alt="" /> : icon}</div>
+      <div className="le-course-art">{course.thumbnailUrl ? <img src={course.thumbnailUrl} alt="" loading="lazy" decoding="async" /> : icon}</div>
       <div className="le-course-body">
         <div className="le-course-meta"><span>{course.level}</span><span>{course.format}</span></div>
         <h3>{course.title}</h3>
@@ -63,6 +63,22 @@ export default function LearnEarnExperience({ onExit = () => history.back() }) {
   const [passportLoading, setPassportLoading] = useState(false);
   const [opportunities, setOpportunities] = useState([]);
   const [opportunityLoading, setOpportunityLoading] = useState(false);
+  const [dataSaver, setDataSaver] = useState(() => localStorage.getItem("howdiLearnDataSaver") === "1");
+  const [isOnline, setIsOnline] = useState(() => navigator.onLine);
+
+  useEffect(() => {
+    const updateOnlineState = () => setIsOnline(navigator.onLine);
+    window.addEventListener("online", updateOnlineState);
+    window.addEventListener("offline", updateOnlineState);
+    return () => {
+      window.removeEventListener("online", updateOnlineState);
+      window.removeEventListener("offline", updateOnlineState);
+    };
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem("howdiLearnDataSaver", dataSaver ? "1" : "0");
+  }, [dataSaver]);
 
   useEffect(() => {
     let active = true;
@@ -164,15 +180,16 @@ export default function LearnEarnExperience({ onExit = () => history.back() }) {
         </header>
         <section className="le-detail">
           <div className="le-detail-hero">
-            <div className="le-detail-art">{detailCourse.thumbnailUrl ? <img src={detailCourse.thumbnailUrl} alt="" /> : "🎓"}</div>
+            <div className="le-detail-art">{detailCourse.thumbnailUrl && !dataSaver ? <img src={detailCourse.thumbnailUrl} alt="" loading="lazy" decoding="async" /> : "🎓"}</div>
             <div>
               <span className="le-pill">{detailCourse.category}</span>
               <h1>{detailCourse.title}</h1>
               <p>{detailCourse.description || "Practical HOWDI learning with clear next steps and real proof of skill."}</p>
               <p>Learn with <strong>{detailCourse.teacher}</strong>.</p>
               <div className="le-detail-meta"><span>{detailCourse.level}</span><span>{detailCourse.duration}</span><span>{detailCourse.lessonCount} lessons</span></div>
-              <button className="le-primary" disabled={courseBusy} onClick={enrol}>{courseBusy ? "PLEASE WAIT…" : detailCourse.price ? "ENROL / CONTINUE" : "START FREE"}</button>
-              {actionNotice && <p className="le-note">{actionNotice}</p>}
+              <button className="le-primary" disabled={courseBusy || !isOnline} onClick={enrol}>{courseBusy ? "PLEASE WAIT…" : !isOnline ? "OFFLINE" : detailCourse.price ? "ENROL / CONTINUE" : "START FREE"}</button>
+              {actionNotice && <p className="le-note" role="status" aria-live="polite">{actionNotice}</p>}
+              {!isOnline && <p className="le-note" role="status">You are offline. Previously downloaded worksheets or saved resources remain available from your device when supported.</p>}
             </div>
           </div>
           <div className="le-detail-grid">
@@ -190,6 +207,7 @@ export default function LearnEarnExperience({ onExit = () => history.back() }) {
               <p className="le-next">Start with the first available lesson, then practice and show your work.</p>
               <div className="le-readiness">
                 <strong>Ready to learn</strong>
+                <label className="le-data-saver"><input type="checkbox" checked={dataSaver} onChange={(e) => setDataSaver(e.target.checked)} /> <span>Data Saver — prefer text, audio and worksheets over optional images/video</span></label>
                 <span>{detailCourse.materials?.length ? detailCourse.materials.join(" · ") : "Materials guidance inside the course"}</span>
                 <span>Low-data learning supported where resources are available</span>
                 <span>Practice and proof stay inside Learn & Earn</span>
@@ -197,6 +215,11 @@ export default function LearnEarnExperience({ onExit = () => history.back() }) {
             </aside>
           </div>
         </section>
+        <div className="le-mobile-action" aria-label="Course action">
+          <button className="le-primary" disabled={courseBusy || !isOnline} onClick={enrol}>
+            {courseBusy ? "PLEASE WAIT…" : !isOnline ? "OFFLINE" : detailCourse.price ? "CONTINUE / ENROL" : "CONTINUE"}
+          </button>
+        </div>
       </main>
     );
   }
@@ -210,6 +233,7 @@ export default function LearnEarnExperience({ onExit = () => history.back() }) {
       <header className="le-topbar">
         <button className="le-logo" onClick={onExit}>HOWDI</button>
         <div className="le-title-wrap"><span>Learn & Earn</span><small>Your skill-to-life journey</small></div>
+        <label className="le-data-toggle" title="Reduce optional media use"><input type="checkbox" checked={dataSaver} onChange={(e) => setDataSaver(e.target.checked)} /><span>Data Saver</span></label>
       </header>
 
       <nav className="le-tabs" aria-label="Learn and Earn navigation">
@@ -283,7 +307,8 @@ export default function LearnEarnExperience({ onExit = () => history.back() }) {
 
       {tab === "Opportunities" && <section className="le-section">
         <div className="le-section-head"><div><small>OPPORTUNITIES</small><h2>Use verified skills in real life</h2></div></div>
-        {opportunityLoading ? <LoadingState label="Matching opportunities" /> : opportunities.length ? <div className="le-list">{opportunities.map((item) => <article className="le-list-card" key={item.id}><div><span className="le-pill">{String(item.fit_state || item.opportunity_type || "OPPORTUNITY").replaceAll("_", " ")}</span><h3>{item.title}</h3><p>{item.description || item.summary || "HOWDI opportunity"}</p>{item.match_percent != null && <strong>{item.match_percent}% proof match</strong>}</div><button className="le-primary">View opportunity</button></article>)}</div> : <EmptyState title="No matching opportunities yet" text="Build verified proof in your Skill Passport to improve matching." />}
+        <p className="le-opportunity-disclaimer">These are potential matches based on verified proof. Selection, work and earnings are never guaranteed.</p>
+        {opportunityLoading ? <LoadingState label="Matching opportunities" /> : opportunities.length ? <div className="le-list">{opportunities.map((item) => <article className="le-list-card" key={item.id}><div><span className="le-pill">{String(item.fit_state || item.opportunity_type || "POTENTIAL MATCH").replaceAll("_", " ")}</span><h3>{item.title}</h3><p>{item.description || item.summary || "Potential HOWDI opportunity"}</p>{item.match_percent != null && <strong>{item.match_percent}% proof match</strong>}</div><button className="le-primary">Explore match</button></article>)}</div> : <EmptyState title="No potential matches yet" text="Build verified proof in your Skill Passport to improve matching." />}
       </section>}
     </main>
   );
