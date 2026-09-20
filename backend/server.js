@@ -13517,6 +13517,17 @@
     function worksServiceRow(r){return{id:String(r.id),serviceCode:r.service_code,name:r.name,icon:r.icon||'🛠️',description:r.description||'',visible:r.customer_visible!==false,active:r.active!==false,sortOrder:Number(r.sort_order||0)}}
     function worksWorkerRow(r){return{id:String(r.id),workerCode:r.worker_code,fullName:r.full_name,phone:r.phone,email:r.email||'',city:r.city||'',pincode:r.pincode||'',requestedSkill:r.requested_skill||'',experienceYears:Number(r.experience_years||0),serviceRadiusKm:Number(r.service_radius_km||0),startingPrice:Number(r.starting_price||0),kycStatus:r.kyc_status,skillStatus:r.skill_status,accountStatus:r.account_status,availability:r.availability,availabilityStatus:r.availability_status||'online',rating:Number(r.rating||0),completedJobs:Number(r.completed_jobs||0),active:r.active!==false,createdAt:r.created_at,updatedAt:r.updated_at}}
     function worksPortalWorkerRow(r){const {id,user_id,...worker}=worksWorkerRow(r);return worker}
+    // Explicit allowlist for GET /api/worker/works/debug-lifecycle: lifecycle ids, statuses, reasons and timestamps only.
+    // Never a raw row: no customer/user/worker ids, howdi_id, contact details or addresses can reach the worker through it.
+    function worksLifecycleDebugRow(r){
+      return {
+        offer_id:r.offer_id,offer_status:r.offer_status,response_reason:r.response_reason,responded_at:r.responded_at,
+        work_order_id:r.work_order_id,work_code:r.work_code,work_status:r.work_status,
+        rejection_id:r.rejection_id,rejection_reason:r.rejection_reason,rejected_at:r.rejected_at,
+        journey_id:r.journey_id,journey_stage:r.journey_stage
+      };
+    }
+
     async function requireActiveSessionWorker(req,res){
       const sessionUser=await getSessionUserFromRequest(req);
       if(!sessionUser){sendJSON(res,401,{status:'error',message:'Worker session is required',code:'WORKER_SESSION_REQUIRED'});return null;}
@@ -27528,18 +27539,18 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               const workerId = await requireActiveSessionWorker(req,res);if(!workerId)return;
               const q=await pool.query(`
                 SELECT p.id,p.content,p.category,p.created_at,
-                       w.id AS worker_id,w.worker_code,w.full_name,
+                       w.worker_code,w.full_name,
                        COUNT(r.worker_id)::int AS reaction_count,
                        EXISTS(SELECT 1 FROM works_connect_reactions vr WHERE vr.post_id=p.id AND vr.worker_id=$1) AS reacted_by_viewer
                 FROM works_connect_posts p
                 JOIN works_workers w ON w.id=p.worker_id
                 LEFT JOIN works_connect_reactions r ON r.post_id=p.id
-                GROUP BY p.id,w.id,w.worker_code,w.full_name
+                GROUP BY p.id,w.worker_code,w.full_name
                 ORDER BY p.created_at DESC
                 LIMIT 100`,[workerId]);
               return sendJSON(res,200,{status:"success",posts:q.rows.map(r=>({
                 id:String(r.id),content:r.content,category:r.category,createdAt:r.created_at,
-                workerId:String(r.worker_id),workerCode:r.worker_code,workerName:r.full_name,
+                workerCode:r.worker_code,workerName:r.full_name,
                 reactionCount:Number(r.reaction_count||0),reactedByViewer:r.reacted_by_viewer===true
               }))});
             }
@@ -27783,7 +27794,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               const workerId=await requireActiveSessionWorker(req,res);if(!workerId)return;
               const q = await pool.query(
                 `SELECT o.id offer_id,o.status offer_status,o.response_reason,o.responded_at,
-                        wo.id work_order_id,wo.work_code,wo.status work_status,wo.customer_user_id,
+                        wo.id work_order_id,wo.work_code,wo.status work_status,
                         rh.id rejection_id,rh.reason rejection_reason,rh.rejected_at,
                         j.id journey_id,j.stage journey_stage
                  FROM works_work_offers o
@@ -27794,7 +27805,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                  WHERE o.worker_id=$1
                  ORDER BY COALESCE(o.responded_at,o.offered_at,o.created_at) DESC,o.id DESC
                  LIMIT 30`,[workerId]);
-              return sendJSON(res,200,{status:"success",rows:q.rows});
+              return sendJSON(res,200,{status:"success",rows:q.rows.map(worksLifecycleDebugRow)});
             }
 
             if (req.method === "GET" && pathname === "/api/worker/works/history") {
