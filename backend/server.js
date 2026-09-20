@@ -13024,6 +13024,42 @@
       return {identity,agreement,totals,earnings,settlements};
     }
 
+    // Idempotent: brings works_work_orders to the full shape on ANY database (fresh, minimal-bootstrap or already complete).
+    // Every statement is safe to run on every boot; existing data is never rewritten except to fill NULLs in columns that did not
+    // exist before (work_code/title/service_name/city) so the NOT NULL constraints of the full definition can be applied.
+    async function ensureWorksWorkOrdersFullSchema(){
+      const add=[
+        ["work_code","VARCHAR(60)"],["title","VARCHAR(180)"],["service_id","BIGINT REFERENCES works_services(id) ON DELETE SET NULL"],
+        ["service_name","VARCHAR(120)"],["work_type","VARCHAR(40) DEFAULT 'one_time'"],["city","VARCHAR(120)"],["pincode","VARCHAR(12)"],
+        ["budget","NUMERIC(12,2) DEFAULT 0"],["schedule_date","DATE"],["description","TEXT DEFAULT ''"],["skills","TEXT DEFAULT ''"],
+        ["priority","VARCHAR(30) DEFAULT 'normal'"],["active","BOOLEAN DEFAULT TRUE"],
+        ["customer_user_id","BIGINT"],["customer_name","VARCHAR(160)"],["customer_phone","VARCHAR(30)"],["customer_email","VARCHAR(255)"],
+        ["address_line","TEXT"],["preferred_worker_id","BIGINT REFERENCES works_workers(id) ON DELETE SET NULL"],["preferred_worker_name","VARCHAR(160)"],
+        ["schedule_time","TIME"],["urgency","VARCHAR(30) DEFAULT 'normal'"],["booking_source","VARCHAR(30) DEFAULT 'customer_web'"],
+        ["created_at","TIMESTAMPTZ DEFAULT NOW()"],["updated_at","TIMESTAMPTZ DEFAULT NOW()"]
+      ];
+      for(const [column,definition] of add)await pool.query(`ALTER TABLE works_work_orders ADD COLUMN IF NOT EXISTS ${column} ${definition}`);
+      // Backfill + constraint/type alignment only while the table is not yet in the full shape, so a complete database pays no table scan
+      // or lock on later boots. Rows can only lack these values on a minimal-shape table that already held data.
+      const shape=await pool.query(`SELECT column_name,is_nullable,character_maximum_length FROM information_schema.columns
+        WHERE table_schema=current_schema() AND table_name='works_work_orders' AND column_name IN ('work_code','title','service_name','city','status')`);
+      const nullable=shape.rows.filter(c=>c.column_name!=='status'&&c.is_nullable==='YES').map(c=>c.column_name);
+      if(nullable.length){
+        const fill={work_code:`'HOWDI-WORK-'||id`,title:`'Work request '||id`,service_name:`'General service'`,city:`'Not specified'`};
+        for(const column of nullable){
+          await pool.query(`UPDATE works_work_orders SET ${column}=${fill[column]} WHERE ${column} IS NULL`);
+          await pool.query(`ALTER TABLE works_work_orders ALTER COLUMN ${column} SET NOT NULL`);
+        }
+      }
+      // the full definition's status contract is VARCHAR(40) DEFAULT 'open'; the minimal bootstrap used VARCHAR(30) DEFAULT 'pending'
+      const status=shape.rows.find(c=>c.column_name==='status');
+      if(status&&Number(status.character_maximum_length||0)<40){
+        await pool.query(`ALTER TABLE works_work_orders ALTER COLUMN status TYPE VARCHAR(40)`);
+        await pool.query(`ALTER TABLE works_work_orders ALTER COLUMN status SET DEFAULT 'open'`);
+      }
+      await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS works_work_orders_work_code_key ON works_work_orders(work_code)`);
+    }
+
     async function initializeWorksLiveTables(){
       await pool.query(`CREATE TABLE IF NOT EXISTS works_services (
         id BIGSERIAL PRIMARY KEY, service_code VARCHAR(60) UNIQUE NOT NULL, name VARCHAR(120) UNIQUE NOT NULL,
@@ -13063,6 +13099,11 @@
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )`);
+      // Fresh-database completion of works_work_orders (idempotent; a no-op on a database that already has the full table).
+      // The early forward-reference bootstrap creates works_work_orders with a minimal shape (id, customer_user_id, worker_user_id,
+      // status, timestamps) BEFORE this block runs, which turns the CREATE TABLE IF NOT EXISTS above into a no-op and leaves a fresh
+      // database without work_code/title/service_name/city/... that the Worker, customer and admin Works routes all read.
+      await ensureWorksWorkOrdersFullSchema();
       await pool.query(`CREATE TABLE IF NOT EXISTS works_work_offers (
         id BIGSERIAL PRIMARY KEY,
         offer_code VARCHAR(60) UNIQUE NOT NULL,
@@ -13517,6 +13558,31 @@
     function worksServiceRow(r){return{id:String(r.id),serviceCode:r.service_code,name:r.name,icon:r.icon||'🛠️',description:r.description||'',visible:r.customer_visible!==false,active:r.active!==false,sortOrder:Number(r.sort_order||0)}}
     function worksWorkerRow(r){return{id:String(r.id),workerCode:r.worker_code,fullName:r.full_name,phone:r.phone,email:r.email||'',city:r.city||'',pincode:r.pincode||'',requestedSkill:r.requested_skill||'',experienceYears:Number(r.experience_years||0),serviceRadiusKm:Number(r.service_radius_km||0),startingPrice:Number(r.starting_price||0),kycStatus:r.kyc_status,skillStatus:r.skill_status,accountStatus:r.account_status,availability:r.availability,availabilityStatus:r.availability_status||'online',rating:Number(r.rating||0),completedJobs:Number(r.completed_jobs||0),active:r.active!==false,createdAt:r.created_at,updatedAt:r.updated_at}}
     function worksPortalWorkerRow(r){const {id,user_id,...worker}=worksWorkerRow(r);return worker}
+    // Worker-facing offer / job serializers: the same shapes the customer and admin routes use, minus the numeric Worker database id.
+    // (The Worker already identifies as themselves through the session; workerCode / workerName remain for display.)
+    function worksWorkerOfferRow(r){const {workerId,...offer}=worksOfferRow(r);return offer}
+    function worksWorkerJourneyRow(r){const {workerId,...journey}=worksJourneyRow(r);return journey}
+    // Worker HPay summary: explicit allowlist. No numeric account/program/earning/settlement ids, no howdi_id, no hpay_account_id
+    // (HPAY-WRK-<zero-padded worker id> embeds the Worker database id) and no raw source_snapshot (payment/work-order ids, provider reference).
+    function worksWorkerHpaySummaryRow(summary){
+      if(!summary)return null;
+      const {identity,agreement,totals,earnings,settlements}=summary;
+      return {
+        // hpay_universal_accounts.howdi_id holds the Worker's worker_code for WORKER accounts (ensureWorkerHpayBridge)
+        identity:{display_name:identity.display_name,program_name:identity.program_name,worker_code:identity.howdi_id},
+        agreement:agreement?{agreement_name:agreement.agreement_name,version:agreement.version,status:agreement.status,settlement_cycle_days:agreement.settlement_cycle_days,rules:agreement.rules,accepted_at:agreement.accepted_at}:null,
+        totals:{gross:totals.gross,howdi_fee:totals.howdi_fee,net:totals.net,hold:totals.hold,eligible:totals.eligible,settled:totals.settled,paid:totals.paid},
+        earnings:(earnings||[]).map(e=>({
+          earning_number:e.earning_number,gross_amount:e.gross_amount,howdi_fee_amount:e.howdi_fee_amount,net_payable_amount:e.net_payable_amount,
+          status:e.status,occurred_at:e.occurred_at,
+          source_snapshot:{workCode:(e.source_snapshot||{}).workCode||null,title:(e.source_snapshot||{}).title||null,serviceName:(e.source_snapshot||{}).serviceName||null}
+        })),
+        settlements:(settlements||[]).map(x=>({
+          settlement_number:x.settlement_number,gross_amount:x.gross_amount,howdi_fee_amount:x.howdi_fee_amount,net_payable_amount:x.net_payable_amount,
+          status:x.status,approved_at:x.approved_at,paid_at:x.paid_at,payout_reference:x.payout_reference,created_at:x.created_at
+        }))
+      };
+    }
     // Explicit allowlist for GET /api/worker/works/debug-lifecycle: lifecycle ids, statuses, reasons and timestamps only.
     // Never a raw row: no customer/user/worker ids, howdi_id, contact details or addresses can reach the worker through it.
     function worksLifecycleDebugRow(r){
@@ -24538,9 +24604,11 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             if(req.method==="GET" && (pathname==="/api/worker/hpay/summary" || pathname==="/api/worker/hpay/summary/")){
               try{
                 const workerId=await requireActiveSessionWorker(req,res);if(!workerId)return;
-                return sendJSON(res,200,{status:"success",summary:await getWorkerHpaySummary(workerId)});
+                return sendJSON(res,200,{status:"success",summary:worksWorkerHpaySummaryRow(await getWorkerHpaySummary(workerId))});
               }catch(error){
-                return sendJSON(res,500,{status:"error",message:"Unable to load Worker HPay",detail:error.message||null});
+                // diagnostics stay server-side; the Worker only ever sees a fixed message
+                console.error("Worker HPay summary failed:",error);
+                return sendJSON(res,500,{status:"error",code:"WORKER_HPAY_UNAVAILABLE",message:"Unable to load Worker HPay right now"});
               }
             }
 
@@ -27440,7 +27508,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 if(!current.rows[0]){await client.query("ROLLBACK");return sendJSON(res,404,{status:"error",message:"Worker not found"});}
                 const previous=String(current.rows[0].availability_status||'online').toLowerCase();
 
-                const q=await client.query(`UPDATE works_workers SET availability_status=$2,availability_until=$3,preferred_radius_km=$4,availability_updated_at=CASE WHEN LOWER(COALESCE(availability_status,'online'))<>$2 THEN NOW() ELSE availability_updated_at END,updated_at=NOW() WHERE id=$1 RETURNING id,availability_status,availability_until,preferred_radius_km,availability_updated_at`,[workerId,status,until,radius]);
+                const q=await client.query(`UPDATE works_workers SET availability_status=$2::text,availability_until=$3,preferred_radius_km=$4,availability_updated_at=CASE WHEN LOWER(COALESCE(availability_status,'online'))<>$2::text THEN NOW() ELSE availability_updated_at END,updated_at=NOW() WHERE id=$1 RETURNING id,availability_status,availability_until,preferred_radius_km,availability_updated_at`,[workerId,status,until,radius]);
 
                 if(previous!==status){
                   await client.query(`UPDATE works_worker_availability_events SET ended_at=NOW() WHERE worker_id=$1 AND ended_at IS NULL`,[workerId]);
@@ -27559,10 +27627,15 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               const b=await getBody(req),workerId=await requireActiveSessionWorker(req,res);if(!workerId)return;const content=clean(b.content),category=(clean(b.category)||"WORK").toUpperCase();
               if(!content||content.length>1200)return sendJSON(res,400,{status:"error",message:"Post must contain 1 to 1200 characters"});
               if(!["WORK","LEARNING","GENERAL"].includes(category))return sendJSON(res,400,{status:"error",message:"Invalid Connect category"});
-              const worker=await pool.query(`SELECT id FROM works_workers WHERE id=$1 AND LOWER(account_status)='active' LIMIT 1`,[workerId]);
+              const worker=await pool.query(`SELECT worker_code,full_name FROM works_workers WHERE id=$1 AND LOWER(account_status)='active' LIMIT 1`,[workerId]);
               if(!worker.rows[0])return sendJSON(res,403,{status:"error",message:"Only active HOWDI workers can post"});
-              const q=await pool.query(`INSERT INTO works_connect_posts(worker_id,content,category) VALUES($1,$2,$3) RETURNING *`,[workerId,content,category]);
-              return sendJSON(res,201,{status:"success",post:q.rows[0]});
+              const q=await pool.query(`INSERT INTO works_connect_posts(worker_id,content,category) VALUES($1,$2,$3) RETURNING id,content,category,created_at`,[workerId,content,category]);
+              // same safe shape as GET /api/worker/connect/feed: never the raw row (it carries worker_id)
+              const created=q.rows[0];
+              return sendJSON(res,201,{status:"success",post:{
+                id:String(created.id),content:created.content,category:created.category,createdAt:created.created_at,
+                workerCode:worker.rows[0].worker_code,workerName:worker.rows[0].full_name,reactionCount:0,reactedByViewer:false
+              }});
             }
 
             if (req.method === "POST" && /^\/api\/worker\/connect\/posts\/\d+\/reaction\/?$/.test(pathname)) {
@@ -27610,7 +27683,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               return sendJSON(res, 200, {
                 status: "success",
                 offers: q.rows.map(r => ({
-                  ...worksOfferRow(r),
+                  ...worksWorkerOfferRow(r),
                   workCode: r.work_code,
                   title: r.title,
                   serviceName: r.service_name,
@@ -27787,7 +27860,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                     happenedAt:r.responded_at||new Date().toISOString()};
                 }
               }
-              return sendJSON(res,200,{status:"success",offer:worksOfferRow(offer),historyItem});
+              return sendJSON(res,200,{status:"success",offer:worksWorkerOfferRow(offer),historyItem});
             }
 
             if (req.method === "GET" && pathname === "/api/worker/works/debug-lifecycle") {
@@ -27941,7 +28014,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               return sendJSON(res, 200, {
                 status: "success",
                 jobs: q.rows.map(r => ({
-                  ...worksJourneyRow(r),
+                  ...worksWorkerJourneyRow(r),
                   budget: Number(r.budget || 0),
                   scheduleDate: r.schedule_date ? String(r.schedule_date).slice(0,10) : "",
                   scheduleTime: r.schedule_time ? String(r.schedule_time).slice(0,5) : "",
@@ -55351,7 +55424,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 [workId,lat,lng,acc,number(b.etaMinutes,null)]);
               const row=await getJourneyByWorkId(workId);
               await addJourneyEvent({journeyId:row.id,workId,workerId:row.worker_id,eventType:'location_update',fromStage:row.stage,toStage:row.stage,actorType:'worker',actorId:workerId,latitude:lat,longitude:lng,accuracyM:acc});
-              return sendJSON(res,200,{status:"success",journey:worksJourneyRow(row)});
+              return sendJSON(res,200,{status:"success",journey:worksWorkerJourneyRow(row)});
             }
 
             if(req.method==="PUT"&&/^\/api\/worker\/works\/jobs\/\d+\/stage\/?$/.test(pathname)){
@@ -55371,7 +55444,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               if(['in_progress','completed'].includes(next))await pool.query(`UPDATE works_work_orders SET status=$2,updated_at=NOW() WHERE id=$1`,[workId,next==='in_progress'?'in_progress':'completed']);
               const row=await getJourneyByWorkId(workId);
               await addJourneyEvent({journeyId:row.id,workId,workerId:row.worker_id,eventType:'stage_changed',fromStage:current.stage,toStage:next,actorType:'worker',actorId:workerId,note});
-              return sendJSON(res,200,{status:"success",journey:worksJourneyRow(row)});
+              return sendJSON(res,200,{status:"success",journey:worksWorkerJourneyRow(row)});
             }
 
             if(req.method==="GET"&&/^\/api\/works\/track\/[^/]+\/?$/.test(pathname)){
@@ -55414,7 +55487,11 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 kycDocumentFile=savePrivateDataFile(code,"kyc",b.kycDocument);
                 certificateFile=savePrivateDataFile(code,"certificate",b.certificate);
                 experienceFile=savePrivateDataFile(code,"experience",b.experienceAttachment);
-              }catch(error){return sendJSON(res,400,{status:"error",message:error.message});}
+              }catch(error){
+                // upload validation / file-system failures: log the detail server-side, return a fixed message (never error.message)
+                console.warn("Worker application upload rejected:",error&&error.message);
+                return sendJSON(res,400,{status:"error",code:"APPLICATION_FILE_REJECTED",message:"One of the uploaded files could not be accepted. Files must be JPG, PNG, WEBP or PDF and under 3 MB."});
+              }
               const workingDays=Array.isArray(b.workingDays)?b.workingDays:[];
               const languages=Array.isArray(b.languages)?b.languages:[];
               const q=await pool.query(`INSERT INTO works_worker_applications(
@@ -55627,6 +55704,16 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               "SERVER ROUTE ERROR:",
               error
             );
+
+            // WORKER_PORTAL_ERROR_SANITIZATION
+            // Every /api/worker/* failure returns a fixed message. SQL text, table/column/constraint names, values and stack
+            // details stay in the server log above ("SERVER ROUTE ERROR:"), never in the response.
+            if (pathname === "/api/worker" || pathname.startsWith("/api/worker/")) {
+              const failure = String((error && error.message) || "");
+              if (failure === "Invalid JSON") return sendJSON(res, 400, { status: "error", code: "INVALID_REQUEST_BODY", message: "The request body is not valid JSON" });
+              if (failure === "Request too large") return sendJSON(res, 413, { status: "error", code: "REQUEST_TOO_LARGE", message: "The request is too large" });
+              return sendJSON(res, 500, { status: "error", code: "WORKER_REQUEST_FAILED", message: "Unable to complete the request right now" });
+            }
 
             // K5E: Connect / notification routes never return raw database errors (table, column and constraint names,
             // offending values). A foreign-key miss is a uniform 404 (so ids cannot be probed through error text),

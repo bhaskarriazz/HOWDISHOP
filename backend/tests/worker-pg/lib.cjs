@@ -25,6 +25,7 @@ async function start(){
 }
 async function stop(){if(srv&&srv.exitCode===null){srv.kill();for(let i=0;i<50&&srv.exitCode===null;i++)await sleep(100);}}
 const serverLog=()=>log;
+const getBase=()=>base;
 
 async function api(method,p,{token,body,headers}={}){
   const h={'content-type':'application/json',...(headers||{})};if(token)h.authorization='Bearer '+token;
@@ -56,15 +57,6 @@ async function mkWorker(user,{id,code,kyc='verified',skill='verified',account='a
   const w=(await pool.query(`INSERT INTO works_workers(${cols.join(',')}) VALUES(${vals.map((_,i)=>'$'+(i+1)).join(',')}) RETURNING id,worker_code`,vals)).rows[0];
   return {id:Number(w.id),code:w.worker_code,user};
 }
-// Fresh databases get works_work_orders from an early minimal CREATE (id,customer_user_id,worker_user_id,status,timestamps)
-// and the full CREATE later in boot is skipped (pre-existing ordering defect, out of scope for this patch).
-// The suite tops the table up with the columns the Worker routes read.
-async function ensureWorkOrderColumns(){
-  const add=[['work_code',"VARCHAR(60)"],['title',"VARCHAR(180)"],['service_id','BIGINT'],['service_name',"VARCHAR(120)"],['work_type',"VARCHAR(40) DEFAULT 'one_time'"],
-    ['city',"VARCHAR(120)"],['pincode',"VARCHAR(12)"],['budget','NUMERIC(12,2) DEFAULT 0'],['schedule_date','DATE'],['description',"TEXT DEFAULT ''"],['skills',"TEXT DEFAULT ''"],
-    ['priority',"VARCHAR(30) DEFAULT 'normal'"],['active','BOOLEAN DEFAULT TRUE'],['customer_name','VARCHAR(160)'],['customer_phone','VARCHAR(30)'],['customer_email','VARCHAR(255)'],['address_line','TEXT']];
-  for(const [c,t] of add)await pool.query(`ALTER TABLE works_work_orders ADD COLUMN IF NOT EXISTS ${c} ${t}`);
-}
 let woSeq=0;
 async function mkWorkOrder({customer,status='offered',address='14 Hidden Lane, Sector 9',code}){
   const n=++woSeq;
@@ -89,6 +81,17 @@ async function mkJourney(wo,worker,offerId,stage='accepted'){
 async function mkPost(worker,content,category='WORK'){
   return Number((await pool.query(`INSERT INTO works_connect_posts(worker_id,content,category) VALUES($1,$2,$3) RETURNING id`,[worker.id,content,category])).rows[0].id);
 }
+async function mkNotification(worker,wo,{title='Job update',message='Your job was updated',type='offer_received'}={}){
+  return Number((await pool.query(`INSERT INTO works_notifications(audience_type,worker_id,work_order_id,event_type,title,message) VALUES('worker',$1,$2,$3,$4,$5) RETURNING id`,[worker.id,wo.id,type,title,message])).rows[0].id);
+}
+let paySeq=0;
+async function mkPayment(wo,customer,{amount=1500}={}){
+  const n=++paySeq;
+  return Number((await pool.query(`INSERT INTO works_payments(payment_code,work_order_id,customer_user_id,payment_kind,amount,status,provider_reference) VALUES($1,$2,$3,'service',$4,'success',$5) RETURNING id`,['PAY-T'+n+'-'+crypto.randomBytes(3).toString('hex'),wo.id,customer.id,amount,'PROVIDER-REF-'+n])).rows[0].id);
+}
+async function mkCancellationCase(wo,worker,customer,reason='Customer cancelled on arrival'){
+  return Number((await pool.query(`INSERT INTO works_cases(case_code,work_order_id,case_type,actor_type,customer_user_id,worker_id,reason) VALUES($1,$2,'cancellation','customer',$3,$4,$5) RETURNING id`,['CASE-T'+(++paySeq)+'-'+crypto.randomBytes(3).toString('hex'),wo.id,customer.id,worker.id,reason])).rows[0].id);
+}
 const react=(postId,worker)=>pool.query(`INSERT INTO works_connect_reactions(post_id,worker_id) VALUES($1,$2) ON CONFLICT DO NOTHING`,[postId,worker.id]);
 
 // ---- deep scan for identity-bearing keys anywhere in a JSON payload
@@ -109,4 +112,4 @@ async function finish(label){
   console.log(`${label}: ${results.pass} passed, ${results.fail} failed`);
   await pool.end();process.exit(results.fail?1:0);
 }
-module.exports={pool,start,stop,api,mkUser,mkWorker,ensureWorkOrderColumns,mkWorkOrder,mkOffer,mkRejection,mkJourney,mkPost,react,forbiddenKeys,check,finish,serverLog,sleep};
+module.exports={pool,start,stop,base:getBase,api,mkUser,mkWorker,mkWorkOrder,mkNotification,mkPayment,mkCancellationCase,mkOffer,mkRejection,mkJourney,mkPost,react,forbiddenKeys,check,finish,serverLog,sleep};

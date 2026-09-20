@@ -1,5 +1,5 @@
 // Worker Portal public-payload privacy — real PostgreSQL, real backend/server.js over HTTP, real sessions.
-//   WORKER_PG_URL=postgresql://user:pass@host:5432/disposable_db node backend/tests/worker-pg/01-payload-privacy.cjs
+//   WORKER_PG_URL=postgresql://user:pass@host:5432/EMPTY_disposable_db node backend/tests/worker-pg/01-payload-privacy.cjs   (or run everything via worker-pg/run.cjs)
 // Covers GET /api/worker/connect/feed and GET /api/worker/works/debug-lifecycle:
 //   * no internal user / worker / customer identity (keys OR values) reaches the Worker browser,
 //   * only the safe UI / lifecycle fields are returned,
@@ -15,7 +15,6 @@ const has=(text,needle)=>String(text).includes(String(needle));
 (async()=>{
   const up=await L.start();check('boot: server starts against an empty database',up,L.serverLog().slice(-800));
   if(!up)return L.finish('worker payload privacy');
-  await L.ensureWorkOrderColumns();
 
   // ---------- fixtures: ids are pinned to values that cannot occur by accident in a payload ----------
   const uA=await mkUser('Asha Worker',{id:620101}), uB=await mkUser('Bilal Worker',{id:620102}), uC=await mkUser('Chetan Pending',{id:620103});
