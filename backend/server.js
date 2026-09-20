@@ -37564,11 +37564,14 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               finally{client.release();}
             }
 
-            if(req.method==="GET" && /^\/api\/learning\/live\/bookings\/\d+\/?$/.test(pathname)){
+            // LEARN_ME_ROUTES: learner-owned reads are served from session-owned /api/learning/me/* paths. The legacy numeric-id
+            // paths stay for older clients but are session-authoritative (another id -> 403) and answer with the same id-free body.
+            if(req.method==="GET" && (/^\/api\/learning\/live\/bookings\/\d+\/?$/.test(pathname) || /^\/api\/learning\/me\/live-bookings\/?$/.test(pathname))){
               try{
                 const learner=await getSessionUserFromRequest(req);
                 if(!learner)return sendJSON(res,401,{status:'error',message:'Learner sign in required',code:'LEARNER_SESSION_REQUIRED'});
-                const userId=Number(pathname.match(/bookings\/(\d+)/)?.[1]);
+                const legacyBookingsId=pathname.match(/bookings\/(\d+)/)?.[1];
+                const userId=legacyBookingsId===undefined?Number(learner.id):Number(legacyBookingsId);
                 if(userId!==Number(learner.id))return sendJSON(res,403,{status:'error',message:'You can only view your own bookings'});
                 const bookings=(await pool.query(`
                   SELECT b.*,tp.display_name AS teacher_name,tp.teacher_code,c.title AS course_title
@@ -37577,7 +37580,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   LEFT JOIN learning_courses c ON c.id=b.course_id
                   WHERE b.user_id=$1 AND b.status <> 'CANCELLED'
                   ORDER BY b.scheduled_start ASC
-                `,[userId])).rows;
+                `,[userId])).rows.map(({user_id,...booking})=>booking);
                 return sendJSON(res,200,{status:'success',bookings});
               }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to load your live classes',detail:error.message||null});}
             }
@@ -38081,11 +38084,12 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             }
 
             const learnerMyBatchesMatch=pathname.match(/^\/api\/learning\/batches\/user\/(\d+)\/?$/i);
-            if(req.method==="GET" && learnerMyBatchesMatch){
+            const learnerMyBatchesMe=/^\/api\/learning\/me\/batches\/?$/i.test(pathname);
+            if(req.method==="GET" && (learnerMyBatchesMatch||learnerMyBatchesMe)){
               try{
                 const learner=await getSessionUserFromRequest(req);
                 if(!learner)return sendJSON(res,401,{status:'error',message:'Learner sign in required',code:'LEARNER_SESSION_REQUIRED'});
-                const requestedUserId=Number(learnerMyBatchesMatch[1]);
+                const requestedUserId=learnerMyBatchesMatch?Number(learnerMyBatchesMatch[1]):Number(learner.id);
                 const userId=Number(learner.id);
                 if(requestedUserId!==userId)return sendJSON(res,403,{status:'error',message:'You can only view your own batches'});
                 const rows=(await pool.query(`
@@ -38216,11 +38220,12 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             // HOWDI V19.2I — LEARNER GROUP CLASS SESSIONS
             // =====================================================
             const learnerBatchSessionsMatch=pathname.match(/^\/api\/learning\/batch-sessions\/user\/(\d+)\/?$/i);
-            if(req.method==="GET" && learnerBatchSessionsMatch){
+            const learnerBatchSessionsMe=/^\/api\/learning\/me\/batch-sessions\/?$/i.test(pathname);
+            if(req.method==="GET" && (learnerBatchSessionsMatch||learnerBatchSessionsMe)){
               try{
                 const learner=await getSessionUserFromRequest(req);
                 if(!learner)return sendJSON(res,401,{status:'error',message:'Learner sign in required',code:'LEARNER_SESSION_REQUIRED'});
-                const requestedUserId=Number(learnerBatchSessionsMatch[1]);
+                const requestedUserId=learnerBatchSessionsMatch?Number(learnerBatchSessionsMatch[1]):Number(learner.id);
                 const userId=Number(learner.id);
                 if(requestedUserId!==userId)return sendJSON(res,403,{status:'error',message:'You can only view your own group classes'});
                 const rows=(await pool.query(`
@@ -38751,18 +38756,19 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             // HOWDI V19.3A — LEARNER HOME / EASIEST USEFUL NEXT STEP
             // Aggregates existing learning, class and batch records without inventing progress.
             // =====================================================
-            if(req.method==="GET" && /^\/api\/learning\/learner-home\/[^/]+\/?$/.test(pathname)){
+            if(req.method==="GET" && (/^\/api\/learning\/learner-home\/[^/]+\/?$/.test(pathname) || /^\/api\/learning\/me\/home\/?$/.test(pathname))){
               try{
                 const learnerSession=await getSessionUserFromRequest(req);
                 if(!learnerSession)return sendJSON(res,401,{status:"error",message:"Learner sign in required",code:"LEARNER_SESSION_REQUIRED"});
-                const requestedUserId=Number(pathname.match(/^\/api\/learning\/learner-home\/([^/]+)\/?$/)?.[1]);
+                const legacyHomeId=pathname.match(/^\/api\/learning\/learner-home\/([^/]+)\/?$/)?.[1];
                 const userId=Number(learnerSession.id);
+                const requestedUserId=legacyHomeId===undefined?userId:Number(legacyHomeId);
                 if(!Number.isInteger(requestedUserId)||requestedUserId<=0)
                   return sendJSON(res,400,{status:"error",message:"Valid learner account is required"});
                 if(requestedUserId!==userId)return sendJSON(res,403,{status:"error",message:"You can only open your own learning home"});
 
                 const learner=(await pool.query(`
-                  SELECT id,howdi_id,full_name,email,phone
+                  SELECT id,full_name
                   FROM users WHERE id=$1 LIMIT 1
                 `,[userId])).rows[0];
                 if(!learner)return sendJSON(res,404,{status:"error",message:"HOWDI learner not found"});
@@ -38884,7 +38890,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
                 return sendJSON(res,200,{
                   status:'success',
-                  learner,
+                  learner:{full_name:learner.full_name},   // no numeric id, howdi_id, email or phone
                   summary:{
                     enrolled_courses:enrolledCount,
                     in_progress_courses:inProgressCount,
@@ -38903,11 +38909,12 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               }
             }
 
-            if(req.method==="GET" && /^\/api\/learning\/user\/[^/]+\/?$/.test(pathname)){
+            if(req.method==="GET" && (/^\/api\/learning\/user\/[^/]+\/?$/.test(pathname) || /^\/api\/learning\/me\/courses\/?$/.test(pathname))){
               const learner=await getSessionUserFromRequest(req);
               if(!learner)return sendJSON(res,401,{status:"error",message:"Learner sign in required",code:"LEARNER_SESSION_REQUIRED"});
-              const requestedUserId=Number(pathname.match(/^\/api\/learning\/user\/([^/]+)\/?$/)?.[1]);
+              const legacyUserId=pathname.match(/^\/api\/learning\/user\/([^/]+)\/?$/)?.[1];
               const userId=Number(learner.id);
+              const requestedUserId=legacyUserId===undefined?userId:Number(legacyUserId);
               if(!Number.isInteger(requestedUserId)||requestedUserId<=0) return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
               if(requestedUserId!==userId)return sendJSON(res,403,{status:"error",message:"You can only view your own learning"});
               const courses=await pool.query(`
@@ -52159,10 +52166,11 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               return sendJSON(res,200,{status:"success",content:query.rows});
             }
 
-            if(req.method==="GET" && /^\/api\/learning\/progress\/\d+\/?$/.test(pathname)){
+            if(req.method==="GET" && (/^\/api\/learning\/progress\/\d+\/?$/.test(pathname) || /^\/api\/learning\/me\/progress\/?$/.test(pathname))){
               const learner=await getSessionUserFromRequest(req);
               if(!learner)return sendJSON(res,401,{status:"error",message:"Learner sign in required",code:"LEARNER_SESSION_REQUIRED"});
-              const userId=Number(pathname.match(/^\/api\/learning\/progress\/(\d+)\/?$/)?.[1]);
+              const legacyProgressId=pathname.match(/^\/api\/learning\/progress\/(\d+)\/?$/)?.[1];
+              const userId=legacyProgressId===undefined?Number(learner.id):Number(legacyProgressId);
               if(!Number.isInteger(userId)||userId<=0) return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
               if(userId!==Number(learner.id))return sendJSON(res,403,{status:"error",message:"You can only view your own learning progress"});
 
@@ -52197,7 +52205,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
               const result=await pool.query(`
                 INSERT INTO user_learning_progress(user_id,content_id,progress_percent,status,last_opened_at,completed_at)
-                VALUES($1,$2,$3,$4,NOW(),CASE WHEN $4='COMPLETED' THEN NOW() ELSE NULL END)
+                VALUES($1,$2,$3,$4::varchar,NOW(),CASE WHEN $4::varchar='COMPLETED' THEN NOW() ELSE NULL END)
                 ON CONFLICT(user_id,content_id) DO UPDATE SET
                   progress_percent=EXCLUDED.progress_percent,
                   status=EXCLUDED.status,
@@ -52207,7 +52215,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 RETURNING *
               `,[userId,contentId,Math.round(requestedProgress),status]);
 
-              return sendJSON(res,200,{status:"success",message:"Learning progress saved",progress:result.rows[0]});
+              {const {user_id:_ownerId,...savedProgress}=result.rows[0];return sendJSON(res,200,{status:"success",message:"Learning progress saved",progress:savedProgress});}
             }
 
             if(req.method==="POST" && pathname==="/api/learning/complete"){
@@ -52231,7 +52239,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 RETURNING *
               `,[userId,contentId]);
 
-              return sendJSON(res,200,{status:"success",message:"Learning completed successfully",progress:result.rows[0]});
+              {const {user_id:_ownerId,...savedProgress}=result.rows[0];return sendJSON(res,200,{status:"success",message:"Learning completed successfully",progress:savedProgress});}
             }
 
             // =====================================================

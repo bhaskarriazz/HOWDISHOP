@@ -6442,7 +6442,7 @@ function App() {
     try{
       const [aRes,bRes]=await Promise.all([
         learningFetch("http://localhost:5000/api/learning/live/availability",{cache:"no-store"}),
-        currentUser?.id?learningFetch(`http://localhost:5000/api/learning/live/bookings/${currentUser.id}`,{cache:"no-store"}):Promise.resolve(null)
+        currentUser?.id?learningFetch("http://localhost:5000/api/learning/me/live-bookings",{cache:"no-store"}):Promise.resolve(null)
       ]);
       const a=await aRes.json().catch(()=>({}));
       if(!aRes.ok||a.status!=="success")throw new Error(a.message||"Unable to load live class slots.");
@@ -6597,7 +6597,7 @@ function App() {
   const loadGroupClassSessions=async()=>{
     if(!currentUser?.id){setGroupClassSessions([]);return;}
     try{
-      const r=await learningFetch(`http://localhost:5000/api/learning/batch-sessions/user/${currentUser.id}`,{cache:"no-store"});
+      const r=await learningFetch("http://localhost:5000/api/learning/me/batch-sessions",{cache:"no-store"});
       const d=await r.json().catch(()=>({}));
       if(r.ok&&d.status==="success")setGroupClassSessions(d.sessions||[]);
     }catch{}
@@ -6617,7 +6617,7 @@ function App() {
     setBatchBusy(true);
     try{
       const calls=[learningFetch("http://localhost:5000/api/learning/batches",{cache:"no-store"})];
-      if(currentUser?.id)calls.push(learningFetch(`http://localhost:5000/api/learning/batches/user/${currentUser.id}`,{cache:"no-store"}));
+      if(currentUser?.id)calls.push(learningFetch("http://localhost:5000/api/learning/me/batches",{cache:"no-store"}));
       const responses=await Promise.all(calls);
       const publicData=await responses[0].json().catch(()=>({}));
       if(responses[0].ok&&publicData.status==="success")setLearningBatches(publicData.batches||[]);
@@ -7134,7 +7134,7 @@ function App() {
     if(!currentUser?.id){setLearnerHome(null);return;}
     setLearnerHomeBusy(true);setLearnerHomeNotice("");
     try{
-      const response=await learningFetch(`http://localhost:5000/api/learning/learner-home/${encodeURIComponent(currentUser.id)}`,{cache:"no-store"});
+      const response=await learningFetch("http://localhost:5000/api/learning/me/home",{cache:"no-store"});
       const data=await response.json().catch(()=>({}));
       if(!response.ok||data.status!=="success")throw new Error(data.message||"Unable to load your learning home.");
       setLearnerHome(data);
@@ -7163,7 +7163,7 @@ function App() {
     if (!currentUser?.id) return;
     setLearningLoading(true);
     try {
-      const response=await learningFetch(`http://localhost:5000/api/learning/user/${encodeURIComponent(currentUser.id)}`,{cache:"no-store"});
+      const response=await learningFetch("http://localhost:5000/api/learning/me/courses",{cache:"no-store"});
       const data=await response.json().catch(()=>({}));
       if(!response.ok||data.status!=="success") throw new Error(data.message||"Unable to load learning data.");
       const items=(data.courses||[]).map((c)=>({
@@ -11753,7 +11753,7 @@ const removeNotification = async (notificationId) => {
     try {
       const [contentResponse, progressResponse] = await Promise.all([
         learningFetch("http://localhost:5000/api/learning/content", { cache: "no-store" }),
-        learningFetch(`http://localhost:5000/api/learning/progress/${encodeURIComponent(currentUser.id)}`, { cache: "no-store", headers: customerSessionHeaders() }),
+        learningFetch("http://localhost:5000/api/learning/me/progress", { cache: "no-store", headers: customerSessionHeaders() }),
       ]);
       const contentData = await contentResponse.json().catch(() => ({}));
       const progressData = await progressResponse.json().catch(() => ({}));
