@@ -1,5 +1,4 @@
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@500;600;700&display=swap');
-
 :root {
   font-family: "DM Sans", sans-serif;
   color: #26362c;
@@ -12467,3 +12466,280 @@ body:has(.howdi-profile-overlay) .howdi-connect-vibe{
   background:#eef6f1 !important;
   color:#0f513f !important;
 }
+
+/* =====================================================================
+   HOWDI CONNECT V16.6K5A — HOME SHELL
+   Scoped to .hc-home-* only. Does not touch any other HOWDI surface.
+   ===================================================================== */
+.hc-home-shell{
+  max-width:960px;
+  margin:0 auto;
+  padding:12px 16px 64px;
+  display:flex;
+  flex-direction:column;
+  gap:22px;
+}
+.hc-home-section{ display:flex; flex-direction:column; gap:10px; }
+.hc-home-section h4{
+  margin:0;
+  font-size:15px;
+  font-weight:700;
+  color:#0f513f;
+  letter-spacing:.01em;
+}
+
+/* Stable skeleton heights — reduces layout shift while sections load */
+.hc-home-skel{ display:flex; flex-direction:column; gap:8px; }
+.hc-home-skel-row{
+  height:64px;
+  border-radius:14px;
+  background:linear-gradient(90deg,#eef2ef 25%,#f6f8f6 37%,#eef2ef 63%);
+  background-size:400% 100%;
+  animation:hcHomeShimmer 1.4s ease-in-out infinite;
+}
+@keyframes hcHomeShimmer{ 0%{background-position:100% 0;} 100%{background-position:0 0;} }
+
+.hc-home-empty{
+  padding:16px;
+  border:1px dashed #d8e3dc;
+  border-radius:14px;
+  color:#5c6b63;
+  font-size:13.5px;
+  background:#fafcfb;
+}
+.hc-home-error{
+  display:flex; align-items:center; justify-content:space-between; gap:10px;
+  padding:14px 16px;
+  border-radius:14px;
+  background:#fdf3f2;
+  border:1px solid #f3d3cf;
+  color:#8a3226;
+  font-size:13.5px;
+}
+.hc-home-error button{
+  border:1px solid #8a3226; background:#fff; color:#8a3226;
+  border-radius:999px; padding:6px 14px; font-weight:600; cursor:pointer;
+}
+.hc-home-error button:focus-visible{ outline:2px solid #8a3226; outline-offset:2px; }
+
+/* ---- HOWDI Special / Hero ---- */
+.hc-home-special-card, .hc-home-hero-card{
+  position:relative;
+  border-radius:18px;
+  padding:18px 20px;
+  background:linear-gradient(135deg,#0f513f,#17795c);
+  color:#fff;
+  cursor:pointer;
+  min-height:64px;
+  display:flex; flex-direction:column; gap:8px; justify-content:center;
+}
+.hc-home-special-copy{ display:flex; flex-direction:column; gap:2px; }
+.hc-home-special-copy b{ font-size:15px; }
+.hc-home-special-copy span{ font-size:13px; opacity:.9; }
+.hc-home-special-card button, .hc-home-hero-card button{
+  align-self:flex-start;
+  background:#fff; color:#0f513f; border:none; border-radius:999px;
+  padding:8px 16px; font-weight:700; font-size:13px; cursor:pointer;
+}
+.hc-home-dismiss{
+  position:absolute; top:8px; right:10px;
+  background:rgba(255,255,255,.18) !important; color:#fff !important;
+  width:26px; height:26px; border-radius:50%; padding:0 !important;
+  display:flex; align-items:center; justify-content:center; font-size:16px; line-height:1;
+}
+.hc-home-hero-card{ min-height:160px; }
+.hc-home-hero-card h3{ margin:0; font-size:19px; line-height:1.3; max-width:640px; }
+.hc-home-hero-card span{ font-size:13px; opacity:.85; }
+.hc-home-hero-media{
+  width:100%; max-height:220px; object-fit:cover; border-radius:12px;
+}
+
+/* ---- Rails (Stories, Vibe, Continue Watching, People, Communities, Shop, Works, Learn) ---- */
+.hc-home-rail-wrap{ position:relative; }
+.hc-home-rail{
+  display:flex;
+  gap:12px;
+  overflow-x:auto;
+  scroll-snap-type:x proximity;
+  padding:2px 2px 8px;
+  scrollbar-width:thin;
+}
+.hc-home-rail:focus-visible{ outline:2px solid #0f513f; outline-offset:2px; }
+.hc-home-rail > *{ scroll-snap-align:start; flex:0 0 auto; }
+.hc-home-rail-nav{
+  position:absolute; top:50%; transform:translateY(-50%);
+  width:32px; height:32px; border-radius:50%;
+  background:#fff; border:1px solid #d8e3dc; color:#0f513f;
+  font-size:18px; line-height:1; cursor:pointer;
+  display:none; align-items:center; justify-content:center;
+  box-shadow:0 2px 8px rgba(15,81,63,.12);
+  z-index:2;
+}
+.hc-home-rail-nav.prev{ left:-6px; }
+.hc-home-rail-nav.next{ right:-6px; }
+.hc-home-rail-nav:focus-visible{ outline:2px solid #0f513f; outline-offset:2px; }
+@media (min-width:768px){
+  .hc-home-rail-nav{ display:flex; }
+}
+
+.hc-home-story{
+  display:flex; flex-direction:column; align-items:center; gap:6px;
+  width:72px; background:none; border:none; cursor:pointer; padding:2px;
+}
+.hc-home-story-ring{
+  width:56px; height:56px; border-radius:50%;
+  display:flex; align-items:center; justify-content:center;
+  background:#eef6f1; color:#0f513f; font-weight:700; font-size:18px;
+  border:2px solid #0f513f;
+}
+.hc-home-story small{ font-size:11px; color:#3d4a44; max-width:70px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+.hc-home-vibe-card{
+  width:110px; height:150px; border-radius:14px; overflow:hidden; position:relative;
+  border:none; padding:0; cursor:pointer; background:#0f513f;
+}
+.hc-home-vibe-card img{ width:100%; height:100%; object-fit:cover; display:block; }
+.hc-home-vibe-fallback{ display:flex; align-items:center; justify-content:center; width:100%; height:100%; color:#fff; font-size:22px; }
+.hc-home-vibe-card small{
+  position:absolute; left:0; right:0; bottom:0; padding:6px 8px;
+  background:linear-gradient(0deg,rgba(0,0,0,.65),transparent);
+  color:#fff; font-size:11px; text-align:left;
+}
+
+/* Continue Watching — thumbnail + progress bar, visually distinct from Continue Your Journey */
+.hc-home-watch-card{
+  width:130px; border:1px solid #e4ece7; border-radius:14px; padding:0;
+  background:#fff; cursor:pointer; overflow:hidden; display:flex; flex-direction:column; gap:0;
+}
+.hc-home-watch-thumb{ position:relative; display:block; width:100%; height:90px; background:#0f513f; }
+.hc-home-watch-thumb img{ width:100%; height:100%; object-fit:cover; display:block; }
+.hc-home-watch-progress{
+  position:absolute; left:0; right:0; bottom:0; height:4px; background:rgba(255,255,255,.35);
+}
+.hc-home-watch-progress span{ display:block; height:100%; background:#ffb703; }
+.hc-home-watch-card small{ padding:6px 8px; font-size:11px; color:#3d4a44; text-align:left; }
+
+.hc-home-person-card{
+  width:150px; border:1px solid #e4ece7; border-radius:14px; padding:14px 12px;
+  display:flex; flex-direction:column; align-items:center; gap:6px; text-align:center;
+  background:#fff; cursor:pointer;
+}
+.hc-home-avatar{
+  width:48px; height:48px; border-radius:50%; overflow:hidden;
+  display:flex; align-items:center; justify-content:center;
+  background:#eef6f1; color:#0f513f; font-weight:700;
+}
+.hc-home-avatar img{ width:100%; height:100%; object-fit:cover; }
+.hc-home-person-card b{ font-size:13px; }
+.hc-home-person-card small{ font-size:11.5px; color:#5c6b63; }
+.hc-home-follow{
+  border:1px solid #0f513f; background:#0f513f; color:#fff;
+  border-radius:999px; padding:5px 14px; font-size:12px; font-weight:700; cursor:pointer;
+  min-height:30px;
+}
+.hc-home-follow.following{ background:#fff; color:#0f513f; }
+.hc-home-follow:focus-visible{ outline:2px solid #0f513f; outline-offset:2px; }
+
+.hc-home-community-card{
+  width:170px; border:1px solid #e4ece7; border-radius:14px; padding:14px;
+  background:#fff; cursor:pointer; text-align:left; display:flex; flex-direction:column; gap:4px;
+}
+
+/* ---- Lists (For You, Trending Articles, Recent Activity) ---- */
+.hc-home-list{ display:flex; flex-direction:column; gap:10px; }
+.hc-home-post-card, .hc-home-article-card{
+  border:1px solid #e4ece7; border-radius:14px; padding:14px 16px;
+  background:#fff; cursor:pointer; display:flex; flex-direction:column; gap:6px;
+}
+.hc-home-post-author{ font-size:12.5px; font-weight:700; color:#0f513f; }
+.hc-home-post-author em{ font-style:normal; color:#5c6b63; margin-left:6px; font-weight:500; }
+.hc-home-post-card p, .hc-home-article-card > span{ font-size:13.5px; color:#2c352f; margin:0; }
+.hc-home-post-meta{ font-size:11.5px; color:#5c6b63; }
+.hc-home-more{
+  align-self:center; border:1px solid #0f513f; background:#fff; color:#0f513f;
+  border-radius:999px; padding:8px 20px; font-weight:700; cursor:pointer; min-height:38px;
+}
+.hc-home-activity-row{
+  display:flex; flex-direction:column; gap:2px; padding:10px 12px;
+  border-radius:12px; background:#fafcfb;
+}
+.hc-home-activity-row.unread{ background:#eef6f1; border-left:3px solid #0f513f; }
+.hc-home-activity-row span{ font-size:12px; font-weight:700; color:#0f513f; }
+.hc-home-activity-row p{ margin:0; font-size:13px; color:#2c352f; }
+
+/* ---- Cross-pillar cards: Shop / Works / Learn & Earn (labelled + CTA) ---- */
+.hc-home-shop-card, .hc-home-works-card, .hc-home-learn-card{
+  width:160px; border:1px solid #e4ece7; border-radius:14px; padding:14px;
+  background:#fff; cursor:pointer; text-align:left; display:flex; flex-direction:column; gap:5px;
+}
+.hc-home-pillar-tag{
+  align-self:flex-start;
+  font-size:10.5px; font-weight:700; letter-spacing:.03em; text-transform:uppercase;
+  color:#0f513f; background:#eef6f1; border-radius:999px; padding:2px 9px;
+}
+.hc-home-price{ font-weight:700; color:#0f513f; font-size:14px; }
+.hc-home-cta{ font-style:normal; font-size:12px; font-weight:700; color:#0f513f; margin-top:2px; }
+
+/* ---- Daily Quote ---- */
+.hc-home-quote blockquote{
+  margin:0; padding:20px 22px; border-radius:16px;
+  background:#f4f7f5; color:#28352e; font-size:16px; font-style:italic; line-height:1.5;
+}
+.hc-home-quote cite{ display:block; margin-top:10px; font-style:normal; font-size:12.5px; color:#5c6b63; }
+
+/* ---- Continue Your Journey — wide utility/action cards (distinct from Continue Watching) ---- */
+.hc-home-journey-list{ display:flex; flex-direction:column; gap:10px; }
+.hc-home-journey-card{
+  display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+  width:100%; border:1px solid #e4ece7; border-radius:14px; padding:14px 16px;
+  background:#fff; cursor:pointer; text-align:left;
+}
+.hc-home-journey-card b{ flex:1 1 auto; min-width:140px; font-size:14px; }
+.hc-home-journey-bar{
+  flex:1 1 160px; height:6px; border-radius:999px; background:#e4ece7; overflow:hidden; min-width:100px;
+}
+.hc-home-journey-bar span{ display:block; height:100%; background:#0f513f; }
+.hc-home-journey-card small{ font-size:12px; color:#5c6b63; }
+
+/* ---- Focus visibility across all interactive Home cards/buttons ---- */
+.hc-home-shell button:focus-visible,
+.hc-home-shell [tabindex]:focus-visible{
+  outline:2px solid #0f513f;
+  outline-offset:2px;
+}
+
+/* ---- Mobile first-screen fixes (K5A scope only: no full K5F redesign) ---- */
+@media (max-width:640px){
+  .hc-home-shell{ padding:10px 12px 48px; gap:16px; }
+  .hc-home-special-card{
+    flex-direction:row; align-items:center; justify-content:space-between;
+    padding:12px 40px 12px 14px; min-height:0;
+  }
+  .hc-home-special-copy span{ display:none; }
+  .hc-home-hero-card{ min-height:0; padding:14px 16px; }
+  .hc-home-hero-card h3{ font-size:16px; }
+  .hc-home-hero-media{ max-height:150px; }
+  .hc-home-person-card, .hc-home-community-card, .hc-home-shop-card, .hc-home-works-card, .hc-home-learn-card{
+    width:132px;
+  }
+  .hc-home-vibe-card{ width:92px; height:128px; }
+  .hc-home-watch-card{ width:112px; }
+}
+
+/* HPAY_STAGE3_HISTORY_REQUESTS_ACCOUNT */
+.hp-stage3{padding-bottom:40px}.hp-stage3-heading{align-items:flex-start}.hp-stage3-kicker{font-size:10px;font-weight:900;letter-spacing:.14em;color:#698073;margin-bottom:4px}.hp-stage3-tabs{display:flex;gap:8px;flex-wrap:wrap;margin:4px 0 22px;padding:6px;background:#f4f7f5;border:1px solid #e2e8e4;border-radius:14px}.hp-stage3-tabs button{border:0;background:transparent;color:#607066;padding:9px 14px;border-radius:10px;font-weight:800;cursor:pointer}.hp-stage3-tabs button.active{background:#fff;color:#263d31;box-shadow:0 3px 12px rgba(31,58,43,.09)}.hp-stage3-alert{display:flex;gap:12px;align-items:center;margin:0 0 18px;padding:12px 14px;border:1px solid #efd7d7;background:#fff8f8;border-radius:13px}.hp-stage3-alert b{color:#8a3838}.hp-stage3-alert span{flex:1;color:#765b5b}.hp-stage3-alert button,.hp-stage3-refresh,.hp-stage3-primary{border:1px solid #ccd8d0;background:#fff;color:#355343;border-radius:10px;padding:9px 13px;font-weight:800;cursor:pointer}.hp-stage3-primary{background:#355343;color:#fff;border-color:#355343}.hp-stage3-workspace{background:#fff;border:1px solid #e1e7e3;border-radius:20px;padding:20px;box-shadow:0 12px 30px rgba(32,54,42,.06)}.hp-stage3-workspace-head{display:flex;gap:20px;align-items:flex-start;justify-content:space-between;margin-bottom:18px}.hp-stage3-workspace-head>div>button{border:0;background:transparent;padding:0 0 8px;color:#60786a;font-weight:800;cursor:pointer}.hp-stage3-workspace-head h3{margin:0 0 5px;font-size:22px;color:#22362b}.hp-stage3-workspace-head p{margin:0;max-width:720px;color:#718078;font-size:13px;line-height:1.55}.hp-stage3-filters{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:16px}.hp-stage3-filters button{border:1px solid #dbe4de;background:#fff;color:#617168;border-radius:999px;padding:7px 12px;font-size:12px;font-weight:800;cursor:pointer}.hp-stage3-filters button.active{background:#eaf2ed;border-color:#c8d9ce;color:#294737}.hp-stage3-list{display:grid;gap:9px}.hp-stage3-row{display:grid;grid-template-columns:42px minmax(0,1fr) auto;gap:12px;align-items:center;padding:13px;border:1px solid #e6ebe8;border-radius:14px;background:#fbfcfb}.hp-stage3-row-icon,.hp-stage3-bank-icon{width:38px;height:38px;border-radius:11px;display:grid;place-items:center;background:#edf4ef;color:#3e6550;font-weight:900}.hp-stage3-row-main{min-width:0;display:flex;flex-direction:column;gap:3px}.hp-stage3-row-main b{color:#273c31;overflow-wrap:anywhere}.hp-stage3-row-main small,.hp-stage3-row-main span{color:#75837b;font-size:11px;overflow-wrap:anywhere}.hp-stage3-row-value{text-align:right;display:flex;flex-direction:column;gap:4px}.hp-stage3-row-value strong{color:#344b3e}.hp-stage3-row-value strong.credit{color:#2f7650}.hp-stage3-row-value strong.debit{color:#9b4a4a}.hp-stage3-row-value em{font-style:normal;font-size:10px;text-transform:uppercase;color:#718078}.hp-stage3-empty{padding:34px 20px;text-align:center;border:1px dashed #d9e2dc;border-radius:14px;background:#fbfcfb;display:flex;flex-direction:column;gap:6px}.hp-stage3-empty b{color:#354b3f}.hp-stage3-empty span{color:#7a8981;font-size:12px}.hp-stage3-request-preview{display:grid;gap:8px}.hp-stage3-request-preview article{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:12px;align-items:center;padding:12px 14px;border:1px solid #e6ebe8;border-radius:13px;background:#fbfcfb}.hp-stage3-request-preview article div{display:flex;flex-direction:column}.hp-stage3-request-preview small{color:#7b8981}.hp-stage3-request-preview em{font-style:normal;font-size:10px;color:#687a70}.hp-stage3-account-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-bottom:22px}.hp-stage3-account-card{border:1px solid #e2e8e4;border-radius:16px;padding:17px;background:linear-gradient(145deg,#fbfdfb,#f3f7f4)}.hp-stage3-account-card>small{display:block;color:#75857c;font-weight:800;margin-bottom:5px}.hp-stage3-account-card>strong{display:block;color:#2b4436;font-size:17px;overflow-wrap:anywhere;margin-bottom:14px}.hp-stage3-account-card dl{margin:0;display:grid;gap:7px}.hp-stage3-account-card dl>div{display:flex;justify-content:space-between;gap:12px;border-top:1px solid #e4eae6;padding-top:7px}.hp-stage3-account-card dt{color:#728078}.hp-stage3-account-card dd{margin:0;color:#344b3e;font-weight:800;text-align:right}.hp-stage3-banks{display:grid;gap:9px}.hp-stage3-banks article{display:grid;grid-template-columns:42px minmax(0,1fr) auto;gap:12px;align-items:center;padding:13px;border:1px solid #e4eae6;border-radius:14px}.hp-stage3-banks article>div:nth-child(2){display:flex;flex-direction:column;gap:3px}.hp-stage3-banks small,.hp-stage3-banks span{color:#74827a;font-size:11px}.hp-stage3-banks em{font-style:normal;color:#476553;background:#edf4ef;border-radius:999px;padding:5px 9px;font-size:10px;font-weight:800}.hp-stage3-provider-note{margin-top:18px;padding:14px 16px;border-radius:14px;background:#f7f9f8;border:1px solid #e3e8e5}.hp-stage3-provider-note b{color:#324a3d}.hp-stage3-provider-note p{margin:5px 0 0;color:#748179;font-size:12px;line-height:1.55}
+@media(max-width:760px){.hp-stage3-tabs{overflow-x:auto;flex-wrap:nowrap}.hp-stage3-tabs button{white-space:nowrap}.hp-stage3-workspace{padding:14px;border-radius:15px}.hp-stage3-workspace-head{flex-direction:column}.hp-stage3-account-grid{grid-template-columns:1fr}.hp-stage3-row{grid-template-columns:38px minmax(0,1fr)}.hp-stage3-row-value{grid-column:2;text-align:left;flex-direction:row;align-items:center;justify-content:space-between}.hp-stage3-request-preview article{grid-template-columns:minmax(0,1fr) auto}.hp-stage3-request-preview article em{grid-column:1/-1}.hp-stage3-banks article{grid-template-columns:38px minmax(0,1fr)}.hp-stage3-banks article>div:last-child{grid-column:2}.hp-stage3-heading .hp-purpose{display:none}}
+
+
+/* HPAY_STAGE4_REVIEW_HARDENING */
+.hp-stage3-row-main b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;overflow-wrap:normal}
+.hp-stage3-row-main small,.hp-stage3-row-main span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;overflow-wrap:normal}
+@media(max-width:760px){
+  .hp-stage3-tabs{scroll-snap-type:x mandatory;scroll-padding:6px;padding-right:24px;scrollbar-width:none}
+  .hp-stage3-tabs::-webkit-scrollbar{display:none}
+  .hp-stage3-tabs button{scroll-snap-align:start;flex:0 0 auto}
+}
+
+
+/* HPAY_STAGE4A_FINAL_CORRECTION */
+.hp-stage3-row-value strong.unknown{color:#64748b}

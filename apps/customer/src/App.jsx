@@ -2,6 +2,10 @@ import { Component, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import "./App.css";
 import HowdiAuthPortal from "./components/HowdiAuthPortal";
+import ShopCatalogue from "./components/ShopCatalogue";
+import HowdiFor from "./howdi-for/HowdiFor";
+import { HowdiForMenuRow, HowdiForFeedCard, HowdiForEmptyStateLink, insertFeedCard } from "./howdi-for/HowdiForEntryPoints";
+import { parseForPath } from "./howdi-for/routes";
 import {
   recordTasteEvent,
   rememberRecentlyViewed,
@@ -294,7 +298,7 @@ const newVibeStudioForm=()=>({
 // Full-screen scroll-snap discovery on top of V14.0A APIs.
 // ==========================================================
 // HOWDI V16.6K1 — Vibe runtime/public identity/community deep-link repair
-function HowdiVibeCore({legacyPosts=[],onCreate,onAddToCart,onBuyNow,onDirectCheckoutToken,onToggleWishlist,wishlist=[],courseOptions=[],serviceOptions=[],communityOptions=[],onOpenCourse,onOpenService,onOpenCommunity,onOpenShop}){
+function HowdiVibeCore({legacyPosts=[],onCreate,onAddToCart,onBuyNow,onDirectCheckoutToken,onToggleWishlist,wishlist=[],courseOptions=[],serviceOptions=[],communityOptions=[],onOpenCourse,onOpenService,onOpenCommunity,onOpenShop,focusVibeCode,onFocusVibeConsumed}){
   const [creatorCommerceNotifications,setCreatorCommerceNotifications]=useState([]);
   const loadCreatorCommerceNotifications=async()=>{try{const r=await fetch(`${API}/api/v1/vibes/creator/commerce/notifications`,{headers:authHeaders(),cache:"no-store"}),d=await r.json().catch(()=>({}));if(r.ok)setCreatorCommerceNotifications(d.notifications||[]);}catch(e){console.error(e)}};
   const [creatorActionBusy,setCreatorActionBusy]=useState("");
@@ -959,6 +963,29 @@ function HowdiVibeCore({legacyPosts=[],onCreate,onAddToCart,onBuyNow,onDirectChe
     setDiscoveryLoading(true);
     try{const r=await fetch(`${API}/api/v1/vibes/search?q=${encodeURIComponent(term)}&limit=30`,{headers:authHeaders(),cache:'no-store'});const d=await r.json();if(!r.ok)throw new Error(d.message||'Search unavailable');setDiscoveryResults(d.items||[]);setTrendingCreators(d.creators||[]);setTrendingTags(d.hashtags||[]);setDiscoveryLabel(`Search: ${term}`);setDiscoveryTab('results')}catch(e){setError(e.message||'Search unavailable')}finally{setDiscoveryLoading(false)}
   };
+
+  // K5B UX CORRECTION: open the exact Vibe a caller (e.g. the Public Profile modal)
+  // asked for, addressed by its existing content identifier (vibe_code) — never a
+  // numeric user id. Reuses the existing search-by-term route and the existing
+  // applyDiscoveryItems() plumbing (the same path Search/Discovery results already
+  // use to focus the player on a specific item) instead of inventing a new fetch
+  // or a new backend route.
+  useEffect(()=>{
+    if(!focusVibeCode)return;
+    let cancelled=false;
+    (async()=>{
+      try{
+        const r=await fetch(`${API}/api/v1/vibes/search?q=${encodeURIComponent(focusVibeCode)}&limit=5`,{headers:authHeaders(),cache:'no-store'});
+        const d=await r.json().catch(()=>({}));
+        if(!r.ok)throw new Error(d.message||'Vibe unavailable');
+        const rows=Array.isArray(d.items)?d.items:[];
+        const match=rows.find(x=>String(x.vibeCode||x.vibe_code||'').toLowerCase()===String(focusVibeCode).toLowerCase())||rows[0];
+        if(!cancelled&&match)applyDiscoveryItems([match],'Vibe');
+      }catch{ /* fall back silently to the already-open generic Vibe feed */ }
+      finally{ if(!cancelled)onFocusVibeConsumed?.(); }
+    })();
+    return ()=>{cancelled=true;};
+  },[focusVibeCode]);
 
   const openCategoryFeed=async(cat)=>{
     setDiscoveryLoading(true);
@@ -2498,7 +2525,12 @@ function App() {
   // ==============================
 
   const [activeSection, setActiveSection] = useState("home");
-  const [navigationOSArea,setNavigationOSArea]=useState("home");
+  const [navigationOSArea,setNavigationOSArea]=useState("connect");
+  // MP-56 — public segment landing pages. This is deliberately not a pillar:
+  // the existing shell remains the navigation owner and destinations resolve
+  // back into its current pillar/view state.
+  const [howdiForRoute,setHowdiForRoute]=useState(()=>typeof window!=="undefined"?parseForPath(window.location.pathname):null);
+  const [howdiForPendingTarget,setHowdiForPendingTarget]=useState(null);
   const [shopOSView,setShopOSView]=useState("home");
   const [slideIndex, setSlideIndex] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -3082,7 +3114,17 @@ function App() {
   const [connectComments, setConnectComments] = useState([]);
   const [connectCommentText, setConnectCommentText] = useState("");
   const [connectCommentsLoading, setConnectCommentsLoading] = useState(false);
-  const [connectView, setConnectView] = useState("feed");
+  const [connectView, setConnectView] = useState("dashboard");
+  // ---- K5A CONNECT HOME SHELL state ----
+  const [connectHomeSections, setConnectHomeSections] = useState({});
+  const [connectHomeLoading, setConnectHomeLoading] = useState({});
+  const [connectHomeLoaded, setConnectHomeLoaded] = useState(false);
+  // K5A REVIEW FIX: which identity ("guest" or a numeric uid) the loaded Home
+  // state belongs to, so a login/logout/account-switch invalidates stale
+  // personalized data instead of leaving it rendered under a new identity.
+  const connectHomeIdentityRef=useRef(null);
+  const connectHomeObserverRef=useRef(null);
+  const connectHomeObservedKeysRef=useRef(new Set());
   const [connectCreateOpen, setConnectCreateOpen] = useState(false);
   const [connectCreateType, setConnectCreateType] = useState("post");
   const [connectPostMedia,setConnectPostMedia]=useState(null);
@@ -3173,6 +3215,34 @@ function App() {
   const [connectGCInvite,setConnectGCInvite]=useState(null);
   const [connectGCCreateOpen,setConnectGCCreateOpen]=useState(false);
   const [connectGCCreate,setConnectGCCreate]=useState({name:"",description:"",privacy:"PUBLIC",category:"GENERAL"});
+  // HOWDI Connect V16.6K3 — fresh-open invitation link deep linking (/connect/invite/:token)
+  const [connectInviteToken,setConnectInviteToken]=useState(null);
+  const [connectInvitePreview,setConnectInvitePreview]=useState(null);
+  const [connectInviteBusy,setConnectInviteBusy]=useState(false);
+  const [connectInviteStatus,setConnectInviteStatus]=useState("");
+  // HOWDI Connect V16.6K4 — one reusable login-continuation mechanism for
+  // any protected Connect action (invite join, group/channel join, message,
+  // follow, save). Call requireConnectLogin(fn) instead of checking
+  // currentUser yourself: if logged in, fn runs immediately; if not, the
+  // login modal opens and fn re-runs automatically the moment login
+  // succeeds (see the currentUser watcher effect further below).
+  const [connectPendingAction,setConnectPendingAction]=useState(null);
+  const requireConnectLogin=(action)=>{
+    const uid=Number(currentUser?.id||currentUser?.user_id||0);
+    if(uid){action();return true;}
+    setConnectPendingAction(()=>action);
+    setShowLogin(true);
+    setAuthMode("login");
+    setConnectNotice("Log in to continue.");
+    return false;
+  };
+  useEffect(()=>{
+    const uid=Number(currentUser?.id||currentUser?.user_id||0);
+    if(!uid||!connectPendingAction)return;
+    const action=connectPendingAction;
+    setConnectPendingAction(null);
+    action();
+  },[currentUser]);
   const [connectNetworkGraphOpen,setConnectNetworkGraphOpen]=useState(false);
   const [connectNetworkGraph,setConnectNetworkGraph]=useState({people:[],partnerRequests:[],mentorRequests:[],trust:{}});
   const [connectNetworkGraphTab,setConnectNetworkGraphTab]=useState("people");
@@ -3278,6 +3348,10 @@ function App() {
   const [connectProfileCodeOpen,setConnectProfileCodeOpen]=useState(false);
   const [connectSocialSummary,setConnectSocialSummary]=useState(null);
   const [connectSocialPeople,setConnectSocialPeople]=useState([]);
+  // K5B UX CORRECTION: the Public Profile modal's Vibe card sets this to the
+  // clicked vibe's vibe_code (a content id, never a numeric user id) so
+  // HowdiVibeCore can focus that exact Vibe instead of opening the generic feed.
+  const [connectVibeFocusCode,setConnectVibeFocusCode]=useState("");
   const [connectSocialTab,setConnectSocialTab]=useState("followers");
   const [connectSocialLoading,setConnectSocialLoading]=useState(false);
   const [connectSocialSettings,setConnectSocialSettings]=useState({publicUsername:"",privateProfile:false,followerListVisibility:"EVERYONE",contactPermission:"EVERYONE",mentionPermission:"EVERYONE",tagPermission:"FOLLOWERS",activityVisible:true,discoverable:true});
@@ -3343,6 +3417,9 @@ function App() {
   const [connectActiveConversation,setConnectActiveConversation]=useState(null);
   const [connectMessages,setConnectMessages]=useState([]);
   const [connectMessageText,setConnectMessageText]=useState("");
+  // HOWDI Connect V16.6K3 — personal/group/channel chat attachments (image/video/document/link)
+  const [connectPendingAttachment,setConnectPendingAttachment]=useState(null);
+  const [connectAttachBusy,setConnectAttachBusy]=useState(false);
   const [connectEditingMessage,setConnectEditingMessage]=useState(null);
   const [connectEmojiOpen,setConnectEmojiOpen]=useState(false);
   const [connectNotifications,setConnectNotifications]=useState([]);
@@ -3407,6 +3484,7 @@ function App() {
   const [connectCreatorPlanName,setConnectCreatorPlanName]=useState("Supporter");
   const [connectCreatorPlanPrice,setConnectCreatorPlanPrice]=useState("99");
   const [connectCreatorPlanPeriod,setConnectCreatorPlanPeriod]=useState("MONTHLY");
+  const [connectCreatorPlanTrial,setConnectCreatorPlanTrial]=useState("0");
   const [connectCreatorPlanBenefits,setConnectCreatorPlanBenefits]=useState("Subscriber badge, member chat and subscriber Spaces");
   const [connectSpaceSeriesTitle,setConnectSpaceSeriesTitle]=useState("");
   const [connectSpaceSeriesTopic,setConnectSpaceSeriesTopic]=useState("");
@@ -3487,6 +3565,12 @@ function App() {
   // HOWDI CONNECT V16.0D — Articles
   const [connectArticles,setConnectArticles]=useState([]),[connectArticleMine,setConnectArticleMine]=useState([]),[connectArticleSelected,setConnectArticleSelected]=useState(null);
   const [connectArticleEditor,setConnectArticleEditor]=useState(false),[connectArticleTitle,setConnectArticleTitle]=useState(""),[connectArticleExcerpt,setConnectArticleExcerpt]=useState(""),[connectArticleCover,setConnectArticleCover]=useState(""),[connectArticleCategory,setConnectArticleCategory]=useState("GENERAL"),[connectArticleTopics,setConnectArticleTopics]=useState(""),[connectArticleBody,setConnectArticleBody]=useState("");
+  // HOWDI Connect V16.6K4 — editing an existing article (open Draft/Published,
+  // edit, preview, save, publish) instead of only ever creating a new one.
+  const [connectArticleEditingId,setConnectArticleEditingId]=useState(null);
+  const [connectArticlePreviewOpen,setConnectArticlePreviewOpen]=useState(false);
+  // HOWDI Connect V16.6K3 — uploaded article cover (URL field kept for backward compatibility)
+  const [connectArticleCoverData,setConnectArticleCoverData]=useState(""),[connectArticleCoverBusy,setConnectArticleCoverBusy]=useState(false);
   const [connectArticleMode,setConnectArticleMode]=useState("DISCOVER"),[connectArticleAnalytics,setConnectArticleAnalytics]=useState(null),[connectArticleNotice,setConnectArticleNotice]=useState("");
 
   // HOWDI CONNECT V16.0C — Direct voice/video/group calling
@@ -3534,6 +3618,16 @@ function App() {
   const [hpayRecipient, setHpayRecipient] = useState("Maya Studio");
   const [hpayStatus, setHpayStatus] = useState(null);
   const [hpayPrivacyAccepted, setHpayPrivacyAccepted] = useState(true);
+  const [hpayHistoryFilter,setHpayHistoryFilter]=useState("all");
+  const [hpayRequestFilter,setHpayRequestFilter]=useState("all");
+  const [hpayAccount,setHpayAccount]=useState(null);
+  const [hpayRequests,setHpayRequests]=useState([]);
+  const [hpayBanks,setHpayBanks]=useState([]);
+  const [hpayRecipientHpayId,setHpayRecipientHpayId]=useState("");
+  const [hpayLoading,setHpayLoading]=useState(false);
+  const [hpaySubmitting,setHpaySubmitting]=useState(false);
+  const [hpayError,setHpayError]=useState("");
+  const [hpayProviderConnected,setHpayProviderConnected]=useState(false);
 
   const supportFaqs = [
     { id: 1, category: "orders", icon: "📦", question: "Where is my order?", answer: "Open My Orders to view the latest status, shipment details and delivery updates." },
@@ -3566,7 +3660,7 @@ function App() {
     setNotificationPreferencesNotice("");
     try {
       const response = await fetch(
-        `http://localhost:5000/api/notifications/preferences/${encodeURIComponent(currentUser.id)}`,
+        `http://localhost:5000/api/notifications/preferences/me`,
         { cache: "no-store", headers: customerSessionHeaders() }
       );
       const data = await response.json().catch(() => ({}));
@@ -3603,7 +3697,7 @@ function App() {
     setNotificationPreferencesNotice("");
     try {
       const response = await fetch(
-        `http://localhost:5000/api/notifications/preferences/${encodeURIComponent(currentUser.id)}`,
+        `http://localhost:5000/api/notifications/preferences/me`,
         {
           method: "PUT",
           headers: { "Content-Type": "application/json", ...customerSessionHeaders() },
@@ -3866,12 +3960,12 @@ function App() {
     setConnectLoading(true);
     try {
       const params=new URLSearchParams();
-      if(currentUser?.id)params.set("userId",String(currentUser.id));
       if(connectPostFeedType)params.set("type",connectPostFeedType);
       if(connectPostFeedKnowledge)params.set("knowledge",connectPostFeedKnowledge);
       if(connectPostFeedAudience)params.set("audience",connectPostFeedAudience);
       const response = await fetch(`${SHOP_API_BASE}/api/connect/feed?${params.toString()}`, {
         cache: "no-store",
+        headers: customerSessionHeaders(),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.status !== "success") {
@@ -3896,23 +3990,107 @@ function App() {
     if(!response.ok||data.status==="error")throw new Error(data.message||"HOWDI Connect request failed.");
     return data;
   };
-  const loadConnectSocialSummary=async()=>{const userId=Number(currentUser?.id||currentUser?.user_id||0);if(!userId)return;try{const d=await connectApi(`/api/connect/social-summary?userId=${encodeURIComponent(userId)}`);setConnectSocialSummary(d);const p=d.profile||{};setConnectSocialSettings({publicUsername:p.public_username||"",privateProfile:Boolean(p.private_profile),followerListVisibility:p.follower_list_visibility||"EVERYONE",contactPermission:p.contact_permission||"EVERYONE",mentionPermission:p.mention_permission||"EVERYONE",tagPermission:p.tag_permission||"FOLLOWERS",activityVisible:p.activity_visible!==false,discoverable:p.discoverable!==false});}catch(e){setConnectNotice(e.message||"Unable to load social profile.");}};
-  const loadConnectSocialGraph=async(type="followers")=>{const userId=Number(currentUser?.id||currentUser?.user_id||0);if(!userId)return;setConnectSocialTab(type);setConnectSocialLoading(true);try{const d=await connectApi(`/api/connect/social-graph?userId=${encodeURIComponent(userId)}&ownerId=${encodeURIComponent(userId)}&type=${encodeURIComponent(type)}`);setConnectSocialPeople(d.people||[]);await loadConnectSocialSummary();}catch(e){setConnectNotice(e.message||"Unable to load network.");}finally{setConnectSocialLoading(false);}};
-  const openConnectSocial=async()=>{setConnectView("social");await Promise.all([loadConnectSocialSummary(),loadConnectSocialGraph(connectSocialTab||"followers")]);};
-  const toggleConnectSocialFollow=async(person)=>{const userId=Number(currentUser?.id||currentUser?.user_id||0);if(!userId||!person?.id)return;try{const d=await connectApi(`/api/connect/users/${person.id}/follow`,{method:"POST",body:JSON.stringify({userId})});setConnectSocialPeople(v=>v.map(x=>x.id===person.id?{...x,viewer_following:Boolean(d.following),request_pending:Boolean(d.requested)}:x));await loadConnectSocialSummary();}catch(e){setConnectNotice(e.message||"Unable to update follow.");}};
-  const respondConnectFollowRequest=async(requesterId,accept)=>{const userId=Number(currentUser?.id||currentUser?.user_id||0);try{await connectApi(`/api/connect/follow-requests/${requesterId}/respond`,{method:"PATCH",body:JSON.stringify({userId,accept})});await loadConnectSocialGraph("requests");}catch(e){setConnectNotice(e.message||"Unable to respond to request.");}};
-  const saveConnectSocialSettings=async()=>{const userId=Number(currentUser?.id||currentUser?.user_id||0);try{await connectApi('/api/connect/social-profile',{method:'PATCH',body:JSON.stringify({userId,...connectSocialSettings})});setConnectNotice("Profile & privacy saved.");await loadConnectSocialSummary();}catch(e){setConnectNotice(e.message||"Unable to save profile privacy.");}};
+  // ---- K5A CONNECT HOME composition loader (progressive/lazy sections) ----
+  const CONNECT_HOME_PRIMARY=["special","hero","stories","forYou","vibes"];
+  const CONNECT_HOME_SECONDARY=["continueWatching","recommendedCreators","suggestedPeople","communities","trendingArticles","shopRecommendations","worksRecommendations","learnRecommendations","recentActivity","dailyQuote","continueYourJourney"];
+  const loadConnectHomeSections=async(keys)=>{
+    if(!keys||!keys.length)return;
+    setConnectHomeLoading(v=>{const n={...v};keys.forEach(k=>{n[k]=true;});return n;});
+    try{
+      const d=await connectApi(`/api/connect/home?sections=${encodeURIComponent(keys.join(","))}`);
+      setConnectHomeSections(v=>({...v,...(d.sections||{})}));
+    }catch(e){
+      setConnectNotice(e.message||"Unable to load Connect Home.");
+    }finally{
+      setConnectHomeLoading(v=>{const n={...v};keys.forEach(k=>{n[k]=false;});return n;});
+    }
+  };
+  const loadConnectHome=async()=>{
+    setConnectHomeLoaded(true);
+    // K5A REVIEW FIX: only the above-the-fold sections load eagerly. Sections
+    // 6-16 are fetched on demand as their wrapper scrolls into view (see
+    // attachConnectHomeLazySection / the IntersectionObserver below) so a
+    // first paint of Connect Home doesn't pay for all 16 sections at once.
+    await loadConnectHomeSections(CONNECT_HOME_PRIMARY);
+  };
+  // K5A REVIEW FIX: single shared IntersectionObserver; each secondary
+  // section's wrapper <section ref={...}> registers itself once and is
+  // unobserved the moment it has been requested, so scrolling never
+  // re-triggers a fetch.
+  const attachConnectHomeLazySection=(key,el)=>{
+    if(!el||connectHomeObservedKeysRef.current.has(key))return;
+    if(!connectHomeObserverRef.current){
+      connectHomeObserverRef.current=new IntersectionObserver((entries)=>{
+        entries.forEach(entry=>{
+          if(!entry.isIntersecting)return;
+          const k=entry.target.getAttribute("data-home-section");
+          if(k){loadConnectHomeSections([k]);connectHomeObserverRef.current.unobserve(entry.target);}
+        });
+      },{root:null,rootMargin:"400px 0px",threshold:0.01});
+    }
+    el.setAttribute("data-home-section",key);
+    connectHomeObservedKeysRef.current.add(key);
+    connectHomeObserverRef.current.observe(el);
+  };
+  const loadConnectHomeForYouMore=async()=>{
+    const cur=connectHomeSections.forYou;
+    if(!cur?.nextCursor)return;
+    setConnectHomeLoading(v=>({...v,forYou:true}));
+    try{
+      const d=await connectApi(`/api/connect/home?sections=forYou&forYouCursor=${encodeURIComponent(cur.nextCursor)}`);
+      const more=d.sections?.forYou;
+      if(more){
+        setConnectHomeSections(v=>({...v,forYou:{items:[...(cur.items||[]),...(more.items||[])],nextCursor:more.nextCursor}}));
+      }
+    }catch(e){
+      setConnectNotice(e.message||"Unable to load more.");
+    }finally{
+      setConnectHomeLoading(v=>({...v,forYou:false}));
+    }
+  };
+  // K5A REVIEW FIX: an authentication-state change (guest→login, login→logout,
+  // or user A→user B) must never leave a previous identity's personalized
+  // Home state (Continue Watching / Recent Activity / Continue Your Journey /
+  // For You / following flags, etc.) rendered under the new identity. Reset
+  // and force a reload the instant the effective identity changes.
+  useEffect(()=>{
+    const uid=Number(currentUser?.id||currentUser?.user_id||0)||0;
+    const identity=uid?String(uid):"guest";
+    if(connectHomeIdentityRef.current!==null&&connectHomeIdentityRef.current!==identity){
+      setConnectHomeSections({});
+      setConnectHomeLoading({});
+      setConnectHomeLoaded(false);
+      connectHomeObservedKeysRef.current=new Set();
+      if(connectHomeObserverRef.current){connectHomeObserverRef.current.disconnect();connectHomeObserverRef.current=null;}
+    }
+    connectHomeIdentityRef.current=identity;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[currentUser?.id,currentUser?.user_id]);
+  useEffect(()=>{
+    if(navigationOSArea==="connect"&&connectView==="dashboard"&&!connectHomeLoaded){
+      loadConnectHome();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[navigationOSArea,connectView,connectHomeLoaded]);
+  // ---- K5B: Follow system — session-authoritative, username-keyed (no numeric ids) ----
+  const loadConnectSocialSummary=async()=>{if(!currentUser)return;try{const d=await connectApi(`/api/connect/social-summary`);setConnectSocialSummary(d);const p=d.profile||{};setConnectSocialSettings({publicUsername:p.public_username||"",privateProfile:Boolean(p.private_profile),followerListVisibility:p.follower_list_visibility||"EVERYONE",contactPermission:p.contact_permission||"EVERYONE",mentionPermission:p.mention_permission||"EVERYONE",tagPermission:p.tag_permission||"FOLLOWERS",activityVisible:p.activity_visible!==false,discoverable:p.discoverable!==false});}catch(e){setConnectNotice(e.message||"Unable to load social profile.");}};
+  const loadConnectSocialGraph=async(type="followers")=>{if(!currentUser)return;setConnectSocialTab(type);setConnectSocialLoading(true);try{const d=await connectApi(`/api/connect/connections/mine?type=${encodeURIComponent(type)}`);setConnectSocialPeople(d.people||[]);await loadConnectSocialSummary();}catch(e){setConnectNotice(e.message||"Unable to load network.");}finally{setConnectSocialLoading(false);}};
+  const loadConnectSuggestions=async()=>{if(!currentUser)return;setConnectSocialTab("suggestions");setConnectSocialLoading(true);try{const d=await connectApi(`/api/connect/connect-suggestions`);setConnectSocialPeople(d.people||[]);}catch(e){setConnectNotice(e.message||"Unable to load suggestions.");}finally{setConnectSocialLoading(false);}};
+  const openConnectSocial=async()=>{setConnectView("social");await Promise.all([loadConnectSocialSummary(),loadConnectSocialGraph(connectSocialTab&&connectSocialTab!=="suggestions"?connectSocialTab:"followers")]);};
+  const toggleConnectSocialFollow=async(person)=>{if(!requireConnectLogin(()=>toggleConnectSocialFollow(person)))return;if(!person?.public_username)return;try{const d=await connectApi(`/api/connect/profile/username/${encodeURIComponent(person.public_username)}/follow`,{method:"POST"});setConnectSocialPeople(v=>v.map(x=>x.public_username===person.public_username?{...x,viewer_following:Boolean(d.following),request_pending:Boolean(d.requested)}:x));await loadConnectSocialSummary();}catch(e){setConnectNotice(e.message||"Unable to update follow.");}};
+  const respondConnectFollowRequest=async(person,accept)=>{if(!person?.public_username)return;try{await connectApi(`/api/connect/profile/username/${encodeURIComponent(person.public_username)}/respond-follow-request`,{method:"PATCH",body:JSON.stringify({accept})});await loadConnectSocialGraph("requests");}catch(e){setConnectNotice(e.message||"Unable to respond to request.");}};
+  const saveConnectSocialSettings=async()=>{try{await connectApi('/api/connect/social-profile',{method:'PATCH',body:JSON.stringify({...connectSocialSettings})});setConnectNotice("Profile & privacy saved.");await loadConnectSocialSummary();}catch(e){setConnectNotice(e.message||"Unable to save profile privacy.");}};
   const loadConnectBootstrap=async()=>{
     const userId=Number(currentUser?.id||currentUser?.user_id||0);if(!userId)return;
-    try{const d=await connectApi(`/api/connect/bootstrap?userId=${encodeURIComponent(userId)}`);setConnectBootstrap(d);
+    try{const d=await connectApi(`/api/connect/bootstrap`);setConnectBootstrap(d);
       const saved={};(d.saved_post_ids||[]).forEach(id=>saved[String(id)]=true);setConnectSavedPosts(saved);
-      const following={};(d.people||[]).forEach(p=>following[String(p.id)]=Boolean(p.following));setConnectFollowing(following);
+      const following={};(d.people||[]).forEach(p=>{if(p.public_username)following[String(p.public_username)]=Boolean(p.following);});setConnectFollowing(following);
       if(d.profile){setConnectProfilePrivate(Boolean(d.profile.private_profile));setConnectActivityVisible(d.profile.activity_visible!==false);setConnectStoryAudience(d.profile.story_audience||"Everyone");setConnectMessageMode(d.profile.message_mode||"Keep");}
     }catch(e){setConnectNotice(e.message||"Unable to load Connect.");}
   };
-  const runConnectSearch=async()=>{const q=connectSearchQuery.trim();if(!q)return;const userId=Number(currentUser?.id||currentUser?.user_id||0);setConnectSearchLoading(true);try{const d=await connectApi(`/api/connect/search?q=${encodeURIComponent(q)}&userId=${encodeURIComponent(userId)}`);setConnectSearchResults({people:d.people||[],posts:d.posts||[],communities:d.communities||[]});setConnectView("discover");}catch(e){setConnectNotice(e.message||"Search failed.");}finally{setConnectSearchLoading(false);}};
-  const toggleConnectFollow=async(person)=>{const userId=Number(currentUser?.id||currentUser?.user_id||0);if(!userId||!person?.id)return setConnectNotice("Please login to follow people.");try{const d=await connectApi(`/api/connect/users/${person.id}/follow`,{method:"POST",body:JSON.stringify({userId})});const following=Boolean(d.following);setConnectFollowing(v=>({...v,[String(person.id)]:following}));setConnectBootstrap(v=>({...v,people:(v.people||[]).map(p=>Number(p.id)===Number(person.id)?{...p,following,follow_requested:Boolean(d.requested)}:p)}));setConnectNotice(d.requested?`Follow request sent to ${person.full_name||"HOWDI member"}.`:following?`Following ${person.full_name||"HOWDI member"}.`:`Unfollowed ${person.full_name||"HOWDI member"}.`);}catch(e){setConnectNotice(e.message||"Follow failed.");}};
-  const toggleConnectSave=async(postId)=>{const userId=Number(currentUser?.id||currentUser?.user_id||0);if(!userId)return;try{const d=await connectApi(`/api/connect/posts/${postId}/save`,{method:"POST",body:JSON.stringify({userId})});setConnectSavedPosts(v=>({...v,[String(postId)]:Boolean(d.saved)}));}catch(e){setConnectNotice(e.message||"Save failed.");}};
+  const runConnectSearch=async()=>{const q=connectSearchQuery.trim();if(!q)return;const userId=Number(currentUser?.id||currentUser?.user_id||0);setConnectSearchLoading(true);try{const d=await connectApi(`/api/connect/search?q=${encodeURIComponent(q)}`);setConnectSearchResults({people:d.people||[],posts:d.posts||[],communities:d.communities||[]});setConnectView("discover");}catch(e){setConnectNotice(e.message||"Search failed.");}finally{setConnectSearchLoading(false);}};
+  const toggleConnectFollow=async(person)=>{const userId=Number(currentUser?.id||currentUser?.user_id||0);const uname=String(person?.public_username||"");if(!userId||(!uname&&!person?.id))return setConnectNotice("Please login to follow people.");try{const d=await connectApi(uname?`/api/connect/profile/username/${encodeURIComponent(uname)}/follow`:`/api/connect/users/${person.id}/follow`,{method:"POST"});const following=Boolean(d.following);const key=String(uname||person.id);setConnectFollowing(v=>({...v,[key]:following}));setConnectBootstrap(v=>({...v,people:(v.people||[]).map(p=>(uname?p.public_username===uname:Number(p.id)===Number(person.id))?{...p,following,follow_requested:Boolean(d.requested)}:p)}));setConnectNotice(d.requested?`Follow request sent to ${person.full_name||"HOWDI member"}.`:following?`Following ${person.full_name||"HOWDI member"}.`:`Unfollowed ${person.full_name||"HOWDI member"}.`);}catch(e){setConnectNotice(e.message||"Follow failed.");}};
+  const toggleConnectSave=async(postId)=>{if(!requireConnectLogin(()=>toggleConnectSave(postId)))return;const userId=Number(currentUser?.id||currentUser?.user_id||0);try{const d=await connectApi(`/api/connect/posts/${postId}/save`,{method:"POST",body:JSON.stringify({userId})});setConnectSavedPosts(v=>({...v,[String(postId)]:Boolean(d.saved)}));}catch(e){setConnectNotice(e.message||"Save failed.");}};
   const applyConnectLiveBitrate=async(mode=connectLiveBitrateMode)=>{
     const map={LOW:250000,STANDARD:900000,HIGH:1800000,AUTO:null};
     const max=map[String(mode||"AUTO").toUpperCase()];
@@ -4107,14 +4285,22 @@ function App() {
     try{await connectApi(`/api/connect/follow-requests/${req.requester_user_id}/respond`,{method:"PATCH",body:JSON.stringify({userId:connectRealtimeUserId(),accept})});await Promise.all([loadConnectProfileStudio(false),loadConnectBootstrap()]);setConnectNotice(accept?"Follow request accepted.":"Follow request declined.");}catch(e){setConnectNotice(e.message||"Unable to update request.");}
   };
 
+  // K5B: prefer username addressing (no numeric id needed in the UI); numeric routes remain
+  // for existing internal callers (e.g. Profile Studio visitor lists) that still hold an id.
   const blockConnectProfile=async(person)=>{
-    const id=Number(person?.id||person?.user_id||0);if(!id)return;
-    try{const d=await connectApi(`/api/connect/profiles/${id}/block`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId()})});setConnectNotice(d.blocked?"Profile blocked.":"Profile unblocked.");if(d.blocked)setConnectPublicProfile(null);await loadConnectProfileStudio(false);}catch(e){setConnectNotice(e.message||"Unable to update block.");}
+    const username=person?.public_username||person?.publicUsername||"";
+    const id=Number(person?.id||person?.user_id||0);
+    if(!username&&!id)return;
+    const path=username?`/api/connect/profile/username/${encodeURIComponent(username)}/block`:`/api/connect/profiles/${id}/block`;
+    try{const d=await connectApi(path,{method:"POST"});setConnectNotice(d.blocked?"Profile blocked.":"Profile unblocked.");if(d.blocked)setConnectPublicProfile(null);await loadConnectProfileStudio(false);}catch(e){setConnectNotice(e.message||"Unable to update block.");}
   };
 
   const toggleConnectCloseFriend=async(person)=>{
-    const id=Number(person?.id||person?.user_id||0);if(!id)return;
-    try{const d=await connectApi(`/api/connect/profiles/${id}/close-friend`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId()})});setConnectNotice(d.close_friend?"Added to Close Friends.":"Removed from Close Friends.");await loadConnectProfileStudio(false);}catch(e){setConnectNotice(e.message||"Unable to update Close Friends.");}
+    const username=person?.public_username||person?.publicUsername||"";
+    const id=Number(person?.id||person?.user_id||0);
+    if(!username&&!id)return;
+    const path=username?`/api/connect/profile/username/${encodeURIComponent(username)}/close-friend`:`/api/connect/profiles/${id}/close-friend`;
+    try{const d=await connectApi(path,{method:"POST"});setConnectNotice(d.close_friend?"Added to Close Friends.":"Removed from Close Friends.");await loadConnectProfileStudio(false);}catch(e){setConnectNotice(e.message||"Unable to update Close Friends.");}
   };
 
   const loadConnectProfileRecommendations=async()=>{
@@ -4181,15 +4367,85 @@ function App() {
   };
 
   const openConnectPublicProfile=async(person)=>{
-    const target=Number(person?.id||person?.user_id||0);if(!target)return;
-    try{const d=await connectApi(`/api/connect/public-profile/${target}?viewerId=${Number(currentUser?.id||currentUser?.user_id||0)}`);setConnectPublicProfile(d);}catch(e){setConnectNotice(e.message||"Unable to open profile.");}
+    // K5A REVIEW FIX: prefer the public-username-addressed route so callers
+    // (e.g. Connect Home cards) never need to hold a raw numeric user id.
+    const viewerId=Number(currentUser?.id||currentUser?.user_id||0);
+    const username=person?.public_username||person?.publicUsername||"";
+    const target=Number(person?.id||person?.user_id||0);
+    if(!username&&!target)return;
+    const path=username
+      ?`/api/connect/public-profile/username/${encodeURIComponent(username)}?viewerId=${viewerId}`
+      :`/api/connect/public-profile/${target}?viewerId=${viewerId}`;
+    try{const d=await connectApi(path);setConnectPublicProfile(d);}catch(e){setConnectNotice(e.message||"Unable to open profile.");}
+  };
+  // K5A REVIEW FIX: follow by public_username so Home person cards never carry a raw id.
+  const toggleConnectFollowByUsername=async(publicUsername,fullName)=>{
+    if(!requireConnectLogin(()=>toggleConnectFollowByUsername(publicUsername,fullName)))return;
+    if(!publicUsername)return setConnectNotice("Please login to follow people.");
+    try{
+      const d=await connectApi(`/api/connect/profile/username/${encodeURIComponent(publicUsername)}/follow`,{method:"POST"});
+      const following=Boolean(d.following);
+      setConnectHomeSections(v=>{
+        const patchList=(list)=>Array.isArray(list)?list.map(p=>p.public_username===publicUsername?{...p,following}:p):list;
+        return {...v,
+          recommendedCreators:v.recommendedCreators?{...v.recommendedCreators,items:patchList(v.recommendedCreators.items)}:v.recommendedCreators,
+          suggestedPeople:v.suggestedPeople?{...v.suggestedPeople,items:patchList(v.suggestedPeople.items)}:v.suggestedPeople,
+        };
+      });
+      // K5B: also keep an open public-profile modal / network list in sync.
+      setConnectPublicProfile(v=>v&&v.profile?.public_username===publicUsername?{...v,profile:{...v.profile,viewer_following:following}}:v);
+      setConnectSocialPeople(v=>v.map(p=>p.public_username===publicUsername?{...p,viewer_following:following,request_pending:Boolean(d.requested)}:p));
+      // K5B CLOSURE: keep the Discover ("People you may know") list in sync too, now that
+      // it is addressed by public_username instead of a raw numeric id.
+      setConnectProfileRecommendations(v=>v.map(p=>p.public_username===publicUsername?{...p,following,follow_requested:Boolean(d.requested)}:p));
+      setConnectBootstrap(v=>({...v,people:(v.people||[]).map(p=>p.public_username===publicUsername?{...p,following,follow_requested:Boolean(d.requested)}:p)}));
+      setConnectNotice(d.requested?`Follow request sent to ${fullName||"HOWDI member"}.`:following?`Following ${fullName||"HOWDI member"}.`:`Unfollowed ${fullName||"HOWDI member"}.`);
+    }catch(e){setConnectNotice(e.message||"Follow failed.");}
   };
 
   const saveConnectPreferences=async(patch={})=>{const userId=Number(currentUser?.id||currentUser?.user_id||0);if(!userId)return;try{await connectApi(`/api/connect/profile/${userId}`,{method:"PUT",body:JSON.stringify({privateProfile:patch.privateProfile??connectProfilePrivate,activityVisible:patch.activityVisible??connectActivityVisible,storyAudience:patch.storyAudience??connectStoryAudience,messageMode:patch.messageMode??connectMessageMode,headline:connectBootstrap.profile?.headline||"",about:connectBootstrap.profile?.about||"",profileType:connectBootstrap.profile?.profile_type||"PERSONAL",professionalCategory:connectBootstrap.profile?.professional_category||"GENERAL",professionTitle:connectBootstrap.profile?.profession_title||"",organizationName:connectBootstrap.profile?.organization_name||"",educationFocus:connectBootstrap.profile?.education_focus||"",expertise:connectBootstrap.profile?.expertise||"",interests:connectBootstrap.profile?.interests||"",statusMessage:connectBootstrap.profile?.status_message||"",availabilityStatus:connectBootstrap.profile?.availability_status||"AVAILABLE",discoverable:connectBootstrap.profile?.discoverable!==false,contactPermission:connectBootstrap.profile?.contact_permission||"EVERYONE",creatorMode:Boolean(connectBootstrap.profile?.creator_mode),professionalMode:Boolean(connectBootstrap.profile?.professional_mode),portfolioUrl:connectBootstrap.profile?.portfolio_url||"",socialLinks:connectBootstrap.profile?.social_links||{}})});await loadConnectBootstrap();}catch(e){setConnectNotice(e.message||"Setting save failed.");}};
   const loadConnectConversations=async()=>{const userId=Number(currentUser?.id||currentUser?.user_id||0);if(!userId)return;try{const d=await connectApi(`/api/connect/conversations?userId=${userId}`);setConnectConversations(d.conversations||[]);}catch(e){setConnectNotice(e.message||"Chat load failed.");}};
   const openConnectConversation=async(c)=>{const userId=Number(currentUser?.id||currentUser?.user_id||0);if(!userId||!c?.id)return;setConnectActiveConversation(c);try{const d=await connectApi(`/api/connect/conversations/${c.id}/messages?userId=${userId}`);setConnectMessages(d.messages||[]);}catch(e){setConnectNotice(e.message||"Messages load failed.");}};
-  const startConnectConversation=async(person)=>{const userId=Number(currentUser?.id||currentUser?.user_id||0);if(!userId||!person?.id)return;try{const d=await connectApi(`/api/connect/conversations`,{method:"POST",body:JSON.stringify({userId,targetUserId:person.id})});setConnectView("messages");await loadConnectConversations();await openConnectConversation({id:d.conversation_id,full_name:person.full_name,howdi_id:person.howdi_id});}catch(e){setConnectNotice(e.message||"Unable to start chat.");}};
-  const sendConnectMessage=async()=>{const userId=Number(currentUser?.id||currentUser?.user_id||0),text=connectMessageText.trim();if(!userId||!connectActiveConversation?.id||!text)return;if(connectEditingMessage){await editConnectMessage(connectEditingMessage);return;}try{await connectApi(`/api/connect/conversations/${connectActiveConversation.id}/messages`,{method:"POST",body:JSON.stringify({userId,messageText:text,expireMode:connectMessageMode})});setConnectMessageText("");await openConnectConversation(connectActiveConversation);await loadConnectConversations();}catch(e){setConnectNotice(e.message||"Send failed.");}};
+  const startConnectConversation=async(person)=>{
+    if(!requireConnectLogin(()=>startConnectConversation(person)))return;
+    const username=person?.public_username||person?.publicUsername||"";
+    const target=Number(person?.id||person?.user_id||0);
+    if(!username&&!target)return;
+    // K5B: prefer the username-addressed route so callers (e.g. the public-profile modal)
+    // never need to hold a raw numeric user id.
+    const path=username?`/api/connect/conversations/username/${encodeURIComponent(username)}/start`:`/api/connect/conversations`;
+    const options=username?{method:"POST"}:{method:"POST",body:JSON.stringify({targetUserId:target})};
+    try{const d=await connectApi(path,options);setConnectView("messages");await loadConnectConversations();await openConnectConversation({id:d.conversation_id,full_name:person.full_name,public_username:person.public_username});}catch(e){setConnectNotice(e.message||"Unable to start chat.");}
+  };
+  const sendConnectMessage=async()=>{if(!connectActiveConversation?.id||(!connectMessageText.trim()&&!connectPendingAttachment))return;if(!requireConnectLogin(sendConnectMessage))return;const userId=Number(currentUser?.id||currentUser?.user_id||0),text=connectMessageText.trim();if(connectEditingMessage){await editConnectMessage(connectEditingMessage);return;}try{const att=connectPendingAttachment;const payload={userId,messageText:text,expireMode:connectMessageMode};if(att){payload.attachmentType=att.type;if(att.type==="LINK")payload.linkUrl=att.linkUrl;else{payload.attachmentData=att.data;payload.attachmentMime=att.mime;payload.attachmentName=att.name;}}await connectApi(`/api/connect/conversations/${connectActiveConversation.id}/messages`,{method:"POST",body:JSON.stringify(payload)});setConnectMessageText("");setConnectPendingAttachment(null);await openConnectConversation(connectActiveConversation);await loadConnectConversations();}catch(e){setConnectNotice(e.message||"Send failed.");}};
+  // HOWDI Connect V16.6K3 — pick/validate an image, video or document for chat (mirrors backend limits)
+  const CONNECT_ATTACHMENT_LIMITS={IMAGE:5*1024*1024,VIDEO:25*1024*1024,DOCUMENT:10*1024*1024};
+  const connectAttachmentTypeForFile=(file)=>{
+    const mime=String(file?.type||"");
+    if(mime.startsWith("image/"))return "IMAGE";
+    if(mime.startsWith("video/"))return "VIDEO";
+    if(["application/pdf","application/msword","application/vnd.ms-excel","text/plain"].includes(mime)||mime.startsWith("application/vnd.openxmlformats"))return "DOCUMENT";
+    return "";
+  };
+  const pickConnectChatAttachment=async(file)=>{
+    if(!file)return;
+    const type=connectAttachmentTypeForFile(file);
+    if(!type){setConnectNotice("That file type isn't supported. Use an image, video or document.");return;}
+    const limit=CONNECT_ATTACHMENT_LIMITS[type];
+    if(file.size>limit){setConnectNotice(`${type[0]}${type.slice(1).toLowerCase()} must be under ${Math.round(limit/1024/1024)}MB.`);return;}
+    setConnectAttachBusy(true);
+    try{
+      const data=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(String(r.result||""));r.onerror=reject;r.readAsDataURL(file);});
+      setConnectPendingAttachment({type,mime:file.type,name:file.name,data});
+    }catch{setConnectNotice("Unable to read that file.");}
+    finally{setConnectAttachBusy(false);}
+  };
+  const attachConnectLink=()=>{
+    const url=(window.prompt("Paste a link to share (https://...)")||"").trim();
+    if(!url)return;
+    if(!/^https?:\/\//i.test(url)){setConnectNotice("Links must start with http:// or https://.");return;}
+    setConnectPendingAttachment({type:"LINK",linkUrl:url});
+  };
   const editConnectMessage=async(message)=>{
     const userId=Number(currentUser?.id||currentUser?.user_id||0);
     const text=connectMessageText.trim();
@@ -4219,7 +4475,10 @@ function App() {
     }catch(e){setConnectNotice(e.message||"Unable to react.");}
   };
 
-  const loadConnectNotifications=async()=>{const userId=Number(currentUser?.id||currentUser?.user_id||0);if(!userId)return;try{const d=await connectApi(`/api/connect/notifications?userId=${userId}`);setConnectNotifications(d.notifications||[]);}catch(e){setConnectNotice(e.message||"Notifications load failed.");}};
+  // K5D: the server derives the user from the session; no user id is sent or needed.
+  const loadConnectNotifications=async()=>{if(!currentUser)return;try{const d=await connectApi(`/api/connect/notifications?limit=30`);setConnectNotifications(d.notifications||[]);if(typeof d.unread_count==="number")setConnectBootstrap(b=>({...b,unread_notifications:d.unread_count}));}catch(e){setConnectNotice(e.message||"Notifications load failed.");}};
+  const markConnectNotificationRead=async(id)=>{setConnectNotifications(prev=>prev.map(n=>String(n.id)===String(id)?{...n,is_read:true}:n));try{const d=await connectApi(`/api/connect/notifications/${encodeURIComponent(id)}/read`,{method:"PATCH"});if(typeof d.unread_count==="number")setConnectBootstrap(b=>({...b,unread_notifications:d.unread_count}));}catch{}};
+  const markAllConnectNotificationsRead=async()=>{setConnectNotifications(prev=>prev.map(n=>({...n,is_read:true})));try{const d=await connectApi(`/api/connect/notifications/read-all`,{method:"PATCH"});setConnectBootstrap(b=>({...b,unread_notifications:typeof d.unread_count==="number"?d.unread_count:0}));}catch{}};
   const createConnectCommunity=async()=>{
     const userId=Number(currentUser?.id||currentUser?.user_id||0),name=connectCommunityName.trim();
     if(!userId||!name)return setConnectNotice("Enter a name.");
@@ -4274,21 +4533,54 @@ function App() {
 
   const loadConnectGCSpaces=async(type=connectCommunityView)=>{const uid=Number(currentUser?.id||currentUser?.user_id||0);if(!uid||!["groups","channels"].includes(type))return;setConnectGCLoading(true);try{const d=await connectApi(`/api/connect/groups-channels?userId=${uid}&type=${type==="channels"?"CHANNEL":"GROUP"}`);setConnectGCSpaces(d.spaces||[])}catch(e){setConnectNotice(e.message||"Unable to load groups and channels.")}finally{setConnectGCLoading(false)}};
   const createConnectGCSpace=async()=>{const uid=Number(currentUser?.id||currentUser?.user_id||0);if(!uid||!connectGCCreate.name.trim())return;try{await connectApi(`/api/connect/groups-channels`,{method:"POST",body:JSON.stringify({userId:uid,spaceType:connectCommunityView==="channels"?"CHANNEL":"GROUP",...connectGCCreate})});setConnectGCCreate({name:"",description:"",privacy:"PUBLIC",category:"GENERAL"});setConnectGCCreateOpen(false);await loadConnectGCSpaces(connectCommunityView);setConnectNotice(`${connectCommunityView==="channels"?"Channel":"Group"} created.`)}catch(e){setConnectNotice(e.message||"Unable to create.")}};
-  const toggleConnectGCMembership=async(space)=>{const uid=Number(currentUser?.id||currentUser?.user_id||0);if(!uid)return;try{await connectApi(`/api/connect/groups-channels/${space.id}/${space.joined?"leave":"join"}`,{method:"POST",body:JSON.stringify({userId:uid})});await loadConnectGCSpaces(connectCommunityView)}catch(e){setConnectNotice(e.message||"Unable to update membership.")}};
+  const toggleConnectGCMembership=async(space)=>{if(!requireConnectLogin(()=>toggleConnectGCMembership(space)))return;const uid=Number(currentUser?.id||currentUser?.user_id||0);try{await connectApi(`/api/connect/groups-channels/${space.id}/${space.joined?"leave":"join"}`,{method:"POST",body:JSON.stringify({userId:uid})});await loadConnectGCSpaces(connectCommunityView)}catch(e){setConnectNotice(e.message||"Unable to update membership.")}};
   const openConnectGCSpace=async(space)=>{const uid=Number(currentUser?.id||currentUser?.user_id||0);setConnectGCSelected(space);setConnectGCInvite(null);try{const d=await connectApi(`/api/connect/groups-channels/${space.id}/messages?userId=${uid}`);setConnectGCMessages(d.messages||[])}catch(e){setConnectGCMessages([]);setConnectNotice(e.message||"Join this space to open it.")}};
-  const sendConnectGCMessage=async()=>{const uid=Number(currentUser?.id||currentUser?.user_id||0);if(!uid||!connectGCSelected||!connectGCMessage.trim())return;try{await connectApi(`/api/connect/groups-channels/${connectGCSelected.id}/messages`,{method:"POST",body:JSON.stringify({userId:uid,body:connectGCMessage})});setConnectGCMessage("");await openConnectGCSpace(connectGCSelected)}catch(e){setConnectNotice(e.message||"Unable to send.")}};
+  const sendConnectGCMessage=async()=>{const uid=Number(currentUser?.id||currentUser?.user_id||0);if(!uid||!connectGCSelected||(!connectGCMessage.trim()&&!connectPendingAttachment))return;try{const att=connectPendingAttachment;const payload={userId:uid,body:connectGCMessage};if(att){payload.attachmentType=att.type;if(att.type==="LINK")payload.linkUrl=att.linkUrl;else{payload.mediaData=att.data;payload.attachmentMime=att.mime;payload.attachmentName=att.name;}}await connectApi(`/api/connect/groups-channels/${connectGCSelected.id}/messages`,{method:"POST",body:JSON.stringify(payload)});setConnectGCMessage("");setConnectPendingAttachment(null);await openConnectGCSpace(connectGCSelected)}catch(e){setConnectNotice(e.message||"Unable to send.")}};
+  // HOWDI Connect V16.6K3 — render an image/video/document/link attachment inside a chat bubble
+  const renderConnectDMAttachment=(m)=>{
+    const type=m.attachment_type,data=m.attachment_data;if(!type||!data)return null;
+    if(type==="IMAGE")return <img src={data} alt="Attachment" style={{display:"block",maxWidth:220,borderRadius:10,marginTop:6}}/>;
+    if(type==="VIDEO")return <video src={data} controls style={{display:"block",maxWidth:240,borderRadius:10,marginTop:6}}/>;
+    if(type==="DOCUMENT")return <a href={data} download={m.attachment_meta?.filename||"file"} style={{display:"block",marginTop:6}}>📎 {m.attachment_meta?.filename||"Document"}</a>;
+    if(type==="LINK")return <a href={data} target="_blank" rel="noreferrer" style={{display:"block",marginTop:6,color:"#2563eb"}}>🔗 {m.attachment_meta?.domain||data}</a>;
+    return null;
+  };
+  const renderConnectSpaceAttachment=(m)=>{
+    const type=m.message_type,data=m.media_data;if(!type||type==="TEXT"||!data)return null;
+    if(type==="IMAGE")return <img src={data} alt="Attachment" style={{display:"block",maxWidth:260,borderRadius:10,marginTop:6}}/>;
+    if(type==="VIDEO")return <video src={data} controls style={{display:"block",maxWidth:280,borderRadius:10,marginTop:6}}/>;
+    if(type==="DOCUMENT")return <a href={data} download={m.attachment_meta?.filename||"file"} style={{display:"block",marginTop:6}}>📎 {m.attachment_meta?.filename||"Document"}</a>;
+    if(type==="LINK")return <a href={data} target="_blank" rel="noreferrer" style={{display:"block",marginTop:6,color:"#2563eb"}}>🔗 {m.attachment_meta?.domain||data}</a>;
+    return null;
+  };
+  const connectAttachmentPickerRow=()=>(
+    <div style={{display:"flex",alignItems:"center",gap:6}}>
+      <label style={{cursor:"pointer",padding:"6px 8px"}} title="Attach image or video">
+        📷<input type="file" accept="image/*,video/*" style={{display:"none"}} onChange={e=>{pickConnectChatAttachment(e.target.files?.[0]);e.target.value="";}}/>
+      </label>
+      <label style={{cursor:"pointer",padding:"6px 8px"}} title="Attach document">
+        📄<input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.txt" style={{display:"none"}} onChange={e=>{pickConnectChatAttachment(e.target.files?.[0]);e.target.value="";}}/>
+      </label>
+      <button type="button" onClick={attachConnectLink} title="Attach link" style={{border:0,background:"transparent",cursor:"pointer",padding:"6px 8px"}}>🔗</button>
+      {connectAttachBusy&&<small style={{color:"#64748b"}}>Reading file…</small>}
+      {connectPendingAttachment&&<span style={{display:"flex",alignItems:"center",gap:6,background:"#f1f5f9",borderRadius:8,padding:"4px 8px",fontSize:12}}>
+        {connectPendingAttachment.type==="IMAGE"&&"🖼️"}{connectPendingAttachment.type==="VIDEO"&&"🎞️"}{connectPendingAttachment.type==="DOCUMENT"&&"📎"}{connectPendingAttachment.type==="LINK"&&"🔗"}
+        {" "}{connectPendingAttachment.name||connectPendingAttachment.linkUrl}
+        <button type="button" onClick={()=>setConnectPendingAttachment(null)} style={{border:0,background:"transparent",cursor:"pointer"}}>×</button>
+      </span>}
+    </div>
+  );
   const createConnectGCInvite=async(space)=>{const uid=Number(currentUser?.id||currentUser?.user_id||0);try{const d=await connectApi(`/api/connect/groups-channels/${space.id}/invite-links`,{method:"POST",body:JSON.stringify({userId:uid,label:"Share invite",expiresInDays:30,maxUses:0,requiresApproval:space.privacy==="PRIVATE"})});const origin=window.location.origin;const link=`${origin}/connect/invite/${d.invite.token}`;setConnectGCInvite({...d.invite,link});try{await navigator.clipboard?.writeText(link)}catch{}setConnectNotice("Invite link created and copied.")}catch(e){setConnectNotice(e.message||"Only admins can create invite links.")}};
   useEffect(()=>{if(connectView==="communities"&&["groups","channels"].includes(connectCommunityView))loadConnectGCSpaces(connectCommunityView)},[connectView,connectCommunityView,currentUser?.id,currentUser?.user_id]);
   useEffect(()=>{if(connectView==="communities"&&connectCommunityView==="spaces"){loadConnectSpaceRecommendations();loadConnectSpaceLibrary();}},[connectView,connectCommunityView,currentUser?.id,currentUser?.user_id]);
   useEffect(()=>{if(connectView==="communities"&&connectCommunityView==="live")loadConnectLiveDiscovery();},[connectView,connectCommunityView,connectLiveFilterFormat,connectLiveFilterLanguage,currentUser?.id,currentUser?.user_id]);
 
   useEffect(()=>{
-    const userId=Number(currentUser?.id||currentUser?.user_id||0);
-    if(!userId)return;
+    if(!currentUser)return;
     let active=true;
     const check=async()=>{
       try{
-        const d=await connectApi(`/api/connect/reminders/due?userId=${userId}`);
+        const d=await connectApi(`/api/connect/reminders/due`);
         if(!active)return;
         if(Array.isArray(d.notifications)&&d.notifications.length){
           setConnectNotifications(prev=>{
@@ -4324,7 +4616,7 @@ function App() {
   const connectSpaceHostPerson=(room)=>({
     id:Number(room.owner_user_id),
     full_name:room.owner_name||"HOWDI host",
-    public_username:room.owner_public_username||""
+    public_username:room.owner_username||room.owner_public_username||""
   });
 
   const shareConnectSpace=async(room)=>{
@@ -4385,6 +4677,53 @@ function App() {
     setConnectCommunityView("spaces");
   },[]);
 
+  // HOWDI Connect V16.6K3 — resolve a fresh-open /connect/invite/:token link once.
+  // Does not touch the existing #space-{id} share flow above.
+  useEffect(()=>{
+    const m=window.location.pathname.match(/^\/connect\/invite\/([A-Za-z0-9_-]+)\/?$/);
+    if(!m)return;
+    const token=m[1];
+    setConnectInviteToken(token);
+    (async()=>{
+      try{
+        const r=await fetch(`${SHOP_API_BASE}/api/connect/invite/${encodeURIComponent(token)}`,{cache:"no-store",headers:customerSessionHeaders()});
+        const d=await r.json().catch(()=>({}));
+        if(!r.ok||d.status==="error"){setConnectInviteStatus(d.message||"This invite link is invalid, expired or exhausted.");setConnectInvitePreview({error:true});return;}
+        setConnectInvitePreview(d.invite);
+      }catch{setConnectInviteStatus("Unable to reach HOWDI to resolve this invite.");setConnectInvitePreview({error:true});}
+    })();
+    openNavigationOSArea("connect","communities");
+    setConnectCommunityView("spaces");
+    // Clean the URL so a later refresh doesn't try to resolve the same link again.
+    try{window.history.replaceState(null,"",`${window.location.origin}/${window.location.search}`);}catch{}
+  },[]);
+
+  const joinConnectInviteSpace=async()=>{
+    if(!connectInviteToken||connectInvitePreview?.error)return;
+    if(!requireConnectLogin(joinConnectInviteSpace))return;
+    setConnectInviteBusy(true);setConnectInviteStatus("");
+    try{
+      const uid=Number(currentUser?.id||currentUser?.user_id||0);
+      const d=await connectApi(`/api/connect/invite/${encodeURIComponent(connectInviteToken)}/join`,{method:"POST",body:JSON.stringify({userId:uid})});
+      const spaceType=String(d.spaceType||connectInvitePreview?.spaceType||"GROUP")==="CHANNEL"?"CHANNEL":"GROUP";
+      const listView=spaceType==="CHANNEL"?"channels":"groups";
+      const listing=await connectApi(`/api/connect/groups-channels?userId=${uid}&type=${spaceType}`);
+      setConnectGCSpaces(listing.spaces||[]);
+      setConnectCommunityView(listView);
+      const found=(listing.spaces||[]).find(s=>Number(s.id)===Number(d.spaceId));
+      if(d.membershipStatus==="PENDING"){
+        setConnectGCSelected(found||{id:d.spaceId,name:connectInvitePreview?.name,space_type:spaceType,privacy:connectInvitePreview?.privacy,member_count:connectInvitePreview?.memberCount,joined:false});
+        setConnectGCMessages([]);
+        setConnectNotice("Join request sent — waiting for admin approval.");
+      }else{
+        if(found)await openConnectGCSpace(found);
+        setConnectNotice("Joined from invite link.");
+      }
+      setConnectInvitePreview(null);setConnectInviteToken(null);
+    }catch(e){setConnectInviteStatus(e.message||"Unable to join from this invite link.");}
+    finally{setConnectInviteBusy(false);}
+  };
+
   const connectRealtimeUserId=()=>Number(currentUser?.id||currentUser?.user_id||0);
 
   const connectRealtimeParticipant=()=>{
@@ -4424,7 +4763,7 @@ function App() {
   const answerConnectSpaceQuestion=async(q)=>{try{await connectApi(`/api/connect/realtime/${connectRealtimeRoom.id}/questions/${q.id}/answer`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId(),answer:connectSpaceAnswerText})});setConnectSpaceAnswering(null);setConnectSpaceAnswerText("");await connectRealtimePoll();}catch(e){setConnectRealtimeError(e.message||"Unable to answer.");}};
   const inviteConnectSpaceCohost=async(person)=>{try{await connectApi(`/api/connect/realtime/${connectRealtimeRoom.id}/cohost/${person.user_id}/invite`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId()})});setConnectNotice(`Co-host invite sent to ${person.full_name}.`);await connectRealtimePoll();}catch(e){setConnectRealtimeError(e.message||"Unable to invite co-host.");}};
   const respondConnectSpaceCohost=async(invite,accept)=>{try{await connectApi(`/api/connect/realtime/${connectRealtimeRoom.id}/cohost-invites/${invite.id}/respond`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId(),accept})});await connectRealtimePoll();}catch(e){setConnectRealtimeError(e.message||"Unable to respond.");}};
-  const connectSpacePersonObject=(p)=>({id:Number(p.user_id),full_name:p.full_name,howdi_id:p.howdi_id});
+  const connectSpacePersonObject=(p)=>({id:Number(p.user_id),full_name:p.full_name,public_username:p.public_username});
   const connectSpaceHostLevelLabel=(level)=>({NEW_VOICE:"New Voice",RISING_HOST:"Rising Host",COMMUNITY_HOST:"Community Host",STAR_HOST:"Star Host"}[level]||"Host");
   const shareConnectLiveCard=async()=>{if(connectRealtimeRoom)await shareConnectSpace(connectRealtimeRoom);};
 
@@ -4690,7 +5029,7 @@ function App() {
 
   const saveConnectCreatorPlan=async()=>{
     try{
-      await connectApi(`/api/connect/creator-plans`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId(),planName:connectCreatorPlanName,price:Number(connectCreatorPlanPrice)||0,billingPeriod:connectCreatorPlanPeriod,benefits:connectCreatorPlanBenefits})});
+      await connectApi(`/api/connect/creator-plans`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId(),planName:connectCreatorPlanName,price:Number(connectCreatorPlanPrice)||0,billingPeriod:connectCreatorPlanPeriod,benefits:connectCreatorPlanBenefits,trialDays:Number(connectCreatorPlanTrial)||0})});
       await loadConnectCreatorDashboard();setConnectNotice("Creator membership plan saved.");
     }catch(e){setConnectNotice(e.message||"Unable to save membership plan.");}
   };
@@ -4762,15 +5101,28 @@ function App() {
     try{await connectApi(`/api/connect/spaces/${connectRealtimeRoom.id}/premium-grant/${person.user_id}`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId()})});setConnectNotice(`Premium access granted to ${person.full_name}.`);}catch(e){setConnectRealtimeError(e.message||"Unable to grant premium access.");}
   };
 
+  // K5D: notifications carry an ID-free `target` ({kind,id}|{kind:"PROFILE",username}); map each kind to an existing Connect view.
   const openConnectNotification=async(n)=>{
-    if(String(n.entity_type||"").toUpperCase()==="SPACE"&&n.entity_id){
-      const room=(connectBootstrap.communities||[]).find(c=>Number(c.id)===Number(n.entity_id));
-      setConnectNotificationsOpen(false);setConnectView("communities");setConnectCommunityView("spaces");
-      if(room)await openConnectSpacePreflight(room);
-      else{
-        try{const d=await connectApi(`/api/connect/spaces/${n.entity_id}/preflight?userId=${connectRealtimeUserId()}`);if(d.room)await openConnectSpacePreflight(d.room);}catch{}
+    if(!n)return;
+    if(!n.is_read)markConnectNotificationRead(n.id);
+    const t=n.target;if(!t)return;
+    setConnectNotificationsOpen(false);
+    try{
+      if(t.kind==="PROFILE"&&t.username){await openConnectPublicProfile({public_username:t.username});}
+      else if(t.kind==="SPACE"){
+        const room=(connectBootstrap.communities||[]).find(c=>String(c.id)===String(t.id));
+        setConnectView("communities");setConnectCommunityView("spaces");
+        if(room)await openConnectSpacePreflight(room);
+        else{const d=await connectApi(`/api/connect/spaces/${t.id}/preflight?userId=${connectRealtimeUserId()}`);if(d.room)await openConnectSpacePreflight(d.room);}
       }
-    }
+      else if(t.kind==="LIVE"){setConnectView("communities");setConnectCommunityView("live");}
+      else if(t.kind==="ARTICLE"){setConnectView("articles");await openConnectArticle({id:t.id});}
+      else if(t.kind==="VIBE"){setConnectView("feed");setConnectContentMode("vibe");}
+      else if(t.kind==="POST"){setConnectView("feed");setConnectContentMode("posts");}
+      else if(t.kind==="STORY"){setConnectView("stories");}
+      else if(t.kind==="GROUP"||t.kind==="CHANNEL"||t.kind==="GROUP_CHANNEL"){setConnectView("communities");setConnectCommunityView("groups");await openConnectGCSpace({id:t.id});}
+      else if(t.kind==="CALL"){setConnectView("messages");loadConnectCallInbox();}
+    }catch(e){setConnectNotice(e.message||"Unable to open this notification.");}
   };
 
   const saveConnectSpaceChatControls=async()=>{try{await connectApi(`/api/connect/realtime/${connectRealtimeRoom.id}/chat-controls`,{method:"PATCH",body:JSON.stringify({userId:connectRealtimeUserId(),chatMode:connectSpaceChatMode,slowSeconds:Number(connectSpaceSlowSeconds)||0})});await connectRealtimePoll();setConnectNotice("Chat controls updated.");}catch(e){setConnectRealtimeError(e.message||"Chat controls failed.");}};
@@ -4991,7 +5343,7 @@ function App() {
   };
 
 
-  const loadConnectCallInbox=async()=>{const uid=connectRealtimeUserId();if(!uid)return;try{const d=await connectApi(`/api/connect/calls/inbox?userId=${uid}`);setConnectCallInbox(d.calls||[]);}catch{}};
+  const loadConnectCallInbox=async()=>{if(!currentUser)return;try{const d=await connectApi(`/api/connect/calls/inbox`);setConnectCallInbox(d.calls||[]);}catch{}};
   const connectCallMedia=async(type)=>{const s=await navigator.mediaDevices.getUserMedia({audio:true,video:type==="VIDEO"?{facingMode:"user"}:false});connectCallStreamRef.current=s;if(connectCallLocalRef.current)connectCallLocalRef.current.srcObject=s;return s;};
 
 
@@ -5002,16 +5354,77 @@ function App() {
 
   const loadConnectArticles=async(mode="DISCOVER")=>{setConnectView("articles");setConnectArticleNotice("");const uid=Number(currentUser?.id||currentUser?.user_id||0);setConnectArticleMode(mode);try{const d=await connectApi(`/api/connect/articles?userId=${uid}&mode=${mode}`);setConnectArticles(d.articles||[]);}catch(e){setConnectArticleNotice(e.message||"Unable to load articles.")}};
   const loadMyConnectArticles=async()=>{setConnectView("articles");setConnectArticleMode("MINE");setConnectArticleNotice("");const uid=Number(currentUser?.id||currentUser?.user_id||0);try{const [m,a]=await Promise.all([connectApi(`/api/connect/articles/mine?userId=${uid}`),connectApi(`/api/connect/articles/analytics?userId=${uid}`)]);setConnectArticleMine(m.articles||[]);setConnectArticleAnalytics(a.analytics||null);}catch(e){setConnectArticleNotice(e.message||"Unable to load your articles.")}};
-  const publishConnectArticle=async(status="PUBLISHED")=>{const uid=Number(currentUser?.id||currentUser?.user_id||0);try{await connectApi('/api/connect/articles',{method:'POST',body:JSON.stringify({userId:uid,title:connectArticleTitle,excerpt:connectArticleExcerpt,coverUrl:connectArticleCover,category:connectArticleCategory,topics:connectArticleTopics,content:connectArticleBody,status})});setConnectArticleEditor(false);setConnectArticleTitle("");setConnectArticleExcerpt("");setConnectArticleCover("");setConnectArticleTopics("");setConnectArticleBody("");setConnectArticleNotice(status==="DRAFT"?"Draft saved.":"Article published.");await loadMyConnectArticles();}catch(e){setConnectArticleNotice(e.message||"Unable to save article.")}};
+  const pickConnectArticleCover=async(file)=>{
+    if(!file)return;
+    if(!String(file.type||"").startsWith("image/")){setConnectArticleNotice("Cover must be an image.");return;}
+    if(file.size>5*1024*1024){setConnectArticleNotice("Cover image must be under 5MB.");return;}
+    setConnectArticleCoverBusy(true);
+    try{const data=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(String(r.result||""));r.onerror=reject;r.readAsDataURL(file);});setConnectArticleCoverData(data);}
+    catch{setConnectArticleNotice("Unable to read that image.");}
+    finally{setConnectArticleCoverBusy(false);}
+  };
+  const resetConnectArticleEditor=()=>{setConnectArticleEditor(false);setConnectArticleEditingId(null);setConnectArticlePreviewOpen(false);setConnectArticleTitle("");setConnectArticleExcerpt("");setConnectArticleCover("");setConnectArticleCoverData("");setConnectArticleTopics("");setConnectArticleBody("");setConnectArticleCategory("GENERAL");};
+  const openConnectArticleEditForm=async(article)=>{
+    const uid=Number(currentUser?.id||currentUser?.user_id||0);
+    try{
+      // Re-fetch full content (the My Articles list already carries it, but this
+      // keeps the editor in sync with the latest saved version).
+      const d=article?.content!==undefined?{article}:await connectApi(`/api/connect/articles/${article.id}?userId=${uid}`);
+      const a=d.article||article;
+      setConnectArticleEditingId(a.id);
+      setConnectArticleTitle(a.article_title||"");
+      setConnectArticleExcerpt(a.article_excerpt||"");
+      setConnectArticleCover(a.article_cover_url||"");
+      setConnectArticleCoverData(a.article_cover_data||"");
+      setConnectArticleCategory(a.article_category||"GENERAL");
+      setConnectArticleTopics(a.topics||"");
+      setConnectArticleBody(a.content||"");
+      setConnectArticlePreviewOpen(false);
+      setConnectArticleEditor(true);
+    }catch(e){setConnectArticleNotice(e.message||"Unable to open this article for editing.");}
+  };
+  const publishConnectArticle=async(status="PUBLISHED")=>{
+    const uid=Number(currentUser?.id||currentUser?.user_id||0);
+    const payload={title:connectArticleTitle,excerpt:connectArticleExcerpt,coverUrl:connectArticleCover,coverMime:connectArticleCoverData.match(/^data:([^;]+);base64,/)?.[1],category:connectArticleCategory,topics:connectArticleTopics,content:connectArticleBody,status};
+    if(connectArticleCoverData)payload.coverData=connectArticleCoverData;
+    else if(!connectArticleCover)payload.clearCoverData=true;
+    try{
+      if(connectArticleEditingId){
+        // Edit path: update the SAME article row — never creates a duplicate.
+        await connectApi(`/api/connect/articles/${connectArticleEditingId}`,{method:'PATCH',body:JSON.stringify({userId:uid,...payload})});
+        setConnectArticleNotice(status==="DRAFT"?"Draft updated.":"Article updated.");
+      }else{
+        await connectApi('/api/connect/articles',{method:'POST',body:JSON.stringify({userId:uid,...payload})});
+        setConnectArticleNotice(status==="DRAFT"?"Draft saved.":"Article published.");
+      }
+      resetConnectArticleEditor();
+      await loadMyConnectArticles();
+    }catch(e){setConnectArticleNotice(e.message||"Unable to save article.")}
+  };
   const openConnectArticle=async(a)=>{const uid=Number(currentUser?.id||currentUser?.user_id||0);try{const d=await connectApi(`/api/connect/articles/${a.id}?userId=${uid}`);setConnectArticleSelected(d.article);connectApi(`/api/connect/articles/${a.id}/history`,{method:'POST',body:JSON.stringify({userId:uid,readSeconds:1})}).catch(()=>{});}catch(e){setConnectArticleNotice(e.message||"Unable to open article.")}};
+  // HOWDI Connect V16.6K3 — wire Like/Save/Share into the Article reader using the existing generic post interaction system (posts/:id/reaction|save|share|comments)
+  const toggleConnectArticleReaction=async()=>{
+    const uid=Number(currentUser?.id||currentUser?.user_id||0);if(!uid||!connectArticleSelected?.id){setConnectNotice("Please login before reacting.");return;}
+    try{const d=await connectApi(`/api/connect/posts/${connectArticleSelected.id}/reaction`,{method:"POST",body:JSON.stringify({userId:uid})});setConnectArticleSelected(v=>v?{...v,liked_by_viewer:d.reacted,like_count:d.reaction_count}:v);}
+    catch(e){setConnectNotice(e.message||"Unable to update your reaction.");}
+  };
+  const shareConnectArticle=async()=>{
+    if(!connectArticleSelected?.id)return;
+    try{const uid=Number(currentUser?.id||currentUser?.user_id||0);const d=await connectApi(`/api/connect/posts/${connectArticleSelected.id}/share`,{method:"POST",body:JSON.stringify({userId:uid,shareType:"COPY_LINK"})});setConnectArticleSelected(v=>v?{...v,share_count:Number(d.share_count||0)}:v);const link=`${window.location.origin}${window.location.pathname}#connect-post-${connectArticleSelected.id}`;if(navigator.clipboard)await navigator.clipboard.writeText(link);setConnectNotice("Article link copied.");}
+    catch(e){setConnectNotice(e.message||"Unable to share.");}
+  };
 
-  const createConnectCall=async()=>{const uid=connectRealtimeUserId(),handles=connectCallInvitees.split(/[, ]+/).map(x=>x.trim().replace(/^@/,"").toLowerCase()).filter(Boolean);if(!uid||!handles.length)return setConnectCallNotice("Enter one or more public usernames to call.");try{const d=await connectApi('/api/connect/calls',{method:'POST',body:JSON.stringify({userId:uid,callType:connectCallType,inviteeUsernames:handles})});await connectCallMedia(connectCallType);setConnectCall(d.call);setConnectCallOpen(true);setConnectCallNotice(handles.length>1?"Group call started — waiting for participants.":"Calling…");connectCallStartPolling(d.call);}catch(e){setConnectCallNotice(e.message||'Unable to start call.');}};
-  const respondConnectCall=async(call,accept)=>{const uid=connectRealtimeUserId();try{await connectApi(`/api/connect/calls/${call.id}/respond`,{method:'PATCH',body:JSON.stringify({userId:uid,accept})});if(accept){await connectCallMedia(call.call_type);setConnectCall(call);setConnectCallOpen(true);connectCallStartPolling(call);}await loadConnectCallInbox();}catch(e){setConnectCallNotice(e.message||'Unable to respond.');}};
-  const connectCallSignal=async(callId,toUserId,signalType,payload)=>connectApi(`/api/connect/calls/${callId}/signal`,{method:'POST',body:JSON.stringify({userId:connectRealtimeUserId(),toUserId,signalType,payload})});
-  const connectCallPeer=(call,peerId,initiator)=>{const key=String(peerId);if(connectCallPeersRef.current.has(key))return connectCallPeersRef.current.get(key);const pc=new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'}]});if(connectCallStreamRef.current)connectCallStreamRef.current.getTracks().forEach(t=>pc.addTrack(t,connectCallStreamRef.current));pc.onicecandidate=e=>{if(e.candidate)connectCallSignal(call.id,peerId,'ICE',e.candidate).catch(()=>{})};pc.ontrack=e=>{if(connectCallRemoteRef.current)connectCallRemoteRef.current.srcObject=e.streams?.[0]||new MediaStream([e.track])};connectCallPeersRef.current.set(key,pc);return pc;};
-  const connectCallPoll=async(call)=>{const uid=connectRealtimeUserId();if(!call?.id||!uid)return;try{const st=await connectApi(`/api/connect/calls/${call.id}/state?userId=${uid}`);setConnectCall(v=>v?{...v,...st.call}:st.call);for(const p of st.participants||[]){const pid=Number(p.user_id);if(pid===uid||p.invite_status!=="JOINED")continue;const pc=connectCallPeer(st.call,pid,Number(st.call.caller_user_id)===uid);if(Number(st.call.caller_user_id)===uid&&pc.signalingState==='stable'&&!pc.localDescription){const offer=await pc.createOffer();await pc.setLocalDescription(offer);await connectCallSignal(call.id,pid,'OFFER',pc.localDescription)}}const sg=await connectApi(`/api/connect/calls/${call.id}/signals?userId=${uid}&after=${connectCallSignalRef.current}`);for(const s of sg.signals||[]){connectCallSignalRef.current=Math.max(connectCallSignalRef.current,Number(s.id)||0);const pc=connectCallPeer(st.call,Number(s.from_user_id),false);if(s.signal_type==='OFFER'){if(pc.signalingState!=='stable'){try{await pc.setLocalDescription({type:'rollback'})}catch{}}await pc.setRemoteDescription(new RTCSessionDescription(s.payload));const ans=await pc.createAnswer();await pc.setLocalDescription(ans);await connectCallSignal(call.id,s.from_user_id,'ANSWER',pc.localDescription)}else if(s.signal_type==='ANSWER'&&pc.signalingState==='have-local-offer')await pc.setRemoteDescription(new RTCSessionDescription(s.payload));else if(s.signal_type==='ICE'){try{await pc.addIceCandidate(new RTCIceCandidate(s.payload))}catch{}}}if(st.call?.status==='ENDED')setConnectCallNotice('Call ended.');}catch(e){setConnectCallNotice(e.message||'Call connection issue.');}};
+  // K5C CORRECTION: calls no longer send or read numeric user ids anywhere in the browser —
+  // actor identity is session-derived server-side, and peers are addressed purely by the
+  // opaque per-call participant_token the state route hands back (call.my_token, call.is_caller,
+  // participants[].token, participants[].is_viewer, signals[].from_token).
+  const createConnectCall=async()=>{if(!currentUser)return setConnectCallNotice("Sign in to start a call.");const handles=connectCallInvitees.split(/[, ]+/).map(x=>x.trim().replace(/^@/,"").toLowerCase()).filter(Boolean);if(!handles.length)return setConnectCallNotice("Enter one or more public usernames to call.");try{const d=await connectApi('/api/connect/calls',{method:'POST',body:JSON.stringify({callType:connectCallType,inviteeUsernames:handles})});await connectCallMedia(connectCallType);setConnectCall(d.call);setConnectCallOpen(true);setConnectCallNotice(handles.length>1?"Group call started — waiting for participants.":"Calling…");connectCallStartPolling(d.call);}catch(e){setConnectCallNotice(e.message||'Unable to start call.');}};
+  const respondConnectCall=async(call,accept)=>{try{await connectApi(`/api/connect/calls/${call.id}/respond`,{method:'PATCH',body:JSON.stringify({accept})});if(accept){await connectCallMedia(call.call_type);setConnectCall(call);setConnectCallOpen(true);connectCallStartPolling(call);}await loadConnectCallInbox();}catch(e){setConnectCallNotice(e.message||'Unable to respond.');}};
+  const connectCallSignal=async(callId,toToken,signalType,payload)=>connectApi(`/api/connect/calls/${callId}/signal`,{method:'POST',body:JSON.stringify({toToken,signalType,payload})});
+  const connectCallPeer=(call,peerToken,initiator)=>{const key=String(peerToken);if(connectCallPeersRef.current.has(key))return connectCallPeersRef.current.get(key);const pc=new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'}]});if(connectCallStreamRef.current)connectCallStreamRef.current.getTracks().forEach(t=>pc.addTrack(t,connectCallStreamRef.current));pc.onicecandidate=e=>{if(e.candidate)connectCallSignal(call.id,peerToken,'ICE',e.candidate).catch(()=>{})};pc.ontrack=e=>{if(connectCallRemoteRef.current)connectCallRemoteRef.current.srcObject=e.streams?.[0]||new MediaStream([e.track])};connectCallPeersRef.current.set(key,pc);return pc;};
+  const connectCallPoll=async(call)=>{if(!call?.id)return;try{const st=await connectApi(`/api/connect/calls/${call.id}/state`);setConnectCall(v=>v?{...v,...st.call}:st.call);for(const p of st.participants||[]){if(p.is_viewer||p.invite_status!=="JOINED")continue;const pc=connectCallPeer(st.call,p.token,st.call.is_caller);if(st.call.is_caller&&pc.signalingState==='stable'&&!pc.localDescription){const offer=await pc.createOffer();await pc.setLocalDescription(offer);await connectCallSignal(call.id,p.token,'OFFER',pc.localDescription)}}const sg=await connectApi(`/api/connect/calls/${call.id}/signals?after=${connectCallSignalRef.current}`);for(const s of sg.signals||[]){connectCallSignalRef.current=Math.max(connectCallSignalRef.current,Number(s.id)||0);const pc=connectCallPeer(st.call,s.from_token,false);if(s.signal_type==='OFFER'){if(pc.signalingState!=='stable'){try{await pc.setLocalDescription({type:'rollback'})}catch{}}await pc.setRemoteDescription(new RTCSessionDescription(s.payload));const ans=await pc.createAnswer();await pc.setLocalDescription(ans);await connectCallSignal(call.id,s.from_token,'ANSWER',pc.localDescription)}else if(s.signal_type==='ANSWER'&&pc.signalingState==='have-local-offer')await pc.setRemoteDescription(new RTCSessionDescription(s.payload));else if(s.signal_type==='ICE'){try{await pc.addIceCandidate(new RTCIceCandidate(s.payload))}catch{}}}if(st.call?.status==='ENDED')setConnectCallNotice('Call ended.');}catch(e){setConnectCallNotice(e.message||'Call connection issue.');}};
   const connectCallStartPolling=(call)=>{if(connectCallTimerRef.current)clearInterval(connectCallTimerRef.current);connectCallSignalRef.current=0;connectCallTimerRef.current=setInterval(()=>connectCallPoll(call),1200);connectCallPoll(call);};
-  const leaveConnectCall=async()=>{const uid=connectRealtimeUserId(),call=connectCall;try{if(call?.id&&uid)await connectApi(`/api/connect/calls/${call.id}/leave`,{method:'POST',body:JSON.stringify({userId:uid})})}catch{}if(connectCallTimerRef.current)clearInterval(connectCallTimerRef.current);connectCallPeersRef.current.forEach(pc=>{try{pc.close()}catch{}});connectCallPeersRef.current.clear();connectCallStreamRef.current?.getTracks().forEach(t=>t.stop());connectCallStreamRef.current=null;setConnectCallOpen(false);setConnectCall(null);};
+  const leaveConnectCall=async()=>{const call=connectCall;try{if(call?.id)await connectApi(`/api/connect/calls/${call.id}/leave`,{method:'POST',body:JSON.stringify({})})}catch{}if(connectCallTimerRef.current)clearInterval(connectCallTimerRef.current);connectCallPeersRef.current.forEach(pc=>{try{pc.close()}catch{}});connectCallPeersRef.current.clear();connectCallStreamRef.current?.getTracks().forEach(t=>t.stop());connectCallStreamRef.current=null;setConnectCallOpen(false);setConnectCall(null);};
   const toggleConnectCallMute=()=>{const next=!connectCallMuted;connectCallStreamRef.current?.getAudioTracks().forEach(t=>t.enabled=!next);setConnectCallMuted(next)};
   const toggleConnectCallCamera=()=>{const next=!connectCallCameraOff;connectCallStreamRef.current?.getVideoTracks().forEach(t=>t.enabled=!next);setConnectCallCameraOff(next)};
 
@@ -5217,7 +5630,7 @@ function App() {
   };
 
   const isConnectFollowing=(person)=>{
-    const key=String(person?.id??"");
+    const key=String(person?.public_username||person?.id||"");
     return Object.prototype.hasOwnProperty.call(connectFollowing,key)?Boolean(connectFollowing[key]):Boolean(person?.following);
   };
 
@@ -5348,8 +5761,8 @@ function App() {
   const rebuildConnectReputation=async()=>{try{await connectApi("/api/connect/reputation/rebuild",{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||0)})});await connectApi("/api/connect/weekly-contribution/sync",{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||0)})});setConnectNotice("Reputation signals refreshed.");await loadConnectReputationOS("overview");}catch(e){setConnectNotice(e.message||"Unable to refresh reputation.");}};
   const loadConnectReputationOS=async(tab="overview")=>{try{const d=await connectApi(`/api/connect/reputation-os?userId=${Number(currentUser?.id||0)}`);setConnectReputationOS(d);setConnectReputationOSTab(tab);setConnectReputationOSOpen(true);}catch(e){setConnectNotice(e.message||"Unable to load Reputation OS.");}};
   const loadConnectRelationshipIntel=async()=>{try{const d=await connectApi(`/api/connect/relationship-intelligence?userId=${Number(currentUser?.id||0)}`);setConnectRelationshipIntel(d);setConnectRelationshipIntelOpen(true);}catch(e){setConnectNotice(e.message||"Unable to load relationship intelligence.");}};
-  const rebuildConnectRelationship=async(person)=>{try{const d=await connectApi("/api/connect/relationship/rebuild",{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||0),otherUserId:Number(person.id||person.other_user_id)})});setConnectNotice(`Relationship strength: ${d.relationship?.strength_score||0}`);await loadConnectRelationshipIntel();}catch(e){setConnectNotice(e.message||"Unable to refresh relationship.");}};
-  const requestConnectSkillEndorsement=async(skill)=>{const target=Number(connectEndorsementTargetId);if(!target)return setConnectNotice("Enter a HOWDI user ID to request endorsement.");try{await connectApi("/api/connect/skill-endorsement-request",{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||0),skillId:skill.id,targetUserId:target,message:`Please validate my ${skill.skill_name} skill if you have worked or learned with me.`})});setConnectNotice("Skill endorsement request sent.");}catch(e){setConnectNotice(e.message||"Unable to request endorsement.");}};
+  const rebuildConnectRelationship=async(person)=>{try{const d=await connectApi("/api/connect/relationship/rebuild",{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||0),otherUserId:Number(person.user_id||person.other_user_id||person.id)})});setConnectNotice(`Relationship strength: ${d.relationship?.strength_score||0}`);await loadConnectRelationshipIntel();}catch(e){setConnectNotice(e.message||"Unable to refresh relationship.");}};
+  const requestConnectSkillEndorsement=async(skill)=>{const target=String(connectEndorsementTargetId||"").replace(/^@/,"").trim();if(!target)return setConnectNotice("Enter a member's @username to request endorsement.");try{await connectApi("/api/connect/skill-endorsement-request",{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||0),skillId:skill.id,targetUsername:target,message:`Please validate my ${skill.skill_name} skill if you have worked or learned with me.`})});setConnectNotice("Skill endorsement request sent.");}catch(e){setConnectNotice(e.message||"Unable to request endorsement.");}};
   const respondConnectSkillEndorsement=async(req,accept)=>{try{await connectApi(`/api/connect/skill-endorsement-request/${req.id}/respond`,{method:"PATCH",body:JSON.stringify({userId:Number(currentUser?.id||0),accept})});await loadConnectRelationshipIntel();setConnectNotice(accept?"Skill endorsed.":"Endorsement declined.");}catch(e){setConnectNotice(e.message||"Unable to respond.");}};
   const loadConnectOfficeHours=async(domain=connectOfficeHoursDomain)=>{try{const d=await connectApi(`/api/connect/office-hours?userId=${Number(currentUser?.id||0)}&domain=${encodeURIComponent(domain)}`);setConnectOfficeHours(d.officeHours||[]);setConnectOfficeHoursDomain(domain);setConnectOfficeHoursOpen(true);}catch(e){setConnectNotice(e.message||"Unable to load office hours.");}};
   const createConnectOfficeHour=async()=>{if(!connectOfficeStartsAt)return;try{await connectApi("/api/connect/office-hours",{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||0),knowledgeDomain:connectOfficeHoursDomain,title:connectOfficeTitle,startsAt:connectOfficeStartsAt,capacity:Number(connectOfficeCapacity)||1,durationMinutes:30,locationType:"ONLINE"})});setConnectOfficeStartsAt("");await loadConnectOfficeHours(connectOfficeHoursDomain);setConnectNotice("Office hours published.");}catch(e){setConnectNotice(e.message||"Unable to publish office hours.");}};
@@ -5357,7 +5770,7 @@ function App() {
 
   const loadConnectEconomy=async(tab="overview")=>{try{const d=await connectApi(`/api/connect/knowledge-economy/dashboard?userId=${Number(currentUser?.id||0)}`);setConnectEconomy(d);setConnectEconomyTab(tab);setConnectEconomyOpen(true);}catch(e){setConnectNotice(e.message||"Unable to load Knowledge Economy.");}};
   const syncConnectBadges=async()=>{try{const d=await connectApi("/api/connect/badges/sync",{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||0)})});setConnectNotice(`${d.badges?.length||0} contribution badges active.`);await loadConnectEconomy("reputation");}catch(e){setConnectNotice(e.message||"Unable to sync badges.");}};
-  const createConnectPartnerGoal=async()=>{if(!connectPartnerGoalTitle.trim()||!connectPartnerGoalUserId)return;try{await connectApi("/api/connect/partner-goals",{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||0),partnerUserId:Number(connectPartnerGoalUserId),title:connectPartnerGoalTitle})});setConnectPartnerGoalTitle("");setConnectPartnerGoalUserId("");await loadConnectEconomy("partners");}catch(e){setConnectNotice(e.message||"Unable to create study goal.");}};
+  const createConnectPartnerGoal=async()=>{if(!connectPartnerGoalTitle.trim()||!connectPartnerGoalUserId)return;try{await connectApi("/api/connect/partner-goals",{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||0),partnerUsername:String(connectPartnerGoalUserId).replace(/^@/,"").trim(),title:connectPartnerGoalTitle})});setConnectPartnerGoalTitle("");setConnectPartnerGoalUserId("");await loadConnectEconomy("partners");}catch(e){setConnectNotice(e.message||"Unable to create study goal.");}};
   const checkinConnectGoal=async(goal,status)=>{try{await connectApi(`/api/connect/partner-goals/${goal.id}/checkin`,{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||0),status})});await loadConnectEconomy("partners");}catch(e){setConnectNotice(e.message||"Unable to check in.");}};
   const updateConnectMentorSession=async(session,status)=>{try{await connectApi(`/api/connect/mentor-session/${session.id}/status`,{method:"PATCH",body:JSON.stringify({userId:Number(currentUser?.id||0),status})});await loadConnectEconomy("sessions");}catch(e){setConnectNotice(e.message||"Unable to update mentor session.");}};
   const validateConnectSkill=async(skill)=>{try{await connectApi(`/api/connect/skill-passport/${skill.id}/validate-note`,{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||0)})});setConnectNotice("Skill validation added.");}catch(e){setConnectNotice(e.message||"Unable to validate skill.");}};
@@ -5366,11 +5779,11 @@ function App() {
   const loadConnectFactCheckTrail=async(post)=>{try{const d=await connectApi(`/api/connect/posts/${post.id}/fact-check-trail`);setConnectFactCheckPost(post);setConnectFactCheckTrail(d.corrections||[]);}catch(e){setConnectNotice(e.message||"Unable to load fact-check trail.");}};
 
   const loadConnectNetworkGraph=async(tab="people")=>{try{const d=await connectApi(`/api/connect/network-graph?userId=${Number(currentUser?.id||0)}`);setConnectNetworkGraph(d);setConnectNetworkGraphTab(tab);setConnectNetworkGraphOpen(true);}catch(e){setConnectNotice(e.message||"Unable to load HOWDI Network Graph.");}};
-  const requestConnectLearningPartner=async(person,type=connectPartnerType)=>{try{await connectApi("/api/connect/learning-partner",{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||0),partnerUserId:Number(person.id||person.user_id),partnerType:type})});setConnectNotice("Learning partner request sent.");}catch(e){setConnectNotice(e.message||"Unable to send partner request.");}};
+  const requestConnectLearningPartner=async(person,type=connectPartnerType)=>{try{await connectApi("/api/connect/learning-partner",{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||0),partnerUserId:Number(person.user_id||person.id),partnerType:type})});setConnectNotice("Learning partner request sent.");}catch(e){setConnectNotice(e.message||"Unable to send partner request.");}};
   const respondConnectLearningPartner=async(req,accept)=>{try{await connectApi("/api/connect/learning-partner/respond",{method:"PATCH",body:JSON.stringify({userId:Number(currentUser?.id||0),fromUserId:req.user_id,partnerType:req.partner_type,accept})});await loadConnectNetworkGraph("requests");}catch(e){setConnectNotice(e.message||"Unable to respond.");}};
   const requestConnectMentor=async(mentor)=>{try{await connectApi("/api/connect/mentor-request",{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||0),mentorUserId:Number(mentor.user_id||mentor.id),knowledgeDomain:connectMentorDomain,message:connectMentorRequestMessage})});setConnectMentorRequestMessage("");setConnectNotice("Mentor request sent.");}catch(e){setConnectNotice(e.message||"Unable to request mentorship.");}};
   const respondConnectMentorRequest=async(req,accept)=>{try{await connectApi(`/api/connect/mentor-request/${req.id}/respond`,{method:"PATCH",body:JSON.stringify({userId:Number(currentUser?.id||0),accept})});await loadConnectNetworkGraph("requests");}catch(e){setConnectNotice(e.message||"Unable to respond.");}};
-  const giveConnectGratitude=async(person)=>{try{await connectApi("/api/connect/gratitude",{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||0),toUserId:Number(person.id||person.user_id),creditCount:1,message:"Thanks for contributing useful knowledge"})});setConnectNotice(`Gratitude sent to ${person.full_name}.`);}catch(e){setConnectNotice(e.message||"Unable to send gratitude.");}};
+  const giveConnectGratitude=async(person)=>{try{await connectApi("/api/connect/gratitude",{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||0),toUserId:Number(person.user_id||person.id),creditCount:1,message:"Thanks for contributing useful knowledge"})});setConnectNotice(`Gratitude sent to ${person.full_name}.`);}catch(e){setConnectNotice(e.message||"Unable to send gratitude.");}};
   const openConnectCircleThread=async(circle)=>{try{const d=await connectApi(`/api/connect/learning-circles/${circle.id}/messages`);setConnectSelectedCircle(circle);setConnectCircleThread(d.messages||[]);setConnectCommunityIntelTab("circle_thread");}catch(e){setConnectNotice(e.message||"Unable to open circle.");}};
   const sendConnectCircleMessage=async()=>{if(!connectSelectedCircle||!connectCircleMessage.trim())return;try{await connectApi(`/api/connect/learning-circles/${connectSelectedCircle.id}/message`,{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||0),message:connectCircleMessage})});setConnectCircleMessage("");await openConnectCircleThread(connectSelectedCircle);}catch(e){setConnectNotice(e.message||"Unable to send message.");}};
   const submitConnectInstitutionRequest=async()=>{if(!connectInstitutionName.trim())return;try{await connectApi("/api/connect/institution-verification-request",{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||0),institutionName:connectInstitutionName,institutionType:connectInstitutionRequestType,websiteUrl:connectInstitutionWebsite})});setConnectInstitutionName("");setConnectInstitutionRequestType("");setConnectInstitutionWebsite("");setConnectNotice("Institution verification request submitted.");}catch(e){setConnectNotice(e.message||"Unable to submit institution request.");}};
@@ -5421,9 +5834,8 @@ function App() {
     try {
       const response = await fetch(`${SHOP_API_BASE}/api/connect/posts`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...customerSessionHeaders() },
         body: JSON.stringify({
-          user_id: currentUser.id,
           content,
           category: connectCategory,
           media_data: connectPostMedia?.data || "",
@@ -5435,7 +5847,7 @@ function App() {
           subscribers_only: connectCreateType==="post"?connectPostSubscribersOnly:false,
           post_type:connectPostType,media_gallery:connectPostGallery,article_title:connectPostArticleTitle,topics:connectPostTopics,location_name:connectPostLocation,
           knowledge_domain:connectKnowledgeDomain,difficulty_level:connectDifficultyLevel,target_audience:connectTargetAudience,audience_scope:connectAudienceScope,
-          source_url:connectSourceUrl,resource_title:connectPostResourceTitle,resource_url:connectResourcePostUrl,collaborator_user_id:Number(connectCollaboratorUserId)||null,
+          source_url:connectSourceUrl,resource_title:connectPostResourceTitle,resource_url:connectResourcePostUrl,collaborator_username:String(connectCollaboratorUserId||"").replace(/^@/,"").trim(),
           post_status:connectPostStatus,scheduled_for:connectPostStatus==="SCHEDULED"&&connectPostScheduledFor?new Date(connectPostScheduledFor).toISOString():null,
           allow_comments:connectPostAllowComments,allow_repost:connectPostAllowRepost,
           learning_objective:connectLearningObjective,key_takeaway:connectKeyTakeaway,subject_name:connectSubjectName,class_level:connectClassLevel,source_kind:connectSourceKind,
@@ -5482,8 +5894,8 @@ function App() {
         `${SHOP_API_BASE}/api/connect/posts/${encodeURIComponent(postId)}/reaction`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ user_id: currentUser.id }),
+          headers: { "Content-Type": "application/json", ...customerSessionHeaders() },
+          body: "{}",
         }
       );
       const data = await response.json().catch(() => ({}));
@@ -5516,7 +5928,7 @@ function App() {
     try {
       const response = await fetch(
         `${SHOP_API_BASE}/api/connect/posts/${encodeURIComponent(post.id)}/comments`,
-        { cache: "no-store" }
+        { cache: "no-store", headers: customerSessionHeaders() }
       );
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.status !== "success") {
@@ -5542,8 +5954,8 @@ function App() {
         `${SHOP_API_BASE}/api/connect/posts/${encodeURIComponent(connectCommentPost.id)}/comments`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ user_id: currentUser.id, content }),
+          headers: { "Content-Type": "application/json", ...customerSessionHeaders() },
+          body: JSON.stringify({ content }),
         }
       );
       const data = await response.json().catch(() => ({}));
@@ -6030,7 +6442,7 @@ function App() {
     try{
       const [aRes,bRes]=await Promise.all([
         learningFetch("http://localhost:5000/api/learning/live/availability",{cache:"no-store"}),
-        currentUser?.id?learningFetch(`http://localhost:5000/api/learning/live/bookings/${currentUser.id}`,{cache:"no-store"}):Promise.resolve(null)
+        currentUser?.id?learningFetch("http://localhost:5000/api/learning/me/live-bookings",{cache:"no-store"}):Promise.resolve(null)
       ]);
       const a=await aRes.json().catch(()=>({}));
       if(!aRes.ok||a.status!=="success")throw new Error(a.message||"Unable to load live class slots.");
@@ -6185,7 +6597,7 @@ function App() {
   const loadGroupClassSessions=async()=>{
     if(!currentUser?.id){setGroupClassSessions([]);return;}
     try{
-      const r=await learningFetch(`http://localhost:5000/api/learning/batch-sessions/user/${currentUser.id}`,{cache:"no-store"});
+      const r=await learningFetch("http://localhost:5000/api/learning/me/batch-sessions",{cache:"no-store"});
       const d=await r.json().catch(()=>({}));
       if(r.ok&&d.status==="success")setGroupClassSessions(d.sessions||[]);
     }catch{}
@@ -6205,7 +6617,7 @@ function App() {
     setBatchBusy(true);
     try{
       const calls=[learningFetch("http://localhost:5000/api/learning/batches",{cache:"no-store"})];
-      if(currentUser?.id)calls.push(learningFetch(`http://localhost:5000/api/learning/batches/user/${currentUser.id}`,{cache:"no-store"}));
+      if(currentUser?.id)calls.push(learningFetch("http://localhost:5000/api/learning/me/batches",{cache:"no-store"}));
       const responses=await Promise.all(calls);
       const publicData=await responses[0].json().catch(()=>({}));
       if(responses[0].ok&&publicData.status==="success")setLearningBatches(publicData.batches||[]);
@@ -6722,7 +7134,7 @@ function App() {
     if(!currentUser?.id){setLearnerHome(null);return;}
     setLearnerHomeBusy(true);setLearnerHomeNotice("");
     try{
-      const response=await learningFetch(`http://localhost:5000/api/learning/learner-home/${encodeURIComponent(currentUser.id)}`,{cache:"no-store"});
+      const response=await learningFetch("http://localhost:5000/api/learning/me/home",{cache:"no-store"});
       const data=await response.json().catch(()=>({}));
       if(!response.ok||data.status!=="success")throw new Error(data.message||"Unable to load your learning home.");
       setLearnerHome(data);
@@ -6751,7 +7163,7 @@ function App() {
     if (!currentUser?.id) return;
     setLearningLoading(true);
     try {
-      const response=await learningFetch(`http://localhost:5000/api/learning/user/${encodeURIComponent(currentUser.id)}`,{cache:"no-store"});
+      const response=await learningFetch("http://localhost:5000/api/learning/me/courses",{cache:"no-store"});
       const data=await response.json().catch(()=>({}));
       if(!response.ok||data.status!=="success") throw new Error(data.message||"Unable to load learning data.");
       const items=(data.courses||[]).map((c)=>({
@@ -6945,7 +7357,7 @@ function App() {
     if (!currentUser?.id) return;
     setNotificationsLoading(true);
     try {
-      const response = await fetch(`http://localhost:5000/api/notifications/${encodeURIComponent(currentUser.id)}`, { cache: "no-store" });
+      const response = await fetch(`http://localhost:5000/api/notifications/${encodeURIComponent(currentUser.id)}`, { cache: "no-store", headers: customerSessionHeaders() });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.status !== "success") throw new Error(data.message || "Unable to load notifications.");
       setCustomerNotifications(Array.isArray(data.notifications) ? data.notifications : []);
@@ -6963,7 +7375,7 @@ function App() {
     try {
       const response = await fetch(`http://localhost:5000/api/notifications/${notificationId}/${read ? "read" : "unread"}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...customerSessionHeaders() },
         body: JSON.stringify({ user_id: currentUser.id }),
       });
       const data = await response.json().catch(() => ({}));
@@ -6999,7 +7411,7 @@ const calculatedUnreadNotificationCount = notifications.filter((item) => item.un
 const deleteNotification = async (id) => {
     if (!currentUser?.id) return;
     const old=notifications; setNotifications((items) => items.filter((item) => item.id !== id));
-    try { const r=await fetch(`http://localhost:5000/api/notifications/${encodeURIComponent(id)}?user_id=${encodeURIComponent(currentUser.id)}`,{method:"DELETE"}); if(!r.ok) throw new Error(); } catch { setNotifications(old); }
+    try { const r=await fetch(`http://localhost:5000/api/notifications/${encodeURIComponent(id)}?user_id=${encodeURIComponent(currentUser.id)}`,{method:"DELETE",headers:customerSessionHeaders()}); if(!r.ok) throw new Error(); } catch { setNotifications(old); }
   };
 
   const openNotifications = () => {
@@ -7205,6 +7617,9 @@ const [selectedCancellationOrder, setSelectedCancellationOrder] = useState(null)
   const [wishlist, setWishlist] = useState([]);
   const [wishlistLoading, setWishlistLoading] = useState(false);
   const [wishlistNotice, setWishlistNotice] = useState("");
+  // Shop S2: set when a saved (catalogue) product is opened from a wishlist screen; ShopCatalogue consumes it.
+  const [shopCatalogueProductId, setShopCatalogueProductId] = useState("");
+  const [cartCheck, setCartCheck] = useState({});
 
   // ==============================
   // SHOPPING CART
@@ -7414,6 +7829,50 @@ const [selectedCancellationOrder, setSelectedCancellationOrder] = useState(null)
     localStorage.setItem("howdiCart", JSON.stringify(cart));
   }, [cart]);
 
+  // Shop S2: while the cart is open, re-check every marketplace line against the server (visibility, option, stock and
+  // the exact price checkout will use). Prices/stock are refreshed, over-quantity lines are capped to what is
+  // available, and lines that can no longer be bought explain why. The server still re-validates at quote/order time.
+  useEffect(() => {
+    if (!cartOpen || !cart.length) return undefined;
+    const lines = cart
+      .map((item) => ({ item, productId: String(item.id ?? item.product_id ?? ""), variantId: item.selectedVariantId ? String(item.selectedVariantId) : null, quantity: Math.min(99, Math.max(1, Number(item.quantity) || 1)) }))
+      .filter((line) => /^\d{1,18}$/.test(line.productId))
+      .slice(0, 30);
+    if (!lines.length) return undefined;
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      try {
+        const response = await fetch(`${SHOP_API_BASE}/api/shop/cart/validate`, {
+          method: "POST", signal: controller.signal, headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ items: lines.map((l) => ({ productId: l.productId, variantId: l.variantId, quantity: l.quantity })) }),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || data.status !== "success" || !Array.isArray(data.lines)) return;
+        const checks = {};
+        data.lines.forEach((result, index) => { if (lines[index]) checks[lines[index].item.cartKey || lines[index].item.name] = result; });
+        setCartCheck(checks);
+        setCart((current) => {
+          let changed = false;
+          const next = current.map((item) => {
+            const result = checks[item.cartKey || item.name];
+            if (!result) return item;
+            const fromVibe = Boolean(item.vibeAttribution || item.vibe_attribution);
+            let updated = item;
+            if (result.status === "ok" && !fromVibe) {
+              const price = moneyFromApi(result.unitPrice);
+              if (item.price !== price || Number(item.stock) !== Number(result.available)) updated = { ...updated, price, numericPrice: result.unitPrice, stock: result.available };
+            }
+            if (result.status === "insufficient_stock" && result.available > 0 && (item.quantity || 1) > result.available) updated = { ...updated, quantity: result.available };
+            if (updated !== item) changed = true;
+            return updated;
+          });
+          return changed ? next : current;
+        });
+      } catch { /* the cart keeps working offline; checkout re-validates on the server */ }
+    }, 300);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [cartOpen, cart]);
+
   useEffect(() => {
     localStorage.setItem("howdiSavedForLater", JSON.stringify(savedForLater));
   }, [savedForLater]);
@@ -7513,12 +7972,52 @@ const [selectedCancellationOrder, setSelectedCancellationOrder] = useState(null)
     setCartOpen(true);
   };
 
+  // Shop S2: a catalogue line the server has just validated (price, option and stock are the server's own).
+  const catalogueLineToCartItem = (line) => ({
+    id: line.productId,
+    product_id: line.productId,
+    name: line.name,
+    icon: "🧶",
+    shop: line.creatorName || "HOWDI SHOP",
+    artisan: line.creatorName || "",
+    price: moneyFromApi(line.unitPrice),
+    oldPrice: moneyFromApi(line.listPrice > line.unitPrice ? line.listPrice : line.unitPrice),
+    numericPrice: line.unitPrice,
+    image: line.image || "",
+    imageUrls: line.image ? [line.image] : [],
+    images: line.image ? [line.image] : [],
+    stock: line.available,
+    category: line.category || "Handmade",
+    subcategory: line.subcategory || "",
+    selectedVariantId: line.variantId || null,
+    selectedColor: line.colour || "",
+    selectedSize: line.size || "",
+    liveProduct: true,
+    catalogueProduct: true,
+  });
+  const addCatalogueLineToCart = (line) => addToCart(catalogueLineToCartItem(line), line.quantity);
+  // "Buy now" on a catalogue product must not throw away what the shopper already has in the cart (the legacy Shop Home
+  // buyNow() replaces the whole cart): the line is merged in and the cart/checkout opens.
+  const buyCatalogueLine = (line) => {
+    addToCart(catalogueLineToCartItem(line), line.quantity);
+    setNotificationOpen(false);
+    setCartOpen(true);
+  };
+
   const setProductQuantity = (product, quantity) => {
     const qty = Math.max(1, Math.min(10, Number(quantity) || 1));
     setSelectedQuantities((current) => ({ ...current, [product.name]: qty }));
   };
 
+  const openCatalogueProduct = (id) => {
+    setShopCatalogueProductId(String(id));
+    setMyHowdiDrawer(null);
+    openNavigationOSArea("shop","catalogue");
+  };
+
   const openProductDetails = (product) => {
+    // Shop S2: wishlist cards are live catalogue products; they open the catalogue product page.
+    if (product?.catalogueProduct) { openCatalogueProduct(product.id); return; }
     rememberRecentlyViewed(product, currentUser?.id || "");
     recordTasteEvent({
       type: "view",
@@ -8193,9 +8692,10 @@ return () => window.clearInterval(timer);
     );
   };
 
-  const removeFromCart = (productName) => {
+  // Lines are identified by cartKey (product + option); name is only the fallback for keyless legacy lines.
+  const removeFromCart = (cartKeyOrName) => {
     setCart((current) =>
-      current.filter((item) => item.name !== productName)
+      current.filter((item) => (item.cartKey || item.name) !== cartKeyOrName)
     );
   };
 
@@ -8272,12 +8772,18 @@ return () => window.clearInterval(timer);
   const checkoutServerTotal=Number(checkoutQuote?.grandTotal??checkoutTotal);
 
 
+  // Shop S2 fix: getCartRecommendations() returns plain products; the cart card list destructures { product, reasons }
+  // (which threw when the cart opened). Normalise to that shape here.
   const cartRecommendations = getCartRecommendations(cart, products, {
     customerId: currentUser?.id,
     location: customerLocation,
     wishlist,
     recentlyViewed,
-  }).slice(0, 4);
+  })
+    .map((entry) => (entry && entry.product ? entry : { product: entry, reasons: [] }))
+    .filter(({ product }) => Boolean(product))
+    .map(({ product, reasons }) => ({ product, reasons: Array.isArray(reasons) ? reasons : [] }))
+    .slice(0, 4);
 
   const recommendationBudget = cartPromotion.tier === "ONE"
     ? 1500
@@ -9103,7 +9609,7 @@ return () => window.clearInterval(timer);
       return;
     }
     if(next==="connect"){
-      const connectTarget=view==="vibe"||view==="home"?"feed":view==="explore"?"discover":view;
+      const connectTarget=view==="vibe"?"feed":view==="home"?"dashboard":view==="explore"?"discover":view;
       setConnectView(connectTarget);
       setConnectContentMode(view==="vibe"?"vibe":"posts");
       setConnectModalOpen(true);
@@ -9111,8 +9617,12 @@ return () => window.clearInterval(timer);
     }
     if(next==="shop"){
       setActiveSection("shop");
-      setShopOSView(view==="home"?"home":view);
-      if(view==="cart"){
+      // Shop S1: categories / product discovery are now the Catalogue workspace.
+      const shopView=view==="categories"||view==="discovery"?"catalogue":view;
+      setShopOSView(shopView==="home"?"home":shopView);
+      if(shopView==="catalogue"){
+        window.setTimeout(()=>window.scrollTo({top:0,behavior:"smooth"}),40);
+      }else if(view==="cart"){
         setCartToast(null);setCartOpen(true);
       }else if(view==="categories"){
         window.setTimeout(()=>document.querySelector(".hs2-categories")?.scrollIntoView({behavior:"smooth",block:"start"}),60);
@@ -9146,6 +9656,54 @@ return () => window.clearInterval(timer);
       return;
     }
   };
+
+  const navigateHowdiFor=(href,target)=>{
+    const url=new URL(String(href||"/for"),window.location.origin);
+    const forRoute=parseForPath(url.pathname);
+    if(forRoute){
+      window.history.pushState({},"",`${url.pathname}${url.search}`);
+      setHowdiForRoute(forRoute);
+      window.scrollTo({top:0,behavior:"smooth"});
+      return;
+    }
+    const needsLogin=target&&["learn.teach","shop.vendor","connect.create"].includes(`${target.pillar}.${target.view}`);
+    if(needsLogin&&!currentUser){
+      setHowdiForPendingTarget({href,target});
+      openLogin();
+      return;
+    }
+    setHowdiForRoute(null);
+    if(url.pathname==="/learn/teach"){
+      openRoleDestination("TEACHER");
+    }else if(url.pathname.startsWith("/learn/")){
+      openNavigationOSArea("learn",url.pathname.split("/")[2]||"discover");
+    }else if(url.pathname.startsWith("/works/")){
+      openNavigationOSArea("works",url.pathname.split("/")[2]||"find");
+    }else if(url.pathname==="/shop/vendor"){
+      openNavigationOSArea("shop","vendor");
+    }else if(url.pathname==="/connect/create"){
+      openNavigationOSArea("connect","home");
+      setConnectCreateType("post");
+      setConnectCreateOpen(true);
+    }else{
+      openNavigationOSArea("home");
+    }
+  };
+
+  useEffect(()=>{
+    const onPopState=()=>setHowdiForRoute(parseForPath(window.location.pathname));
+    window.addEventListener("popstate",onPopState);
+    return()=>window.removeEventListener("popstate",onPopState);
+  },[]);
+
+  // Reuse the existing login surface; the deferred destination is short-lived
+  // in memory and runs only after an authenticated user is available.
+  useEffect(()=>{
+    if(!currentUser||!howdiForPendingTarget)return;
+    const pending=howdiForPendingTarget;
+    setHowdiForPendingTarget(null);
+    navigateHowdiFor(pending.href,pending.target);
+  },[currentUser,howdiForPendingTarget]);
 
   const navigate = (section) => {
     if (["home", "connect", "shop", "works", "learn"].includes(section)) {
@@ -9267,6 +9825,34 @@ return () => window.clearInterval(timer);
   const getWishlistProductId = (product) =>
     String(product?.product_id ?? product?.productId ?? product?.id ?? product?._id ?? product?.name ?? "");
 
+  // Shop S2: the wishlist is session-authoritative. The browser sends only a product id plus the session token;
+  // the server stores the id and returns live catalogue cards, which are mapped to the shape the existing
+  // wishlist screens (Shop hearts, My HOWDI drawer, profile tab) already render.
+  const wishlistCardToProduct = (card) => {
+    const current = Number(card?.price?.current ?? 0);
+    const original = Number(card?.price?.original ?? 0);
+    const image = card?.image || "";
+    return {
+      id: String(card?.id ?? ""),
+      product_id: String(card?.id ?? ""),
+      name: card?.name || "HOWDI Product",
+      icon: "🧶",
+      shop: card?.creator?.display_name || "HOWDI Creator",
+      artisan: card?.creator?.display_name || "HOWDI Creator",
+      category: card?.category || "Handmade",
+      subcategory: card?.subcategory || "",
+      productType: card?.productType || "",
+      price: moneyFromApi(current),
+      oldPrice: moneyFromApi(original > current ? original : current),
+      numericPrice: current,
+      image,
+      imageUrls: image ? [image] : [],
+      images: image ? [image] : [],
+      liveProduct: true,
+      catalogueProduct: true,
+    };
+  };
+
   const loadWishlist = async () => {
     if (!currentUser?.id) {
       setWishlist([]);
@@ -9275,32 +9861,19 @@ return () => window.clearInterval(timer);
 
     setWishlistLoading(true);
     try {
-      const response = await fetch(
-        `http://localhost:5000/api/wishlist/user/${encodeURIComponent(currentUser.id)}`,
-        { cache: "no-store" }
-      );
+      const response = await fetch(`${SHOP_API_BASE}/api/shop/wishlist`, { cache: "no-store", headers: customerSessionHeaders() });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.status !== "success") {
         throw new Error(data.message || "Unable to load wishlist.");
       }
-
-      const liveWishlist = Array.isArray(data.wishlist) ? data.wishlist : [];
-      setWishlist(liveWishlist);
-      setWishlistNotice("");
-      try {
-        localStorage.setItem(`howdiWishlist_${currentUser.id}`, JSON.stringify(liveWishlist));
-      } catch {}
+      setWishlist((Array.isArray(data.items) ? data.items : []).map(wishlistCardToProduct));
+      setWishlistNotice(data.unavailableCount > 0 ? `${data.unavailableCount} saved ${data.unavailableCount === 1 ? "item is" : "items are"} no longer available.` : "");
+      // The old client-side copy of this list (full product blobs) is no longer used.
+      try { localStorage.removeItem(`howdiWishlist_${currentUser.id}`); } catch {}
     } catch (error) {
       console.error("HOWDI LOAD WISHLIST ERROR:", error);
-      setWishlistNotice(
-        ""
-      );
-      try {
-        const saved = JSON.parse(localStorage.getItem(`howdiWishlist_${currentUser.id}`) || "[]");
-        setWishlist(Array.isArray(saved) ? saved : []);
-      } catch {
-        setWishlist([]);
-      }
+      setWishlist([]);
+      setWishlistNotice(error.message || "Unable to load wishlist.");
     } finally {
       setWishlistLoading(false);
     }
@@ -9322,8 +9895,9 @@ return () => window.clearInterval(timer);
     }
 
     const productId = getWishlistProductId(product);
-    if (!productId) {
-      setWishlistNotice("Unable to identify this product for your wishlist.");
+    // Only real marketplace products (numeric catalogue ids) can be saved; demo/legacy cards have no server record.
+    if (!/^\d{1,18}$/.test(productId)) {
+      setWishlistNotice("This item can't be saved to your wishlist.");
       return;
     }
 
@@ -9335,25 +9909,14 @@ return () => window.clearInterval(timer);
     setWishlistNotice("");
 
     try {
-      let response;
-      if (exists) {
-        response = await fetch(
-          `http://localhost:5000/api/wishlist/${encodeURIComponent(productId)}?user_id=${encodeURIComponent(currentUser.id)}`,
-          { method: "DELETE" }
-        );
-      } else {
-        response = await fetch("http://localhost:5000/api/wishlist", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            user_id: currentUser.id,
-            product,
-          }),
-        });
-      }
+      const response = await fetch(`${SHOP_API_BASE}/api/shop/wishlist/${encodeURIComponent(productId)}`, {
+        method: exists ? "DELETE" : "PUT",
+        headers: customerSessionHeaders(),
+      });
 
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.status !== "success") {
+        if (response.status === 401) openLogin();
         throw new Error(data.message || "Unable to update wishlist.");
       }
 
@@ -9378,7 +9941,7 @@ return () => window.clearInterval(timer);
           : (currentLikes.includes(product.name) ? currentLikes : [...currentLikes, product.name])
       );
 
-      setWishlistNotice(data.message || (exists ? "Removed from wishlist." : "Added to wishlist."));
+      setWishlistNotice(exists ? "Removed from wishlist." : "Added to wishlist.");
       await loadWishlist();
     } catch (error) {
       console.error("HOWDI WISHLIST ERROR:", error);
@@ -9644,6 +10207,42 @@ return () => window.clearInterval(timer);
   const [returnRequestBusy,setReturnRequestBusy]=useState(false);
   const returnIdempotencyRef=useRef("");
   const customerSessionHeaders=()=>{try{const t=localStorage.getItem("howdiSessionToken")||"";return t?{Authorization:`Bearer ${t}`}:{}}catch{return {}}};
+  const HPAY_API_BASE=(import.meta.env.VITE_API_BASE_URL||"http://localhost:5000").replace(/\/+$/,"");
+  async function loadHpayDashboard(){
+    if(!currentUser){setHpayAccount(null);setHpayRequests([]);setHpayBanks([]);setHpayError("Sign in to use HPay.");return;}
+    setHpayLoading(true);setHpayError("");
+    try{
+      const r=await fetch(`${HPAY_API_BASE}/api/hpay/me`,{headers:customerSessionHeaders(),cache:"no-store"});
+      const d=await r.json().catch(()=>({}));
+      if(!r.ok||d.status!=="success")throw new Error(d.message||"Unable to load HPay");
+      setHpayAccount(d.account||null);setHpayRequests(Array.isArray(d.requests)?d.requests:[]);setHpayBanks(Array.isArray(d.banks)?d.banks:[]);
+      setHpayProviderConnected(d.provider?.money_movement_connected===true);
+      setWalletBalance(Number(d.wallet?.balance||0));
+      setWalletTransactions((Array.isArray(d.transactions)?d.transactions:[]).map(x=>({
+        ...x,amount:Number(x.amount||0),type:String(x.direction||"").toUpperCase()==="DEBIT"?"debit":String(x.direction||"").toUpperCase()==="CREDIT"?"credit":"unknown",
+        title:x.description||x.transaction_type||"HPay activity",date:x.created_at?new Date(x.created_at).toLocaleString("en-IN"):""
+      })));
+    }catch(e){setHpayError(e.message||"Unable to load HPay");}
+    finally{setHpayLoading(false);}
+  }
+  async function submitHpayAction(){
+    const amount=Number(hpayAmount||0);
+    if(!(amount>0)||!hpayPrivacyAccepted)return;
+    setHpaySubmitting(true);setHpayStatus(null);
+    try{
+      if(hpayAction!=="request"){
+        setHpayStatus({type:"info",title:"Payment provider required",message:"HPay will not mark money as sent, added, or transferred until an authorized payment provider confirms the movement."});
+        return;
+      }
+      const r=await fetch(`${HPAY_API_BASE}/api/hpay/requests`,{method:"POST",headers:{"Content-Type":"application/json",...customerSessionHeaders()},body:JSON.stringify({amount,note:hpayNote,payer_hpay_id:hpayRecipientHpayId.trim()||null})});
+      const d=await r.json().catch(()=>({}));
+      if(!r.ok||d.status!=="success")throw new Error(d.message||"Unable to create payment request");
+      setHpayStatus({type:"success",title:"Request created",message:`₹${amount.toLocaleString("en-IN")} request ${d.request?.payer_hpay_id?`sent to ${d.request.payer_hpay_id}`:"created"}. No funds have moved.`});
+      await loadHpayDashboard();
+    }catch(e){setHpayStatus({type:"error",title:"Request not created",message:e.message||"Unable to create payment request"});}
+    finally{setHpaySubmitting(false);}
+  }
+  useEffect(()=>{if(connectView==="hpay")loadHpayDashboard();},[connectView,currentUser?.id]);
   function openReturnRequest(order,status){
     setOrdersNotice("");
     const eligible=status?.eligibility?.eligible_items||[];
@@ -10723,7 +11322,7 @@ const saveProfileDetails = async (event) => {
     if (!currentUser?.id) return;
     setNotificationsLoading(true);
     try {
-      const response = await fetch(`http://localhost:5000/api/notifications/${encodeURIComponent(currentUser.id)}?limit=100`, { cache: "no-store" });
+      const response = await fetch(`http://localhost:5000/api/notifications/${encodeURIComponent(currentUser.id)}?limit=100`, { cache: "no-store", headers: customerSessionHeaders() });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.status !== "success") throw new Error(data.message || "Unable to load notifications.");
       setNotifications(Array.isArray(data.notifications) ? data.notifications : []);
@@ -10743,7 +11342,7 @@ const saveProfileDetails = async (event) => {
       const endpoint = makeRead ? "read" : "unread";
       const response = await fetch(`http://localhost:5000/api/notifications/${notification.id}/${endpoint}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...customerSessionHeaders() },
         body: JSON.stringify({ user_id: currentUser.id }),
       });
       const data = await response.json().catch(() => ({}));
@@ -10757,7 +11356,7 @@ const saveProfileDetails = async (event) => {
 const removeNotification = async (notificationId) => {
     if (!currentUser?.id) return;
     try {
-      const response = await fetch(`http://localhost:5000/api/notifications/${notificationId}?user_id=${encodeURIComponent(currentUser.id)}`, { method: "DELETE" });
+      const response = await fetch(`http://localhost:5000/api/notifications/${notificationId}?user_id=${encodeURIComponent(currentUser.id)}`, { method: "DELETE", headers: customerSessionHeaders() });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.status !== "success") throw new Error(data.message || "Unable to remove notification.");
       await loadNotifications();
@@ -11070,7 +11669,7 @@ const removeNotification = async (notificationId) => {
     setMessagesLoading(true);
     try {
       const [notificationResponse, messagesResponse] = await Promise.all([
-        fetch(`http://localhost:5000/api/notifications/${encodeURIComponent(currentUser.id)}`, { cache: "no-store" }),
+        fetch(`http://localhost:5000/api/notifications/${encodeURIComponent(currentUser.id)}`, { cache: "no-store", headers: customerSessionHeaders() }),
         fetch(`http://localhost:5000/api/messages/${encodeURIComponent(currentUser.id)}`, { cache: "no-store" }),
       ]);
       const notificationData = await notificationResponse.json().catch(() => ({}));
@@ -11092,7 +11691,7 @@ const removeNotification = async (notificationId) => {
   const markNotificationRead = async (notificationId) => {
     setMessageActionLoading(`notification-${notificationId}`);
     try {
-      const response = await fetch(`http://localhost:5000/api/notifications/${notificationId}/read`, { method: "POST" });
+      const response = await fetch(`http://localhost:5000/api/notifications/${notificationId}/read`, { method: "POST", headers: customerSessionHeaders() });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.status !== "success") throw new Error(data.message || "Unable to update notification.");
       await loadMessagesCenter();
@@ -11109,7 +11708,7 @@ const removeNotification = async (notificationId) => {
     try {
       const response = await fetch("http://localhost:5000/api/notifications/read-all", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...customerSessionHeaders() },
         body: JSON.stringify({ user_id: currentUser.id }),
       });
       const data = await response.json().catch(() => ({}));
@@ -11154,7 +11753,7 @@ const removeNotification = async (notificationId) => {
     try {
       const [contentResponse, progressResponse] = await Promise.all([
         learningFetch("http://localhost:5000/api/learning/content", { cache: "no-store" }),
-        learningFetch(`http://localhost:5000/api/learning/progress/${encodeURIComponent(currentUser.id)}`, { cache: "no-store", headers: customerSessionHeaders() }),
+        learningFetch("http://localhost:5000/api/learning/me/progress", { cache: "no-store", headers: customerSessionHeaders() }),
       ]);
       const contentData = await contentResponse.json().catch(() => ({}));
       const progressData = await progressResponse.json().catch(() => ({}));
@@ -11729,7 +12328,7 @@ const removeNotification = async (notificationId) => {
           <button
             className="brand"
             onClick={() => {
-              openNavigationOSArea("home");
+              openNavigationOSArea("connect","home");
             }}
           >
 
@@ -11754,7 +12353,7 @@ const removeNotification = async (notificationId) => {
           <nav id="howdi-main-nav" aria-label="HOWDI Navigation OS" className={`main-nav howdi-simple-ecosystem-nav ${menuOpen ? "mobile-open" : ""}`}>
             <button type="button" className={navigationOSArea==="home"?"active":""} onClick={()=>openNavigationOSArea("home")}>⌂ Home</button>
             <button type="button" className={navigationOSArea==="connect"?"active":""} onClick={()=>openNavigationOSArea("connect","home")}>◉ Connect</button>
-            <button type="button" className={navigationOSArea==="shop"?"active":""} onClick={()=>openNavigationOSArea("shop","home")}>🛍 Shop</button>
+            <button type="button" className={navigationOSArea==="shop"?"active":""} onClick={()=>openNavigationOSArea("shop","catalogue")}>🛍 Shop</button>
             <button type="button" className={navigationOSArea==="works"?"active":""} onClick={()=>openNavigationOSArea("works","find")}>🛠 Works</button>
             <button type="button" className={navigationOSArea==="learn"?"active":""} onClick={()=>openNavigationOSArea("learn","discover")}>🎓 Learn & Earn</button>
           </nav>
@@ -11883,14 +12482,14 @@ const removeNotification = async (notificationId) => {
             {[
               ["feed","⌂","Home"],["vibe","▷","Vibe"],["explore","⌕","Explore"],["stories","◉","Stories"],["messages","○","Messages"],["communities","◇","Communities"]
             ].map(([id,icon,label])=>{
-              const isActive=id==="vibe"?(connectView==="feed"&&connectContentMode==="vibe"):id==="feed"?(connectView==="feed"&&connectContentMode!=="vibe"):id==="explore"?connectView==="discover":connectView===id;
+              const isActive=id==="vibe"?(connectView==="feed"&&connectContentMode==="vibe"):id==="feed"?connectView==="dashboard":id==="explore"?connectView==="discover":connectView===id;
               return <button key={id} type="button" className={isActive?"active":""} onClick={()=>openNavigationOSArea("connect",id==="feed"?"home":id)}><span>{icon}</span>{label}</button>;
             })}
           </div>}
 
-          <button type="button" className={navigationOSArea==="shop"?"pillar active":"pillar"} onClick={()=>openNavigationOSArea("shop","home")}><span>▢</span><b>Shop</b></button>
+          <button type="button" className={navigationOSArea==="shop"?"pillar active":"pillar"} onClick={()=>openNavigationOSArea("shop","catalogue")}><span>▢</span><b>Shop</b></button>
           {navigationOSArea==="shop" && <div className="howdi-master-subnav">
-            {[["home","Shop Home"],["categories","Categories"],["discovery","Product Discovery"],["cart","Cart"],["vendor","Vendor / Creator"]].map(([id,label])=><button key={id} type="button" className={shopOSView===id?"active":""} onClick={()=>openNavigationOSArea("shop",id)}>{label}</button>)}
+            {[["catalogue","Catalogue"],["home","Shop Home"],["cart","Cart"],["vendor","Vendor / Creator"]].map(([id,label])=><button key={id} type="button" className={shopOSView===id?"active":""} onClick={()=>openNavigationOSArea("shop",id)}>{label}</button>)}
           </div>}
 
           <button type="button" className={navigationOSArea==="works"?"pillar active":"pillar"} onClick={()=>openNavigationOSArea("works","find")}><span>×</span><b>Works</b></button>
@@ -12037,6 +12636,7 @@ const removeNotification = async (notificationId) => {
               <button type="button" onClick={() => routeFromMyHowdi("learning")}><i>🎓</i><b>My Learning</b></button>
               <button type="button" onClick={() => routeFromMyHowdi("notifications")}><i>🔔</i><b>Notifications</b></button>
             </div>
+            <div className="mh-links"><HowdiForMenuRow onNavigate={navigateHowdiFor} /></div>
           </div>
 
           {logoutNotice && <div className="mh-notice" role="alert">{logoutNotice}</div>}
@@ -12107,7 +12707,7 @@ const removeNotification = async (notificationId) => {
                    const product = item.product || item;
                    return <article className="mh-card" key={getWishlistProductId(item) || index}>
                      <div className="mh-card-row">
-                       <div className="mh-card-main"><b>{product.name || product.title || "HOWDI Product"}</b><small>{product.category || "Saved in your HOWDI wishlist"}{product.price ? ` · ₹${Number(product.price).toLocaleString("en-IN")}` : ""}</small></div>
+                       <div className="mh-card-main"><b>{product.name || product.title || "HOWDI Product"}</b><small>{product.category || "Saved in your HOWDI wishlist"}{product.numericPrice || product.price ? ` · ₹${Number(product.numericPrice ?? String(product.price).replace(/[^0-9.]/g, "")).toLocaleString("en-IN")}` : ""}</small></div>
                        <span>♡</span>
                      </div>
                      <div className="mh-card-actions"><button onClick={() => {setMyHowdiDrawer(null);openNavigationOSArea("shop","home")}}>View in Shop</button><button className="mh-danger" onClick={() => toggleWishlist(product)}>Remove</button></div>
@@ -12369,7 +12969,7 @@ const removeNotification = async (notificationId) => {
 
                   <div style={{ display: "grid", gap: "12px" }}>
                     {cart.map((item) => (
-                      <article key={item.name} className="howdi-cart-item">
+                      <article key={item.cartKey||item.name} className="howdi-cart-item">
                         <div className="howdi-cart-item-top">
                           <div className="howdi-cart-thumb">
                             {item.image ? <img src={item.image} alt={item.name} /> : item.icon}
@@ -12378,6 +12978,9 @@ const removeNotification = async (notificationId) => {
                             <div className="howdi-cart-shop">{item.shop || "HOWDI SHOP"}</div>
                             <div className="howdi-cart-name">{item.name}</div>
                             <div className="howdi-cart-price">{item.price}</div>
+                            {cartCheck[item.cartKey||item.name] && cartCheck[item.cartKey||item.name].status !== "ok" ? (
+                              <div role="alert" style={{ marginTop: "4px", color: "#a32d2d", fontSize: "12px", fontWeight: 700 }}>{cartCheck[item.cartKey||item.name].message}</div>
+                            ) : null}
                           </div>
                           <button type="button" className="howdi-cart-remove" onClick={(event) => { event.stopPropagation(); removeFromCart(item.cartKey||item.name); }}>Remove</button>
                         </div>
@@ -16641,7 +17244,7 @@ const removeNotification = async (notificationId) => {
                                 <div style={{ width: "42px", height: "42px", borderRadius: "50%", overflow: "hidden", background: "#eaf1ec", display: "grid", placeItems: "center", flexShrink: 0, fontWeight: 900, color: "#365947" }}>
                                   {post.profile_image ? <img src={post.profile_image} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : String(post.full_name || "H").slice(0, 1).toUpperCase()}
                                 </div>
-                                <div><strong style={{ color: "#0f172a" }}>{post.full_name || "HOWDI Member"}</strong><div style={{ color: "#64748b", fontSize: "12px", marginTop: "2px" }}>{post.howdi_id || "HOWDI"} · {formatConnectDate(post.created_at)}</div></div>
+                                <div><strong style={{ color: "#0f172a" }}>{post.full_name || "HOWDI Member"}</strong><div style={{ color: "#64748b", fontSize: "12px", marginTop: "2px" }}>{post.public_username ? `@${post.public_username}` : "HOWDI member"} · {formatConnectDate(post.created_at)}</div></div>
                               </div>
                               <span style={{ padding: "5px 8px", borderRadius: "999px", background: "#f1f7f2", color: "#365947", fontSize: "10px", fontWeight: 900 }}>{post.category}</span>
                             </div>
@@ -17488,6 +18091,7 @@ const removeNotification = async (notificationId) => {
                             <div style={{ fontSize:"30px" }}>🛠️</div>
                             <strong style={{ display:"block", marginTop:"7px", color:"#365947" }}>No HOWDI Works bookings yet</strong>
                             <span style={{ fontSize:"12px" }}>Your service requests will appear here after booking.</span>
+                            <HowdiForEmptyStateLink context="works" onNavigate={navigateHowdiFor}/>
                           </div>
                         )}
 
@@ -17864,7 +18468,11 @@ const removeNotification = async (notificationId) => {
           id="shop"
           data-navigation-os={navigationOSArea==="shop"?"active":"inactive"}
         >
-          <div className="hs2-layout">
+          {shopOSView==="catalogue" && <ShopCatalogue apiBase={SHOP_API_BASE} onExit={()=>openNavigationOSArea("shop","home")}
+            signedIn={Boolean(currentUser?.id)} getAuthHeaders={customerSessionHeaders} onRequireLogin={openLogin}
+            onAddToCart={addCatalogueLineToCart} onBuyNow={buyCatalogueLine}
+            openProductId={shopCatalogueProductId} onOpenProductHandled={()=>setShopCatalogueProductId("")} />}
+          <div className="hs2-layout" style={shopOSView==="catalogue"?{display:"none"}:undefined}>
             <main className="hs2-main">
               <section className="hs2-hero">
                 <div className="hs2-hero-copy">
@@ -18531,8 +19139,13 @@ const removeNotification = async (notificationId) => {
               .filter(Boolean),
           });
 
+          // Shop S2 fix: getPersonalizedProducts() returns plain products, but this section destructures
+          // { product, reasons } - which threw on every render with a non-empty product list and blanked the app.
+          // Accept either shape and never dereference a missing product.
           const visible = personalized
-            .filter(({ product }) => !cart.some((item) => item.name === product.name))
+            .map((entry) => (entry && entry.product ? entry : { product: entry, reasons: [] }))
+            .filter(({ product }) => product && !cart.some((item) => item.name === product.name))
+            .map(({ product, reasons }) => ({ product, reasons: Array.isArray(reasons) ? reasons : [] }))
             .slice(0, 6);
 
           if (!visible.length) return null;
@@ -18982,7 +19595,7 @@ const removeNotification = async (notificationId) => {
               <div className="hc-nav-section">
                 <small>CONNECT</small>
                 <nav>
-                  <button type="button" title="Home" className={connectView==="feed"&&connectContentMode==="posts"?"active":""} onClick={()=>{setConnectView("feed");setConnectContentMode("posts")}}><i>⌂</i><span>Home</span></button>
+                  <button type="button" title="Home" className={connectView==="dashboard"?"active":""} onClick={()=>{setConnectView("dashboard");setConnectContentMode("posts")}}><i>⌂</i><span>Home</span></button>
                   <button type="button" title="Vibe" className={connectView==="feed"&&connectContentMode==="vibe"?"active":""} onClick={()=>{setConnectView("feed");setConnectContentMode("vibe")}}><i>▶</i><span>Vibe</span></button>
                   <button type="button" title="Explore" className={connectView==="discover"?"active":""} onClick={()=>setConnectView("discover")}><i>⌕</i><span>Explore</span></button>
                   <button type="button" title="Stories" className={connectView==="stories"?"active":""} onClick={()=>setConnectView("stories")}><i>◉</i><span>Stories</span></button>
@@ -19005,7 +19618,7 @@ const removeNotification = async (notificationId) => {
             <main className="hc2-main">
               <header className="hc2-topbar">
                 <div className="hc2-mobile-brand"><b>HOWDI</b><span>Connect Home</span></div>
-                <div className="hc14-context"><b>{connectContentMode==="vibe"?"Vibe":connectView==="feed"?"Home":connectView==="discover"?"Explore":connectView==="stories"?"Stories":connectView==="messages"?"Messages":connectView==="communities"?"Communities":connectView==="hpay"?"HPay":"Connect"}</b><small>HOWDI ecosystem</small></div>
+                <div className="hc14-context"><b>{connectContentMode==="vibe"?"Vibe":connectView==="dashboard"?"Home":connectView==="feed"?"Feed":connectView==="discover"?"Explore":connectView==="stories"?"Stories":connectView==="messages"?"Messages":connectView==="communities"?"Communities":connectView==="hpay"?"HPay":"Connect"}</b><small>HOWDI ecosystem</small></div>
                 <div className="hc5-search">
                   <span className="hc5-search-icon">⌕</span>
                   <input value={connectSearchQuery} onChange={e=>setConnectSearchQuery(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")runConnectSearch()}} placeholder="Search people, posts, groups or ask HOWDI AI" />
@@ -19017,7 +19630,8 @@ const removeNotification = async (notificationId) => {
               {connectNotificationsOpen&&<div style={{position:"absolute",right:64,top:64,zIndex:50,width:340,maxHeight:430,overflow:"auto",background:"#fff",border:"1px solid #e4e8e5",borderRadius:16,boxShadow:"0 18px 50px rgba(20,45,30,.18)",padding:12}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}><b>Notifications</b><button type="button" onClick={()=>setConnectNotificationsOpen(false)}>×</button></div>
                 {!connectNotifications.length&&<p>No Connect notifications yet.</p>}
-                {connectNotifications.slice(0,20).map(n=><article key={n.id} onClick={()=>openConnectNotification(n)} style={{padding:"10px 4px",borderTop:"1px solid #eef1ef",cursor:String(n.entity_type||"").toUpperCase()==="SPACE"?"pointer":"default"}}><b>{n.actor_name||"HOWDI"}</b><div>{n.message}</div><small>{formatConnectDate(n.created_at)}{String(n.entity_type||"").toUpperCase()==="SPACE"?" · Open Space":""}</small></article>)}
+                {connectNotifications.some(n=>!n.is_read)&&<button type="button" onClick={markAllConnectNotificationsRead} style={{margin:"6px 0",fontSize:12}}>Mark all read</button>}
+                {connectNotifications.slice(0,20).map(n=><article key={n.id} onClick={()=>openConnectNotification(n)} style={{padding:"10px 4px",borderTop:"1px solid #eef1ef",cursor:n.target?"pointer":"default",background:n.is_read?"transparent":"#f3faf5"}}><b>{n.actor_name||"HOWDI"}</b>{n.actor_public_username&&<small style={{marginLeft:6,color:"#6b7a70"}}>@{n.actor_public_username}</small>}<div>{n.message}</div><small>{formatConnectDate(n.created_at)}{n.target?" · Open":""}</small></article>)}
               </div>}
 
               <div className="hc2-scroll">
@@ -19055,6 +19669,263 @@ const removeNotification = async (notificationId) => {
                     </div>
                   </details>
                 </section>}
+                {connectView==="dashboard" && (()=>{
+                  const S=connectHomeSections;
+                  const L=connectHomeLoading;
+                  const loggedIn=Boolean(currentUser?.id||currentUser?.user_id);
+                  const who=(p)=>{const u=p?.public_username||p?.creatorPublicUsername||p?.actor_public_username;return u?`@${u}`:(p?.full_name||p?.creatorName||p?.actor_name||"HOWDI member");};
+                  const avatarInitial=(p)=>(p?.full_name||p?.creatorName||"H").slice(0,1).toUpperCase();
+                  const Skeleton=({rows=1})=><div className="hc-home-skel" aria-busy="true">{Array.from({length:rows}).map((_,i)=><div key={i} className="hc-home-skel-row" />)}</div>;
+                  const Empty=({label})=><div className="hc-home-empty"><span>{label}</span></div>;
+                  const SectionError=({onRetry})=><div className="hc-home-error"><span>Couldn't load this right now.</span><button type="button" onClick={onRetry}>Retry</button></div>;
+                  const railNav=(dir)=>(e)=>{const wrap=e.currentTarget.closest('.hc-home-rail-wrap');const rail=wrap&&wrap.querySelector('.hc-home-rail');if(rail)rail.scrollBy({left:dir*Math.round(rail.clientWidth*0.8),behavior:'smooth'});};
+                  const Rail=({label,children,className=""})=>(
+                    <div className="hc-home-rail-wrap">
+                      <button type="button" className="hc-home-rail-nav prev" aria-label={`Scroll ${label} backward`} onClick={railNav(-1)}>‹</button>
+                      <div className={`hc-home-rail ${className}`} role="region" aria-label={label} tabIndex={-1}>{children}</div>
+                      <button type="button" className="hc-home-rail-nav next" aria-label={`Scroll ${label} forward`} onClick={railNav(1)}>›</button>
+                    </div>
+                  );
+                  const openPersonProfile=(p)=>{if(p.public_username)openConnectPublicProfile({public_username:p.public_username,full_name:p.full_name});};
+                  const followBtn=(p)=><button type="button" className={`hc-home-follow${p.following?" following":""}`} onClick={(e)=>{e.stopPropagation();requireConnectLogin(()=>toggleConnectFollowByUsername(p.public_username,p.full_name));}}>{p.following?"Following":"Follow"}</button>;
+                  const openPost=(item)=>{ if(item.post_type==="ARTICLE"){openConnectArticle(item);} else {setConnectView("feed");setConnectContentMode("posts");} };
+                  const openSpecialCta=(item)=>{
+                    const u=String(item?.cta_url||"").toLowerCase();
+                    if(u.includes("shop"))return openNavigationOSArea("shop","home");
+                    if(u.includes("works"))return openNavigationOSArea("works","home");
+                    if(u.includes("learn"))return openNavigationOSArea("learn","home");
+                    if(u.includes("vibe"))return openNavigationOSArea("connect","vibe");
+                    if(u.includes("communit"))return openNavigationOSArea("connect","communities");
+                  };
+                  const lazyRef=(key)=>(el)=>attachConnectHomeLazySection(key,el);
+                  return (
+                  <div className="hc-home-shell" aria-label="HOWDI Connect Home">
+
+                    {/* 1. HOWDI Special (admin-managed) */}
+                    <section className="hc-home-section hc-home-special">
+                      {S.special?.error?<SectionError onRetry={()=>loadConnectHomeSections(["special"])}/>:!S.special?<Skeleton/>:S.special.item?(
+                        <div className="hc-home-special-card">
+                          <div className="hc-home-special-copy">
+                            <b>{S.special.item.title}</b>
+                            <span>{S.special.item.subtitle}</span>
+                          </div>
+                          {S.special.item.cta_label&&<button type="button" onClick={()=>openSpecialCta(S.special.item)}>{S.special.item.cta_label} →</button>}
+                          <button type="button" className="hc-home-dismiss" aria-label="Dismiss" onClick={(e)=>{e.stopPropagation();e.currentTarget.closest('.hc-home-special-card').style.display='none';}}>×</button>
+                        </div>
+                      ):<Empty label="No HOWDI Special right now."/>}
+                    </section>
+
+                    {/* 2. Hero / Media of the Day (admin-managed, with intelligent fallback) */}
+                    <section className="hc-home-section hc-home-hero">
+                      {S.hero?.error?<SectionError onRetry={()=>loadConnectHomeSections(["hero"])}/>:!S.hero?<Skeleton/>:S.hero.item?(
+                        <div className="hc-home-hero-card" onClick={()=>S.hero.source==="admin"?openSpecialCta(S.hero.item):openPost(S.hero.item)}>
+                          <small>Media of the Day</small>
+                          {S.hero.item.media_type==="IMAGE"&&S.hero.item.media_url&&<img className="hc-home-hero-media" src={S.hero.item.media_url} alt=""/>}
+                          {S.hero.item.media_type==="VIDEO"&&S.hero.item.media_url&&<video className="hc-home-hero-media" src={S.hero.item.media_url} muted playsInline/>}
+                          <h3>{S.hero.item.title||S.hero.item.article_title||(S.hero.item.body_text||S.hero.item.content||"").slice(0,120)}</h3>
+                          {S.hero.source==="admin"?(S.hero.item.cta_label&&<button type="button" onClick={(e)=>{e.stopPropagation();openSpecialCta(S.hero.item);}}>{S.hero.item.cta_label} →</button>):<span>By {who(S.hero.item)}</span>}
+                        </div>
+                      ):<Empty label="Nothing featured yet."/>}
+                    </section>
+
+                    {/* 3. Stories */}
+                    <section className="hc-home-section hc-home-stories">
+                      <h4>Stories</h4>
+                      {S.stories?.error?<SectionError onRetry={()=>loadConnectHomeSections(["stories"])}/>:!S.stories?<Skeleton rows={1}/>:S.stories.items.length?(
+                        <Rail label="Stories" className="hc-home-stories-row">
+                          {S.stories.items.map(s=><button type="button" key={s.id} className="hc-home-story" onClick={()=>openNavigationOSArea("connect","stories")}>
+                            <span className="hc-home-story-ring">{avatarInitial(s)}</span>
+                            <small>{s.mine?"You":who(s)}</small>
+                          </button>)}
+                        </Rail>
+                      ):<Empty label="No stories yet. Share the first moment of your day."/>}
+                    </section>
+
+                    {/* 4. For You */}
+                    <section className="hc-home-section hc-home-foryou">
+                      <h4>For You</h4>
+                      {S.forYou?.error?<SectionError onRetry={()=>loadConnectHomeSections(["forYou"])}/>:!S.forYou?<Skeleton rows={3}/>:S.forYou.items.length?(
+                        <div className="hc-home-list">
+                          {S.forYou.items.map(p=><article key={p.id} className="hc-home-post-card" onClick={()=>openPost(p)}>
+                            <span className="hc-home-post-author">{who(p)}{p.from_followed&&<em>· Following</em>}</span>
+                            <p>{p.article_title||(p.content||"").slice(0,160)}</p>
+                            <span className="hc-home-post-meta">♥ {p.reaction_count||0} · ✎ {p.comment_count||0}</span>
+                          </article>)}
+                          {S.forYou.nextCursor&&<button type="button" className="hc-home-more" onClick={loadConnectHomeForYouMore} disabled={L.forYou}>{L.forYou?"Loading…":"Load more"}</button>}
+                        </div>
+                      ):<Empty label={loggedIn?"Follow people and interests to fill your feed.":"Log in to get a feed tailored to you — for now, here's what's trending on HOWDI Connect."}/>}
+                    </section>
+
+                    {/* 5. Vibe discovery */}
+                    <section className="hc-home-section hc-home-vibes">
+                      <h4>Vibe</h4>
+                      {S.vibes?.error?<SectionError onRetry={()=>loadConnectHomeSections(["vibes"])}/>:!S.vibes?<Skeleton rows={1}/>:S.vibes.items.length?(
+                        <Rail label="Vibe" className="hc-home-vibe-row">
+                          {S.vibes.items.map(v=><button type="button" key={v.id} className="hc-home-vibe-card" onClick={()=>openNavigationOSArea("connect","vibe")}>
+                            {v.coverUrl?<img src={v.coverUrl} alt=""/>:<span className="hc-home-vibe-fallback">▷</span>}
+                            <small>{v.creatorPublicUsername?`@${v.creatorPublicUsername}`:v.creatorName}</small>
+                          </button>)}
+                        </Rail>
+                      ):<Empty label="No Vibes yet — be the first to share one."/>}
+                    </section>
+
+                    {/* 6. Continue Watching (Vibe watch progress — visually distinct: thumbnail + progress bar) */}
+                    <section ref={lazyRef("continueWatching")} className="hc-home-section hc-home-continue-watching">
+                      <h4>Continue Watching</h4>
+                      {S.continueWatching?.error?<SectionError onRetry={()=>loadConnectHomeSections(["continueWatching"])}/>:!S.continueWatching?<Skeleton rows={2}/>:S.continueWatching.items.length?(
+                        <Rail label="Continue Watching" className="hc-home-watch-row">
+                          {S.continueWatching.items.map(v=><button type="button" key={v.vibeId} className="hc-home-watch-card" onClick={()=>openNavigationOSArea("connect","vibe")}>
+                            <span className="hc-home-watch-thumb">
+                              {v.coverUrl?<img src={v.coverUrl} alt=""/>:<span className="hc-home-vibe-fallback">▷</span>}
+                              <span className="hc-home-watch-progress"><span style={{width:`${Math.min(100,Math.max(0,v.completionPercent||0))}%`}}/></span>
+                            </span>
+                            <small>{v.creatorPublicUsername?`@${v.creatorPublicUsername}`:v.creatorName}</small>
+                          </button>)}
+                        </Rail>
+                      ):<Empty label={loggedIn?"Watch a Vibe and your progress will appear here.":"Log in to pick up Vibes where you left off."}/>}
+                    </section>
+
+                    {/* 7. Recommended Creators */}
+                    <section ref={lazyRef("recommendedCreators")} className="hc-home-section hc-home-creators">
+                      <h4>Recommended Creators</h4>
+                      {S.recommendedCreators?.error?<SectionError onRetry={()=>loadConnectHomeSections(["recommendedCreators"])}/>:!S.recommendedCreators?<Skeleton rows={2}/>:S.recommendedCreators.items.length?(
+                        <Rail label="Recommended Creators" className="hc-home-people-row">
+                          {S.recommendedCreators.items.map(p=><div key={p.public_username} className="hc-home-person-card" onClick={()=>openPersonProfile(p)}>
+                            <span className="hc-home-avatar">{p.profile_image?<img src={p.profile_image} alt=""/>:avatarInitial(p)}</span>
+                            <b>@{p.public_username}</b>
+                            <small>{p.profession_title||p.professional_category||"Creator"}</small>
+                            {followBtn(p)}
+                          </div>)}
+                        </Rail>
+                      ):<Empty label="No creators to recommend yet."/>}
+                    </section>
+
+                    {/* 8. Suggested People */}
+                    <section ref={lazyRef("suggestedPeople")} className="hc-home-section hc-home-people">
+                      <h4>Suggested People</h4>
+                      {S.suggestedPeople?.error?<SectionError onRetry={()=>loadConnectHomeSections(["suggestedPeople"])}/>:!S.suggestedPeople?<Skeleton rows={2}/>:S.suggestedPeople.items.length?(
+                        <Rail label="Suggested People" className="hc-home-people-row">
+                          {S.suggestedPeople.items.map(p=><div key={p.public_username} className="hc-home-person-card" onClick={()=>openPersonProfile(p)}>
+                            <span className="hc-home-avatar">{p.profile_image?<img src={p.profile_image} alt=""/>:avatarInitial(p)}</span>
+                            <b>@{p.public_username}</b>
+                            <small>{p.profession_title||"HOWDI member"}</small>
+                            {followBtn(p)}
+                          </div>)}
+                        </Rail>
+                      ):<Empty label="No suggestions right now."/>}
+                    </section>
+
+                    {/* 9. Communities */}
+                    <section ref={lazyRef("communities")} className="hc-home-section hc-home-communities">
+                      <h4>Communities</h4>
+                      {S.communities?.error?<SectionError onRetry={()=>loadConnectHomeSections(["communities"])}/>:!S.communities?<Skeleton rows={2}/>:S.communities.items.length?(
+                        <Rail label="Communities" className="hc-home-communities-row">
+                          {S.communities.items.map(c=><button type="button" key={c.id} className="hc-home-community-card" onClick={()=>openNavigationOSArea("connect","communities")}>
+                            <b>{c.name}</b>
+                            <small>{c.member_count||0} members</small>
+                          </button>)}
+                        </Rail>
+                      ):<Empty label="No public communities yet."/>}
+                    </section>
+
+                    {/* 10. Trending Articles */}
+                    <section ref={lazyRef("trendingArticles")} className="hc-home-section hc-home-articles">
+                      <h4>Trending Articles</h4>
+                      {S.trendingArticles?.error?<SectionError onRetry={()=>loadConnectHomeSections(["trendingArticles"])}/>:!S.trendingArticles?<Skeleton rows={2}/>:S.trendingArticles.items.length?(
+                        <div className="hc-home-list">
+                          {S.trendingArticles.items.map(a=><article key={a.id} className="hc-home-article-card" onClick={()=>openConnectArticle(a)}>
+                            <b>{a.article_title}</b>
+                            <span>{a.article_excerpt}</span>
+                            <small>By {who(a)} · {a.view_count||0} views</small>
+                          </article>)}
+                        </div>
+                      ):<Empty label="No trending articles yet."/>}
+                    </section>
+
+                    {/* 11. Shop recommendations */}
+                    <section ref={lazyRef("shopRecommendations")} className="hc-home-section hc-home-shop">
+                      <h4>Shop</h4>
+                      {S.shopRecommendations?.error?<SectionError onRetry={()=>loadConnectHomeSections(["shopRecommendations"])}/>:!S.shopRecommendations?<Skeleton rows={2}/>:S.shopRecommendations.items.length?(
+                        <Rail label="Shop" className="hc-home-shop-row">
+                          {S.shopRecommendations.items.map(p=><button type="button" key={p.id} className="hc-home-shop-card" onClick={()=>openProductDetails(p)}>
+                            <span className="hc-home-pillar-tag">Shop</span>
+                            <b>{p.name}</b>
+                            <span className="hc-home-price">₹{p.price}</span>
+                            <em className="hc-home-cta">View Product →</em>
+                          </button>)}
+                        </Rail>
+                      ):<Empty label="No products to recommend yet."/>}
+                    </section>
+
+                    {/* 12. Works recommendations */}
+                    <section ref={lazyRef("worksRecommendations")} className="hc-home-section hc-home-works">
+                      <h4>Works</h4>
+                      {S.worksRecommendations?.error?<SectionError onRetry={()=>loadConnectHomeSections(["worksRecommendations"])}/>:!S.worksRecommendations?<Skeleton rows={2}/>:S.worksRecommendations.items.length?(
+                        <Rail label="Works" className="hc-home-works-row">
+                          {S.worksRecommendations.items.map(w=><button type="button" key={w.id} className="hc-home-works-card" onClick={()=>openNavigationOSArea("works","home")}>
+                            <span className="hc-home-pillar-tag">Works</span>
+                            <b>{w.full_name}</b>
+                            <span>{w.requested_skill||"HOWDI Works"}</span>
+                            <small>★ {Number(w.rating||0).toFixed(1)}</small>
+                            <em className="hc-home-cta">View Service →</em>
+                          </button>)}
+                        </Rail>
+                      ):<Empty label="No Works recommendations yet."/>}
+                    </section>
+
+                    {/* 13. Learn recommendations */}
+                    <section ref={lazyRef("learnRecommendations")} className="hc-home-section hc-home-learn">
+                      <h4>Learn & Earn</h4>
+                      {S.learnRecommendations?.error?<SectionError onRetry={()=>loadConnectHomeSections(["learnRecommendations"])}/>:!S.learnRecommendations?<Skeleton rows={2}/>:S.learnRecommendations.items.length?(
+                        <Rail label="Learn and Earn" className="hc-home-learn-row">
+                          {S.learnRecommendations.items.map(c=><button type="button" key={c.id} className="hc-home-learn-card" onClick={()=>openNavigationOSArea("learn","home")}>
+                            <span className="hc-home-pillar-tag">Learn & Earn</span>
+                            <b>{c.title}</b>
+                            <small>{c.category} · {c.level}</small>
+                            <em className="hc-home-cta">View Course →</em>
+                          </button>)}
+                        </Rail>
+                      ):<Empty label="No courses to recommend yet."/>}
+                    </section>
+
+                    {/* 14. Recent Activity */}
+                    <section ref={lazyRef("recentActivity")} className="hc-home-section hc-home-activity">
+                      <h4>Recent Activity</h4>
+                      {S.recentActivity?.error?<SectionError onRetry={()=>loadConnectHomeSections(["recentActivity"])}/>:!S.recentActivity?<Skeleton rows={2}/>:S.recentActivity.items.length?(
+                        <div className="hc-home-list">
+                          {S.recentActivity.items.map(n=><div key={n.id} className={`hc-home-activity-row${n.is_read?"":" unread"}`}>
+                            <span>{who(n)}</span>
+                            <p>{n.message}</p>
+                          </div>)}
+                        </div>
+                      ):<Empty label={loggedIn?"No recent activity yet. Follow, comment or share to see it here.":"Log in to see follows, comments and replies as they happen."}/>}
+                    </section>
+
+                    {/* 15. Daily Quote (admin-managed) */}
+                    <section ref={lazyRef("dailyQuote")} className="hc-home-section hc-home-quote">
+                      {S.dailyQuote?.error?<SectionError onRetry={()=>loadConnectHomeSections(["dailyQuote"])}/>:!S.dailyQuote?<Skeleton/>:S.dailyQuote.item?(
+                        <blockquote>“{S.dailyQuote.item.quote_text}”<cite>— {S.dailyQuote.item.author}</cite></blockquote>
+                      ):null}
+                    </section>
+
+                    {/* 16. Continue Your Journey (wide utility/action cards — visually distinct from Continue Watching) */}
+                    <section ref={lazyRef("continueYourJourney")} className="hc-home-section hc-home-journey">
+                      <h4>Continue Your Journey</h4>
+                      {S.continueYourJourney?.error?<SectionError onRetry={()=>loadConnectHomeSections(["continueYourJourney"])}/>:!S.continueYourJourney?<Skeleton rows={2}/>:S.continueYourJourney.items.length?(
+                        <div className="hc-home-journey-list">
+                          {S.continueYourJourney.items.map(e=><button type="button" key={e.course_id} className="hc-home-journey-card" onClick={()=>openNavigationOSArea("learn","home")}>
+                            <span className="hc-home-pillar-tag">Learn & Earn</span>
+                            <b>{e.title}</b>
+                            <span className="hc-home-journey-bar"><span style={{width:`${Math.min(100,Math.max(0,e.progress||0))}%`}}/></span>
+                            <small>{e.progress||0}% complete</small>
+                          </button>)}
+                        </div>
+                      ):<Empty label={loggedIn?"Nothing in progress right now — start a course, booking or unfinished action from Learn & Earn.":"Log in to resume courses, bookings and unfinished HOWDI actions."}/>}
+                    </section>
+
+                  </div>
+                  );
+                })()}
                 {connectView==="feed" && <div className="hc2-feed-layout">
                   <section className="hc2-feed-col">
                     {connectContentMode==="posts"&&<>
@@ -19103,7 +19974,12 @@ const removeNotification = async (notificationId) => {
                       <span>✨ {connectPosts.filter(p=>p.intent_type==="COLLAB"&&p.intent_status==="OPEN").length} collaborations</span>
                       <span>📍 {connectPosts.filter(p=>p.intent_type==="LOCAL"&&p.intent_status==="OPEN").length} local calls</span>
                     </div>}
-                    {connectPosts.filter(post=>!connectMemberFeedOnly||post.subscribers_only).map(post=><article className="hc2-post" key={post.id} onMouseEnter={()=>registerConnectPostView(post.id)}>
+                    {insertFeedCard(
+                      connectPosts.filter(post=>!connectMemberFeedOnly||post.subscribers_only),
+                      <HowdiForFeedCard onNavigate={navigateHowdiFor} onDismiss={()=>setProfilePreferences(v=>({...v,howdiForFeedDismissed:true}))}/>
+                    ).filter(item=>!(item&&item.__howdi_for_card__)||!profilePreferences.howdiForFeedDismissed).map(post=>post&&post.__howdi_for_card__?
+                      <div key="__howdi_for_card__">{post.card}</div>:
+                      <article className="hc2-post" key={post.id} onMouseEnter={()=>registerConnectPostView(post.id)}>
                       <div className="hc2-post-head"><div className="hc2-avatar">{String(post.full_name||"H")[0]}</div><div><b>{post.full_name||"HOWDI Member"} {(post.verified||post.is_verified) && <i className="hc5-verified" title="Verified">✓</i>}</b><small>@{post.public_username||post.username||"member"} · {formatConnectDate(post.created_at)}</small></div><button>•••</button></div>
                       <div className="hc130-post-meta"><span>{connectProfileCategoryLabel(post.post_type||"POST")}</span>{post.knowledge_domain&&post.knowledge_domain!=="GENERAL"&&<span>{connectProfileCategoryLabel(post.knowledge_domain)}</span>}{post.target_audience&&post.target_audience!=="EVERYONE"&&<span>For {connectProfileCategoryLabel(post.target_audience)}</span>}{post.difficulty_level&&post.difficulty_level!=="ALL"&&<span>{connectProfileCategoryLabel(post.difficulty_level)}</span>}{post.location_name&&<span>📍 {post.location_name}</span>}</div>{post.subscribers_only&&<span className="hc104-post-badge">⭐ MEMBERS ONLY</span>}{post.article_title&&<h2 className="hc130-article-title">{post.article_title}</h2>}{["ARTICLE","EDUCATION","STUDENT_NOTE","TEACHER_LESSON"].includes(post.post_type)&&<div className="hc131-reader-meta"><span>📖 {connectReadingMinutes(`${post.article_title||""} ${post.content||""}`)} min read</span>{post.subject_name&&<span>{post.subject_name}</span>}{post.class_level&&<span>{post.class_level}</span>}{post.series_part&&<span>Part {post.series_part}</span>}</div>}{post.learning_objective&&<div className="hc131-learning-card"><b>🎯 Learning objective</b><p>{post.learning_objective}</p></div>}<p onClick={()=>logConnectPostView(post,false)}>{post.content}</p>{post.key_takeaway&&<div className="hc131-takeaway"><b>💡 Key takeaway</b><p>{post.key_takeaway}</p></div>}{post.media_data&&(String(post.media_type||"").startsWith("video/")?<video src={post.media_data} controls playsInline style={{display:"block",width:"100%",maxHeight:560,marginTop:12,borderRadius:16,background:"#111"}}/>:<img src={post.media_data} alt="HOWDI Connect post" style={{display:"block",width:"100%",maxHeight:560,objectFit:"contain",marginTop:12,borderRadius:16}}/>)}{Array.isArray(post.media_gallery)&&post.media_gallery.length>0&&<div className={`hc130-gallery-view n${Math.min(6,post.media_gallery.length)}`}>{post.media_gallery.map((src,i)=><img src={src} key={i} alt={`Post ${i+1}`}/>)}</div>}{post.topics&&<div className="hc130-topics">{String(post.topics).split(/[,#]/).map(x=>x.trim()).filter(Boolean).slice(0,8).map(x=><span key={x}>#{x.replace(/\s+/g,"")}</span>)}</div>}{post.resource_url&&<div className="hc130-resource"><span>📚</span><div><b>{post.resource_title||"Learning resource"}</b><small>{post.source_url?"Includes source/reference":"Shared resource"}</small></div><button onClick={()=>window.open(post.resource_url,"_blank","noopener,noreferrer")}>Open resource</button></div>}{post.source_url&&<div className="hc130-source">🔗 <button onClick={()=>window.open(post.source_url,"_blank","noopener,noreferrer")}>View source / reference</button></div>}{post.collaborator_name&&<div className="hc130-collab">🤝 With {post.collaborator_name} {post.collaboration_status==="ACCEPTED"?"✓":`· ${post.collaboration_status}`}</div>}<div className="hc131-credibility"><span>{post.source_kind==="SOURCE_PROVIDED"?"✓ Source provided":post.source_kind==="PERSONAL_OPINION"?"💬 Personal opinion":"🌐 Community knowledge"}</span>{Number(post.edit_count)>0&&<span>Edited {post.edit_count}×</span>}{Number(post.view_count)>0&&<span>👁 {post.view_count}</span>}</div><div className="hc132-intelligence">{post.discovery_score!==undefined&&<span>✦ Discovery {post.discovery_score}</span>}{post.knowledge_chain_label&&<span>🔗 {post.knowledge_chain_label}{post.series_part?` · Part ${post.series_part}`:""}</span>}{post.language_code&&post.language_code!=="en"&&<span>🌐 {String(post.language_code).toUpperCase()}</span>}{post.local_city&&<span>📍 {post.local_city}</span>}{post.opportunity_type&&<span className="opportunity">🎯 {connectProfileCategoryLabel(post.opportunity_type)} · {post.opportunity_location||"Open"}</span>}</div>{post.post_type==="QUIZ"&&post.quiz_question&&<div className="hc131-quiz"><b>🧠 {post.quiz_question}</b>{(post.quiz_options||[]).map((q,i)=><button key={i} disabled={!!connectQuizResult[post.id]} onClick={()=>attemptConnectQuiz(post,i)}>{String.fromCharCode(65+i)}. {q}</button>)}{connectQuizResult[post.id]&&<div className={connectQuizResult[post.id].correct?"ok":"bad"}>{connectQuizResult[post.id].correct?"✓ Correct":"✕ Try reviewing this concept"}{connectQuizResult[post.id].explanation&&<small>{connectQuizResult[post.id].explanation}</small>}</div>}</div>}<div className="hc132-value-actions"><button onClick={()=>voteConnectUsefulness(post,1)}>👍 Useful {post.useful_count||0}</button><button onClick={()=>voteConnectUsefulness(post,-1)}>👎 {post.not_useful_count||0}</button><button className={post.learn_later?"active":""} onClick={()=>toggleConnectLearnLater(post)}>⏳ {post.learn_later?"Learn later ✓":"Learn later"}</button>{["EDUCATION","ARTICLE","STUDENT_NOTE","TEACHER_LESSON","RESOURCE"].includes(post.post_type)&&<button onClick={()=>{setConnectTeachBackPost(post);setConnectTeachBackText("")}}>🗣 Teach Back {post.teachback_count||0}</button>}{post.learning_progress==="COMPLETED"&&<button onClick={()=>{setConnectProofPost(post);setConnectProofText("")}}>🏅 Proof of Learning</button>}{post.knowledge_domain&&post.knowledge_domain!=="GENERAL"&&<button onClick={()=>toggleConnectDomainFollow(post.knowledge_domain)}>＋ Follow {connectProfileCategoryLabel(post.knowledge_domain)}</button>}<button onClick={()=>{setConnectCorrectionPost(post);setConnectCorrectionText("");setConnectCorrectionEvidence("")}}>🧭 Correct knowledge</button><button onClick={()=>loadConnectFactCheckTrail(post)}>🔎 Fact-check trail</button>{post.opportunity_type&&<button onClick={()=>createConnectInviteLoop("OPPORTUNITY",post.id)}>👥 Invite</button>}</div>{["EDUCATION","STUDENT_NOTE","TEACHER_LESSON","ARTICLE","RESOURCE","FLASHCARD"].includes(post.post_type)&&<div className="hc131-progress"><span>Learning status: {connectProfileCategoryLabel(post.learning_progress||"NOT_STARTED")}</span><button onClick={()=>setConnectLearningProgress(post,"LEARNING")}>Learning</button><button onClick={()=>{setConnectLearningProgress(post,"COMPLETED");logConnectPostView(post,true)}}>✓ Completed</button></div>}
                       {post.intent_type&&post.intent_type!=="SHARE"&&<div className={`hc9-open-call ${String(post.intent_status||"OPEN").toLowerCase()}`}>
@@ -19125,7 +20001,7 @@ const removeNotification = async (notificationId) => {
                       {!connectPosts.some(post=>String(post.media_type||"").startsWith("video/"))&&<div className="hc2-empty">No videos yet. Create the first HOWDI video.</div>}
                     </div>}
 
-                    {connectContentMode==="vibe" && <HowdiVibeCore legacyPosts={connectPosts} courseOptions={learningCourses} serviceOptions={liveWorkCategories} communityOptions={[...(connectBootstrap.communities||[]),...connectGCSpaces].filter((x,i,a)=>a.findIndex(y=>String(y.id||y.name)===String(x.id||x.name))===i)} onOpenShop={()=>openNavigationOSArea("shop","home")} onOpenCourse={(id)=>{const course=id?learningCourses.find(c=>String(c.id)===String(id)):null;setConnectModalOpen(false);setNavigationOSArea("learn");setLearningBrowseOpen(true);if(course)openCourseDetails(course);else setLearningPortalView("discover")}} onOpenService={(id)=>{const service=id?liveWorkCategories.find(c=>String(c.id||c.name)===String(id)):null;setConnectModalOpen(false);openWorksFind(service||null)}} onOpenCommunity={(id)=>{const allCommunities=[...(connectBootstrap.communities||[]),...connectGCSpaces];const target=id?allCommunities.find(c=>String(c.id||c.slug||c.name)===String(id)):null;setNavigationOSArea("connect");setConnectView("communities");setConnectCommunityView(String(target?.space_type||target?.community_type||"").toUpperCase()==="CHANNEL"?"channels":"groups");setConnectContentMode("posts");setConnectModalOpen(true);if(target&&target.id)setTimeout(()=>openConnectGCSpace(target),0)}} onAddToCart={addToCart} onBuyNow={buyNow} onDirectCheckoutToken={setVibeDirectCheckoutToken} onToggleWishlist={toggleWishlist} wishlist={wishlist} onCreate={()=>{setConnectCreateType("camera");setConnectPostMedia(null);setConnectPostMediaPreview("");setConnectCreateOpen(true)}}/>}
+                    {connectContentMode==="vibe" && <HowdiVibeCore legacyPosts={connectPosts} courseOptions={learningCourses} serviceOptions={liveWorkCategories} communityOptions={[...(connectBootstrap.communities||[]),...connectGCSpaces].filter((x,i,a)=>a.findIndex(y=>String(y.id||y.name)===String(x.id||x.name))===i)} onOpenShop={()=>openNavigationOSArea("shop","home")} onOpenCourse={(id)=>{const course=id?learningCourses.find(c=>String(c.id)===String(id)):null;setConnectModalOpen(false);setNavigationOSArea("learn");setLearningBrowseOpen(true);if(course)openCourseDetails(course);else setLearningPortalView("discover")}} onOpenService={(id)=>{const service=id?liveWorkCategories.find(c=>String(c.id||c.name)===String(id)):null;setConnectModalOpen(false);openWorksFind(service||null)}} onOpenCommunity={(id)=>{const allCommunities=[...(connectBootstrap.communities||[]),...connectGCSpaces];const target=id?allCommunities.find(c=>String(c.id||c.slug||c.name)===String(id)):null;setNavigationOSArea("connect");setConnectView("communities");setConnectCommunityView(String(target?.space_type||target?.community_type||"").toUpperCase()==="CHANNEL"?"channels":"groups");setConnectContentMode("posts");setConnectModalOpen(true);if(target&&target.id)setTimeout(()=>openConnectGCSpace(target),0)}} onAddToCart={addToCart} onBuyNow={buyNow} onDirectCheckoutToken={setVibeDirectCheckoutToken} onToggleWishlist={toggleWishlist} wishlist={wishlist} onCreate={()=>{setConnectCreateType("camera");setConnectPostMedia(null);setConnectPostMediaPreview("");setConnectCreateOpen(true)}} focusVibeCode={connectVibeFocusCode} onFocusVibeConsumed={()=>setConnectVibeFocusCode("")}/>}
 
                     {connectContentMode==="live" && <div className="hc5-live-home">
                       <div className="hc5-vibe-head"><div><small>LIVE ROOMS</small><h3>HOWDI Live</h3><p>Live room listings created by HOWDI members.</p></div><button onClick={()=>{setConnectView("communities");setConnectCommunityView("live")}}>Open Live rooms</button></div>
@@ -19159,7 +20035,7 @@ const removeNotification = async (notificationId) => {
                 </div>}
 
                 {connectView==="discover" && <section className="hc2-page">
-                  <div className="hc2-page-head"><div><small>EXPLORE</small><h2>Find your next interest</h2><p>Creators, conversations and communities selected around what you enjoy.</p></div></div><div className="hc112-discover-filter"><select value={connectDiscoverCategory} onChange={e=>setConnectDiscoverCategory(e.target.value)}><option value="">All categories</option>{["EDUCATION","STUDENT","INSTITUTE","SERVICE_JOB","BUSINESS","CREATOR","TECHNOLOGY","AI","QUANTUM_COMPUTING","PUBLIC_AFFAIRS","POLITICS","MUSIC","COMEDY","TRAVEL","SCIENCE"].map(x=><option key={x} value={x}>{connectProfileCategoryLabel(x)}</option>)}</select><select value={connectDiscoverProfileType} onChange={e=>setConnectDiscoverProfileType(e.target.value)}><option value="">All profile types</option>{["PERSONAL","PROFESSIONAL","CREATOR","INSTITUTION","STUDENT","ORGANIZATION"].map(x=><option key={x} value={x}>{connectProfileCategoryLabel(x)}</option>)}</select><select value={connectDiscoverPresence} onChange={e=>setConnectDiscoverPresence(e.target.value)}><option value="ALL">Any activity</option><option value="ONLINE">Active now</option><option value="LIVE">Live now</option></select><button onClick={loadConnectProfileRecommendations}>Refresh smart matches</button></div><div style={{display:"grid",gap:10,marginBottom:20}}><div className="hc2-section-head"><b>People you may know</b></div>{filteredConnectPeople().slice(0,12).map(person=><article key={person.id} style={{display:"grid",gridTemplateColumns:"auto 1fr auto auto",gap:10,alignItems:"center",padding:12,border:"1px solid #e6ebe7",borderRadius:14,background:"#fff"}}><div className="hc2-avatar">{String(person.full_name||"H")[0]}</div><span className="hc112-discover-person"><button className="hc110-person-name" onClick={()=>openConnectPublicProfile(person)}>{person.full_name||"HOWDI Member"} {person.verified&&<i className="hc5-verified" title="Verified HOWDI identity">✓</i>}</button><small>{person.profession_title||connectProfileCategoryLabel(person.professional_category||"GENERAL")} · {person.is_live_now?"🔴 Live":person.presence_status==="ONLINE"?"🟢 Active":person.public_username?`@${person.public_username}`:"HOWDI member"}</small></span><button type="button" onClick={()=>toggleConnectFollow(person)}>{isConnectFollowing(person)?"Unfollow":"Follow"}</button><button type="button" onClick={()=>startConnectConversation(person)}>Message</button></article>)}</div>
+                  <div className="hc2-page-head"><div><small>EXPLORE</small><h2>Find your next interest</h2><p>Creators, conversations and communities selected around what you enjoy.</p></div></div><div className="hc112-discover-filter"><select value={connectDiscoverCategory} onChange={e=>setConnectDiscoverCategory(e.target.value)}><option value="">All categories</option>{["EDUCATION","STUDENT","INSTITUTE","SERVICE_JOB","BUSINESS","CREATOR","TECHNOLOGY","AI","QUANTUM_COMPUTING","PUBLIC_AFFAIRS","POLITICS","MUSIC","COMEDY","TRAVEL","SCIENCE"].map(x=><option key={x} value={x}>{connectProfileCategoryLabel(x)}</option>)}</select><select value={connectDiscoverProfileType} onChange={e=>setConnectDiscoverProfileType(e.target.value)}><option value="">All profile types</option>{["PERSONAL","PROFESSIONAL","CREATOR","INSTITUTION","STUDENT","ORGANIZATION"].map(x=><option key={x} value={x}>{connectProfileCategoryLabel(x)}</option>)}</select><select value={connectDiscoverPresence} onChange={e=>setConnectDiscoverPresence(e.target.value)}><option value="ALL">Any activity</option><option value="ONLINE">Active now</option><option value="LIVE">Live now</option></select><button onClick={loadConnectProfileRecommendations}>Refresh smart matches</button></div><div style={{display:"grid",gap:10,marginBottom:20}}><div className="hc2-section-head"><b>People you may know</b></div>{filteredConnectPeople().slice(0,12).map(person=><article key={person.public_username||person.full_name} style={{display:"grid",gridTemplateColumns:"auto 1fr auto auto",gap:10,alignItems:"center",padding:12,border:"1px solid #e6ebe7",borderRadius:14,background:"#fff"}}><div className="hc2-avatar">{String(person.full_name||"H")[0]}</div><span className="hc112-discover-person"><button className="hc110-person-name" onClick={()=>openConnectPublicProfile(person)}>{person.full_name||"HOWDI Member"} {person.verified&&<i className="hc5-verified" title="Verified HOWDI identity">✓</i>}</button><small>{person.profession_title||connectProfileCategoryLabel(person.professional_category||"GENERAL")} · {person.is_live_now?"🔴 Live":person.presence_status==="ONLINE"?"🟢 Active":person.public_username?`@${person.public_username}`:"HOWDI member"}</small></span>{/* K5B CLOSURE: Discover follow/message actions are now @public_username-addressed, never a raw numeric id. */}<button type="button" onClick={()=>toggleConnectFollowByUsername(person.public_username,person.full_name)}>{person.following?"Unfollow":person.follow_requested?"Requested":"Follow"}</button><button type="button" onClick={()=>startConnectConversation(person)}>Message</button></article>)}</div>
                   <div className="hc2-explore-hero"><div><span>FEATURED TODAY</span><h3>Original ideas live here.</h3><p>Meet independent creators and the stories behind what they build.</p><button>Explore creators</button></div><div className="hc2-explore-art"><i>H</i></div></div>
                   <div className="hc2-section-head"><b>Explore by interest</b></div>
                   <div className="hc2-interest-grid">{[["Handmade","Craft, crochet & original work"],["Local","People and stories near you"],["Learning","Skills worth sharing"],["Design","Ideas, spaces & visual culture"],["Sustainable","Thoughtful ways to create"],["Community","Conversations that connect"]].map(([a,b])=><button key={a}><i>{a[0]}</i><span><b>{a}</b><small>{b}</small></span><em>→</em></button>)}</div>
@@ -19179,7 +20055,7 @@ const removeNotification = async (notificationId) => {
                     {!connectConversations.length&&<div className="hc2-empty">No chats yet. Find someone in Explore.</div>}
                     {connectConversations.map(c=><button className={Number(connectActiveConversation?.id)===Number(c.id)?"active":""} key={c.id} onClick={()=>openConnectConversation(c)}><div className="hc2-avatar">{String(c.full_name||"H")[0]}</div><span><b>{c.full_name||"HOWDI Member"}</b><small>{c.last_message||c.public_username||"Start chatting"}</small></span><em>{Number(c.unread_count||0)>0?c.unread_count:""}</em></button>)}
                   </aside>
-                  <div className="hc2-chat">{connectActiveConversation?<><header><div className="hc2-avatar">{String(connectActiveConversation.full_name||"H")[0]}</div><span><b>{connectActiveConversation.full_name||"HOWDI Member"}</b><small>{connectActiveConversation.public_username?`@${connectActiveConversation.public_username}`:"HOWDI Connect"}</small></span></header><div className="hc2-chat-body">{connectMessages.map(m=><div key={m.id} className={Number(m.sender_user_id)===Number(currentUser?.id||currentUser?.user_id)?"hc2-bubble mine":"hc2-bubble theirs"}>{m.deleted_at?<i>Message deleted</i>:<>{m.message_text}{m.edited_at&&<em style={{fontSize:9,opacity:.65,marginLeft:6}}>(edited)</em>}<div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:4}}>{Object.entries(m.reactions||{}).map(([uid,emoji])=><span key={uid}>{emoji}</span>)}</div><div style={{display:"flex",gap:4,marginTop:5}}>{["👍","❤️","😂"].map(e=><button key={e} type="button" onClick={()=>reactConnectMessage(m,e)} style={{border:0,background:"transparent",cursor:"pointer"}}>{e}</button>)}{Number(m.sender_user_id)===Number(currentUser?.id||currentUser?.user_id)&&<><button type="button" onClick={()=>{setConnectEditingMessage(m);setConnectMessageText(m.message_text)}} style={{border:0,background:"transparent",cursor:"pointer"}}>Edit</button><button type="button" onClick={()=>deleteConnectMessage(m)} style={{border:0,background:"transparent",cursor:"pointer"}}>Delete</button></>}</div></>}<small>{formatConnectDate(m.created_at)}{m.expires_at?` · expires ${formatConnectDate(m.expires_at)}`:""}</small></div>)}</div><footer style={{position:"relative"}}><button type="button" onClick={()=>setConnectEmojiOpen(v=>!v)}>😊</button>{connectEmojiOpen&&<div style={{position:"absolute",bottom:"52px",left:8,display:"flex",gap:6,padding:8,background:"#fff",border:"1px solid #e5e9e6",borderRadius:12,zIndex:5}}>{["😀","😂","😍","👍","🙏","🔥","🎉","❤️"].map(e=><button type="button" key={e} onClick={()=>{setConnectMessageText(v=>v+e);setConnectEmojiOpen(false)}} style={{fontSize:20,border:0,background:"transparent"}}>{e}</button>)}</div>}<input value={connectMessageText} onChange={e=>setConnectMessageText(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")sendConnectMessage()}} placeholder={connectEditingMessage?"Edit message…":"Message…"}/>{connectEditingMessage&&<button type="button" onClick={()=>{setConnectEditingMessage(null);setConnectMessageText("")}}>×</button>}<button className="send" onClick={sendConnectMessage}>↑</button></footer></>:<div className="hc2-empty">Select a conversation.</div>}</div>
+                  <div className="hc2-chat">{connectActiveConversation?<><header><div className="hc2-avatar">{String(connectActiveConversation.full_name||"H")[0]}</div><span><b>{connectActiveConversation.full_name||"HOWDI Member"}</b><small>{connectActiveConversation.public_username?`@${connectActiveConversation.public_username}`:"HOWDI Connect"}</small></span></header><div className="hc2-chat-body">{connectMessages.map(m=><div key={m.id} className={m.is_mine?"hc2-bubble mine":"hc2-bubble theirs"}>{m.deleted_at?<i>Message deleted</i>:<>{m.message_text}{renderConnectDMAttachment(m)}{m.edited_at&&<em style={{fontSize:9,opacity:.65,marginLeft:6}}>(edited)</em>}<div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:4}}>{Object.entries(m.reactions||{}).map(([uid,emoji])=><span key={uid}>{emoji}</span>)}</div><div style={{display:"flex",gap:4,marginTop:5}}>{["👍","❤️","😂"].map(e=><button key={e} type="button" onClick={()=>reactConnectMessage(m,e)} style={{border:0,background:"transparent",cursor:"pointer"}}>{e}</button>)}{m.is_mine&&<><button type="button" onClick={()=>{setConnectEditingMessage(m);setConnectMessageText(m.message_text)}} style={{border:0,background:"transparent",cursor:"pointer"}}>Edit</button><button type="button" onClick={()=>deleteConnectMessage(m)} style={{border:0,background:"transparent",cursor:"pointer"}}>Delete</button></>}</div></>}<small>{formatConnectDate(m.created_at)}{m.expires_at?` · expires ${formatConnectDate(m.expires_at)}`:""}</small></div>)}</div><footer style={{position:"relative",flexWrap:"wrap"}}>{connectAttachmentPickerRow()}<button type="button" onClick={()=>setConnectEmojiOpen(v=>!v)}>😊</button>{connectEmojiOpen&&<div style={{position:"absolute",bottom:"52px",left:8,display:"flex",gap:6,padding:8,background:"#fff",border:"1px solid #e5e9e6",borderRadius:12,zIndex:5}}>{["😀","😂","😍","👍","🙏","🔥","🎉","❤️"].map(e=><button type="button" key={e} onClick={()=>{setConnectMessageText(v=>v+e);setConnectEmojiOpen(false)}} style={{fontSize:20,border:0,background:"transparent"}}>{e}</button>)}</div>}<input value={connectMessageText} onChange={e=>setConnectMessageText(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")sendConnectMessage()}} placeholder={connectEditingMessage?"Edit message…":"Message…"}/>{connectEditingMessage&&<button type="button" onClick={()=>{setConnectEditingMessage(null);setConnectMessageText("")}}>×</button>}<button className="send" onClick={sendConnectMessage}>↑</button></footer></>:<div className="hc2-empty">Select a conversation.</div>}</div>
                   <aside className="hc2-chat-info"><div className="hc2-avatar big">{String(connectActiveConversation?.full_name||"H")[0]}</div><b>{connectActiveConversation?.full_name||"HOWDI Connect"}</b><small>{connectActiveConversation?.public_username?`@${connectActiveConversation.public_username}`:"Select a chat"}</small><label><span><b>Message mode</b><small>Keep or auto-delete messages after 24 hours.</small></span><select value={connectMessageMode} onChange={e=>{setConnectMessageMode(e.target.value);saveConnectPreferences({messageMode:e.target.value})}}><option>Keep</option><option>After viewing</option><option>24 hours</option></select></label></aside>
                 </section>}
 
@@ -19261,7 +20137,7 @@ const removeNotification = async (notificationId) => {
                             <div className="hc95-host-row">
                               <div className="hc95-host-avatar">{String(room.owner_name||"H").trim().slice(0,1).toUpperCase()}</div>
                               <div className="hc95-host-copy"><small>HOST</small><b>{room.owner_name||"HOWDI member"}</b></div>
-                              {!owner&&<button type="button" className={connectFollowing[String(room.owner_user_id)]||room.owner_following?"following":""} onClick={()=>toggleConnectFollow(connectSpaceHostPerson(room))}>{connectFollowing[String(room.owner_user_id)]||room.owner_following?"Following":"＋ Follow"}</button>}
+                              {!owner&&<button type="button" className={connectFollowing[String(room.owner_username||room.owner_user_id)]||room.owner_following?"following":""} onClick={()=>toggleConnectFollow(connectSpaceHostPerson(room))}>{connectFollowing[String(room.owner_username||room.owner_user_id)]||room.owner_following?"Following":"＋ Follow"}</button>}
                             </div>
 
                             <div className="hc94-space-meta">
@@ -19271,7 +20147,7 @@ const removeNotification = async (notificationId) => {
                             </div>
 
                             {Array.isArray(room.audience_preview)&&room.audience_preview.length>0&&<div className="hc95-audience-row">
-                              <div className="hc95-audience-faces">{room.audience_preview.slice(0,4).map((person,index)=><i key={`${person.user_id}-${index}`} title={person.full_name}>{String(person.full_name||"H").slice(0,1).toUpperCase()}</i>)}</div>
+                              <div className="hc95-audience-faces">{room.audience_preview.slice(0,4).map((person,index)=><i key={`${person.public_username||"member"}-${index}`} title={person.full_name}>{String(person.full_name||"H").slice(0,1).toUpperCase()}</i>)}</div>
                               <small>{live?"Listening now":"Community interest"}</small>
                             </div>}
 
@@ -19327,42 +20203,90 @@ const removeNotification = async (notificationId) => {
                   </div>}
                 </section>}
 
-                {connectView==="hpay" && <section className="hp-page hp-approved-home">
-                  <div className="hp-approved-heading">
-                    <div><h2>HPay</h2><b>Fast. Secure. For a Kinder Tomorrow.</b><p>Pay, receive, and manage your money — all in one place.</p></div>
-                    <div className="hp-purpose">Payments<br/>with Purpose <span>♡</span></div>
+                {/* HPAY_STAGE4_REVIEW_HARDENING */}
+                {/* HPAY_STAGE4A_FINAL_CORRECTION */}
+                {connectView==="hpay" && <section className="hp-page hp-approved-home hp-stage3">
+                  <div className="hp-approved-heading hp-stage3-heading">
+                    <div>
+                      <div className="hp-stage3-kicker">HOWDI HPAY</div>
+                      <h2>{hpayView==="home"?"HPay":hpayView==="transactions"?"Transaction History":hpayView==="requests"?"Payment Requests":"HPay Account"}</h2>
+                      <b>{hpayAccount?.hpay_id||"Secure customer payments"}</b>
+                      <p>{hpayView==="home"?"Pay, request and review verified HPay activity in one place.":hpayView==="transactions"?"Your wallet and provider-confirmed HPay activity.":hpayView==="requests"?"Requests you created or received, without exposing internal account IDs.":"Your HPay identity, limits and masked linked-bank details."}</p>
+                    </div>
+                    <div className="hp-purpose">Payments<br/>with Purpose <span aria-hidden="true">♡</span></div>
                   </div>
 
-                  <div className="hp-approved-grid">
-                    <main>
-                      <div className="hp-top-cards">
-                        <section className="hp-approved-balance">
-                          <div><small>Your HPay Balance</small><strong>₹{Number(walletBalance||0).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2})}</strong><span>⬡ &nbsp; Secure & Encrypted</span></div>
-                          <div className="hp-balance-actions"><button onClick={()=>{setHpayAction("self");setHpayAmount("");setHpayNote("")}}>＋ &nbsp; Add Money</button><button className="outline" onClick={()=>{setHpayAction("pay");setHpayAmount("");setHpayNote("")}}>➤ &nbsp; Send Money</button></div>
+                  <nav className="hp-stage3-tabs" aria-label="HPay views">
+                    {[["home","Overview"],["transactions","Transactions"],["requests","Requests"],["settings","Account & Bank"]].map(([id,label])=><button key={id} type="button" className={hpayView===id?"active":""} aria-current={hpayView===id?"page":undefined} onClick={()=>setHpayView(id)}>{label}</button>)}
+                  </nav>
+
+                  {hpayError&&<div className="hp-stage3-alert" role="alert"><b>HPay unavailable</b><span>{hpayError}</span><button type="button" onClick={loadHpayDashboard}>Retry</button></div>}
+
+                  {hpayView==="home"&&<>
+                    <div className="hp-approved-grid">
+                      <main>
+                        <div className="hp-top-cards">
+                          <section className="hp-approved-balance">
+                            <div><small>Your HPay Balance</small><strong>{hpayLoading?"…":`₹${Number(walletBalance||0).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2})}`}</strong><span>⬡ &nbsp; {hpayAccount?.status||"Account state unavailable"}</span></div>
+                            <div className="hp-balance-actions"><button type="button" onClick={()=>{setHpayAction("self");setHpayAmount("");setHpayNote("")}}>＋ &nbsp; Add Money</button><button type="button" className="outline" onClick={()=>{setHpayAction("pay");setHpayAmount("");setHpayNote("")}}>➤ &nbsp; Send Money</button></div>
+                          </section>
+                          <button className="hp-account-card" type="button" onClick={()=>setHpayView("settings")}><span aria-hidden="true">▣</span><div><b>HPay Account & Bank</b><small>{hpayBanks.length?`${hpayBanks.length} linked account${hpayBanks.length===1?"":"s"}`:"No linked bank shown"}</small><em>{hpayAccount?.hpay_id||"Open account details"}</em></div><i>›</i></button>
+                        </div>
+
+                        <div className="hp-section-head"><h3>Quick Actions</h3><button type="button" onClick={()=>setHpayView("transactions")}>View history →</button></div>
+                        <div className="hp-approved-actions">
+                          {[["scan","▦","Pay / Scan"],["pay","➤","Send Money"],["self","＋","Add Money"],["request","↓","Request Money"],["bank","▥","Pay to Bank"],["transactions","▤","Transaction History"]].map(([id,icon,label])=><button key={id} type="button" onClick={()=>id==="transactions"?setHpayView("transactions"):(setHpayAction(id),setHpayAmount(""),setHpayNote(""))}><i aria-hidden="true">{icon}</i><span>{label}</span></button>)}
+                        </div>
+
+                        <div className="hp-section-head"><h3>Recent Transactions</h3><button type="button" onClick={()=>setHpayView("transactions")}>View all →</button></div>
+                        <section className="hp-approved-transactions">
+                          {hpayLoading?<div className="hp-empty-transactions" role="status" aria-live="polite"><b>Loading HPay activity…</b><span>Your signed-in account is being refreshed.</span></div>:walletTransactions.length===0?<div className="hp-empty-transactions"><b>No HPay transactions yet</b><span>Your wallet and provider-confirmed HPay activity will appear here.</span></div>:walletTransactions.slice(0,5).map((item,idx)=>{const amount=Number(item.amount||0),debit=String(item.direction||item.type||"").toUpperCase().includes("DEBIT");return <article key={item.id||idx}><i aria-hidden="true">{debit?"↗":"＋"}</i><div><b>{item.description||item.title||item.transaction_type||"HPay transaction"}</b><small>{item.created_at?new Date(item.created_at).toLocaleString("en-IN"):item.date||""}</small></div><strong className={debit?"debit":"credit"}>{debit?"- ":"+ "}₹{Math.abs(amount).toLocaleString("en-IN")}</strong><em>{item.status||"Recorded"}</em></article>})}
                         </section>
-                        <button className="hp-account-card" type="button" onClick={()=>setHpayView("settings")}><span>▣</span><div><b>UPI & Bank Accounts</b><small>Manage your linked accounts</small><em>Link or manage account</em></div><i>›</i></button>
-                      </div>
 
-                      <div className="hp-section-head"><h3>Quick Actions</h3><button onClick={()=>setHpayView("transactions")}>View all →</button></div>
-                      <div className="hp-approved-actions">
-                        {[["scan","▦","Pay / Scan"],["pay","➤","Send Money"],["self","＋","Add Money"],["request","↓","Request Money"],["bank","▥","Pay to Bank"],["transactions","▤","Transaction History"]].map(([id,icon,label])=><button key={id} type="button" onClick={()=>id==="transactions"?setHpayView("transactions"):(setHpayAction(id),setHpayAmount(""),setHpayNote(""))}><i>{icon}</i><span>{label}</span></button>)}
-                      </div>
+                        <div className="hp-section-head"><h3>Payment Requests</h3><button type="button" onClick={()=>setHpayView("requests")}>View all →</button></div>
+                        <section className="hp-stage3-request-preview">
+                          {hpayRequests.length===0?<div className="hp-empty-transactions"><b>No payment requests yet</b><span>Create a request when you need someone to pay you.</span></div>:hpayRequests.slice(0,3).map(r=><article key={r.request_id}><div><b>{r.direction==="INCOMING"?"Incoming request":"Your request"}</b><small>{r.direction==="INCOMING"?(r.requester_hpay_id||"HPay member"):(r.payer_hpay_id||"Shareable request")}</small></div><strong>₹{Number(r.amount||0).toLocaleString("en-IN")}</strong><em>{r.status||"PENDING"}</em></article>)}
+                        </section>
+                      </main>
 
-                      <div className="hp-section-head"><h3>Recent Transactions</h3><button onClick={()=>setHpayView("transactions")}>View all →</button></div>
-                      <section className="hp-approved-transactions">
-                        {walletTransactions.length===0?<div className="hp-empty-transactions"><b>No HPay transactions yet</b><span>Your completed wallet and payment activity will appear here.</span></div>:walletTransactions.slice(0,5).map((item,idx)=>{const amount=Number(item.amount||0);const positive=amount>=0;return <article key={item.id||idx}><i>{positive?"＋":"↗"}</i><div><b>{item.description||item.transaction_type||"HPay transaction"}</b><small>{item.created_at?new Date(item.created_at).toLocaleString("en-IN"):""}</small></div><strong className={positive?"credit":"debit"}>{positive?"+ ":"- "}₹{Math.abs(amount).toLocaleString("en-IN")}</strong><em>Completed</em></article>})}
-                      </section>
-                    </main>
+                      <aside className="hp-approved-side">
+                        <button className="hp-settings-card" type="button" onClick={()=>setHpayView("settings")}><i aria-hidden="true">⚙</i><div><b>Account & Security</b><small>Limits, status and masked bank details</small></div><span>›</span></button>
+                        <section className="hp-benefits"><h3><span aria-hidden="true">♕</span> &nbsp; HPay Safety</h3>{["Session-authoritative customer identity","No browser-selected account IDs","Provider-confirmed money movement","Masked linked-bank details","Public HPay IDs for requests"].map(x=><div key={x}><span aria-hidden="true">✓</span><b>{x}</b><i aria-hidden="true">›</i></div>)}</section>
+                        <section className="hp-help"><h3><span aria-hidden="true">◉</span> &nbsp; Need Help?</h3><p>Our support team is here for you.</p><button type="button" onClick={()=>setActiveSection("support")}>Contact Support</button></section>
+                      </aside>
+                    </div>
+                  </>}
 
-                    <aside className="hp-approved-side">
-                      <button className="hp-settings-card" type="button" onClick={()=>setHpayView("settings")}><i>⚙</i><div><b>Payment Settings</b><small>Limits, security, preferences</small></div><span>›</span></button>
-                      <section className="hp-benefits"><h3>♕ &nbsp; HPay Benefits</h3>{["Secure & Encrypted Payments","Fast & Hassle-Free Transactions","Support Creators & Local Workers","Easy Refunds & Disputes","Track All Transactions"].map(x=><div key={x}><span>✓</span><b>{x}</b><i>›</i></div>)}</section>
-                      <section className="hp-help"><h3>◉ &nbsp; Need Help?</h3><p>Our support team is here for you.</p><button type="button" onClick={()=>setActiveSection("support")}>Contact Support</button></section>
-                      <section className="hp-safe"><i>▣</i><div><b>Your Payments<br/>Stay Safe with HPay</b><p>Security controls help protect your payment activity and data.</p></div><span>›</span></section>
-                    </aside>
-                  </div>
+                  {hpayView==="transactions"&&<section className="hp-stage3-workspace" aria-label="HPay transaction history">
+                    <header className="hp-stage3-workspace-head"><div><button type="button" onClick={()=>setHpayView("home")}>← Overview</button><h3>Transaction history</h3><p>Recorded wallet activity and provider-confirmed HPay transactions for your signed-in account.</p></div><button type="button" className="hp-stage3-refresh" onClick={loadHpayDashboard} disabled={hpayLoading}>{hpayLoading?"Refreshing…":"Refresh"}</button></header>
+                    <div className="hp-stage3-filters" role="group" aria-label="Filter transaction history">{[["all","All"],["credit","Money in"],["debit","Money out"]].map(([id,label])=><button key={id} type="button" className={hpayHistoryFilter===id?"active":""} onClick={()=>setHpayHistoryFilter(id)}>{label}</button>)}</div>
+                    <div className="hp-stage3-list">
+                      {walletTransactions.filter(item=>hpayHistoryFilter==="all"||(hpayHistoryFilter==="debit"?String(item.direction||item.type||"").toUpperCase().includes("DEBIT"):String(item.direction||item.type||"").toUpperCase().includes("CREDIT"))).length===0?<div className="hp-stage3-empty"><b>No transactions in this view</b><span>Only real wallet or provider-confirmed records appear here.</span></div>:walletTransactions.filter(item=>hpayHistoryFilter==="all"||(hpayHistoryFilter==="debit"?String(item.direction||item.type||"").toUpperCase().includes("DEBIT"):String(item.direction||item.type||"").toUpperCase().includes("CREDIT"))).map((item,idx)=>{const dir=String(item.direction||item.type||"").toUpperCase(),debit=dir.includes("DEBIT"),credit=dir.includes("CREDIT"),amount=Math.abs(Number(item.amount||0));return <article key={item.id||idx} className="hp-stage3-row"><div className="hp-stage3-row-icon" aria-hidden="true">{debit?"↗":credit?"＋":"•"}</div><div className="hp-stage3-row-main"><b>{item.description||item.title||item.transaction_type||"HPay activity"}</b><small>{item.transaction_id&&<span>{item.transaction_id} · </span>}{item.created_at?new Date(item.created_at).toLocaleString("en-IN"):item.date||""}</small><span>{item.method||item.source||"HPay"}</span></div><div className="hp-stage3-row-value"><strong className={debit?"debit":credit?"credit":"unknown"}>{debit?"- ":credit?"+ ":""}₹{amount.toLocaleString("en-IN")}</strong><em>{item.status||"Recorded"}</em></div></article>})}
+                    </div>
+                  </section>}
 
-                  <section className="hp-autopay"><i>❧</i><div><b>Enable Auto-Pay for a Hassle-Free Experience</b><span>Set up auto-pay for courses, subscriptions and more.</span></div><button type="button" onClick={()=>setHpayView("settings")}>Set Up Now &nbsp; →</button><em>Small Payments<br/>Big Impact ♡</em></section>
+                  {hpayView==="requests"&&<section className="hp-stage3-workspace" aria-label="HPay payment requests">
+                    <header className="hp-stage3-workspace-head"><div><button type="button" onClick={()=>setHpayView("home")}>← Overview</button><h3>Payment requests</h3><p>Incoming and outgoing requests are tied to your authenticated HPay account.</p></div><button type="button" className="hp-stage3-primary" onClick={()=>{setHpayAction("request");setHpayAmount("");setHpayNote("");setHpayRecipientHpayId("")}}>＋ New request</button></header>
+                    <div className="hp-stage3-filters" role="group" aria-label="Filter payment requests">{[["all","All"],["incoming","Incoming"],["outgoing","Outgoing"]].map(([id,label])=><button key={id} type="button" className={hpayRequestFilter===id?"active":""} onClick={()=>setHpayRequestFilter(id)}>{label}</button>)}</div>
+                    <div className="hp-stage3-list">
+                      {hpayRequests.filter(r=>hpayRequestFilter==="all"||String(r.direction||"").toLowerCase()===hpayRequestFilter).length===0?<div className="hp-stage3-empty"><b>No payment requests in this view</b><span>Requests you create or receive will appear here.</span></div>:hpayRequests.filter(r=>hpayRequestFilter==="all"||String(r.direction||"").toLowerCase()===hpayRequestFilter).map(r=><article key={r.request_id} className="hp-stage3-row"><div className="hp-stage3-row-icon" aria-hidden="true">{r.direction==="INCOMING"?"↓":"↑"}</div><div className="hp-stage3-row-main"><b>{r.direction==="INCOMING"?`From ${r.requester_hpay_id||"HPay member"}`:(r.payer_hpay_id?`To ${r.payer_hpay_id}`:"Shareable request")}</b><small>{r.request_id} · {r.created_at?new Date(r.created_at).toLocaleString("en-IN"):""}</small><span>{r.note||"No note"}{r.expires_at?` · ${String(r.status||"").toUpperCase()==="EXPIRED"||new Date(r.expires_at).getTime()<Date.now()?"Expired":"Expires"} ${new Date(r.expires_at).toLocaleDateString("en-IN")}`:""}</span></div><div className="hp-stage3-row-value"><strong>₹{Number(r.amount||0).toLocaleString("en-IN")}</strong><em>{r.status||"PENDING"}</em></div></article>)}
+                    </div>
+                  </section>}
+
+                  {hpayView==="settings"&&<section className="hp-stage3-workspace" aria-label="HPay account and linked banks">
+                    <header className="hp-stage3-workspace-head"><div><button type="button" onClick={()=>setHpayView("home")}>← Overview</button><h3>Account & linked bank details</h3><p>Only public HPay identity and masked bank information are shown here.</p></div><button type="button" className="hp-stage3-refresh" onClick={loadHpayDashboard} disabled={hpayLoading}>{hpayLoading?"Refreshing…":"Refresh"}</button></header>
+                    <div className="hp-stage3-account-grid">
+                      <section className="hp-stage3-account-card"><small>HPay ID</small><strong>{hpayAccount?.hpay_id||"Not available"}</strong><dl><div><dt>Account</dt><dd>{hpayAccount?.status||"—"}</dd></div><div><dt>KYC</dt><dd>{hpayAccount?.kyc_status||"—"}</dd></div><div><dt>Single limit</dt><dd>₹{Number(hpayAccount?.single_limit||0).toLocaleString("en-IN")}</dd></div><div><dt>Daily limit</dt><dd>₹{Number(hpayAccount?.daily_limit||0).toLocaleString("en-IN")}</dd></div></dl></section>
+                      <section className="hp-stage3-account-card"><small>Payment capabilities</small><strong>{hpayProviderConnected?"Provider connected":"Provider confirmation required"}</strong><dl><div><dt>Requests</dt><dd>{hpayAccount?.requests_enabled?"Enabled":"Unavailable"}</dd></div><div><dt>UPI</dt><dd>{hpayAccount?.upi_enabled?"Enabled":"Unavailable"}</dd></div><div><dt>Bank</dt><dd>{hpayAccount?.bank_enabled?"Enabled":"Unavailable"}</dd></div><div><dt>QR</dt><dd>{hpayAccount?.qr_enabled?"Enabled":"Unavailable"}</dd></div></dl></section>
+                    </div>
+                    <div className="hp-section-head"><h3>Linked bank accounts</h3><span>Masked details only</span></div>
+                    <div className="hp-stage3-banks">
+                      {hpayBanks.length===0?<div className="hp-stage3-empty"><b>No linked bank account is available</b><span>HOWDI will not simulate bank linking. A real provider-backed linking flow is required.</span></div>:hpayBanks.map((bank,idx)=><article key={`${bank.bank_name||"bank"}-${bank.account_number_masked||idx}`}><div className="hp-stage3-bank-icon" aria-hidden="true">▥</div><div><b>{bank.bank_name||"Linked bank"}</b><small>{bank.account_holder_name||"Account holder"} · {bank.account_number_masked||"Masked account"}</small><span>{bank.ifsc?`IFSC ${bank.ifsc} · `:""}{bank.verification_status||"Verification unavailable"}</span></div><div><em>{bank.is_default?"Default":"Linked"}</em></div></article>)}
+                    </div>
+                    <div className="hp-stage3-provider-note"><b>No fabricated money movement</b><p>Send Money, Add Money, Bank and UPI actions remain provider-gated. HOWDI only records success after an authorized payment provider confirms the movement.</p></div>
+                  </section>}
+
+                  {hpayView==="home"&&<section className="hp-autopay"><i aria-hidden="true">❧</i><div><b>Payment provider confirmation protects your money</b><span>HPay does not invent a successful bank, UPI or wallet transfer.</span></div><button type="button" onClick={()=>setHpayView("settings")}>Account details &nbsp; →</button><em>Secure by<br/>design ♡</em></section>}
                 </section>}
 
                 {connectView==="subscriptions" && <section className="hc160e-page">
@@ -19373,10 +20297,10 @@ const removeNotification = async (notificationId) => {
                 </section>}
 
                 {connectView==="articles" && <section className="hc160d-page">
-                  <header><div><small>HOWDI CONNECT · ARTICLES</small><h2>Ideas worth reading</h2><p>Long-form stories, knowledge, creator insights and useful community writing.</p></div><button onClick={()=>setConnectArticleEditor(true)}>＋ Write article</button></header>
+                  <header><div><small>HOWDI CONNECT · ARTICLES</small><h2>Ideas worth reading</h2><p>Long-form stories, knowledge, creator insights and useful community writing.</p></div><button onClick={()=>{resetConnectArticleEditor();setConnectArticleEditor(true);}}>＋ Write article</button></header>
                   <nav><button className={connectArticleMode==="DISCOVER"?"active":""} onClick={()=>loadConnectArticles("DISCOVER")}>Discover</button><button className={connectArticleMode==="FOLLOWING"?"active":""} onClick={()=>loadConnectArticles("FOLLOWING")}>Following</button><button className={connectArticleMode==="MINE"?"active":""} onClick={loadMyConnectArticles}>My articles</button></nav>
                   {connectArticleAnalytics&&connectArticleMode==="MINE"&&<div className="hc160d-analytics">{[["Articles",connectArticleAnalytics.total_articles],["Published",connectArticleAnalytics.published],["Views",connectArticleAnalytics.views],["Likes",connectArticleAnalytics.likes],["Saves",connectArticleAnalytics.saves]].map(([k,v])=><article key={k}><b>{v||0}</b><span>{k}</span></article>)}</div>}
-                  <div className="hc160d-grid">{(connectArticleMode==="MINE"?connectArticleMine:connectArticles).map(a=><article key={a.id} onClick={()=>openConnectArticle(a)}>{a.article_cover_url?<img src={a.article_cover_url} alt=""/>:<div className="hc160d-cover">HOWDI</div>}<small>{a.article_category||"GENERAL"}{a.post_status?` · ${a.post_status}`:""}</small><h3>{a.article_title}</h3><p>{a.article_excerpt||String(a.content||"").slice(0,180)}</p><footer><span>{a.public_username?`@${a.public_username}`:a.full_name||"You"}</span><span>{a.article_read_minutes||1} min read</span></footer></article>)}</div>{connectArticleNotice&&<em className="hc160d-notice">{connectArticleNotice}</em>}
+                  <div className="hc160d-grid">{(connectArticleMode==="MINE"?connectArticleMine:connectArticles).map(a=><article key={a.id} onClick={()=>openConnectArticle(a)}>{(a.article_cover_data||a.article_cover_url)?<img src={a.article_cover_data||a.article_cover_url} alt=""/>:<div className="hc160d-cover">HOWDI</div>}<small>{a.article_category||"GENERAL"}{a.post_status?` · ${a.post_status}`:""}</small><h3>{a.article_title}</h3><p>{a.article_excerpt||String(a.content||"").slice(0,180)}</p><footer><span>{a.public_username?`@${a.public_username}`:a.full_name||"You"}</span><span>{a.article_read_minutes||1} min read</span></footer>{connectArticleMode==="MINE"&&<button type="button" onClick={e=>{e.stopPropagation();openConnectArticleEditForm(a);}} style={{marginTop:8}}>✏️ Edit</button>}</article>)}</div>{connectArticleNotice&&<em className="hc160d-notice">{connectArticleNotice}</em>}
                 </section>}
 
                 {connectView==="social" && <section className="hc160-social-page">
@@ -19385,10 +20309,17 @@ const removeNotification = async (notificationId) => {
                     <button onClick={()=>loadConnectSocialGraph("followers")} className={connectSocialTab==="followers"?"active":""}><b>{connectSocialSummary?.counts?.followers||0}</b><span>Followers</span></button>
                     <button onClick={()=>loadConnectSocialGraph("following")} className={connectSocialTab==="following"?"active":""}><b>{connectSocialSummary?.counts?.following||0}</b><span>Following</span></button>
                     <button onClick={()=>loadConnectSocialGraph("requests")} className={connectSocialTab==="requests"?"active":""}><b>{connectSocialSummary?.counts?.requests||0}</b><span>Requests</span></button>
+                    {/* K5B FINAL UX CLOSURE: Mutuals/Suggestions get the same <b> line as
+                        Followers/Following/Requests so all five tabs share one two-line
+                        height on both desktop and mobile. No mutuals/suggestions count is
+                        loaded up front (that would mean an extra network call just for tab
+                        labels), so the <b> is an invisible spacer instead of a number. */}
+                    <button onClick={()=>loadConnectSocialGraph("mutuals")} className={connectSocialTab==="mutuals"?"active":""}><b aria-hidden="true">&nbsp;</b><span>Mutuals</span></button>
+                    <button onClick={()=>loadConnectSuggestions()} className={connectSocialTab==="suggestions"?"active":""}><b aria-hidden="true">&nbsp;</b><span>Suggestions</span></button>
                   </div>
                   <div className="hc160-grid">
-                    <div className="hc160-network-card"><div className="hc160-card-title"><b>{connectSocialTab==="requests"?"Follow requests":connectSocialTab==="following"?"Following":"Followers"}</b><button onClick={()=>loadConnectSocialGraph(connectSocialTab)}>↻ Refresh</button></div>
-                      {connectSocialLoading?<div className="hc160-empty">Loading your network…</div>:connectSocialPeople.length===0?<div className="hc160-empty">No people here yet.</div>:<div className="hc160-people">{connectSocialPeople.map(p=><article key={p.id}><div className="hc160-avatar">{p.profile_image?<img src={p.profile_image} alt=""/>:<span>{String(p.full_name||"H").slice(0,1).toUpperCase()}</span>}</div><div className="hc160-person"><b>{p.full_name||"HOWDI member"}</b><small>{p.public_username?`@${p.public_username}`:p.profession_title||p.headline||"HOWDI Connect member"}</small></div><div className="hc160-actions">{connectSocialTab==="requests"?<><button className="primary" onClick={()=>respondConnectFollowRequest(p.id,true)}>Accept</button><button onClick={()=>respondConnectFollowRequest(p.id,false)}>Decline</button></>:<button className={p.viewer_following?"following":"primary"} onClick={()=>toggleConnectSocialFollow(p)}>{p.viewer_following?"Following":p.follows_viewer?"Follow back":p.request_pending?"Requested":"Follow"}</button>}<button onClick={()=>{openConnectPublicProfile({id:p.id});setConnectView("profile")}}>View</button></div></article>)}</div>}
+                    <div className="hc160-network-card"><div className="hc160-card-title"><b>{({requests:"Follow requests",following:"Following",mutuals:"Mutual connections",suggestions:"Suggested for you"})[connectSocialTab]||"Followers"}</b><button onClick={()=>connectSocialTab==="suggestions"?loadConnectSuggestions():loadConnectSocialGraph(connectSocialTab)}>↻ Refresh</button></div>
+                      {connectSocialLoading?<div className="hc160-empty">Loading your network…</div>:connectSocialPeople.length===0?<div className="hc160-empty">{connectSocialTab==="suggestions"?"No suggestions right now.":connectSocialTab==="mutuals"?"No mutual connections here.":"No people here yet."}</div>:<div className="hc160-people">{connectSocialPeople.map(p=><article key={p.public_username}><div className="hc160-avatar">{p.profile_image?<img src={p.profile_image} alt=""/>:<span>{String(p.full_name||"H").slice(0,1).toUpperCase()}</span>}</div><div className="hc160-person"><b>{p.full_name||"HOWDI member"}</b><small>{p.public_username?`@${p.public_username}`:p.profession_title||p.headline||"HOWDI Connect member"}</small></div><div className="hc160-actions">{connectSocialTab==="requests"?<><button className="primary" onClick={()=>respondConnectFollowRequest(p,true)}>Accept</button><button onClick={()=>respondConnectFollowRequest(p,false)}>Decline</button></>:<button className={p.viewer_following?"following":"primary"} onClick={()=>toggleConnectSocialFollow(p)}>{p.viewer_following?"Following":p.follows_viewer?"Follow back":p.request_pending?"Requested":"Follow"}</button>}<button onClick={()=>{openConnectPublicProfile({public_username:p.public_username,full_name:p.full_name});setConnectView("profile")}}>View</button></div></article>)}</div>}
                     </div>
                     <aside className="hc160-privacy-card"><div className="hc160-card-title"><b>Profile & privacy</b><span>Public identity</span></div><label><span>Public username</span><div className="hc160-username"><i>@</i><input value={connectSocialSettings.publicUsername} onChange={e=>setConnectSocialSettings(v=>({...v,publicUsername:e.target.value.toLowerCase().replace(/[^a-z0-9._]/g,"").slice(0,30)}))} placeholder="choose.username"/></div><small>Your internal HOWDI ID is never shown publicly.</small></label><label className="hc160-switch"><span><b>Private profile</b><small>New followers require approval.</small></span><input type="checkbox" checked={connectSocialSettings.privateProfile} onChange={e=>setConnectSocialSettings(v=>({...v,privateProfile:e.target.checked}))}/></label><label><span>Follower list</span><select value={connectSocialSettings.followerListVisibility} onChange={e=>setConnectSocialSettings(v=>({...v,followerListVisibility:e.target.value}))}><option value="EVERYONE">Everyone</option><option value="FOLLOWERS">Followers</option><option value="NO_ONE">Only me</option></select></label><label><span>Who can message me</span><select value={connectSocialSettings.contactPermission} onChange={e=>setConnectSocialSettings(v=>({...v,contactPermission:e.target.value}))}><option value="EVERYONE">Everyone</option><option value="FOLLOWERS">Followers</option><option value="FOLLOWING">People I follow</option><option value="NO_ONE">No one</option></select></label><label><span>Mentions</span><select value={connectSocialSettings.mentionPermission} onChange={e=>setConnectSocialSettings(v=>({...v,mentionPermission:e.target.value}))}><option value="EVERYONE">Everyone</option><option value="FOLLOWERS">Followers</option><option value="NO_ONE">No one</option></select></label><label><span>Tags</span><select value={connectSocialSettings.tagPermission} onChange={e=>setConnectSocialSettings(v=>({...v,tagPermission:e.target.value}))}><option value="EVERYONE">Everyone</option><option value="FOLLOWERS">Followers</option><option value="NO_ONE">No one</option></select></label><label className="hc160-switch"><span><b>Activity status</b><small>Allow eligible members to see your activity.</small></span><input type="checkbox" checked={connectSocialSettings.activityVisible} onChange={e=>setConnectSocialSettings(v=>({...v,activityVisible:e.target.checked}))}/></label><label className="hc160-switch"><span><b>Discoverable</b><small>Allow your profile in Connect discovery.</small></span><input type="checkbox" checked={connectSocialSettings.discoverable} onChange={e=>setConnectSocialSettings(v=>({...v,discoverable:e.target.checked}))}/></label><button className="hc160-save" onClick={saveConnectSocialSettings}>Save profile & privacy</button></aside>
                   </div>
@@ -19432,12 +20363,13 @@ const removeNotification = async (notificationId) => {
                 <small>YOUR HPAY QR</small>
                 <div className="hp-qr-placeholder"><div></div><span>H</span></div>
                 <b>{customerDisplayName}</b>
-                <p>howditestttt@hpay</p>
+                <p>{hpayAccount?.hpay_id||"Sign in to create your HPay identity"}</p>
                 <div><button>Share QR</button><button>Save QR</button></div>
               </div>}
 
               {["pay","request","upi","bank","self"].includes(hpayAction) && <div className="hp-payment-form">
-                {hpayAction==="pay" || hpayAction==="request" ? <label><span>{hpayAction==="request"?"Request from":"Paying"}</span><div className="hp-recipient-box"><div className="hp-person-avatar">{hpayRecipient.slice(0,1)}</div><div><b>{hpayRecipient}</b><small>Verified HOWDI identity <i className="hc5-verified">✓</i></small></div><button>Change</button></div></label> : null}
+                {hpayAction==="pay" ? <label><span>Paying</span><div className="hp-recipient-box"><div className="hp-person-avatar">{hpayRecipient.slice(0,1)}</div><div><b>{hpayRecipient}</b><small>Recipient must be confirmed by the payment provider before money moves.</small></div></div></label> : null}
+                {hpayAction==="request" ? <label><span>Request from HPay ID (optional)</span><input value={hpayRecipientHpayId} onChange={e=>setHpayRecipientHpayId(e.target.value.toLowerCase().replace(/[^a-z0-9._@-]/g,"").slice(0,120))} placeholder="username@hpay"/><small>Leave blank to create a shareable request without assigning a payer.</small></label> : null}
                 {hpayAction==="upi" && <label><span>UPI ID</span><input placeholder="name@upi" /></label>}
                 {hpayAction==="bank" && <><label><span>Account number</span><input placeholder="Enter account number" /></label><label><span>IFSC</span><input placeholder="Enter IFSC code" /></label><label><span>Account holder</span><input placeholder="Name on bank account" /></label></>}
                 {hpayAction==="self" && <><label><span>From</span><select><option>Primary bank •••• 9002</option><option>Bank account •••• 9098</option></select></label><label><span>To</span><select><option>Bank account •••• 9098</option><option>HPay balance</option></select></label></>}
@@ -19446,11 +20378,11 @@ const removeNotification = async (notificationId) => {
                 <label><span>Note (optional)</span><input value={hpayNote} onChange={e=>setHpayNote(e.target.value)} placeholder={hpayAction==="request"?"What is this request for?":"Add a message"} /></label>
                 <label className="hp-safety-check"><input type="checkbox" checked={hpayPrivacyAccepted} onChange={e=>setHpayPrivacyAccepted(e.target.checked)} /><span>I checked the recipient details.</span></label>
 
-                {!hpayStatus ? <button type="button" className="hp-confirm" disabled={!hpayAmount || !hpayPrivacyAccepted} onClick={()=>setHpayStatus("success")}>{hpayAction==="request"?"Send request":hpayAction==="self"?"Transfer":"Continue to pay"} ₹{hpayAmount||"0"}</button>
-                : <div className="hp-success"><i>✓</i><b>{hpayAction==="request"?"Request sent":"Payment ready"}</b><small>{hpayAction==="request"?`₹${hpayAmount} request created for ${hpayRecipient}.`:`₹${hpayAmount} payment flow is ready for backend/UPI integration.`}</small><button onClick={()=>{setHpayAction(null);setHpayStatus(null)}}>Done</button></div>}
+                {!hpayStatus ? <button type="button" className="hp-confirm" disabled={!hpayAmount || !hpayPrivacyAccepted || hpaySubmitting} onClick={submitHpayAction}>{hpaySubmitting?"Saving…":hpayAction==="request"?"Create request":"Continue"} {hpayAmount?`₹${hpayAmount}`:""}</button>
+                : <div className={`hp-success ${hpayStatus.type||"info"}`}><i>{hpayStatus.type==="success"?"✓":"i"}</i><b>{hpayStatus.title}</b><small>{hpayStatus.message}</small><button onClick={()=>{setHpayAction(null);setHpayStatus(null);setHpayRecipientHpayId("")}}>Done</button></div>}
               </div>}
 
-              <footer className="hp-sheet-footer"><span>Protected by HOWDI security</span><em>Frontend payment preview</em></footer>
+              <footer className="hp-sheet-footer"><span>Session-protected HPay</span><em>{hpayProviderConnected?"Payment provider connected":"Money movement requires provider confirmation"}</em></footer>
             </div>
           </div>}
 
@@ -19472,16 +20404,16 @@ const removeNotification = async (notificationId) => {
           {connectReputationOSTab==="office"&&<section><h3>Your office hours</h3><div className="hc136-rel-list">{(connectReputationOS.officeHours||[]).map(o=><article key={o.id}><div><b>{o.title}</b><small>{new Date(o.starts_at).toLocaleString()} · {connectProfileCategoryLabel(o.knowledge_domain)}</small></div><strong>{o.booked_count||0}/{o.capacity}</strong></article>)}</div></section>}
           </div></div></div>, document.body)}
 
-          {connectRelationshipIntelOpen&&createPortal(<div className="hc136-overlay howdi-connect-tool-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setConnectRelationshipIntelOpen(false)}}><div className="hc136-rel"><header><div><small>RELATIONSHIP INTELLIGENCE</small><h2>Who should you learn with next? 🔗</h2></div><button onClick={()=>setConnectRelationshipIntelOpen(false)}>×</button></header><div className="hc136-rel-body"><section><h3>People ranked by learning relationship</h3><div className="hc136-people">{(connectRelationshipIntel.people||[]).slice(0,40).map(p=><article key={p.id}><div><b>{p.full_name}</b><small>{p.public_username?`@${p.public_username}`:"HOWDI member"} · {p.reputation_level}</small></div><strong>{p.strength_score||0}</strong><p>{(p.reasons||[]).join(" · ")||"No strong shared signal yet."}</p><footer><button onClick={()=>rebuildConnectRelationship(p)}>Refresh relationship</button><button onClick={()=>requestConnectLearningPartner(p)}>Learn together</button></footer></article>)}</div></section><section><h3>Endorsement requests</h3><div className="hc136-inbox">{(connectRelationshipIntel.inboxEndorsements||[]).map(r=><article key={r.id}><div><b>{r.requester_name}</b><small>asks you to validate {r.skill_name}</small></div><button onClick={()=>respondConnectSkillEndorsement(r,true)}>Endorse</button><button onClick={()=>respondConnectSkillEndorsement(r,false)}>Decline</button></article>)}</div></section></div></div></div>, document.body)}
+          {connectRelationshipIntelOpen&&createPortal(<div className="hc136-overlay howdi-connect-tool-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setConnectRelationshipIntelOpen(false)}}><div className="hc136-rel"><header><div><small>RELATIONSHIP INTELLIGENCE</small><h2>Who should you learn with next? 🔗</h2></div><button onClick={()=>setConnectRelationshipIntelOpen(false)}>×</button></header><div className="hc136-rel-body"><section><h3>People ranked by learning relationship</h3><div className="hc136-people">{(connectRelationshipIntel.people||[]).slice(0,40).map(p=><article key={p.public_username||p.user_id}><div><b>{p.full_name}</b><small>{p.public_username?`@${p.public_username}`:"HOWDI member"} · {p.reputation_level}</small></div><strong>{p.strength_score||0}</strong><p>{(p.reasons||[]).join(" · ")||"No strong shared signal yet."}</p><footer><button onClick={()=>rebuildConnectRelationship(p)}>Refresh relationship</button><button onClick={()=>requestConnectLearningPartner(p)}>Learn together</button></footer></article>)}</div></section><section><h3>Endorsement requests</h3><div className="hc136-inbox">{(connectRelationshipIntel.inboxEndorsements||[]).map(r=><article key={r.id}><div><b>{r.requester_name}</b><small>asks you to validate {r.skill_name}</small></div><button onClick={()=>respondConnectSkillEndorsement(r,true)}>Endorse</button><button onClick={()=>respondConnectSkillEndorsement(r,false)}>Decline</button></article>)}</div></section></div></div></div>, document.body)}
 
           {connectOfficeHoursOpen&&createPortal(<div className="hc136-overlay howdi-connect-tool-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setConnectOfficeHoursOpen(false)}}><div className="hc136-office"><header><div><small>EXPERT OFFICE HOURS</small><h2>Short, focused access to knowledge 🕘</h2></div><button onClick={()=>setConnectOfficeHoursOpen(false)}>×</button></header><div className="hc136-office-tools"><select value={connectOfficeHoursDomain} onChange={e=>loadConnectOfficeHours(e.target.value)}>{["EDUCATION","AI","QUANTUM_COMPUTING","SCIENCE","TECHNOLOGY","CAREER","CODING","BUSINESS"].map(x=><option key={x} value={x}>{connectProfileCategoryLabel(x)}</option>)}</select><input value={connectOfficeQuestion} onChange={e=>setConnectOfficeQuestion(e.target.value)} placeholder="Question to ask when booking"/></div><div className="hc136-office-grid">{connectOfficeHours.map(o=><article key={o.id}><span>{connectProfileCategoryLabel(o.knowledge_domain)} · Reputation {o.reputation_score||0}</span><b>{o.title}</b><small>{o.full_name} · {new Date(o.starts_at).toLocaleString()}</small><p>{o.note||"Focused knowledge office hours"}</p><footer><span>{o.booked_count||0}/{o.capacity} booked</span>{Number(o.mentor_user_id)!==Number(currentUser?.id||0)&&<button disabled={o.booked_by_me||Number(o.booked_count)>=Number(o.capacity)} onClick={()=>bookConnectOfficeHour(o)}>{o.booked_by_me?"Booked ✓":"Book"}</button>}</footer></article>)}</div><section className="hc136-publish-office"><h3>Publish your office hours</h3><input value={connectOfficeTitle} onChange={e=>setConnectOfficeTitle(e.target.value)} placeholder="Title"/><input type="datetime-local" value={connectOfficeStartsAt} onChange={e=>setConnectOfficeStartsAt(e.target.value)}/><input type="number" min="1" max="20" value={connectOfficeCapacity} onChange={e=>setConnectOfficeCapacity(e.target.value)}/><button onClick={createConnectOfficeHour}>Publish</button></section></div></div>, document.body)}
 
           {connectEconomyOpen&&createPortal(<div className="hc135-overlay howdi-connect-tool-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setConnectEconomyOpen(false)}}><div className="hc135-economy"><header><div><small>HOWDI KNOWLEDGE ECONOMY</small><h2>Contribution should create opportunity 💠</h2></div><button onClick={()=>setConnectEconomyOpen(false)}>×</button></header><nav>{[["overview","Overview"],["reputation","XP & badges"],["skills","Skill Passport"],["sessions","Mentoring"],["partners","Study goals"]].map(([id,label])=><button className={connectEconomyTab===id?"active":""} onClick={()=>setConnectEconomyTab(id)} key={id}>{label}</button>)}</nav><div className="hc135-body">
           {connectEconomyTab==="overview"&&<div className="hc135-metrics"><article><b>{connectEconomy.gratitude?.received||0}</b><span>Gratitude received</span></article><article><b>{connectEconomy.trust?.xp||0}</b><span>Contribution XP</span></article><article><b>{connectEconomy.badges?.length||0}</b><span>Badges unlocked</span></article><article><b>{connectEconomy.sessions?.filter(x=>x.session_status==="COMPLETED").length||0}</b><span>Mentor sessions</span></article></div>}
           {connectEconomyTab==="reputation"&&<section><div className="hc135-level"><b>{connectEconomy.trust?.level||"NEW"}</b><span>{connectEconomy.trust?.xp||0} XP</span><button onClick={syncConnectBadges}>Sync badges</button></div><div className="hc135-badges">{(connectEconomy.badges||[]).map(b=><article key={b.badge_code}><b>{b.badge_name}</b><small>{b.description}</small><span>{b.min_points} XP</span></article>)}</div></section>}
-          {connectEconomyTab==="skills"&&<section><div className="hc136-endorse-target"><input value={connectEndorsementTargetId} onChange={e=>setConnectEndorsementTargetId(e.target.value.replace(/\D/g,""))} placeholder="HOWDI user ID for endorsement request"/></div><div className="hc135-skill-grid">{(connectEconomy.skills||[]).map(s=><article key={s.id}><b>{s.skill_name}</b><small>{s.skill_level}</small><span>✓ {s.validation_count||0} validations</span><button onClick={()=>validateConnectSkill(s)}>Peer validate</button><button onClick={()=>requestConnectSkillEndorsement(s)}>Request endorsement</button></article>)}</div></section>}
+          {connectEconomyTab==="skills"&&<section><div className="hc136-endorse-target"><input value={connectEndorsementTargetId} onChange={e=>setConnectEndorsementTargetId(e.target.value.toLowerCase().replace(/[^a-z0-9._@]/g,""))} placeholder="Member @username for endorsement request"/></div><div className="hc135-skill-grid">{(connectEconomy.skills||[]).map(s=><article key={s.id}><b>{s.skill_name}</b><small>{s.skill_level}</small><span>✓ {s.validation_count||0} validations</span><button onClick={()=>validateConnectSkill(s)}>Peer validate</button><button onClick={()=>requestConnectSkillEndorsement(s)}>Request endorsement</button></article>)}</div></section>}
           {connectEconomyTab==="sessions"&&<section><div className="hc135-list">{(connectEconomy.sessions||[]).map(s=><article key={s.id}><div><b>{Number(s.mentor_user_id)===Number(currentUser?.id)?`Mentoring ${s.learner_name}`:`Mentor ${s.mentor_name}`}</b><small>{s.scheduled_for?new Date(s.scheduled_for).toLocaleString():"Time not scheduled"} · {s.duration_minutes} min</small></div><span>{s.session_status}</span>{s.session_status==="SCHEDULED"&&<><button onClick={()=>updateConnectMentorSession(s,"COMPLETED")}>Complete</button><button onClick={()=>updateConnectMentorSession(s,"CANCELLED")}>Cancel</button></>}</article>)}</div></section>}
-          {connectEconomyTab==="partners"&&<section><div className="hc135-goal-form"><input value={connectPartnerGoalUserId} onChange={e=>setConnectPartnerGoalUserId(e.target.value.replace(/\D/g,""))} placeholder="Partner user ID"/><input value={connectPartnerGoalTitle} onChange={e=>setConnectPartnerGoalTitle(e.target.value)} placeholder="Shared study goal"/><button onClick={createConnectPartnerGoal}>Create goal</button></div><div className="hc135-list">{(connectEconomy.goals||[]).map(g=><article key={g.id}><div><b>{g.title}</b><small>Partner: {g.partner_name} · {g.checkin_count||0} check-ins</small></div><span>{g.goal_status}</span>{g.goal_status==="ACTIVE"&&<><button onClick={()=>checkinConnectGoal(g,"ON_TRACK")}>On track</button><button onClick={()=>checkinConnectGoal(g,"NEEDS_HELP")}>Need help</button><button onClick={()=>checkinConnectGoal(g,"DONE")}>Done</button></>}</article>)}</div></section>}
+          {connectEconomyTab==="partners"&&<section><div className="hc135-goal-form"><input value={connectPartnerGoalUserId} onChange={e=>setConnectPartnerGoalUserId(e.target.value.toLowerCase().replace(/[^a-z0-9._@]/g,""))} placeholder="Partner @username"/><input value={connectPartnerGoalTitle} onChange={e=>setConnectPartnerGoalTitle(e.target.value)} placeholder="Shared study goal"/><button onClick={createConnectPartnerGoal}>Create goal</button></div><div className="hc135-list">{(connectEconomy.goals||[]).map(g=><article key={g.id}><div><b>{g.title}</b><small>Partner: {g.partner_name} · {g.checkin_count||0} check-ins</small></div><span>{g.goal_status}</span>{g.goal_status==="ACTIVE"&&<><button onClick={()=>checkinConnectGoal(g,"ON_TRACK")}>On track</button><button onClick={()=>checkinConnectGoal(g,"NEEDS_HELP")}>Need help</button><button onClick={()=>checkinConnectGoal(g,"DONE")}>Done</button></>}</article>)}</div></section>}
           </div></div></div>, document.body)}
 
           {connectMultilingualOpen&&createPortal(<div className="hc135-overlay howdi-connect-tool-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setConnectMultilingualOpen(false)}}><div className="hc135-language"><header><div><small>HOWDI LANGUAGE BRIDGE</small><h2>Discover useful knowledge across languages 🌍</h2></div><button onClick={()=>setConnectMultilingualOpen(false)}>×</button></header><div className="hc135-language-tools"><select value={connectBridgeLanguage} onChange={e=>setConnectBridgeLanguage(e.target.value)}><option value="en">English</option><option value="hi">Hindi</option><option value="te">Telugu</option><option value="kn">Kannada</option><option value="ta">Tamil</option><option value="ml">Malayalam</option><option value="bn">Bengali</option><option value="as">Assamese</option></select><button onClick={loadConnectMultilingualBridge}>Refresh</button></div><div className="hc135-language-grid">{connectMultilingualPosts.map(p=><article key={p.id}><span>{String(p.language_code||"en").toUpperCase()} · {p.bridge_reason}</span><b>{p.article_title||String(p.content||"").slice(0,120)}</b><p>{String(p.content||"").slice(0,180)}</p><small>{p.full_name} · {connectProfileCategoryLabel(p.knowledge_domain)}</small></article>)}</div></div></div>, document.body)}
@@ -19491,7 +20423,7 @@ const removeNotification = async (notificationId) => {
           {connectFactCheckPost&&createPortal(<div className="hc135-overlay howdi-connect-tool-overlay" onMouseDown={e=>{if(e.target===e.currentTarget){setConnectFactCheckPost(null);setConnectFactCheckTrail([])}}}><div className="hc135-fact"><header><div><small>PUBLIC FACT-CHECK TRAIL</small><h3>{connectFactCheckPost.article_title||"Knowledge corrections"}</h3></div><button onClick={()=>{setConnectFactCheckPost(null);setConnectFactCheckTrail([])}}>×</button></header><div>{connectFactCheckTrail.map(c=><article key={c.id}><span>{c.correction_status}</span><b>{c.full_name}</b><p>{c.correction_text}</p>{c.evidence_url&&<button onClick={()=>window.open(c.evidence_url,"_blank","noopener,noreferrer")}>Evidence</button>}<small>Agree {c.agree||0} · Disagree {c.disagree||0}</small></article>)}{!connectFactCheckTrail.length&&<p>No correction proposals yet.</p>}</div></div></div>, document.body)}
 
           {connectNetworkGraphOpen&&createPortal(<div className="hc134-overlay howdi-connect-tool-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setConnectNetworkGraphOpen(false)}}><div className="hc134-network"><header><div><small>HOWDI NETWORK GRAPH</small><h2>Learn with people who increase your possibilities 🕸</h2></div><button onClick={()=>setConnectNetworkGraphOpen(false)}>×</button></header><nav>{[["people","People you should know"],["requests","Requests"],["trust","Trust & contribution"]].map(([id,label])=><button className={connectNetworkGraphTab===id?"active":""} onClick={()=>setConnectNetworkGraphTab(id)} key={id}>{label}</button>)}</nav><div className="hc134-network-body">
-          {connectNetworkGraphTab==="people"&&<><div className="hc134-partner-type"><span>Connect as</span><select value={connectPartnerType} onChange={e=>setConnectPartnerType(e.target.value)}><option value="LEARNING_PARTNER">Learning partner</option><option value="ACCOUNTABILITY">Accountability partner</option><option value="STUDY_BUDDY">Study buddy</option><option value="PEER_TUTOR">Peer tutor</option></select></div><div className="hc134-people-grid">{(connectNetworkGraph.people||[]).map((p,i)=><article key={p.id}><em>#{i+1}</em><b>{p.full_name}</b><small>{p.public_username?`@${p.public_username}`:"HOWDI member"}</small><div className="hc134-score">Contribution {p.contribution_score||0}</div><div className="hc134-signals"><span>👍 {p.useful_votes||0}</span><span>🗣 {p.teachbacks||0}</span><span>✓ {p.skill_validations||0}</span><span>🙏 {p.gratitude||0}</span></div><footer><button onClick={()=>requestConnectLearningPartner(p)}>Connect to learn</button><button onClick={()=>giveConnectGratitude(p)}>🙏</button></footer></article>)}</div></>}
+          {connectNetworkGraphTab==="people"&&<><div className="hc134-partner-type"><span>Connect as</span><select value={connectPartnerType} onChange={e=>setConnectPartnerType(e.target.value)}><option value="LEARNING_PARTNER">Learning partner</option><option value="ACCOUNTABILITY">Accountability partner</option><option value="STUDY_BUDDY">Study buddy</option><option value="PEER_TUTOR">Peer tutor</option></select></div><div className="hc134-people-grid">{(connectNetworkGraph.people||[]).map((p,i)=><article key={p.public_username||p.user_id}><em>#{i+1}</em><b>{p.full_name}</b><small>{p.public_username?`@${p.public_username}`:"HOWDI member"}</small><div className="hc134-score">Contribution {p.contribution_score||0}</div><div className="hc134-signals"><span>👍 {p.useful_votes||0}</span><span>🗣 {p.teachbacks||0}</span><span>✓ {p.skill_validations||0}</span><span>🙏 {p.gratitude||0}</span></div><footer><button onClick={()=>requestConnectLearningPartner(p)}>Connect to learn</button><button onClick={()=>giveConnectGratitude(p)}>🙏</button></footer></article>)}</div></>}
           {connectNetworkGraphTab==="requests"&&<section><h3>Learning partner requests</h3><div className="hc134-request-list">{(connectNetworkGraph.partnerRequests||[]).map(r=><article key={`${r.user_id}-${r.partner_type}`}><div><b>{r.full_name}</b><small>{connectProfileCategoryLabel(r.partner_type)}</small></div><button onClick={()=>respondConnectLearningPartner(r,true)}>Accept</button><button onClick={()=>respondConnectLearningPartner(r,false)}>Decline</button></article>)}</div><h3>Mentor requests</h3><div className="hc134-request-list">{(connectNetworkGraph.mentorRequests||[]).map(r=><article key={r.id}><div><b>{r.full_name}</b><small>{connectProfileCategoryLabel(r.knowledge_domain)}</small></div><button onClick={()=>respondConnectMentorRequest(r,true)}>Accept</button><button onClick={()=>respondConnectMentorRequest(r,false)}>Decline</button></article>)}</div></section>}
           {connectNetworkGraphTab==="trust"&&<section><div className="hc134-trust-card"><b>{connectNetworkGraph.trust?.points||0}</b><span>Trust points from community contribution</span><small>{connectNetworkGraph.trust?.events||0} trust events recorded</small></div><p className="hc133-note">Trust points are HOWDI activity signals, not identity verification, financial credit, or professional certification.</p></section>}
           </div></div></div>, document.body)}
@@ -19525,11 +20457,22 @@ const removeNotification = async (notificationId) => {
 
           {connectProfileCodeOpen&&<div className="hc112-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setConnectProfileCodeOpen(false)}}><div className="hc112-profile-code"><button className="close" onClick={()=>setConnectProfileCodeOpen(false)}>×</button><div className="logo">HOWDI</div><div className="hc112-code-avatar">{connectBootstrap.profile?.avatar_data?<img src={connectBootstrap.profile.avatar_data} alt="Profile"/>:customerDisplayName.slice(0,1).toUpperCase()}</div><h2>{customerDisplayName}</h2><small>{currentUser?.public_username?`@${currentUser.public_username}`:"HOWDI member"}</small><div className="hc112-code-grid">{Array.from({length:81},(_,i)=><i key={i} className={((i*7+connectRealtimeUserId())%5)<2?"on":""}></i>)}</div><p>Scan-style HOWDI profile code</p><button onClick={shareConnectProfile}>Share profile</button></div></div>}
 
-          {connectProfileStudioOpen&&connectProfileStudio&&<div className="hc111-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setConnectProfileStudioOpen(false)}}><div className="hc111-studio"><header><div><small>PROFILE STUDIO</small><h3>Trust, portfolio & network</h3></div><button onClick={()=>setConnectProfileStudioOpen(false)}>×</button></header><div className="hc111-studio-body"><div className="hc111-analytics">{[["Profile visits",connectProfileStudio.analytics?.visits],["Unique visitors",connectProfileStudio.analytics?.unique_visitors],["Followers",connectProfileStudio.analytics?.followers],["Post views",connectProfileStudio.analytics?.post_views],["Project views",connectProfileStudio.analytics?.project_views],["Endorsements",connectProfileStudio.analytics?.endorsements]].map(([k,v])=><div key={k}><small>{k}</small><b>{v||0}</b></div>)}</div><section className="hc112-completion-card"><div><small>PROFILE STRENGTH</small><h3>{connectProfileStudio.strength||"STARTER"} · {connectProfileStudio.completion||0}%</h3></div><div className="hc110-completion-bar"><span style={{width:`${connectProfileStudio.completion||0}%`}}></span></div><div className="hc112-checklist">{Object.entries(connectProfileStudio.checklist||{}).map(([k,v])=><span className={v?"done":""} key={k}>{v?"✓":"○"} {connectProfileCategoryLabel(k)}</span>)}</div></section><section><div className="hc111-section-title"><b>Professional verification</b><span>{connectProfileStudio.verification?.status||"Not submitted"}</span></div><div className="hc111-inline-form"><select value={connectVerifyType} onChange={e=>setConnectVerifyType(e.target.value)}><option value="PROFESSIONAL">Professional</option><option value="CREATOR">Creator</option><option value="INSTITUTION">Institution</option><option value="EDUCATION">Education</option></select><input value={connectVerifyEvidence} onChange={e=>setConnectVerifyEvidence(e.target.value)} placeholder="Evidence / qualification"/><input value={connectVerifyUrl} onChange={e=>setConnectVerifyUrl(e.target.value)} placeholder="Evidence URL"/><button onClick={requestConnectProfessionalVerification}>Submit</button></div></section><section><div className="hc111-section-title"><b>Follow requests</b><span>{connectProfileStudio.followRequests?.length||0}</span></div><div className="hc111-rows">{(connectProfileStudio.followRequests||[]).map(r=><div key={r.requester_user_id}><span><b>{r.full_name}</b><small>{r.profession_title||r.howdi_id}</small></span><button onClick={()=>respondConnectProfileFollowRequest(r,true)}>Accept</button><button onClick={()=>respondConnectProfileFollowRequest(r,false)}>Decline</button></div>)}{!(connectProfileStudio.followRequests||[]).length&&<p>No pending follow requests.</p>}</div></section><section><div className="hc111-section-title"><b>Visitors</b><span>Recent profile viewers</span></div><div className="hc111-visitor-grid">{(connectProfileStudio.visits||[]).slice(0,12).map(v=><button key={v.viewer_user_id} onClick={()=>openConnectPublicProfile({id:v.viewer_user_id})}><b>{v.full_name}</b><small>{v.profession_title||v.howdi_id} · {v.visit_count} visits</small></button>)}</div></section><section><div className="hc111-section-title"><b>Pinned / featured</b><span>{connectProfileStudio.featured?.length||0}</span></div><div className="hc111-inline-form compact"><input value={connectFeaturedPostId} onChange={e=>setConnectFeaturedPostId(e.target.value)} placeholder="Post ID"/><button onClick={pinConnectProfilePost}>Pin post</button></div><div className="hc111-featured-list">{(connectProfileStudio.featured||[]).map(f=><span key={f.id}><b>{f.content_type} · {f.title||f.content_id}</b><button onClick={()=>removeConnectFeatured(f)}>Remove</button></span>)}</div></section><section><div className="hc111-section-title"><b>Portfolio projects</b><span>{connectProfileStudio.projects?.length||0}</span></div><div className="hc111-project-form"><input value={connectProjectForm.title} onChange={e=>setConnectProjectForm(v=>({...v,title:e.target.value}))} placeholder="Project title"/><input value={connectProjectForm.projectUrl} onChange={e=>setConnectProjectForm(v=>({...v,projectUrl:e.target.value}))} placeholder="Project URL"/><textarea value={connectProjectForm.description} onChange={e=>setConnectProjectForm(v=>({...v,description:e.target.value}))} placeholder="What did you build?"/><label>Project image<input type="file" accept="image/*" onChange={e=>readConnectImageFile(e.target.files?.[0],x=>setConnectProjectForm(v=>({...v,mediaData:x})),4)}/></label><button onClick={addConnectProfileProject}>Add project</button></div><div className="hc111-project-grid">{(connectProfileStudio.projects||[]).slice(0,8).map(p=><article key={p.id}>{p.media_data&&<img src={p.media_data} alt={p.title}/>}<b>{p.title}</b><small>{p.description}</small></article>)}</div></section><section><div className="hc111-section-title"><b>Experience</b><span>{connectProfileStudio.experience?.length||0}</span></div><div className="hc111-exp-form"><input value={connectExperienceForm.roleTitle} onChange={e=>setConnectExperienceForm(v=>({...v,roleTitle:e.target.value}))} placeholder="Role"/><input value={connectExperienceForm.organization} onChange={e=>setConnectExperienceForm(v=>({...v,organization:e.target.value}))} placeholder="Organization"/><input type="date" value={connectExperienceForm.startDate} onChange={e=>setConnectExperienceForm(v=>({...v,startDate:e.target.value}))}/><button onClick={addConnectExperience}>Add experience</button></div><div className="hc111-timeline">{(connectProfileStudio.experience||[]).map(x=><div key={x.id}><i></i><span><b>{x.role_title}</b><small>{x.organization}</small></span></div>)}</div></section><section><div className="hc111-section-title"><b>Education</b><span>{connectProfileStudio.education?.length||0}</span></div><div className="hc111-exp-form"><input value={connectEducationForm.institution} onChange={e=>setConnectEducationForm(v=>({...v,institution:e.target.value}))} placeholder="Institution"/><input value={connectEducationForm.program} onChange={e=>setConnectEducationForm(v=>({...v,program:e.target.value}))} placeholder="Program"/><input value={connectEducationForm.fieldOfStudy} onChange={e=>setConnectEducationForm(v=>({...v,fieldOfStudy:e.target.value}))} placeholder="Field of study"/><button onClick={addConnectEducation}>Add education</button></div><div className="hc111-timeline">{(connectProfileStudio.education||[]).map(x=><div key={x.id}><i></i><span><b>{x.institution}</b><small>{x.program} {x.field_of_study?`· ${x.field_of_study}`:""}</small></span></div>)}</div></section><section><div className="hc111-section-title"><b>Skills</b><span>{connectProfileStudio.skills?.length||0}</span></div><div className="hc111-inline-form compact"><input value={connectSkillName} onChange={e=>setConnectSkillName(e.target.value)} placeholder="Add a skill"/><button onClick={addConnectSkill}>Add</button></div><div className="hc111-skill-chips">{(connectProfileStudio.skills||[]).map(s=><span key={s.id}>{s.skill_name} · {s.endorsement_count||0}</span>)}</div></section><section><div className="hc111-section-title"><b>Safety center</b><span>Privacy · Close Friends · Blocks</span></div><div className="hc112-safety-grid"><span><small>Visitors</small><b>{connectProfileStudio.privacy?.visitor_visibility||"EVERYONE"}</b></span><span><small>Followers list</small><b>{connectProfileStudio.privacy?.follower_list_visibility||"EVERYONE"}</b></span><span><small>Mentions</small><b>{connectProfileStudio.privacy?.mention_permission||"EVERYONE"}</b></span><span><small>Tags</small><b>{connectProfileStudio.privacy?.tag_permission||"FOLLOWERS"}</b></span></div><div className="hc111-network-columns"><div><b>Close Friends</b>{(connectProfileStudio.closeFriends||[]).map(x=><span key={x.friend_user_id}>{x.full_name}</span>)}</div><div><b>Blocked</b>{(connectProfileStudio.blocks||[]).map(x=><span key={x.blocked_user_id}>{x.full_name}</span>)}</div></div></section><section><div className="hc111-section-title"><b>People recommendations</b><span>Category-aware</span></div><div className="hc111-reco-filter"><select value={connectRecommendationCategory} onChange={e=>setConnectRecommendationCategory(e.target.value)}><option value="">Smart category</option>{["EDUCATION","STUDENT","INSTITUTE","SERVICE_JOB","BUSINESS","CREATOR","TECHNOLOGY","AI","QUANTUM_COMPUTING","PUBLIC_AFFAIRS","POLITICS","MUSIC","COMEDY","TRAVEL","SCIENCE"].map(x=><option key={x} value={x}>{connectProfileCategoryLabel(x)}</option>)}</select><select value={connectRecommendationType} onChange={e=>setConnectRecommendationType(e.target.value)}><option value="">Any profile type</option>{["PERSONAL","PROFESSIONAL","CREATOR","INSTITUTION","STUDENT","ORGANIZATION"].map(x=><option key={x} value={x}>{connectProfileCategoryLabel(x)}</option>)}</select><button onClick={loadConnectProfileRecommendations}>Find people</button></div><div className="hc111-reco-list">{connectProfileRecommendations.map(p=><button key={p.id} onClick={()=>openConnectPublicProfile(p)}><span className={p.is_live_now?"live":p.presence_status==="ONLINE"?"online":""}></span><div><b>{p.full_name}</b><small>{p.profession_title||connectProfileCategoryLabel(p.professional_category)}</small></div><em>{Math.round(Number(p.recommendation_score||0))}</em></button>)}</div></section></div></div></div>}
+          {connectProfileStudioOpen&&connectProfileStudio&&<div className="hc111-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setConnectProfileStudioOpen(false)}}><div className="hc111-studio"><header><div><small>PROFILE STUDIO</small><h3>Trust, portfolio & network</h3></div><button onClick={()=>setConnectProfileStudioOpen(false)}>×</button></header><div className="hc111-studio-body"><div className="hc111-analytics">{[["Profile visits",connectProfileStudio.analytics?.visits],["Unique visitors",connectProfileStudio.analytics?.unique_visitors],["Followers",connectProfileStudio.analytics?.followers],["Post views",connectProfileStudio.analytics?.post_views],["Project views",connectProfileStudio.analytics?.project_views],["Endorsements",connectProfileStudio.analytics?.endorsements]].map(([k,v])=><div key={k}><small>{k}</small><b>{v||0}</b></div>)}</div><section className="hc112-completion-card"><div><small>PROFILE STRENGTH</small><h3>{connectProfileStudio.strength||"STARTER"} · {connectProfileStudio.completion||0}%</h3></div><div className="hc110-completion-bar"><span style={{width:`${connectProfileStudio.completion||0}%`}}></span></div><div className="hc112-checklist">{Object.entries(connectProfileStudio.checklist||{}).map(([k,v])=><span className={v?"done":""} key={k}>{v?"✓":"○"} {connectProfileCategoryLabel(k)}</span>)}</div></section><section><div className="hc111-section-title"><b>Professional verification</b><span>{connectProfileStudio.verification?.status||"Not submitted"}</span></div><div className="hc111-inline-form"><select value={connectVerifyType} onChange={e=>setConnectVerifyType(e.target.value)}><option value="PROFESSIONAL">Professional</option><option value="CREATOR">Creator</option><option value="INSTITUTION">Institution</option><option value="EDUCATION">Education</option></select><input value={connectVerifyEvidence} onChange={e=>setConnectVerifyEvidence(e.target.value)} placeholder="Evidence / qualification"/><input value={connectVerifyUrl} onChange={e=>setConnectVerifyUrl(e.target.value)} placeholder="Evidence URL"/><button onClick={requestConnectProfessionalVerification}>Submit</button></div></section><section><div className="hc111-section-title"><b>Follow requests</b><span>{connectProfileStudio.followRequests?.length||0}</span></div><div className="hc111-rows">{(connectProfileStudio.followRequests||[]).map(r=><div key={r.requester_user_id}><span><b>{r.full_name}</b><small>{r.profession_title||(r.public_username?`@${r.public_username}`:"HOWDI member")}</small></span><button onClick={()=>respondConnectProfileFollowRequest(r,true)}>Accept</button><button onClick={()=>respondConnectProfileFollowRequest(r,false)}>Decline</button></div>)}{!(connectProfileStudio.followRequests||[]).length&&<p>No pending follow requests.</p>}</div></section><section><div className="hc111-section-title"><b>Visitors</b><span>Recent profile viewers</span></div><div className="hc111-visitor-grid">{(connectProfileStudio.visits||[]).slice(0,12).map(v=><button key={v.viewer_user_id} onClick={()=>openConnectPublicProfile({id:v.viewer_user_id})}><b>{v.full_name}</b><small>{v.profession_title||(v.public_username?`@${v.public_username}`:"HOWDI member")} · {v.visit_count} visits</small></button>)}</div></section><section><div className="hc111-section-title"><b>Pinned / featured</b><span>{connectProfileStudio.featured?.length||0}</span></div><div className="hc111-inline-form compact"><input value={connectFeaturedPostId} onChange={e=>setConnectFeaturedPostId(e.target.value)} placeholder="Post ID"/><button onClick={pinConnectProfilePost}>Pin post</button></div><div className="hc111-featured-list">{(connectProfileStudio.featured||[]).map(f=><span key={f.id}><b>{f.content_type} · {f.title||f.content_id}</b><button onClick={()=>removeConnectFeatured(f)}>Remove</button></span>)}</div></section><section><div className="hc111-section-title"><b>Portfolio projects</b><span>{connectProfileStudio.projects?.length||0}</span></div><div className="hc111-project-form"><input value={connectProjectForm.title} onChange={e=>setConnectProjectForm(v=>({...v,title:e.target.value}))} placeholder="Project title"/><input value={connectProjectForm.projectUrl} onChange={e=>setConnectProjectForm(v=>({...v,projectUrl:e.target.value}))} placeholder="Project URL"/><textarea value={connectProjectForm.description} onChange={e=>setConnectProjectForm(v=>({...v,description:e.target.value}))} placeholder="What did you build?"/><label>Project image<input type="file" accept="image/*" onChange={e=>readConnectImageFile(e.target.files?.[0],x=>setConnectProjectForm(v=>({...v,mediaData:x})),4)}/></label><button onClick={addConnectProfileProject}>Add project</button></div><div className="hc111-project-grid">{(connectProfileStudio.projects||[]).slice(0,8).map(p=><article key={p.id}>{p.media_data&&<img src={p.media_data} alt={p.title}/>}<b>{p.title}</b><small>{p.description}</small></article>)}</div></section><section><div className="hc111-section-title"><b>Experience</b><span>{connectProfileStudio.experience?.length||0}</span></div><div className="hc111-exp-form"><input value={connectExperienceForm.roleTitle} onChange={e=>setConnectExperienceForm(v=>({...v,roleTitle:e.target.value}))} placeholder="Role"/><input value={connectExperienceForm.organization} onChange={e=>setConnectExperienceForm(v=>({...v,organization:e.target.value}))} placeholder="Organization"/><input type="date" value={connectExperienceForm.startDate} onChange={e=>setConnectExperienceForm(v=>({...v,startDate:e.target.value}))}/><button onClick={addConnectExperience}>Add experience</button></div><div className="hc111-timeline">{(connectProfileStudio.experience||[]).map(x=><div key={x.id}><i></i><span><b>{x.role_title}</b><small>{x.organization}</small></span></div>)}</div></section><section><div className="hc111-section-title"><b>Education</b><span>{connectProfileStudio.education?.length||0}</span></div><div className="hc111-exp-form"><input value={connectEducationForm.institution} onChange={e=>setConnectEducationForm(v=>({...v,institution:e.target.value}))} placeholder="Institution"/><input value={connectEducationForm.program} onChange={e=>setConnectEducationForm(v=>({...v,program:e.target.value}))} placeholder="Program"/><input value={connectEducationForm.fieldOfStudy} onChange={e=>setConnectEducationForm(v=>({...v,fieldOfStudy:e.target.value}))} placeholder="Field of study"/><button onClick={addConnectEducation}>Add education</button></div><div className="hc111-timeline">{(connectProfileStudio.education||[]).map(x=><div key={x.id}><i></i><span><b>{x.institution}</b><small>{x.program} {x.field_of_study?`· ${x.field_of_study}`:""}</small></span></div>)}</div></section><section><div className="hc111-section-title"><b>Skills</b><span>{connectProfileStudio.skills?.length||0}</span></div><div className="hc111-inline-form compact"><input value={connectSkillName} onChange={e=>setConnectSkillName(e.target.value)} placeholder="Add a skill"/><button onClick={addConnectSkill}>Add</button></div><div className="hc111-skill-chips">{(connectProfileStudio.skills||[]).map(s=><span key={s.id}>{s.skill_name} · {s.endorsement_count||0}</span>)}</div></section><section><div className="hc111-section-title"><b>Safety center</b><span>Privacy · Close Friends · Blocks</span></div><div className="hc112-safety-grid"><span><small>Visitors</small><b>{connectProfileStudio.privacy?.visitor_visibility||"EVERYONE"}</b></span><span><small>Followers list</small><b>{connectProfileStudio.privacy?.follower_list_visibility||"EVERYONE"}</b></span><span><small>Mentions</small><b>{connectProfileStudio.privacy?.mention_permission||"EVERYONE"}</b></span><span><small>Tags</small><b>{connectProfileStudio.privacy?.tag_permission||"FOLLOWERS"}</b></span></div><div className="hc111-network-columns"><div><b>Close Friends</b>{(connectProfileStudio.closeFriends||[]).map(x=><span key={x.friend_user_id}>{x.full_name}</span>)}</div><div><b>Blocked</b>{(connectProfileStudio.blocks||[]).map(x=><span key={x.blocked_user_id}>{x.full_name}</span>)}</div></div></section><section><div className="hc111-section-title"><b>People recommendations</b><span>Category-aware</span></div><div className="hc111-reco-filter"><select value={connectRecommendationCategory} onChange={e=>setConnectRecommendationCategory(e.target.value)}><option value="">Smart category</option>{["EDUCATION","STUDENT","INSTITUTE","SERVICE_JOB","BUSINESS","CREATOR","TECHNOLOGY","AI","QUANTUM_COMPUTING","PUBLIC_AFFAIRS","POLITICS","MUSIC","COMEDY","TRAVEL","SCIENCE"].map(x=><option key={x} value={x}>{connectProfileCategoryLabel(x)}</option>)}</select><select value={connectRecommendationType} onChange={e=>setConnectRecommendationType(e.target.value)}><option value="">Any profile type</option>{["PERSONAL","PROFESSIONAL","CREATOR","INSTITUTION","STUDENT","ORGANIZATION"].map(x=><option key={x} value={x}>{connectProfileCategoryLabel(x)}</option>)}</select><button onClick={loadConnectProfileRecommendations}>Find people</button></div><div className="hc111-reco-list">{connectProfileRecommendations.map(p=><button key={p.id} onClick={()=>openConnectPublicProfile(p)}><span className={p.is_live_now?"live":p.presence_status==="ONLINE"?"online":""}></span><div><b>{p.full_name}</b><small>{p.profession_title||connectProfileCategoryLabel(p.professional_category)}</small></div><em>{Math.round(Number(p.recommendation_score||0))}</em></button>)}</div></section></div></div></div>}
 
           {connectProfileEditOpen&&<div className="hc110-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setConnectProfileEditOpen(false)}}><div className="hc110-editor"><header><div><small>HOWDI IDENTITY</small><h3>Edit Connect profile</h3></div><button onClick={()=>setConnectProfileEditOpen(false)}>×</button></header><div className="hc110-editor-body"><section><b>Profile identity</b><div className="hc111-media-pickers"><label><span>Profile photo</span><input type="file" accept="image/*" onChange={e=>readConnectImageFile(e.target.files?.[0],setConnectProfileAvatarData,3)}/>{connectProfileAvatarData&&<img src={connectProfileAvatarData} alt="Avatar preview"/>}</label><label><span>Cover image</span><input type="file" accept="image/*" onChange={e=>readConnectImageFile(e.target.files?.[0],setConnectProfileCoverData,6)}/>{connectProfileCoverData&&<img src={connectProfileCoverData} alt="Cover preview"/>}</label></div><div className="hc110-form-grid"><label>Profile type<select value={connectProfileType} onChange={e=>setConnectProfileType(e.target.value)}><option value="PERSONAL">Personal</option><option value="PROFESSIONAL">Professional</option><option value="CREATOR">Content Creator</option><option value="INSTITUTION">Institution</option><option value="STUDENT">Student</option><option value="ORGANIZATION">Organization</option></select></label><label>Category<select value={connectProfessionalCategory} onChange={e=>setConnectProfessionalCategory(e.target.value)}>{["GENERAL","EDUCATION","STUDENT","INSTITUTE","SERVICE_JOB","BUSINESS","CREATOR","TECHNOLOGY","AI","QUANTUM_COMPUTING","PUBLIC_AFFAIRS","POLITICS","HEALTH","ARTS","MUSIC","COMEDY","TRAVEL","SPORTS","SCIENCE","FINANCE","SOCIAL_IMPACT"].map(x=><option key={x} value={x}>{connectProfileCategoryLabel(x)}</option>)}</select></label><label>Profession / role<input value={connectProfessionTitle} onChange={e=>setConnectProfessionTitle(e.target.value)} placeholder="Teacher, student, designer, technician…"/></label><label>Organization / institute<input value={connectOrganizationName} onChange={e=>setConnectOrganizationName(e.target.value)} placeholder="School, company, institute…"/></label></div><label>Headline<input value={connectProfileHeadline} onChange={e=>setConnectProfileHeadline(e.target.value)} placeholder="One line about you"/></label><label>About<textarea value={connectProfileAbout} onChange={e=>setConnectProfileAbout(e.target.value)} placeholder="Tell HOWDI about your work, learning, ideas or community."/></label></section><section><b>Profile-specific details</b><div className="hc110-form-grid"><label>Student level<input value={connectStudentLevel} onChange={e=>setConnectStudentLevel(e.target.value)} placeholder="Class 10, Undergraduate, Research scholar…"/></label><label>Institution type<input value={connectInstitutionType} onChange={e=>setConnectInstitutionType(e.target.value)} placeholder="School, College, Coaching, University…"/></label><label>Service area<input value={connectServiceArea} onChange={e=>setConnectServiceArea(e.target.value)} placeholder="Bengaluru · Remote · Nationwide"/></label><label>Service / rate note<input value={connectServiceRateText} onChange={e=>setConnectServiceRateText(e.target.value)} placeholder="Available weekends · ₹500/hour…"/></label></div></section><section><b>Knowledge & interests</b><label>Education focus<input value={connectEducationFocus} onChange={e=>setConnectEducationFocus(e.target.value)} placeholder="NEET, coding, AI research, quantum computing…"/></label><label>Expertise<textarea value={connectExpertise} onChange={e=>setConnectExpertise(e.target.value)} placeholder="Skills, services, subjects, professional knowledge…"/></label><label>Interests<textarea value={connectInterests} onChange={e=>setConnectInterests(e.target.value)} placeholder="Education, AI, travel, politics, music, jobs…"/></label></section><section><b>Profile safety & visibility</b><div className="hc110-form-grid"><label>Profile visitors<select value={connectVisitorVisibility} onChange={e=>setConnectVisitorVisibility(e.target.value)}><option value="EVERYONE">Everyone</option><option value="FOLLOWERS">Followers only</option><option value="NO_ONE">Do not record visitors</option></select></label><label>Follower list<select value={connectFollowerListVisibility} onChange={e=>setConnectFollowerListVisibility(e.target.value)}><option value="EVERYONE">Everyone</option><option value="FOLLOWERS">Followers only</option><option value="ONLY_ME">Only me</option></select></label><label>Mentions<select value={connectMentionPermission} onChange={e=>setConnectMentionPermission(e.target.value)}><option value="EVERYONE">Everyone</option><option value="FOLLOWERS">Followers</option><option value="NO_ONE">No one</option></select></label><label>Profile tags<select value={connectTagPermission} onChange={e=>setConnectTagPermission(e.target.value)}><option value="EVERYONE">Everyone</option><option value="FOLLOWERS">Followers</option><option value="NO_ONE">No one</option></select></label></div></section><section><b>Status & visibility</b><label>Status message<input value={connectStatusMessage} onChange={e=>setConnectStatusMessage(e.target.value)} placeholder="Working on something new…"/></label><div className="hc110-form-grid"><label>Availability<select value={connectAvailability} onChange={e=>setConnectAvailability(e.target.value)}>{["AVAILABLE","BUSY","DO_NOT_DISTURB","AWAY","OPEN_TO_WORK","HIRING","OPEN_TO_COLLAB"].map(x=><option key={x} value={x}>{connectProfileCategoryLabel(x)}</option>)}</select></label><label>Who can message<select value={connectContactPermission} onChange={e=>setConnectContactPermission(e.target.value)}><option value="EVERYONE">Everyone</option><option value="FOLLOWERS">Followers</option><option value="FOLLOWING">People I follow</option><option value="NO_ONE">No one</option></select></label></div><div className="hc110-toggles"><label><input type="checkbox" checked={!connectProfilePrivate} onChange={e=>setConnectProfilePrivate(!e.target.checked)}/><span><b>Public profile</b><small>Turn off for private profile.</small></span></label><label><input type="checkbox" checked={connectDiscoverable} onChange={e=>setConnectDiscoverable(e.target.checked)}/><span><b>Discoverable</b><small>Appear in Connect search and recommendations.</small></span></label><label><input type="checkbox" checked={connectActivityVisible} onChange={e=>setConnectActivityVisible(e.target.checked)}/><span><b>Activity / last seen</b><small>Show active now and last seen.</small></span></label><label><input type="checkbox" checked={connectCreatorMode} onChange={e=>setConnectCreatorMode(e.target.checked)}/><span><b>Creator mode</b><small>Show creator identity and tools.</small></span></label><label><input type="checkbox" checked={connectProfessionalMode} onChange={e=>setConnectProfessionalMode(e.target.checked)}/><span><b>Professional mode</b><small>Highlight role, institute and expertise.</small></span></label></div></section><section><b>Links</b><label>Portfolio URL<input value={connectPortfolioUrl} onChange={e=>setConnectPortfolioUrl(e.target.value)} placeholder="https://…"/></label><div className="hc110-form-grid">{[["website","Website"],["linkedin","LinkedIn"],["youtube","YouTube"],["instagram","Instagram"],["x","X / Twitter"]].map(([k,l])=><label key={k}>{l}<input value={connectSocialLinks[k]||""} onChange={e=>setConnectSocialLinks(v=>({...v,[k]:e.target.value}))}/></label>)}</div></section></div><footer><button onClick={()=>setConnectProfileEditOpen(false)}>Cancel</button><button className="primary" onClick={saveConnectProfileIdentity}>Save profile</button></footer></div></div>}
 
-          {connectPublicProfile&&<div className="hc110-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setConnectPublicProfile(null)}}><div className="hc110-public"><header><button onClick={()=>setConnectPublicProfile(null)}>×</button></header><div className="hc110-public-avatar">{String(connectPublicProfile.profile?.full_name||"H")[0]}</div><h2>{connectPublicProfile.profile?.full_name}</h2><small>{connectPublicProfile.profile?.public_username?`@${connectPublicProfile.profile.public_username}`:"HOWDI member"}</small>{connectPublicProfile.private?<div className="hc110-private-profile">🔒 This profile is private.</div>:<><div className="hc110-public-presence">{connectPresenceLabel(connectPublicProfile.profile)}</div>{connectPublicProfile.verification&&<div className={`hc112-verify ${String(connectPublicProfile.verification.status||"").toLowerCase()}`}><b>✓ {connectProfileCategoryLabel(connectPublicProfile.verification.verification_type)} verification</b><span>{connectPublicProfile.verification.status}</span></div>}<div className="hc112-layout-card">{(()=>{const x=connectProfileLayoutLabel(connectPublicProfile.profile);return <><span>{x.icon}</span><div><b>{x.title}</b><small>{x.sub}</small></div></>})()}</div><div className="hc110-identity-chips"><span>{connectProfileCategoryLabel(connectPublicProfile.profile?.profile_type)}</span><span>{connectProfileCategoryLabel(connectPublicProfile.profile?.professional_category)}</span>{connectPublicProfile.profile?.is_live_now&&<span className="live">● LIVE</span>}</div><h3>{connectPublicProfile.profile?.profession_title||connectPublicProfile.profile?.headline}</h3><p>{connectPublicProfile.profile?.about}</p><div className="hc2-profile-counts"><span><b>{connectPublicProfile.profile?.post_count||0}</b> Posts</span><span><b>{connectPublicProfile.profile?.follower_count||0}</b> Followers</span><span><b>{connectPublicProfile.profile?.following_count||0}</b> Following</span></div><div className="hc111-public-actions"><button onClick={()=>toggleConnectFollow({id:connectPublicProfile.profile?.user_id,full_name:connectPublicProfile.profile?.full_name})}>{connectPublicProfile.profile?.viewer_following?"Unfollow":connectPublicProfile.profile?.private_profile?"Request follow":"Follow"}</button>{connectPublicProfile.canMessage&&<button onClick={()=>{startConnectConversation({id:connectPublicProfile.profile?.user_id,full_name:connectPublicProfile.profile?.full_name});setConnectPublicProfile(null)}}>Message</button>}{connectPublicProfile.profile?.viewer_following&&<button onClick={()=>toggleConnectCloseFriend(connectPublicProfile.profile)}>Close friend</button>}<button className="danger" onClick={()=>blockConnectProfile(connectPublicProfile.profile)}>Block</button></div>{!!connectPublicProfile.skills?.length&&<section className="hc111-public-section"><b>Skills</b><div className="hc111-skill-chips">{connectPublicProfile.skills.map(s=><button key={s.id} onClick={()=>endorseConnectSkill(s)} className={s.viewer_endorsed?"endorsed":""}>{s.skill_name} · {s.endorsement_count||0}</button>)}</div></section>}{!!connectPublicProfile.featured?.length&&<section className="hc111-public-section"><b>Featured</b><div className="hc112-featured-grid">{connectPublicProfile.featured.map(f=><article key={f.id}><small>{f.content_type}</small><b>{f.title||f.resolved?.content?.slice(0,60)||f.resolved?.title||"Featured content"}</b>{f.resolved?.media_data&&<img src={f.resolved.media_data} alt="Featured"/>}</article>)}</div></section>}{!!connectPublicProfile.projects?.length&&<section className="hc111-public-section"><b>Projects</b><div className="hc111-project-grid">{connectPublicProfile.projects.slice(0,6).map(p=><article key={p.id} onClick={()=>openConnectProject(p)} role="button">{p.media_data&&<img src={p.media_data} alt={p.title}/>}<strong>{p.title}</strong><small>{p.description}</small></article>)}</div></section>}<div className="hc112-strength"><div><b>{connectPublicProfile.profileStrength||"STARTER"}</b><small>Profile strength</small></div><span>{connectPublicProfile.completion||0}% complete</span></div><div className="hc110-completion-bar"><span style={{width:`${connectPublicProfile.completion||0}%`}}></span></div></>}</div></div>}
+          {connectPublicProfile&&<div className="hc110-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setConnectPublicProfile(null)}}><div className="hc110-public"><header><button onClick={()=>setConnectPublicProfile(null)}>×</button></header><div className="hc110-public-avatar">{String(connectPublicProfile.profile?.full_name||"H")[0]}</div><h2>{connectPublicProfile.profile?.full_name}</h2><small>{connectPublicProfile.profile?.public_username?`@${connectPublicProfile.profile.public_username}`:"HOWDI member"}</small>{connectPublicProfile.private?<div className="hc110-private-profile">🔒 This profile is private.</div>:<><div className="hc110-public-presence">{connectPresenceLabel(connectPublicProfile.profile)}</div>{connectPublicProfile.verification&&<div className={`hc112-verify ${String(connectPublicProfile.verification.status||"").toLowerCase()}`}><b>✓ {connectProfileCategoryLabel(connectPublicProfile.verification.verification_type)} verification</b><span>{connectPublicProfile.verification.status}</span></div>}<div className="hc112-layout-card">{(()=>{const x=connectProfileLayoutLabel(connectPublicProfile.profile);return <><span>{x.icon}</span><div><b>{x.title}</b><small>{x.sub}</small></div></>})()}</div><div className="hc110-identity-chips"><span>{connectProfileCategoryLabel(connectPublicProfile.profile?.profile_type)}</span><span>{connectProfileCategoryLabel(connectPublicProfile.profile?.professional_category)}</span>{connectPublicProfile.profile?.is_live_now&&<span className="live">● LIVE</span>}</div><h3>{connectPublicProfile.profile?.profession_title||connectPublicProfile.profile?.headline}</h3><p>{connectPublicProfile.profile?.about}</p><div className="hc2-profile-counts"><span><b>{connectPublicProfile.profile?.post_count||0}</b> Posts</span><span><b>{connectPublicProfile.profile?.follower_count||0}</b> Followers</span><span><b>{connectPublicProfile.profile?.following_count||0}</b> Following</span></div><div className="hc111-public-actions"><button onClick={()=>toggleConnectFollowByUsername(connectPublicProfile.profile?.public_username,connectPublicProfile.profile?.full_name)}>{connectPublicProfile.profile?.viewer_following?"Unfollow":connectPublicProfile.profile?.private_profile?"Request follow":"Follow"}</button>{connectPublicProfile.canMessage&&<button onClick={()=>{startConnectConversation({public_username:connectPublicProfile.profile?.public_username,full_name:connectPublicProfile.profile?.full_name});setConnectPublicProfile(null)}}>Message</button>}{connectPublicProfile.profile?.viewer_following&&<button onClick={()=>toggleConnectCloseFriend(connectPublicProfile.profile)}>Close friend</button>}<button className="danger" onClick={()=>blockConnectProfile(connectPublicProfile.profile)}>Block</button></div>{!!connectPublicProfile.skills?.length&&<section className="hc111-public-section"><b>Skills</b><div className="hc111-skill-chips">{connectPublicProfile.skills.map(s=><button key={s.id} onClick={()=>endorseConnectSkill(s)} className={s.viewer_endorsed?"endorsed":""}>{s.skill_name} · {s.endorsement_count||0}</button>)}</div></section>}{!!connectPublicProfile.featured?.length&&<section className="hc111-public-section"><b>Featured</b><div className="hc112-featured-grid">{connectPublicProfile.featured.map(f=><article key={f.id}><small>{f.content_type}</small><b>{f.title||f.resolved?.content?.slice(0,60)||f.resolved?.title||"Featured content"}</b>{f.resolved?.media_data&&<img src={f.resolved.media_data} alt="Featured"/>}</article>)}</div></section>}{!!connectPublicProfile.projects?.length&&<section className="hc111-public-section"><b>Projects</b><div className="hc111-project-grid">{connectPublicProfile.projects.slice(0,6).map(p=><article key={p.id} onClick={()=>openConnectProject(p)} role="button">{p.media_data&&<img src={p.media_data} alt={p.title}/>}<strong>{p.title}</strong><small>{p.description}</small></article>)}</div></section>}{/* K5B FINAL UX CLOSURE: Vibes/Articles/Communities cards are now clickable and
+    keyboard-accessible (role="button", tabIndex, Enter/Space), reusing existing
+    navigation plumbing: openConnectArticle for Articles (unchanged since K5B
+    FINAL UX CLOSURE); Vibes now focus the exact clicked Vibe via its vibe_code
+    (K5B UX CORRECTION — see connectVibeFocusCode/focusVibeCode above), and
+    Communities now open the exact clicked community via the same
+    openConnectGCSpace() path the Vibe player's own onOpenCommunity handler
+    already uses elsewhere in this file, instead of only switching to the
+    generic Communities tab. Routing stays public-username-safe — every id used
+    here is a content id (vibe_code / post id / community id), never a numeric
+    user id. */}
+          {!!connectPublicProfile.vibes?.length&&<section className="hc111-public-section"><b>Vibes</b><div className="hc112-featured-grid">{connectPublicProfile.vibes.map(v=>{const openThisVibe=()=>{setConnectVibeFocusCode(v.vibe_code||"");openNavigationOSArea("connect","vibe");setConnectPublicProfile(null);};return <article key={v.vibe_code} role="button" tabIndex={0} onClick={openThisVibe} onKeyDown={e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();openThisVibe();}}}>{v.cover_url&&<img src={v.cover_url} alt=""/>}<small>{v.caption||v.vibe_type}</small></article>;})}</div></section>}{!!connectPublicProfile.articles?.length&&<section className="hc111-public-section"><b>Articles</b><div className="hc111-project-grid">{connectPublicProfile.articles.map(a=>{const openThisArticle=()=>openConnectArticle(a);return <article key={a.id} role="button" tabIndex={0} onClick={openThisArticle} onKeyDown={e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();openThisArticle();}}}><strong>{a.article_title}</strong><small>{a.article_excerpt}</small></article>;})}</div></section>}{!!connectPublicProfile.communities?.length&&<section className="hc111-public-section"><b>Communities</b><div className="hc111-project-grid">{connectPublicProfile.communities.map(c=>{const openThisCommunity=()=>{const target={id:c.id,name:c.name,description:c.description,space_type:String(c.community_type||"GROUP").toUpperCase(),privacy:"PUBLIC",member_count:c.member_count};setNavigationOSArea("connect");setConnectView("communities");setConnectCommunityView(target.space_type==="CHANNEL"?"channels":"groups");setConnectContentMode("posts");setConnectModalOpen(true);setConnectPublicProfile(null);setTimeout(()=>openConnectGCSpace(target),0);};return <article key={c.id} role="button" tabIndex={0} onClick={openThisCommunity} onKeyDown={e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();openThisCommunity();}}}><strong>{c.name}</strong><small>{c.member_count||0} members</small></article>;})}</div></section>}<div className="hc112-strength"><div><b>{connectPublicProfile.profileStrength||"STARTER"}</b><small>Profile strength</small></div><span>{connectPublicProfile.completion||0}% complete</span></div><div className="hc110-completion-bar"><span style={{width:`${connectPublicProfile.completion||0}%`}}></span></div></>}</div></div>}
 
           {connectSpaceCompletionOpen&&connectSpaceCompletion&&<div className="hc107-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setConnectSpaceCompletionOpen(false)}}><div className="hc107-completion"><header><div><small>SPACE COMPLETION</small><h3>{connectSpaceCompletion.room?.name}</h3></div><button onClick={()=>setConnectSpaceCompletionOpen(false)}>×</button></header><div className="hc107-completion-grid">{[["Participants",connectSpaceCompletion.metrics?.unique_participants],["Check-ins",connectSpaceCompletion.metrics?.checkins],["Questions",connectSpaceCompletion.metrics?.questions],["Chat messages",connectSpaceCompletion.metrics?.chat_messages],["Feedback",connectSpaceCompletion.metrics?.feedback_responses],["NPS",connectSpaceCompletion.metrics?.avg_nps??"—"],["Open reports",connectSpaceCompletion.metrics?.open_reports]].map(([k,v])=><div key={k}><small>{k}</small><b>{v??0}</b></div>)}</div>{connectSpaceCompletion.room?.recap_notes&&<section><b>Recap</b><p>{connectSpaceCompletion.room.recap_notes}</p></section>}</div></div>}
 
@@ -19539,9 +20482,9 @@ const removeNotification = async (notificationId) => {
 
           {connectSeriesEpisodesOpen&&connectSeriesEpisodesData&&<div className="hc103-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setConnectSeriesEpisodesOpen(false)}}><div className="hc103-series-page"><header><div><small>SPACE SERIES</small><h3>{connectSeriesEpisodesData.series?.title}</h3><p>{connectSeriesEpisodesData.series?.topic||connectSeriesEpisodesData.series?.description}</p><div className="hc105-series-follow"><button onClick={toggleConnectSeriesFollow}>{connectSeriesEpisodesData.followed?"✓ Following":"＋ Follow series"}</button><span>{connectSeriesEpisodesData.followerCount||0} followers</span></div></div><button onClick={()=>setConnectSeriesEpisodesOpen(false)}>×</button></header><div className="hc105-prefix"><input value={connectSeriesTitlePrefix} onChange={e=>setConnectSeriesTitlePrefix(e.target.value)} placeholder="Episode label e.g. Session"/><button onClick={saveConnectSeriesTitlePrefix}>Save naming</button></div><div className="hc103-schedule"><b>Recurring schedule</b><select value={connectSeriesScheduleType} onChange={e=>setConnectSeriesScheduleType(e.target.value)}><option value="WEEKLY">Weekly</option><option value="BIWEEKLY">Every 2 weeks</option><option value="MONTHLY">Monthly</option></select><select value={connectSeriesScheduleDay} onChange={e=>setConnectSeriesScheduleDay(e.target.value)}>{["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"].map((d,i)=><option value={i} key={d}>{d}</option>)}</select><input type="time" value={connectSeriesScheduleTime} onChange={e=>setConnectSeriesScheduleTime(e.target.value)}/><button onClick={saveConnectSeriesRecurringSchedule}>Save</button><button className="generate" onClick={generateConnectNextSeriesEpisode}>＋ Generate next episode</button></div>{connectSeriesEpisodesData.schedule&&<div className="hc103-schedule-note">🗓 {connectSeriesEpisodesData.schedule.recurrence_type} · day {connectSeriesEpisodesData.schedule.weekday} · {connectSeriesEpisodesData.schedule.local_time||"time not set"} · {connectSeriesEpisodesData.schedule.timezone}</div>}<div className="hc103-episodes">{(connectSeriesEpisodesData.episodes||[]).map((ep,i)=><article key={ep.id}><span>{String(i+1).padStart(2,"0")}</span><div><b>{ep.episode_number?`#${ep.episode_number} · `:""}{ep.name}</b><small>{String(ep.session_status||"").toUpperCase()} · {ep.audience_total||0} audience{ep.scheduled_for?` · ${formatConnectSpaceWhen(ep.scheduled_for)}`:""}</small></div><div>{ep.replay_available&&<button onClick={()=>openConnectSpaceReplay(ep)}>▶ Replay</button>}<button onClick={()=>openConnectSpacePreflight(ep)}>Open</button></div></article>)}{!(connectSeriesEpisodesData.episodes||[]).length&&<p className="hc103-empty">No Spaces linked to this series yet.</p>}</div></div></div>}
 
-          {connectCreatorDashboardOpen&&<div className="hc102-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setConnectCreatorDashboardOpen(false)}}><div className="hc102-dashboard"><header><div><small>CREATOR STUDIO</small><h3>Membership & earnings</h3></div><button onClick={()=>setConnectCreatorDashboardOpen(false)}>×</button></header>{connectCreatorDashboardLoading?<div className="hc102-loading">Loading creator studio…</div>:connectCreatorDashboard&&<><div className="hc102-money">{[["Tips",connectCreatorDashboard.earnings?.tips],["Gifts",connectCreatorDashboard.earnings?.gifts],["Premium",connectCreatorDashboard.earnings?.premium],["Memberships",connectCreatorDashboard.earnings?.memberships]].map(([label,value])=><div key={label}><small>{label}</small><b>₹{Number(value||0).toLocaleString("en-IN")}</b></div>)}</div><section className="hc102-plan"><div><small>MEMBERSHIP PLAN</small><h4>{connectCreatorDashboard.plan?.plan_name||"Create your first plan"}</h4></div><div className="hc102-plan-form"><input value={connectCreatorPlanName} onChange={e=>setConnectCreatorPlanName(e.target.value)} placeholder="Plan name"/><input type="number" min="0" value={connectCreatorPlanPrice} onChange={e=>setConnectCreatorPlanPrice(e.target.value)} placeholder="Price"/><select value={connectCreatorPlanPeriod} onChange={e=>setConnectCreatorPlanPeriod(e.target.value)}><option value="MONTHLY">Monthly</option><option value="YEARLY">Yearly</option></select><textarea value={connectCreatorPlanBenefits} onChange={e=>setConnectCreatorPlanBenefits(e.target.value)} placeholder="Benefits"/></div><button onClick={saveConnectCreatorPlan}>Save membership plan</button></section><section><div className="hc102-section-title"><b>Members</b><span>{(connectCreatorDashboard.members||[]).filter(m=>m.status==="ACTIVE").length} active</span></div><input className="hc105-member-search" value={connectMemberSearch} onChange={e=>setConnectMemberSearch(e.target.value)} placeholder="Search members…"/><div className="hc102-member-list">{(connectCreatorDashboard.members||[]).filter(m=>!connectMemberSearch||String(m.full_name||"").toLowerCase().includes(connectMemberSearch.toLowerCase())||String(m.public_username||"").toLowerCase().includes(connectMemberSearch.toLowerCase())).slice(0,50).map(m=><div key={m.subscriber_user_id}><span><b>{m.full_name} {m.member_tier?.badge_emoji||""}</b><small>{m.status} · ₹{Number(m.amount||0).toLocaleString("en-IN")}{m.member_tier?.tier_name?` · ${m.member_tier.tier_name}`:""} · score {m.activity_score||0}{m.trial_ends_at?` · trial until ${new Date(m.trial_ends_at).toLocaleDateString("en-IN")}`:""}</small></span><div className="hc106-member-actions"><button onClick={()=>openConnectMemberCard(m)}>Profile</button>{m.status!=="ACTIVE"&&<button onClick={()=>grantConnectCreatorMembership(m)}>Activate</button>}</div></div>)}{!(connectCreatorDashboard.members||[]).length&&<p>No members yet.</p>}</div></section><section className="hc103-member-analytics"><div className="hc102-section-title"><b>Membership analytics</b><span>Lifecycle</span></div><div className="hc104-automation-actions"><button onClick={runConnectMembershipExpirySweep}>✓ Run expiry check</button><button onClick={sendConnectRenewalReminders}>🔔 Send renewal reminders</button></div><div className="hc103-metrics"><div><small>Active</small><b>{connectMembershipAnalytics?.summary?.active_members||0}</b></div><div><small>Pending</small><b>{connectMembershipAnalytics?.summary?.pending_members||0}</b></div><div><small>Cancelled</small><b>{connectMembershipAnalytics?.summary?.cancelled_members||0}</b></div><div><small>Active value</small><b>₹{Number(connectMembershipAnalytics?.summary?.active_value||0).toLocaleString("en-IN")}</b></div></div>{!!connectMembershipAnalytics?.expiring?.length&&<div className="hc103-expiring"><b>Expiring in 14 days</b>{connectMembershipAnalytics.expiring.slice(0,6).map(x=><span key={x.subscriber_user_id}>{x.full_name}<small>{new Date(x.current_period_end).toLocaleDateString("en-IN")}</small></span>)}</div>}</section><section className="hc106-community-ops"><div className="hc102-section-title"><b>Community operations</b><span>Challenges · Polls</span></div><div className="hc106-challenge-form"><input value={connectChallengeTitle} onChange={e=>setConnectChallengeTitle(e.target.value)} placeholder="Challenge title"/><input value={connectChallengeDescription} onChange={e=>setConnectChallengeDescription(e.target.value)} placeholder="Description"/><input type="number" min="1" value={connectChallengeTarget} onChange={e=>setConnectChallengeTarget(e.target.value)} placeholder="Target"/><button onClick={createConnectChallenge}>Create challenge</button></div><div className="hc106-challenges">{(connectCreatorDashboard.challenges||[]).map(ch=><span key={ch.id}><b>🏆 {ch.title}</b><small>Target {ch.target_count} · {ch.completed_members||0} completed</small></span>)}</div><div className="hc106-poll-builder"><input value={connectMemberPollQuestion} onChange={e=>setConnectMemberPollQuestion(e.target.value)} placeholder="Ask subscribers…"/><select value={connectMemberPollCohort} onChange={e=>setConnectMemberPollCohort(e.target.value)}><option value="ALL">All members</option><option value="GENERAL">General</option><option value="VIP">VIP</option><option value="NEW">New</option></select>{connectMemberPollOptions.map((v,i)=><input key={i} value={v} onChange={e=>setConnectMemberPollOptions(a=>a.map((x,j)=>j===i?e.target.value:x))} placeholder={`Option ${i+1}`}/>)}<button onClick={()=>setConnectMemberPollOptions(a=>a.length<6?[...a,""]:a)}>＋ Option</button><button onClick={createConnectMemberPoll}>Publish poll</button></div><div className="hc106-polls">{(connectCreatorDashboard.memberPolls||[]).slice(0,8).map(p=><article key={p.id}><b>{p.question}</b><small>{p.cohort} · {p.total_votes||0} votes</small><div>{(p.options||[]).map(o=><button key={o.id} onClick={()=>voteConnectMemberPoll(p,o.id)}>{o.option_text} · {o.votes||0}</button>)}</div></article>)}</div></section><section className="hc106-calendar"><div className="hc102-section-title"><b>Series calendar</b><span>Next 45 days</span></div><div>{connectSeriesCalendar.slice(0,12).map(e=><button key={e.id} onClick={()=>openConnectSpacePreflight(e)}><span>🗓</span><div><b>{e.name}</b><small>{new Date(e.scheduled_for).toLocaleString("en-IN")} · {e.series_title||"Space"}</small></div></button>)}{!connectSeriesCalendar.length&&<p>No scheduled Series events.</p>}</div></section><section className="hc105-announcements"><div className="hc102-section-title"><b>Member announcements</b><span>Active subscribers</span></div><textarea value={connectCreatorAnnouncement} onChange={e=>setConnectCreatorAnnouncement(e.target.value)} placeholder="Share an update with your members…"/><button onClick={sendConnectCreatorAnnouncement}>Send announcement</button><div className="hc106-scheduled-ann"><input value={connectScheduledAnnouncement} onChange={e=>setConnectScheduledAnnouncement(e.target.value)} placeholder="Schedule an announcement"/><select value={connectScheduledAnnouncementCohort} onChange={e=>setConnectScheduledAnnouncementCohort(e.target.value)}><option value="ALL">All members</option><option value="GENERAL">General</option><option value="VIP">VIP</option><option value="NEW">New</option></select><input type="datetime-local" value={connectScheduledAnnouncementAt} onChange={e=>setConnectScheduledAnnouncementAt(e.target.value)}/><button onClick={scheduleConnectMemberAnnouncement}>Schedule</button><button onClick={runDueConnectMemberAnnouncements}>Run due now</button></div><div className="hc106-scheduled-list">{(connectCreatorDashboard.scheduledAnnouncements||[]).slice(0,6).map(a=><span key={a.id}><b>{a.target_cohort} · {a.status}</b><small>{new Date(a.scheduled_for).toLocaleString("en-IN")} · {a.message}</small></span>)}</div><div>{(connectCreatorDashboard.announcements||[]).slice(0,5).map(a=><p key={a.id}>{a.message}<small>{new Date(a.created_at).toLocaleString("en-IN")}</small></p>)}</div></section><section className="hc104-growth"><div className="hc102-section-title"><b>Growth tools</b><span>Coupons · Goals · Tiers</span></div><div className="hc104-coupon-form"><input value={connectCouponCode} onChange={e=>setConnectCouponCode(e.target.value.toUpperCase())} placeholder="Coupon code"/><select value={connectCouponType} onChange={e=>setConnectCouponType(e.target.value)}><option value="PERCENT">% off</option><option value="FLAT">₹ off</option></select><input type="number" value={connectCouponValue} onChange={e=>setConnectCouponValue(e.target.value)} placeholder="Value"/><input type="number" value={connectCouponMaxUses} onChange={e=>setConnectCouponMaxUses(e.target.value)} placeholder="Max uses (0 unlimited)"/><input type="datetime-local" value={connectCouponExpiresAt} onChange={e=>setConnectCouponExpiresAt(e.target.value)}/><button onClick={saveConnectMembershipCoupon}>Save coupon</button></div><div className="hc104-coupon-list">{(connectCreatorDashboard.coupons||[]).slice(0,8).map(c=><span key={c.id} className={!c.is_active?"disabled":""}><b>{c.code}</b><small>{c.discount_type==="FLAT"?"₹":"%"}{Number(c.discount_value||0)} · {c.used_count}/{c.max_uses||"∞"} used{c.expires_at?` · expires ${new Date(c.expires_at).toLocaleDateString("en-IN")}`:""}</small><button onClick={()=>toggleConnectMembershipCoupon(c)}>{c.is_active?"Disable":"Enable"}</button></span>)}</div><div className="hc104-goal-form"><input value={connectGoalTitle} onChange={e=>setConnectGoalTitle(e.target.value)} placeholder="Goal title"/><select value={connectGoalType} onChange={e=>setConnectGoalType(e.target.value)}><option value="MEMBERS">Members</option><option value="REVENUE">Revenue</option><option value="AUDIENCE">Audience</option></select><input type="number" value={connectGoalTarget} onChange={e=>setConnectGoalTarget(e.target.value)} placeholder="Target"/><button onClick={saveConnectCreatorGoal}>Save goal</button></div>{connectCreatorDashboard.goal&&<div className="hc105-goal-wrap"><div className="hc104-goal-current">🎯 <b>{connectCreatorDashboard.goal.title}</b><span>{Number(connectCreatorDashboard.goalCurrent||0).toLocaleString("en-IN")} / {Number(connectCreatorDashboard.goal.target_value||0).toLocaleString("en-IN")} · {connectCreatorDashboard.goalProgress||0}%</span></div><div className="hc105-goal-bar"><i style={{width:`${connectCreatorDashboard.goalProgress||0}%`}}></i></div></div>}<div className="hc104-tier-form"><input value={connectTierEmoji} onChange={e=>setConnectTierEmoji(e.target.value)} placeholder="⭐"/><input value={connectTierName} onChange={e=>setConnectTierName(e.target.value)} placeholder="Tier name"/><input type="number" value={connectTierMonths} onChange={e=>setConnectTierMonths(e.target.value)} placeholder="Min months"/><button onClick={addConnectCreatorTier}>Add tier</button></div><div className="hc104-tier-list">{(connectCreatorDashboard.tiers||[]).map(t=><span key={t.id}>{t.badge_emoji} <b>{t.tier_name}</b><small>{t.min_months}+ months</small></span>)}</div></section><section className="hc103-perks"><div className="hc102-section-title"><b>Member perks</b><span>{(connectCreatorDashboard.perks||[]).length}</span></div><div className="hc103-perk-form"><input value={connectCreatorPerkTitle} onChange={e=>setConnectCreatorPerkTitle(e.target.value)} placeholder="Perk title"/><input value={connectCreatorPerkDescription} onChange={e=>setConnectCreatorPerkDescription(e.target.value)} placeholder="Description"/><button onClick={addConnectCreatorPerk}>＋ Add perk</button></div><div className="hc103-perk-list">{(connectCreatorDashboard.perks||[]).map(p=><span key={p.id}>✨ <b>{p.perk_title}</b><small>{p.perk_description}</small></span>)}</div></section><section className="hc103-revenue"><div className="hc102-section-title"><b>Revenue history</b><span>{(connectCreatorDashboard.ledger||[]).length} entries</span></div><div className="hc105-revenue-head"><div><small>Available payout</small><b>₹{Number(connectCreatorDashboard.availablePayout||0).toLocaleString("en-IN")}</b></div><button onClick={exportConnectRevenueCsv}>⇩ Export CSV</button></div><div className="hc105-breakdown">{(connectCreatorDashboard.revenueBreakdown||[]).map(x=><span key={x.source_type}><b>{x.source_type}</b><small>{x.entries} entries · ₹{Number(x.net||0).toLocaleString("en-IN")}</small></span>)}</div><div className="hc103-ledger">{(connectCreatorDashboard.ledger||[]).slice(0,10).map(r=><div key={r.id}><span><b>{r.source_type}</b><small>{new Date(r.created_at).toLocaleDateString("en-IN")} · {r.status}</small></span><strong>₹{Number(r.net_amount||0).toLocaleString("en-IN")}</strong></div>)}{!(connectCreatorDashboard.ledger||[]).length&&<p>No completed revenue entries yet.</p>}</div><div className="hc103-payout-form"><input type="number" min="0" value={connectCreatorPayoutAmount} onChange={e=>setConnectCreatorPayoutAmount(e.target.value)} placeholder="Payout amount"/><button onClick={requestConnectCreatorPayout}>Request payout</button></div>{!!connectCreatorDashboard.payouts?.length&&<div className="hc103-payouts">{connectCreatorDashboard.payouts.slice(0,6).map(p=><span key={p.id}><b>₹{Number(p.amount||0).toLocaleString("en-IN")}</b><small>{p.status} · {p.reference_code}</small>{p.status==="REQUESTED"&&<button onClick={async()=>{try{await connectApi(`/api/connect/creator-payouts/${p.id}/status`,{method:"PATCH",body:JSON.stringify({userId:connectRealtimeUserId(),status:"PROCESSING",note:"Creator acknowledged payout processing"})});await loadConnectCreatorDashboard();}catch(e){setConnectNotice(e.message||"Unable to update payout.")}}}>Mark processing</button>}</span>)}</div>}</section><section className="hc106-invites"><div className="hc102-section-title"><b>Member invites & referrals</b><span>Growth codes</span></div><div className="hc106-invite-form"><input value={connectInviteRewardLabel} onChange={e=>setConnectInviteRewardLabel(e.target.value)} placeholder="Reward label"/><button onClick={createConnectCreatorInvite}>Create invite</button></div><div className="hc106-invite-list">{(connectCreatorDashboard.invites||[]).map(i=><span key={i.id}><code>{i.invite_code}</code><small>{i.redemption_count||0} redeemed · {i.reward_label}</small><button onClick={()=>navigator.clipboard?.writeText(i.invite_code)}>Copy</button></span>)}</div><div className="hc106-redeem"><input value={connectInviteRedeemCode} onChange={e=>setConnectInviteRedeemCode(e.target.value.toUpperCase())} placeholder="Redeem invite code"/><button onClick={redeemConnectCreatorInvite}>Redeem</button></div></section><section className="hc106-resources"><div className="hc102-section-title"><b>Member resource library</b><span>Subscribers</span></div><div className="hc106-resource-form"><input value={connectResourceTitle} onChange={e=>setConnectResourceTitle(e.target.value)} placeholder="Resource title"/><input value={connectResourceDescription} onChange={e=>setConnectResourceDescription(e.target.value)} placeholder="Description"/><input value={connectResourceUrl} onChange={e=>setConnectResourceUrl(e.target.value)} placeholder="Resource URL"/><button onClick={addConnectCreatorResource}>Add resource</button></div><div className="hc106-resource-list">{(connectCreatorDashboard.resources||[]).map(r=><span key={r.id}><b>📚 {r.title}</b><small>{r.description||r.resource_url||"Subscriber resource"}</small></span>)}</div></section><section className="hc106-statement"><div className="hc102-section-title"><b>Creator statement</b><button onClick={exportConnectStatementCsv}>⇩ Statement CSV</button></div><div>{[["Gross",connectCreatorDashboard.statement?.gross],["Fees",connectCreatorDashboard.statement?.fees],["Net",connectCreatorDashboard.statement?.net],["Paid",connectCreatorDashboard.statement?.paid],["Available",connectCreatorDashboard.availablePayout]].map(([k,v])=><span key={k}><small>{k}</small><b>₹{Number(v||0).toLocaleString("en-IN")}</b></span>)}</div></section><section className="hc105-automation-center"><div className="hc102-section-title"><b>Automation center</b><span>Recurring Series</span></div><p>Generate any due recurring episodes across your active Series.</p><button onClick={runConnectSeriesAutomation} disabled={connectSeriesAutomationRunning}>{connectSeriesAutomationRunning?"Running…":"⚡ Generate due episodes"}</button></section><section className="hc102-series"><div className="hc102-section-title"><b>Space Series</b><span>{(connectCreatorDashboard.series||[]).length}</span></div><div className="hc102-series-create"><input value={connectSpaceSeriesTitle} onChange={e=>setConnectSpaceSeriesTitle(e.target.value)} placeholder="Series title"/><input value={connectSpaceSeriesTopic} onChange={e=>setConnectSpaceSeriesTopic(e.target.value)} placeholder="Topic"/><button onClick={createConnectSpaceSeries}>＋ Create series</button></div>{(connectCreatorDashboard.series||[]).map(s=><button type="button" className="hc102-series-row hc103-series-open" key={s.id} onClick={()=>openConnectSeriesEpisodes(s)}><span>{s.cover_emoji||"🎙️"}</span><div><b>{s.title}</b><small>ID {s.id} · {s.episode_count||0} Spaces</small></div><em>Open →</em></button>)}</section></>}</div></div>}
+          {connectCreatorDashboardOpen&&<div className="hc102-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setConnectCreatorDashboardOpen(false)}}><div className="hc102-dashboard"><header><div><small>CREATOR STUDIO</small><h3>Membership & earnings</h3></div><button onClick={()=>setConnectCreatorDashboardOpen(false)}>×</button></header>{connectCreatorDashboardLoading?<div className="hc102-loading">Loading creator studio…</div>:connectCreatorDashboard&&<><div className="hc102-money">{[["Tips",connectCreatorDashboard.earnings?.tips],["Gifts",connectCreatorDashboard.earnings?.gifts],["Premium",connectCreatorDashboard.earnings?.premium],["Memberships",connectCreatorDashboard.earnings?.memberships]].map(([label,value])=><div key={label}><small>{label}</small><b>₹{Number(value||0).toLocaleString("en-IN")}</b></div>)}</div><section className="hc102-plan"><div><small>MEMBERSHIP PLAN</small><h4>{connectCreatorDashboard.plan?.plan_name||"Create your first plan"}</h4></div><div className="hc102-plan-form"><input value={connectCreatorPlanName} onChange={e=>setConnectCreatorPlanName(e.target.value)} placeholder="Plan name"/><input type="number" min="0" value={connectCreatorPlanPrice} onChange={e=>setConnectCreatorPlanPrice(e.target.value)} placeholder="Price"/><select value={connectCreatorPlanPeriod} onChange={e=>setConnectCreatorPlanPeriod(e.target.value)}><option value="MONTHLY">Monthly</option><option value="YEARLY">Yearly</option></select><select value={connectCreatorPlanTrial} onChange={e=>setConnectCreatorPlanTrial(e.target.value)} title="Free trial offered to new members"><option value="0">No free trial</option><option value="7">7-day free trial</option><option value="14">14-day free trial</option><option value="30">30-day free trial</option></select><textarea value={connectCreatorPlanBenefits} onChange={e=>setConnectCreatorPlanBenefits(e.target.value)} placeholder="Benefits"/></div><button onClick={saveConnectCreatorPlan}>Save membership plan</button></section><section><div className="hc102-section-title"><b>Members</b><span>{(connectCreatorDashboard.members||[]).filter(m=>m.status==="ACTIVE").length} active</span></div><input className="hc105-member-search" value={connectMemberSearch} onChange={e=>setConnectMemberSearch(e.target.value)} placeholder="Search members…"/><div className="hc102-member-list">{(connectCreatorDashboard.members||[]).filter(m=>!connectMemberSearch||String(m.full_name||"").toLowerCase().includes(connectMemberSearch.toLowerCase())||String(m.public_username||"").toLowerCase().includes(connectMemberSearch.toLowerCase())).slice(0,50).map(m=><div key={m.subscriber_user_id}><span><b>{m.full_name} {m.member_tier?.badge_emoji||""}</b><small>{m.status} · ₹{Number(m.amount||0).toLocaleString("en-IN")}{m.member_tier?.tier_name?` · ${m.member_tier.tier_name}`:""} · score {m.activity_score||0}{m.trial_ends_at?` · trial until ${new Date(m.trial_ends_at).toLocaleDateString("en-IN")}`:""}</small></span><div className="hc106-member-actions"><button onClick={()=>openConnectMemberCard(m)}>Profile</button>{m.status!=="ACTIVE"&&<button onClick={()=>grantConnectCreatorMembership(m)}>Activate</button>}</div></div>)}{!(connectCreatorDashboard.members||[]).length&&<p>No members yet.</p>}</div></section><section className="hc103-member-analytics"><div className="hc102-section-title"><b>Membership analytics</b><span>Lifecycle</span></div><div className="hc104-automation-actions"><button onClick={runConnectMembershipExpirySweep}>✓ Run expiry check</button><button onClick={sendConnectRenewalReminders}>🔔 Send renewal reminders</button></div><div className="hc103-metrics"><div><small>Active</small><b>{connectMembershipAnalytics?.summary?.active_members||0}</b></div><div><small>Pending</small><b>{connectMembershipAnalytics?.summary?.pending_members||0}</b></div><div><small>Cancelled</small><b>{connectMembershipAnalytics?.summary?.cancelled_members||0}</b></div><div><small>Active value</small><b>₹{Number(connectMembershipAnalytics?.summary?.active_value||0).toLocaleString("en-IN")}</b></div></div>{!!connectMembershipAnalytics?.expiring?.length&&<div className="hc103-expiring"><b>Expiring in 14 days</b>{connectMembershipAnalytics.expiring.slice(0,6).map(x=><span key={x.subscriber_user_id}>{x.full_name}<small>{new Date(x.current_period_end).toLocaleDateString("en-IN")}</small></span>)}</div>}</section><section className="hc106-community-ops"><div className="hc102-section-title"><b>Community operations</b><span>Challenges · Polls</span></div><div className="hc106-challenge-form"><input value={connectChallengeTitle} onChange={e=>setConnectChallengeTitle(e.target.value)} placeholder="Challenge title"/><input value={connectChallengeDescription} onChange={e=>setConnectChallengeDescription(e.target.value)} placeholder="Description"/><input type="number" min="1" value={connectChallengeTarget} onChange={e=>setConnectChallengeTarget(e.target.value)} placeholder="Target"/><button onClick={createConnectChallenge}>Create challenge</button></div><div className="hc106-challenges">{(connectCreatorDashboard.challenges||[]).map(ch=><span key={ch.id}><b>🏆 {ch.title}</b><small>Target {ch.target_count} · {ch.completed_members||0} completed</small></span>)}</div><div className="hc106-poll-builder"><input value={connectMemberPollQuestion} onChange={e=>setConnectMemberPollQuestion(e.target.value)} placeholder="Ask subscribers…"/><select value={connectMemberPollCohort} onChange={e=>setConnectMemberPollCohort(e.target.value)}><option value="ALL">All members</option><option value="GENERAL">General</option><option value="VIP">VIP</option><option value="NEW">New</option></select>{connectMemberPollOptions.map((v,i)=><input key={i} value={v} onChange={e=>setConnectMemberPollOptions(a=>a.map((x,j)=>j===i?e.target.value:x))} placeholder={`Option ${i+1}`}/>)}<button onClick={()=>setConnectMemberPollOptions(a=>a.length<6?[...a,""]:a)}>＋ Option</button><button onClick={createConnectMemberPoll}>Publish poll</button></div><div className="hc106-polls">{(connectCreatorDashboard.memberPolls||[]).slice(0,8).map(p=><article key={p.id}><b>{p.question}</b><small>{p.cohort} · {p.total_votes||0} votes</small><div>{(p.options||[]).map(o=><button key={o.id} onClick={()=>voteConnectMemberPoll(p,o.id)}>{o.option_text} · {o.votes||0}</button>)}</div></article>)}</div></section><section className="hc106-calendar"><div className="hc102-section-title"><b>Series calendar</b><span>Next 45 days</span></div><div>{connectSeriesCalendar.slice(0,12).map(e=><button key={e.id} onClick={()=>openConnectSpacePreflight(e)}><span>🗓</span><div><b>{e.name}</b><small>{new Date(e.scheduled_for).toLocaleString("en-IN")} · {e.series_title||"Space"}</small></div></button>)}{!connectSeriesCalendar.length&&<p>No scheduled Series events.</p>}</div></section><section className="hc105-announcements"><div className="hc102-section-title"><b>Member announcements</b><span>Active subscribers</span></div><textarea value={connectCreatorAnnouncement} onChange={e=>setConnectCreatorAnnouncement(e.target.value)} placeholder="Share an update with your members…"/><button onClick={sendConnectCreatorAnnouncement}>Send announcement</button><div className="hc106-scheduled-ann"><input value={connectScheduledAnnouncement} onChange={e=>setConnectScheduledAnnouncement(e.target.value)} placeholder="Schedule an announcement"/><select value={connectScheduledAnnouncementCohort} onChange={e=>setConnectScheduledAnnouncementCohort(e.target.value)}><option value="ALL">All members</option><option value="GENERAL">General</option><option value="VIP">VIP</option><option value="NEW">New</option></select><input type="datetime-local" value={connectScheduledAnnouncementAt} onChange={e=>setConnectScheduledAnnouncementAt(e.target.value)}/><button onClick={scheduleConnectMemberAnnouncement}>Schedule</button><button onClick={runDueConnectMemberAnnouncements}>Run due now</button></div><div className="hc106-scheduled-list">{(connectCreatorDashboard.scheduledAnnouncements||[]).slice(0,6).map(a=><span key={a.id}><b>{a.target_cohort} · {a.status}</b><small>{new Date(a.scheduled_for).toLocaleString("en-IN")} · {a.message}</small></span>)}</div><div>{(connectCreatorDashboard.announcements||[]).slice(0,5).map(a=><p key={a.id}>{a.message}<small>{new Date(a.created_at).toLocaleString("en-IN")}</small></p>)}</div></section><section className="hc104-growth"><div className="hc102-section-title"><b>Growth tools</b><span>Coupons · Goals · Tiers</span></div><div className="hc104-coupon-form"><input value={connectCouponCode} onChange={e=>setConnectCouponCode(e.target.value.toUpperCase())} placeholder="Coupon code"/><select value={connectCouponType} onChange={e=>setConnectCouponType(e.target.value)}><option value="PERCENT">% off</option><option value="FLAT">₹ off</option></select><input type="number" value={connectCouponValue} onChange={e=>setConnectCouponValue(e.target.value)} placeholder="Value"/><input type="number" value={connectCouponMaxUses} onChange={e=>setConnectCouponMaxUses(e.target.value)} placeholder="Max uses (0 unlimited)"/><input type="datetime-local" value={connectCouponExpiresAt} onChange={e=>setConnectCouponExpiresAt(e.target.value)}/><button onClick={saveConnectMembershipCoupon}>Save coupon</button></div><div className="hc104-coupon-list">{(connectCreatorDashboard.coupons||[]).slice(0,8).map(c=><span key={c.id} className={!c.is_active?"disabled":""}><b>{c.code}</b><small>{c.discount_type==="FLAT"?"₹":"%"}{Number(c.discount_value||0)} · {c.used_count}/{c.max_uses||"∞"} used{c.expires_at?` · expires ${new Date(c.expires_at).toLocaleDateString("en-IN")}`:""}</small><button onClick={()=>toggleConnectMembershipCoupon(c)}>{c.is_active?"Disable":"Enable"}</button></span>)}</div><div className="hc104-goal-form"><input value={connectGoalTitle} onChange={e=>setConnectGoalTitle(e.target.value)} placeholder="Goal title"/><select value={connectGoalType} onChange={e=>setConnectGoalType(e.target.value)}><option value="MEMBERS">Members</option><option value="REVENUE">Revenue</option><option value="AUDIENCE">Audience</option></select><input type="number" value={connectGoalTarget} onChange={e=>setConnectGoalTarget(e.target.value)} placeholder="Target"/><button onClick={saveConnectCreatorGoal}>Save goal</button></div>{connectCreatorDashboard.goal&&<div className="hc105-goal-wrap"><div className="hc104-goal-current">🎯 <b>{connectCreatorDashboard.goal.title}</b><span>{Number(connectCreatorDashboard.goalCurrent||0).toLocaleString("en-IN")} / {Number(connectCreatorDashboard.goal.target_value||0).toLocaleString("en-IN")} · {connectCreatorDashboard.goalProgress||0}%</span></div><div className="hc105-goal-bar"><i style={{width:`${connectCreatorDashboard.goalProgress||0}%`}}></i></div></div>}<div className="hc104-tier-form"><input value={connectTierEmoji} onChange={e=>setConnectTierEmoji(e.target.value)} placeholder="⭐"/><input value={connectTierName} onChange={e=>setConnectTierName(e.target.value)} placeholder="Tier name"/><input type="number" value={connectTierMonths} onChange={e=>setConnectTierMonths(e.target.value)} placeholder="Min months"/><button onClick={addConnectCreatorTier}>Add tier</button></div><div className="hc104-tier-list">{(connectCreatorDashboard.tiers||[]).map(t=><span key={t.id}>{t.badge_emoji} <b>{t.tier_name}</b><small>{t.min_months}+ months</small></span>)}</div></section><section className="hc103-perks"><div className="hc102-section-title"><b>Member perks</b><span>{(connectCreatorDashboard.perks||[]).length}</span></div><div className="hc103-perk-form"><input value={connectCreatorPerkTitle} onChange={e=>setConnectCreatorPerkTitle(e.target.value)} placeholder="Perk title"/><input value={connectCreatorPerkDescription} onChange={e=>setConnectCreatorPerkDescription(e.target.value)} placeholder="Description"/><button onClick={addConnectCreatorPerk}>＋ Add perk</button></div><div className="hc103-perk-list">{(connectCreatorDashboard.perks||[]).map(p=><span key={p.id}>✨ <b>{p.perk_title}</b><small>{p.perk_description}</small></span>)}</div></section><section className="hc103-revenue"><div className="hc102-section-title"><b>Revenue history</b><span>{(connectCreatorDashboard.ledger||[]).length} entries</span></div><div className="hc105-revenue-head"><div><small>Available payout</small><b>₹{Number(connectCreatorDashboard.availablePayout||0).toLocaleString("en-IN")}</b></div><button onClick={exportConnectRevenueCsv}>⇩ Export CSV</button></div><div className="hc105-breakdown">{(connectCreatorDashboard.revenueBreakdown||[]).map(x=><span key={x.source_type}><b>{x.source_type}</b><small>{x.entries} entries · ₹{Number(x.net||0).toLocaleString("en-IN")}</small></span>)}</div><div className="hc103-ledger">{(connectCreatorDashboard.ledger||[]).slice(0,10).map(r=><div key={r.id}><span><b>{r.source_type}</b><small>{new Date(r.created_at).toLocaleDateString("en-IN")} · {r.status}</small></span><strong>₹{Number(r.net_amount||0).toLocaleString("en-IN")}</strong></div>)}{!(connectCreatorDashboard.ledger||[]).length&&<p>No completed revenue entries yet.</p>}</div><div className="hc103-payout-form"><input type="number" min="0" value={connectCreatorPayoutAmount} onChange={e=>setConnectCreatorPayoutAmount(e.target.value)} placeholder="Payout amount"/><button onClick={requestConnectCreatorPayout}>Request payout</button></div>{!!connectCreatorDashboard.payouts?.length&&<div className="hc103-payouts">{connectCreatorDashboard.payouts.slice(0,6).map(p=><span key={p.id}><b>₹{Number(p.amount||0).toLocaleString("en-IN")}</b><small>{p.status} · {p.reference_code}</small>{p.status==="REQUESTED"&&<button onClick={async()=>{try{await connectApi(`/api/connect/creator-payouts/${p.id}/status`,{method:"PATCH",body:JSON.stringify({userId:connectRealtimeUserId(),status:"PROCESSING",note:"Creator acknowledged payout processing"})});await loadConnectCreatorDashboard();}catch(e){setConnectNotice(e.message||"Unable to update payout.")}}}>Mark processing</button>}</span>)}</div>}</section><section className="hc106-invites"><div className="hc102-section-title"><b>Member invites & referrals</b><span>Growth codes</span></div><div className="hc106-invite-form"><input value={connectInviteRewardLabel} onChange={e=>setConnectInviteRewardLabel(e.target.value)} placeholder="Reward label"/><button onClick={createConnectCreatorInvite}>Create invite</button></div><div className="hc106-invite-list">{(connectCreatorDashboard.invites||[]).map(i=><span key={i.id}><code>{i.invite_code}</code><small>{i.redemption_count||0} redeemed · {i.reward_label}</small><button onClick={()=>navigator.clipboard?.writeText(i.invite_code)}>Copy</button></span>)}</div><div className="hc106-redeem"><input value={connectInviteRedeemCode} onChange={e=>setConnectInviteRedeemCode(e.target.value.toUpperCase())} placeholder="Redeem invite code"/><button onClick={redeemConnectCreatorInvite}>Redeem</button></div></section><section className="hc106-resources"><div className="hc102-section-title"><b>Member resource library</b><span>Subscribers</span></div><div className="hc106-resource-form"><input value={connectResourceTitle} onChange={e=>setConnectResourceTitle(e.target.value)} placeholder="Resource title"/><input value={connectResourceDescription} onChange={e=>setConnectResourceDescription(e.target.value)} placeholder="Description"/><input value={connectResourceUrl} onChange={e=>setConnectResourceUrl(e.target.value)} placeholder="Resource URL"/><button onClick={addConnectCreatorResource}>Add resource</button></div><div className="hc106-resource-list">{(connectCreatorDashboard.resources||[]).map(r=><span key={r.id}><b>📚 {r.title}</b><small>{r.description||r.resource_url||"Subscriber resource"}</small></span>)}</div></section><section className="hc106-statement"><div className="hc102-section-title"><b>Creator statement</b><button onClick={exportConnectStatementCsv}>⇩ Statement CSV</button></div><div>{[["Gross",connectCreatorDashboard.statement?.gross],["Fees",connectCreatorDashboard.statement?.fees],["Net",connectCreatorDashboard.statement?.net],["Paid",connectCreatorDashboard.statement?.paid],["Available",connectCreatorDashboard.availablePayout]].map(([k,v])=><span key={k}><small>{k}</small><b>₹{Number(v||0).toLocaleString("en-IN")}</b></span>)}</div></section><section className="hc105-automation-center"><div className="hc102-section-title"><b>Automation center</b><span>Recurring Series</span></div><p>Generate any due recurring episodes across your active Series.</p><button onClick={runConnectSeriesAutomation} disabled={connectSeriesAutomationRunning}>{connectSeriesAutomationRunning?"Running…":"⚡ Generate due episodes"}</button></section><section className="hc102-series"><div className="hc102-section-title"><b>Space Series</b><span>{(connectCreatorDashboard.series||[]).length}</span></div><div className="hc102-series-create"><input value={connectSpaceSeriesTitle} onChange={e=>setConnectSpaceSeriesTitle(e.target.value)} placeholder="Series title"/><input value={connectSpaceSeriesTopic} onChange={e=>setConnectSpaceSeriesTopic(e.target.value)} placeholder="Topic"/><button onClick={createConnectSpaceSeries}>＋ Create series</button></div>{(connectCreatorDashboard.series||[]).map(s=><button type="button" className="hc102-series-row hc103-series-open" key={s.id} onClick={()=>openConnectSeriesEpisodes(s)}><span>{s.cover_emoji||"🎙️"}</span><div><b>{s.title}</b><small>ID {s.id} · {s.episode_count||0} Spaces</small></div><em>Open →</em></button>)}</section></>}</div></div>}
 
-          {connectSpacePreflight&&<div className="hc101-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setConnectSpacePreflight(null)}}><div className="hc101-preflight"><header><div><small>SPACE PREVIEW</small><h3>{connectSpacePreflight?.room?.name||"HOWDI Space"}</h3></div><button onClick={()=>setConnectSpacePreflight(null)}>×</button></header>{connectSpacePreflightLoading?<div className="hc101-loading">Loading Space…</div>:<><div className="hc101-preview-hero"><span>🎙️</span><div><b>{connectSpacePreflight.room.owner_name||"HOWDI host"}</b><small>{connectSpacePreflight.room.topic||"Community conversation"}</small></div><em>{String(connectSpacePreflight.room.session_status||"").toUpperCase()}</em></div><p>{connectSpacePreflight.room.description||"Join the conversation on HOWDI Connect."}</p>{connectSpacePreflight.room.space_rules&&<div className="hc101-rules"><b>Room rules</b><p>{connectSpacePreflight.room.space_rules}</p></div>}<div className="hc101-preview-meta"><span>👥 {connectSpacePreflight.room.audience_total||0} audience</span>{String(connectSpacePreflight.room.session_status||"").toUpperCase()==="SCHEDULED"&&<span>⏳ {connectSpacePreflight.room.waitlist_count||0} waitlist</span>}{connectSpacePreflight.room.space_agenda&&<div className="hc107-preflight-agenda"><b>Agenda</b><p>{connectSpacePreflight.room.space_agenda}</p></div>}{connectSpacePreflight.room.premium_enabled&&<span>💎 Premium · ₹{Number(connectSpacePreflight.room.premium_price||0).toLocaleString("en-IN")}</span>}{connectSpacePreflight.room.subscribers_only&&<span>⭐ Subscribers only</span>}{connectSpacePreflight.room.subscribers_only&&!connectSpacePreflight.room.owner_subscribed&&<div className="hc104-member-tools"><input value={connectCouponCode} onChange={e=>setConnectCouponCode(e.target.value.toUpperCase())} placeholder="Membership coupon"/><select value={connectTrialDays} onChange={e=>setConnectTrialDays(e.target.value)}><option value="0">No trial</option><option value="7">7-day trial</option><option value="14">14-day trial</option><option value="30">30-day trial</option></select>{Number(connectTrialDays)>0&&<button onClick={()=>startConnectCreatorTrial(connectSpacePreflight.room.owner_user_id,connectSpacePreflight.room.owner_name)}>Start trial</button>}<input type="number" value={connectGiftRecipientId} onChange={e=>setConnectGiftRecipientId(e.target.value)} placeholder="Gift to @username"/>{connectGiftRecipientId&&<button onClick={()=>giftConnectCreatorMembership(connectSpacePreflight.room.owner_user_id)}>🎁 Gift membership</button>}</div>}{connectSpacePreflight.room.series_title&&<span>🎙️ {connectSpacePreflight.room.series_title}</span>}{connectSpacePreflight.room.bookmarked&&<span>🔖 Saved</span>}</div>{connectSpacePreflight.followup&&<div className="hc101-followup-preview"><small>NEXT SPACE</small><b>{connectSpacePreflight.followup.name}</b></div>}{String(connectSpacePreflight.room.session_status||"").toUpperCase()==="ENDED"&&<div className="hc107-feedback-form"><b>Rate this Space</b><select value={connectSpaceNps} onChange={e=>setConnectSpaceNps(e.target.value)}>{Array.from({length:11},(_,i)=><option value={i} key={i}>{i} / 10</option>)}</select><select value={connectSpaceFeedbackTag} onChange={e=>setConnectSpaceFeedbackTag(e.target.value)}><option value="GREAT_HOST">Great host</option><option value="USEFUL">Useful</option><option value="EDUCATIONAL">Educational</option><option value="FUN">Fun</option><option value="AUDIO_ISSUE">Audio issue</option><option value="TOO_LONG">Too long</option></select><textarea value={connectSpaceFeedbackComment} onChange={e=>setConnectSpaceFeedbackComment(e.target.value)} placeholder="Optional feedback"/><button onClick={submitConnectSpaceFeedback}>Send feedback</button></div>}<footer><button onClick={()=>setConnectSpacePreflight(null)}>Not now</button>{String(connectSpacePreflight.room.session_status||"").toUpperCase()==="SCHEDULED"&&<button className={connectSpacePreflight.room.waitlisted?"waitlisted":""} onClick={toggleConnectSpaceWaitlist}>{connectSpacePreflight.room.waitlisted?`✓ Waitlisted${connectSpacePreflight.room.waitlist_position?` #${connectSpacePreflight.room.waitlist_position}`:""}`:"⏳ Join waitlist"}</button>}{connectSpacePreflight.room.subscribers_only&&!connectSpacePreflight.room.owner_subscribed?<button className="member" onClick={()=>subscribeConnectMembershipCreator(connectSpacePreflight.room.owner_user_id,connectSpacePreflight.room.owner_name)}>⭐ Subscribe to host</button>:<><button className="primary" onClick={joinConnectSpaceFromPreflight}>{connectSpacePreflight.room.premium_enabled&&!connectSpacePreflight.room.premium_access?`Unlock · ₹${Number(connectSpacePreflight.room.premium_price||0).toLocaleString("en-IN")}`:String(connectSpacePreflight.room.session_status||"").toUpperCase()==="LIVE"?"Join live":"Enter Space"}</button>{connectSpacePreflight.room.owner_subscribed&&<button onClick={()=>renewConnectCreatorMembership(connectSpacePreflight.room.owner_user_id,connectSpacePreflight.room.owner_name)}>Renew</button>}{connectSpacePreflight.room.owner_subscribed&&<button onClick={()=>cancelConnectCreatorMembership(connectSpacePreflight.room.owner_user_id)}>Cancel membership</button>}{connectSpacePreflight.room.owner_subscribed&&<button onClick={()=>pauseConnectCreatorMembership(connectSpacePreflight.room.owner_user_id)}>Pause</button>}</>}</footer></>}</div></div>}
+          {connectSpacePreflight&&<div className="hc101-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setConnectSpacePreflight(null)}}><div className="hc101-preflight"><header><div><small>SPACE PREVIEW</small><h3>{connectSpacePreflight?.room?.name||"HOWDI Space"}</h3></div><button onClick={()=>setConnectSpacePreflight(null)}>×</button></header>{connectSpacePreflightLoading?<div className="hc101-loading">Loading Space…</div>:<><div className="hc101-preview-hero"><span>🎙️</span><div><b>{connectSpacePreflight.room.owner_name||"HOWDI host"}</b><small>{connectSpacePreflight.room.topic||"Community conversation"}</small></div><em>{String(connectSpacePreflight.room.session_status||"").toUpperCase()}</em></div><p>{connectSpacePreflight.room.description||"Join the conversation on HOWDI Connect."}</p>{connectSpacePreflight.room.space_rules&&<div className="hc101-rules"><b>Room rules</b><p>{connectSpacePreflight.room.space_rules}</p></div>}<div className="hc101-preview-meta"><span>👥 {connectSpacePreflight.room.audience_total||0} audience</span>{String(connectSpacePreflight.room.session_status||"").toUpperCase()==="SCHEDULED"&&<span>⏳ {connectSpacePreflight.room.waitlist_count||0} waitlist</span>}{connectSpacePreflight.room.space_agenda&&<div className="hc107-preflight-agenda"><b>Agenda</b><p>{connectSpacePreflight.room.space_agenda}</p></div>}{connectSpacePreflight.room.premium_enabled&&<span>💎 Premium · ₹{Number(connectSpacePreflight.room.premium_price||0).toLocaleString("en-IN")}</span>}{connectSpacePreflight.room.subscribers_only&&<span>⭐ Subscribers only</span>}{connectSpacePreflight.room.subscribers_only&&!connectSpacePreflight.room.owner_subscribed&&<div className="hc104-member-tools"><input value={connectCouponCode} onChange={e=>setConnectCouponCode(e.target.value.toUpperCase())} placeholder="Membership coupon"/><select value={connectTrialDays} onChange={e=>setConnectTrialDays(e.target.value)}><option value="0">No trial</option><option value="7">7-day trial</option><option value="14">14-day trial</option><option value="30">30-day trial</option></select>{Number(connectTrialDays)>0&&<button onClick={()=>startConnectCreatorTrial(connectSpacePreflight.room.owner_user_id,connectSpacePreflight.room.owner_name)}>Start trial</button>}<input type="text" autoCapitalize="none" value={connectGiftRecipientId} onChange={e=>setConnectGiftRecipientId(e.target.value)} placeholder="Gift to @username"/>{connectGiftRecipientId&&<button onClick={()=>giftConnectCreatorMembership(connectSpacePreflight.room.owner_user_id)}>🎁 Gift membership</button>}</div>}{connectSpacePreflight.room.series_title&&<span>🎙️ {connectSpacePreflight.room.series_title}</span>}{connectSpacePreflight.room.bookmarked&&<span>🔖 Saved</span>}</div>{connectSpacePreflight.followup&&<div className="hc101-followup-preview"><small>NEXT SPACE</small><b>{connectSpacePreflight.followup.name}</b></div>}{String(connectSpacePreflight.room.session_status||"").toUpperCase()==="ENDED"&&<div className="hc107-feedback-form"><b>Rate this Space</b><select value={connectSpaceNps} onChange={e=>setConnectSpaceNps(e.target.value)}>{Array.from({length:11},(_,i)=><option value={i} key={i}>{i} / 10</option>)}</select><select value={connectSpaceFeedbackTag} onChange={e=>setConnectSpaceFeedbackTag(e.target.value)}><option value="GREAT_HOST">Great host</option><option value="USEFUL">Useful</option><option value="EDUCATIONAL">Educational</option><option value="FUN">Fun</option><option value="AUDIO_ISSUE">Audio issue</option><option value="TOO_LONG">Too long</option></select><textarea value={connectSpaceFeedbackComment} onChange={e=>setConnectSpaceFeedbackComment(e.target.value)} placeholder="Optional feedback"/><button onClick={submitConnectSpaceFeedback}>Send feedback</button></div>}<footer><button onClick={()=>setConnectSpacePreflight(null)}>Not now</button>{String(connectSpacePreflight.room.session_status||"").toUpperCase()==="SCHEDULED"&&<button className={connectSpacePreflight.room.waitlisted?"waitlisted":""} onClick={toggleConnectSpaceWaitlist}>{connectSpacePreflight.room.waitlisted?`✓ Waitlisted${connectSpacePreflight.room.waitlist_position?` #${connectSpacePreflight.room.waitlist_position}`:""}`:"⏳ Join waitlist"}</button>}{connectSpacePreflight.room.subscribers_only&&!connectSpacePreflight.room.owner_subscribed?<button className="member" onClick={()=>subscribeConnectMembershipCreator(connectSpacePreflight.room.owner_user_id,connectSpacePreflight.room.owner_name)}>⭐ Subscribe to host</button>:<><button className="primary" onClick={joinConnectSpaceFromPreflight}>{connectSpacePreflight.room.premium_enabled&&!connectSpacePreflight.room.premium_access?`Unlock · ₹${Number(connectSpacePreflight.room.premium_price||0).toLocaleString("en-IN")}`:String(connectSpacePreflight.room.session_status||"").toUpperCase()==="LIVE"?"Join live":"Enter Space"}</button>{connectSpacePreflight.room.owner_subscribed&&<button onClick={()=>renewConnectCreatorMembership(connectSpacePreflight.room.owner_user_id,connectSpacePreflight.room.owner_name)}>Renew</button>}{connectSpacePreflight.room.owner_subscribed&&<button onClick={()=>cancelConnectCreatorMembership(connectSpacePreflight.room.owner_user_id)}>Cancel membership</button>}{connectSpacePreflight.room.owner_subscribed&&<button onClick={()=>pauseConnectCreatorMembership(connectSpacePreflight.room.owner_user_id)}>Pause</button>}</>}</footer></>}</div></div>}
           {connectSpaceHostControlsOpen&&<div className="hc100-overlay"><div className="hc100-modal"><header><h3>Host controls 🛡</h3><button onClick={()=>setConnectSpaceHostControlsOpen(false)}>×</button></header><label>Chat mode<select value={connectSpaceChatMode} onChange={e=>setConnectSpaceChatMode(e.target.value)}><option value="OPEN">Open chat</option><option value="HOST_ONLY">Host / co-host only</option><option value="SUBSCRIBERS">Subscribers only</option></select></label><label>Slow mode seconds<input type="number" min="0" max="120" value={connectSpaceSlowSeconds} onChange={e=>setConnectSpaceSlowSeconds(e.target.value)}/></label><button className="primary" onClick={saveConnectSpaceChatControls}>Save chat controls</button><label>Discovery boost<input type="range" min="0" max="100" value={connectSpaceBoost} onChange={e=>setConnectSpaceBoost(e.target.value)}/><small>{connectSpaceBoost}/100</small></label><button className="primary" onClick={saveConnectSpaceBoost}>Save discovery boost</button><label>Follow-up Space ID<input value={connectSpaceFollowupId} onChange={e=>setConnectSpaceFollowupId(e.target.value)} placeholder="Next Space ID"/></label><button className="primary" onClick={saveConnectSpaceFollowup}>Link follow-up Space</button><div className="hc107-ops"><b>🎛 Space operations</b><label className="hc102-check"><input type="checkbox" checked={connectSpaceRoomLocked} onChange={e=>setConnectSpaceRoomLocked(e.target.checked)}/><span>Lock new joins</span></label><div className="hc107-grid"><label>Audience capacity<input type="number" min="0" value={connectSpaceMaxAudience} onChange={e=>setConnectSpaceMaxAudience(e.target.value)} placeholder="0 = unlimited"/></label><label>Speaker capacity<input type="number" min="0" value={connectSpaceMaxSpeakers} onChange={e=>setConnectSpaceMaxSpeakers(e.target.value)} placeholder="0 = unlimited"/></label><label>Check-in code<input value={connectSpaceCheckinCode} onChange={e=>setConnectSpaceCheckinCode(e.target.value.toUpperCase())} placeholder="e.g. HOWDI27"/></label></div><label>Agenda<textarea value={connectSpaceAgenda} onChange={e=>setConnectSpaceAgenda(e.target.value)} placeholder="Topics, speaker order, key points…"/></label><div className="hc107-checklist">{[["title","Title/topic ready"],["audio","Audio checked"],["moderation","Moderation ready"],["replay","Replay decision"]].map(([k,l])=><label key={k}><input type="checkbox" checked={Boolean(connectSpaceChecklist[k])} onChange={e=>setConnectSpaceChecklist(v=>({...v,[k]:e.target.checked}))}/><span>{l}</span></label>)}</div><label>Post-Space recap<textarea value={connectSpaceRecapNotes} onChange={e=>setConnectSpaceRecapNotes(e.target.value)} placeholder="Summary, next actions, useful links…"/></label><button className="primary" onClick={saveConnectSpaceOperations}>Save Space operations</button><div className="hc107-waitlist-actions"><button onClick={()=>promoteConnectWaitlist()}>Promote next waitlist</button><button onClick={autoPromoteConnectWaitlist}>Auto-promote seats</button></div></div><div className="hc102-series-box"><b>🎙️ Series & membership</b><label>Series ID<input value={connectSpaceSeriesId} onChange={e=>setConnectSpaceSeriesId(e.target.value)} placeholder="Series ID"/></label><label>Recurring rule<input value={connectSpaceRecurringRule} onChange={e=>setConnectSpaceRecurringRule(e.target.value)} placeholder="Every Saturday · 7 PM"/></label><label className="hc102-check"><input type="checkbox" checked={connectSpaceSubscribersOnly} onChange={e=>setConnectSpaceSubscribersOnly(e.target.checked)}/><span>Subscribers-only Space</span></label><button className="primary" onClick={saveConnectSpaceSeriesSettings}>Save series settings</button></div>{!!connectRealtimeState?.waitlist?.length&&<div className="hc107-waitlist"><b>⏳ Waitlist</b>{connectRealtimeState.waitlist.slice(0,12).map(w=><div key={w.user_id}><span>#{w.position||"?"} · {w.full_name}</span><button onClick={()=>promoteConnectWaitlist(w)}>Promote</button></div>)}</div>}{!!connectRealtimeState?.blockedUsers?.length&&<div className="hc100-blocked"><b>Blocked users</b>{connectRealtimeState.blockedUsers.map(x=><div key={x.blocked_user_id}><span>{x.full_name}</span><button onClick={()=>unblockConnectSpaceUser(x.blocked_user_id)}>Unblock</button></div>)}</div>}<small className="hc100-report-count">{connectRealtimeState?.reportCount||0} open participant reports</small>{!!connectRealtimeState?.reports?.length&&<div className="hc107-report-queue"><b>Report review</b>{connectRealtimeState.reports.slice(0,8).map(r=><div key={r.id} className={String(r.status).toLowerCase()}><span><b>{r.target_name||"Participant"} · {r.reason}</b><small>{r.reporter_name||"Member"} · {r.status}</small></span>{r.status==="OPEN"&&<div><button onClick={()=>resolveConnectSpaceReport(r,"RESOLVED")}>Resolve</button><button onClick={()=>resolveConnectSpaceReport(r,"DISMISSED")}>Dismiss</button></div>}</div>)}</div>}</div></div>}
           {connectSpaceReportTarget&&<div className="hc100-overlay"><div className="hc100-modal"><header><h3>Report participant</h3><button onClick={()=>setConnectSpaceReportTarget(null)}>×</button></header><p>Report {connectSpaceReportTarget.full_name}</p><select value={connectSpaceReportReason} onChange={e=>setConnectSpaceReportReason(e.target.value)}><option value="HARASSMENT">Harassment</option><option value="SPAM">Spam</option><option value="ABUSE">Abuse</option><option value="IMPERSONATION">Impersonation</option><option value="OTHER">Other</option></select><textarea value={connectSpaceReportDetails} onChange={e=>setConnectSpaceReportDetails(e.target.value)} placeholder="Add details…"/><button className="primary" onClick={submitConnectSpaceReport}>Submit report</button></div></div>}
           {connectSpaceGiftOpen&&<div className="hc99-overlay"><div className="hc99-modal"><header><h3>Send a Space gift 🎁</h3><button onClick={()=>setConnectSpaceGiftOpen(false)}>×</button></header><p>Celebrate a host or conversation with a live gift.</p><div className="hc99-gift-grid">{[["🌟","STAR",10],["☕","COFFEE",25],["🧶","YARN",50],["💐","BOUQUET",100],["🏆","TROPHY",250],["💎","DIAMOND",500]].map(([icon,code,value])=><button key={code} onClick={()=>sendConnectSpaceGift(code,value)}><span>{icon}</span><b>{code}</b><small>₹{value}</small></button>)}</div></div></div>}
@@ -19833,7 +20776,7 @@ const removeNotification = async (notificationId) => {
                   {connectPollOptions.map((value,index)=><div className="hc9-poll-option-edit" key={index}><input value={value} onChange={e=>setConnectPollOptions(items=>items.map((x,i)=>i===index?e.target.value:x))} placeholder={`Option ${index+1}`}/>{connectPollOptions.length>2&&<button type="button" onClick={()=>setConnectPollOptions(items=>items.filter((_,i)=>i!==index))}>−</button>}</div>)}
                   {connectPollOptions.length<4&&<button type="button" className="hc9-add-option" onClick={()=>setConnectPollOptions(items=>[...items,""])}>＋ Add option</button>}
                 </div>}
-                {connectCreateType==="post"&&<div className="hc130-composer"><div className="hc130-row"><label>Post type<select value={connectPostType} onChange={e=>setConnectPostType(e.target.value)}>{["POST","ARTICLE","EDUCATION","RESOURCE","LOCATION","UPDATE","COLLAB","STUDENT_NOTE","TEACHER_LESSON","INSTITUTE_ANNOUNCEMENT","QUIZ","FLASHCARD","QUESTION"].map(x=><option key={x}>{x}</option>)}</select></label><label>Knowledge<select value={connectKnowledgeDomain} onChange={e=>setConnectKnowledgeDomain(e.target.value)}>{["GENERAL","EDUCATION","AI","QUANTUM_COMPUTING","SCIENCE","TECHNOLOGY","CAREER","EXAM_PREP","CODING","BUSINESS","POLITICS","PUBLIC_AFFAIRS","TRAVEL","HEALTH"].map(x=><option key={x}>{connectProfileCategoryLabel(x)}</option>)}</select></label><label>Audience<select value={connectTargetAudience} onChange={e=>setConnectTargetAudience(e.target.value)}>{["EVERYONE","STUDENTS","TEACHERS","INSTITUTES","PROFESSIONALS","CREATORS","JOB_SEEKERS","PARENTS"].map(x=><option key={x}>{connectProfileCategoryLabel(x)}</option>)}</select></label><label>Difficulty<select value={connectDifficultyLevel} onChange={e=>setConnectDifficultyLevel(e.target.value)}><option>ALL</option><option>BEGINNER</option><option>INTERMEDIATE</option><option>ADVANCED</option></select></label></div>{["ARTICLE","EDUCATION","RESOURCE"].includes(connectPostType)&&<input value={connectPostArticleTitle} onChange={e=>setConnectPostArticleTitle(e.target.value)} placeholder="Article / learning title"/>}<div className="hc130-row"><input value={connectPostTopics} onChange={e=>setConnectPostTopics(e.target.value)} placeholder="Topics: AI, NEET, careers…"/><input value={connectPostLocation} onChange={e=>setConnectPostLocation(e.target.value)} placeholder="Location"/><input value={connectSourceUrl} onChange={e=>setConnectSourceUrl(e.target.value)} placeholder="Source / reference URL"/></div>{["RESOURCE","EDUCATION"].includes(connectPostType)&&<div className="hc130-row"><input value={connectPostResourceTitle} onChange={e=>setConnectPostResourceTitle(e.target.value)} placeholder="Resource title"/><input value={connectResourcePostUrl} onChange={e=>setConnectResourcePostUrl(e.target.value)} placeholder="Resource URL"/></div>}<div className="hc130-row"><label>Visibility<select value={connectAudienceScope} onChange={e=>setConnectAudienceScope(e.target.value)}><option value="EVERYONE">Everyone</option><option value="FOLLOWERS">Followers</option><option value="CLOSE_FRIENDS">Close Friends</option></select></label><label>Status<select value={connectPostStatus} onChange={e=>setConnectPostStatus(e.target.value)}><option value="PUBLISHED">Publish now</option><option value="DRAFT">Save draft</option><option value="SCHEDULED">Schedule</option></select></label>{connectPostStatus==="SCHEDULED"&&<label>Schedule<input type="datetime-local" value={connectPostScheduledFor} onChange={e=>setConnectPostScheduledFor(e.target.value)}/></label>}<label>Collaborator user ID<input value={connectCollaboratorUserId} onChange={e=>setConnectCollaboratorUserId(e.target.value.replace(/\D/g,""))} placeholder="Optional"/></label></div>{["EDUCATION","STUDENT_NOTE","TEACHER_LESSON","FLASHCARD","QUIZ"].includes(connectPostType)&&<div className="hc131-learning"><div className="hc130-row"><input value={connectSubjectName} onChange={e=>setConnectSubjectName(e.target.value)} placeholder="Subject e.g. Physics"/><input value={connectClassLevel} onChange={e=>setConnectClassLevel(e.target.value)} placeholder="Class / level"/><input value={connectLearningObjective} onChange={e=>setConnectLearningObjective(e.target.value)} placeholder="Learning objective"/><input value={connectKeyTakeaway} onChange={e=>setConnectKeyTakeaway(e.target.value)} placeholder="Key takeaway"/></div></div>}<div className="hc130-row"><label>Knowledge source<select value={connectSourceKind} onChange={e=>setConnectSourceKind(e.target.value)}><option value="COMMUNITY">Community knowledge</option><option value="SOURCE_PROVIDED">Source provided</option><option value="PERSONAL_OPINION">Personal opinion</option></select></label><label>Series ID<input value={connectSeriesId} onChange={e=>setConnectSeriesId(e.target.value.replace(/\D/g,""))} placeholder="Optional"/></label><label>Part<input value={connectSeriesPart} onChange={e=>setConnectSeriesPart(e.target.value.replace(/\D/g,""))} placeholder="1, 2, 3…"/></label></div>{connectPostType==="QUIZ"&&<div className="hc131-quiz-builder"><input value={connectQuizQuestion} onChange={e=>setConnectQuizQuestion(e.target.value)} placeholder="Quiz question"/>{connectQuizOptions.map((x,i)=><div key={i}><input value={x} onChange={e=>setConnectQuizOptions(v=>v.map((q,j)=>j===i?e.target.value:q))} placeholder={`Option ${i+1}`}/><label><input type="radio" name="quiz-correct" checked={Number(connectQuizCorrectIndex)===i} onChange={()=>setConnectQuizCorrectIndex(i)}/> Correct</label></div>)}<textarea value={connectQuizExplanation} onChange={e=>setConnectQuizExplanation(e.target.value)} placeholder="Explain the correct answer"/></div>}<div className="hc132-growth-fields"><div className="hc130-row"><label>Knowledge chain<input value={connectKnowledgeChainLabel} onChange={e=>setConnectKnowledgeChainLabel(e.target.value)} placeholder="e.g. Learn AI from zero"/></label><label>Parent post ID<input value={connectParentPostId} onChange={e=>setConnectParentPostId(e.target.value.replace(/\D/g,""))} placeholder="Continue from…"/></label><label>Language<select value={connectPostLanguage} onChange={e=>setConnectPostLanguage(e.target.value)}><option value="en">English</option><option value="hi">Hindi</option><option value="te">Telugu</option><option value="kn">Kannada</option><option value="ta">Tamil</option><option value="ml">Malayalam</option><option value="bn">Bengali</option><option value="as">Assamese</option></select></label><label>Local city<input value={connectPostLocalCity} onChange={e=>setConnectPostLocalCity(e.target.value)} placeholder="Bengaluru"/></label></div><div className="hc130-row"><label>Opportunity<select value={connectOpportunityType} onChange={e=>setConnectOpportunityType(e.target.value)}><option value="">None</option><option value="JOB">Job</option><option value="INTERNSHIP">Internship</option><option value="FREELANCE">Freelance</option><option value="MENTORSHIP">Mentorship</option><option value="COLLABORATION">Collaboration</option><option value="EVENT">Event</option></select></label><label>Opportunity location<input value={connectOpportunityLocation} onChange={e=>setConnectOpportunityLocation(e.target.value)} placeholder="Remote / Bengaluru"/></label></div></div><label className="hc130-gallery"><span>Photo carousel — up to 6 images</span><input type="file" accept="image/*" multiple onChange={e=>selectConnectPostGallery(e.target.files)}/>{!!connectPostGallery.length&&<div>{connectPostGallery.map((x,i)=><img src={x} key={i} alt={`Gallery ${i+1}`}/>)}</div>}</label><div className="hc130-permissions"><label><input type="checkbox" checked={connectPostAllowComments} onChange={e=>setConnectPostAllowComments(e.target.checked)}/> Allow comments</label><label><input type="checkbox" checked={connectPostAllowRepost} onChange={e=>setConnectPostAllowRepost(e.target.checked)}/> Allow reposts</label></div></div>}<div className="hc2-create-tools"><button># Hashtag</button><button>@ Mention</button><button>⌖ Location</button><button type="button" className={connectPollOpen?"active":""} onClick={()=>connectCreateType==="post"&&setConnectPollOpen(v=>!v)}>◉ Poll</button></div><footer><select value={connectCategory} onChange={e=>setConnectCategory(e.target.value)}><option value="GENERAL">General</option><option value="CREATOR">Creator</option><option value="DISCOVERY">Discovery</option><option value="LEARNING">Learning</option><option value="EDUCATION">Education</option><option value="AI">AI</option><option value="QUANTUM">Quantum</option><option value="SCIENCE">Science</option><option value="CAREER">Career</option><option value="INSTITUTE">Institute</option><option value="STUDENT">Student</option></select><button className="hc2-primary" disabled={connectPosting} onClick={async()=>{if(connectCreateType==="post"){await publishConnectPost();setConnectCreateOpen(false);return;}if(connectCreateType==="story"){const ok=await publishConnectStory();if(ok)setConnectCreateOpen(false);return;}if(connectCreateType==="camera"){setConnectCategory("VIBE");await publishConnectPost();setConnectCreateOpen(false);}}}>{connectPosting?"Publishing…":connectCreateType==="story"?"Share story":"Post"}</button></footer></> :<div className="hc2-camera-ui" style={{display:"flex",flexDirection:"column",minHeight:0,maxHeight:"calc(100vh - 170px)",overflow:"hidden"}}>
+                {connectCreateType==="post"&&<div className="hc130-composer"><div className="hc130-row"><label>Post type<select value={connectPostType} onChange={e=>setConnectPostType(e.target.value)}>{["POST","ARTICLE","EDUCATION","RESOURCE","LOCATION","UPDATE","COLLAB","STUDENT_NOTE","TEACHER_LESSON","INSTITUTE_ANNOUNCEMENT","QUIZ","FLASHCARD","QUESTION"].map(x=><option key={x}>{x}</option>)}</select></label><label>Knowledge<select value={connectKnowledgeDomain} onChange={e=>setConnectKnowledgeDomain(e.target.value)}>{["GENERAL","EDUCATION","AI","QUANTUM_COMPUTING","SCIENCE","TECHNOLOGY","CAREER","EXAM_PREP","CODING","BUSINESS","POLITICS","PUBLIC_AFFAIRS","TRAVEL","HEALTH"].map(x=><option key={x}>{connectProfileCategoryLabel(x)}</option>)}</select></label><label>Audience<select value={connectTargetAudience} onChange={e=>setConnectTargetAudience(e.target.value)}>{["EVERYONE","STUDENTS","TEACHERS","INSTITUTES","PROFESSIONALS","CREATORS","JOB_SEEKERS","PARENTS"].map(x=><option key={x}>{connectProfileCategoryLabel(x)}</option>)}</select></label><label>Difficulty<select value={connectDifficultyLevel} onChange={e=>setConnectDifficultyLevel(e.target.value)}><option>ALL</option><option>BEGINNER</option><option>INTERMEDIATE</option><option>ADVANCED</option></select></label></div>{["ARTICLE","EDUCATION","RESOURCE"].includes(connectPostType)&&<input value={connectPostArticleTitle} onChange={e=>setConnectPostArticleTitle(e.target.value)} placeholder="Article / learning title"/>}<div className="hc130-row"><input value={connectPostTopics} onChange={e=>setConnectPostTopics(e.target.value)} placeholder="Topics: AI, NEET, careers…"/><input value={connectPostLocation} onChange={e=>setConnectPostLocation(e.target.value)} placeholder="Location"/><input value={connectSourceUrl} onChange={e=>setConnectSourceUrl(e.target.value)} placeholder="Source / reference URL"/></div>{["RESOURCE","EDUCATION"].includes(connectPostType)&&<div className="hc130-row"><input value={connectPostResourceTitle} onChange={e=>setConnectPostResourceTitle(e.target.value)} placeholder="Resource title"/><input value={connectResourcePostUrl} onChange={e=>setConnectResourcePostUrl(e.target.value)} placeholder="Resource URL"/></div>}<div className="hc130-row"><label>Visibility<select value={connectAudienceScope} onChange={e=>setConnectAudienceScope(e.target.value)}><option value="EVERYONE">Everyone</option><option value="FOLLOWERS">Followers</option><option value="CLOSE_FRIENDS">Close Friends</option></select></label><label>Status<select value={connectPostStatus} onChange={e=>setConnectPostStatus(e.target.value)}><option value="PUBLISHED">Publish now</option><option value="DRAFT">Save draft</option><option value="SCHEDULED">Schedule</option></select></label>{connectPostStatus==="SCHEDULED"&&<label>Schedule<input type="datetime-local" value={connectPostScheduledFor} onChange={e=>setConnectPostScheduledFor(e.target.value)}/></label>}<label>Collaborator @username<input value={connectCollaboratorUserId} onChange={e=>setConnectCollaboratorUserId(e.target.value.toLowerCase().replace(/[^a-z0-9._@]/g,""))} placeholder="Optional"/></label></div>{["EDUCATION","STUDENT_NOTE","TEACHER_LESSON","FLASHCARD","QUIZ"].includes(connectPostType)&&<div className="hc131-learning"><div className="hc130-row"><input value={connectSubjectName} onChange={e=>setConnectSubjectName(e.target.value)} placeholder="Subject e.g. Physics"/><input value={connectClassLevel} onChange={e=>setConnectClassLevel(e.target.value)} placeholder="Class / level"/><input value={connectLearningObjective} onChange={e=>setConnectLearningObjective(e.target.value)} placeholder="Learning objective"/><input value={connectKeyTakeaway} onChange={e=>setConnectKeyTakeaway(e.target.value)} placeholder="Key takeaway"/></div></div>}<div className="hc130-row"><label>Knowledge source<select value={connectSourceKind} onChange={e=>setConnectSourceKind(e.target.value)}><option value="COMMUNITY">Community knowledge</option><option value="SOURCE_PROVIDED">Source provided</option><option value="PERSONAL_OPINION">Personal opinion</option></select></label><label>Series ID<input value={connectSeriesId} onChange={e=>setConnectSeriesId(e.target.value.replace(/\D/g,""))} placeholder="Optional"/></label><label>Part<input value={connectSeriesPart} onChange={e=>setConnectSeriesPart(e.target.value.replace(/\D/g,""))} placeholder="1, 2, 3…"/></label></div>{connectPostType==="QUIZ"&&<div className="hc131-quiz-builder"><input value={connectQuizQuestion} onChange={e=>setConnectQuizQuestion(e.target.value)} placeholder="Quiz question"/>{connectQuizOptions.map((x,i)=><div key={i}><input value={x} onChange={e=>setConnectQuizOptions(v=>v.map((q,j)=>j===i?e.target.value:q))} placeholder={`Option ${i+1}`}/><label><input type="radio" name="quiz-correct" checked={Number(connectQuizCorrectIndex)===i} onChange={()=>setConnectQuizCorrectIndex(i)}/> Correct</label></div>)}<textarea value={connectQuizExplanation} onChange={e=>setConnectQuizExplanation(e.target.value)} placeholder="Explain the correct answer"/></div>}<div className="hc132-growth-fields"><div className="hc130-row"><label>Knowledge chain<input value={connectKnowledgeChainLabel} onChange={e=>setConnectKnowledgeChainLabel(e.target.value)} placeholder="e.g. Learn AI from zero"/></label><label>Parent post ID<input value={connectParentPostId} onChange={e=>setConnectParentPostId(e.target.value.replace(/\D/g,""))} placeholder="Continue from…"/></label><label>Language<select value={connectPostLanguage} onChange={e=>setConnectPostLanguage(e.target.value)}><option value="en">English</option><option value="hi">Hindi</option><option value="te">Telugu</option><option value="kn">Kannada</option><option value="ta">Tamil</option><option value="ml">Malayalam</option><option value="bn">Bengali</option><option value="as">Assamese</option></select></label><label>Local city<input value={connectPostLocalCity} onChange={e=>setConnectPostLocalCity(e.target.value)} placeholder="Bengaluru"/></label></div><div className="hc130-row"><label>Opportunity<select value={connectOpportunityType} onChange={e=>setConnectOpportunityType(e.target.value)}><option value="">None</option><option value="JOB">Job</option><option value="INTERNSHIP">Internship</option><option value="FREELANCE">Freelance</option><option value="MENTORSHIP">Mentorship</option><option value="COLLABORATION">Collaboration</option><option value="EVENT">Event</option></select></label><label>Opportunity location<input value={connectOpportunityLocation} onChange={e=>setConnectOpportunityLocation(e.target.value)} placeholder="Remote / Bengaluru"/></label></div></div><label className="hc130-gallery"><span>Photo carousel — up to 6 images</span><input type="file" accept="image/*" multiple onChange={e=>selectConnectPostGallery(e.target.files)}/>{!!connectPostGallery.length&&<div>{connectPostGallery.map((x,i)=><img src={x} key={i} alt={`Gallery ${i+1}`}/>)}</div>}</label><div className="hc130-permissions"><label><input type="checkbox" checked={connectPostAllowComments} onChange={e=>setConnectPostAllowComments(e.target.checked)}/> Allow comments</label><label><input type="checkbox" checked={connectPostAllowRepost} onChange={e=>setConnectPostAllowRepost(e.target.checked)}/> Allow reposts</label></div></div>}<div className="hc2-create-tools"><button># Hashtag</button><button>@ Mention</button><button>⌖ Location</button><button type="button" className={connectPollOpen?"active":""} onClick={()=>connectCreateType==="post"&&setConnectPollOpen(v=>!v)}>◉ Poll</button></div><footer><select value={connectCategory} onChange={e=>setConnectCategory(e.target.value)}><option value="GENERAL">General</option><option value="CREATOR">Creator</option><option value="DISCOVERY">Discovery</option><option value="LEARNING">Learning</option><option value="EDUCATION">Education</option><option value="AI">AI</option><option value="QUANTUM">Quantum</option><option value="SCIENCE">Science</option><option value="CAREER">Career</option><option value="INSTITUTE">Institute</option><option value="STUDENT">Student</option></select><button className="hc2-primary" disabled={connectPosting} onClick={async()=>{if(connectCreateType==="post"){await publishConnectPost();setConnectCreateOpen(false);return;}if(connectCreateType==="story"){const ok=await publishConnectStory();if(ok)setConnectCreateOpen(false);return;}if(connectCreateType==="camera"){setConnectCategory("VIBE");await publishConnectPost();setConnectCreateOpen(false);}}}>{connectPosting?"Publishing…":connectCreateType==="story"?"Share story":"Post"}</button></footer></> :<div className="hc2-camera-ui" style={{display:"flex",flexDirection:"column",minHeight:0,maxHeight:"calc(100vh - 170px)",overflow:"hidden"}}>
                 <div style={{padding:"16px 18px 10px",overflowY:"auto",minHeight:0,flex:"1 1 auto"}}>
                   <div style={{display:"grid",gap:10}}>
                     <div style={{display:"flex",alignItems:"center",gap:10}}>
@@ -19858,7 +20801,7 @@ const removeNotification = async (notificationId) => {
 
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,padding:"12px 18px",borderTop:"1px solid #e5ebe7",background:"#fff",flex:"0 0 auto",position:"sticky",bottom:0,zIndex:5}}>
                   <button type="button" onClick={()=>{setConnectPostMedia(null);setConnectPostMediaPreview("");setConnectComposer("")}}>Clear</button>
-                  <button type="button" className="hc2-primary" disabled={connectPosting||!connectPostMedia?.data||!String(connectPostMedia?.type||"").startsWith("video/")} onClick={async()=>{const oldCategory=connectCategory;setConnectCategory("VIBE");try{const content=connectComposer.trim();if(!currentUser?.id){setConnectNotice("Please login before publishing.");return;}setConnectPosting(true);const response=await fetch(`${SHOP_API_BASE}/api/connect/posts`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({user_id:currentUser.id,content:content||"HOWDI Vibe",category:"VIBE",media_data:connectPostMedia?.data||"",media_type:connectPostMedia?.type||""})});const data=await response.json().catch(()=>({}));if(!response.ok||data.status!=="success")throw new Error(data.message||"Unable to publish Vibe.");setConnectComposer("");setConnectPostMedia(null);setConnectPostMediaPreview("");setConnectCreateOpen(false);setConnectContentMode("vibe");await loadConnectFeed();}catch(error){setConnectNotice(error.message||"Unable to publish Vibe.");}finally{setConnectPosting(false);setConnectCategory(oldCategory);}}}>{connectPosting?"Publishing…":"Publish Vibe"}</button>
+                  <button type="button" className="hc2-primary" disabled={connectPosting||!connectPostMedia?.data||!String(connectPostMedia?.type||"").startsWith("video/")} onClick={async()=>{const oldCategory=connectCategory;setConnectCategory("VIBE");try{const content=connectComposer.trim();if(!currentUser?.id){setConnectNotice("Please login before publishing.");return;}setConnectPosting(true);const response=await fetch(`${SHOP_API_BASE}/api/connect/posts`,{method:"POST",headers:{"Content-Type":"application/json",...customerSessionHeaders()},body:JSON.stringify({content:content||"HOWDI Vibe",category:"VIBE",media_data:connectPostMedia?.data||"",media_type:connectPostMedia?.type||""})});const data=await response.json().catch(()=>({}));if(!response.ok||data.status!=="success")throw new Error(data.message||"Unable to publish Vibe.");setConnectComposer("");setConnectPostMedia(null);setConnectPostMediaPreview("");setConnectCreateOpen(false);setConnectContentMode("vibe");await loadConnectFeed();}catch(error){setConnectNotice(error.message||"Unable to publish Vibe.");}finally{setConnectPosting(false);setConnectCategory(oldCategory);}}}>{connectPosting?"Publishing…":"Publish Vibe"}</button>
                 </div>
               </div>}
             </div>
@@ -20142,7 +21085,7 @@ const removeNotification = async (notificationId) => {
                             ["earn","₹","Earn"]
                           ].map(([id,icon,label])=>
                             <button type="button" key={id} className={learningPortalView===id?"active":""} onClick={()=>{if(id==="journey"){setLearningJourneyFocus("learn");loadSkillJourney();}if(id==="passport"){loadSkillPassport();loadSkillAssessments();}if(id==="access"){loadLearningAccessPlans();loadLearningAccessHealth();}if(id==="market"){loadLearningMarketIntelligence();}if(id==="community"){loadLearningCommunityPrograms();}if(id==="opportunities"){loadLearningOpportunities();}if(id==="hpay"){loadLearningHpay();}setLearningPortalView(id)}}>
-                              <i>{icon}</i><span>{label}</span>
+                              <i aria-hidden="true">{icon}</i><span>{label}</span>
                             </button>
                           )}
                         </nav>
@@ -20232,7 +21175,7 @@ const removeNotification = async (notificationId) => {
                                       <div><b>{course.title}</b><small>{course.teacher_name} · {course.lesson_count||0} lessons</small><div className="hle-home-mini-progress"><i style={{width:`${Number(course.progress||0)}%`}}/></div></div>
                                       <strong>{Number(course.progress||0)}%</strong>
                                     </article>)}
-                                    {!learnerHomeBusy&&!(learnerHome?.courses||[]).length&&<div className="hle-home-empty compact"><span>🌱</span><div><b>Your learning space is ready</b><small>Pick one useful skill and begin.</small></div><button onClick={()=>setLearningPortalView("discover")}>Discover</button></div>}
+                                    {!learnerHomeBusy&&!(learnerHome?.courses||[]).length&&<div className="hle-home-empty compact"><span>🌱</span><div><b>Your learning space is ready</b><small>Pick one useful skill and begin.</small></div><button onClick={()=>setLearningPortalView("discover")}>Discover</button><HowdiForEmptyStateLink context="learn" onNavigate={navigateHowdiFor}/></div>}
                                   </div>
                                 </section>
                               </div>
@@ -20983,6 +21926,11 @@ const removeNotification = async (notificationId) => {
 
       </main>
 
+      {howdiForRoute&&<div className="hf-app-overlay" role="dialog" aria-modal="true" aria-label="HOWDI for">
+        <header className="hf-app-overlay-head"><button type="button" onClick={()=>{window.history.pushState({},"","/");setHowdiForRoute(null);openNavigationOSArea("connect","home")}}>← Back to HOWDI</button></header>
+        <HowdiFor route={howdiForRoute} onNavigate={navigateHowdiFor}/>
+      </div>}
+
 
       {fitStudioOpen && selectedProduct && (
         <div role="dialog" aria-modal="true" className="howdi-fit-scope" style={{ position: "fixed", inset: 0, zIndex: 2147483000, isolation: "isolate", background: "rgba(15,23,42,.62)", color: "#172033", display: "flex", alignItems: "center", justifyContent: "center", padding: 18 }} onClick={closeFitStudio}>
@@ -21374,10 +22322,32 @@ const removeNotification = async (notificationId) => {
 
       {connectGCCreateOpen&&<div className="hc160b-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setConnectGCCreateOpen(false)}}><div className="hc160b-modal"><header><div><small>HOWDI CONNECT</small><h3>Create {connectCommunityView==="channels"?"channel":"group"}</h3></div><button onClick={()=>setConnectGCCreateOpen(false)}>×</button></header><label>Name<input value={connectGCCreate.name} onChange={e=>setConnectGCCreate(v=>({...v,name:e.target.value}))} placeholder="Community name"/></label><label>Description<textarea rows="3" value={connectGCCreate.description} onChange={e=>setConnectGCCreate(v=>({...v,description:e.target.value}))}/></label><div className="hc160b-form-row"><label>Privacy<select value={connectGCCreate.privacy} onChange={e=>setConnectGCCreate(v=>({...v,privacy:e.target.value}))}><option value="PUBLIC">Public</option><option value="PRIVATE">Private · approval</option><option value="INVITE_ONLY">Invite only</option></select></label><label>Category<input value={connectGCCreate.category} onChange={e=>setConnectGCCreate(v=>({...v,category:e.target.value.toUpperCase()}))}/></label></div><footer><button onClick={()=>setConnectGCCreateOpen(false)}>Cancel</button><button className="primary" onClick={createConnectGCSpace}>Create →</button></footer></div></div>}
 
-      {connectArticleEditor&&<div className="hc160d-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setConnectArticleEditor(false)}}><div className="hc160d-editor"><header><div><small>ARTICLE STUDIO</small><h2>Write on HOWDI</h2></div><button onClick={()=>setConnectArticleEditor(false)}>×</button></header><input value={connectArticleTitle} onChange={e=>setConnectArticleTitle(e.target.value)} placeholder="Article title"/><textarea className="excerpt" value={connectArticleExcerpt} onChange={e=>setConnectArticleExcerpt(e.target.value)} placeholder="Short summary / excerpt"/><div className="row"><select value={connectArticleCategory} onChange={e=>setConnectArticleCategory(e.target.value)}><option>GENERAL</option><option>EDUCATION</option><option>TECHNOLOGY</option><option>BUSINESS</option><option>CREATIVITY</option><option>COMMUNITY</option><option>CAREER</option><option>TRAVEL</option></select><input value={connectArticleTopics} onChange={e=>setConnectArticleTopics(e.target.value)} placeholder="Topics: AI, crochet, learning"/></div><input value={connectArticleCover} onChange={e=>setConnectArticleCover(e.target.value)} placeholder="Cover image URL (media upload can plug in here)"/><textarea className="body" value={connectArticleBody} onChange={e=>setConnectArticleBody(e.target.value)} placeholder="Tell the full story…"/><footer><button onClick={()=>publishConnectArticle("DRAFT")}>Save draft</button><button className="primary" onClick={()=>publishConnectArticle("PUBLISHED")}>Publish article</button></footer></div></div>}
-      {connectArticleSelected&&<div className="hc160d-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setConnectArticleSelected(null)}}><article className="hc160d-reader"><button className="close" onClick={()=>setConnectArticleSelected(null)}>×</button>{connectArticleSelected.article_cover_url&&<img src={connectArticleSelected.article_cover_url} alt=""/>}<small>{connectArticleSelected.article_category} · {connectArticleSelected.article_read_minutes||1} min read</small><h1>{connectArticleSelected.article_title}</h1><div className="author"><b>{connectArticleSelected.full_name}</b><span>{connectArticleSelected.public_username?`@${connectArticleSelected.public_username}`:"HOWDI creator"}</span></div><p className="lead">{connectArticleSelected.article_excerpt}</p><div className="content">{String(connectArticleSelected.content||"").split("\n").map((x,i)=><p key={i}>{x}</p>)}</div></article></div>}
+      {connectArticleEditor&&<div className="hc160d-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)resetConnectArticleEditor()}}><div className="hc160d-editor"><header><div><small>ARTICLE STUDIO</small><h2>{connectArticleEditingId?"Edit article":"Write on HOWDI"}</h2></div><button onClick={resetConnectArticleEditor}>×</button></header><input value={connectArticleTitle} onChange={e=>setConnectArticleTitle(e.target.value)} placeholder="Article title"/><textarea className="excerpt" value={connectArticleExcerpt} onChange={e=>setConnectArticleExcerpt(e.target.value)} placeholder="Short summary / excerpt"/><div className="row"><select value={connectArticleCategory} onChange={e=>setConnectArticleCategory(e.target.value)}><option>GENERAL</option><option>EDUCATION</option><option>TECHNOLOGY</option><option>BUSINESS</option><option>CREATIVITY</option><option>COMMUNITY</option><option>CAREER</option><option>TRAVEL</option></select><input value={connectArticleTopics} onChange={e=>setConnectArticleTopics(e.target.value)} placeholder="Topics: AI, crochet, learning"/></div><input value={connectArticleCover} onChange={e=>{setConnectArticleCover(e.target.value);if(e.target.value)setConnectArticleCoverData("");}} placeholder="Cover image URL (optional)"/><div className="row" style={{alignItems:"center",gap:10}}><label style={{cursor:"pointer",border:"1px solid #dbe3dc",borderRadius:8,padding:"7px 12px"}}>📷 Upload cover<input type="file" accept="image/*" style={{display:"none"}} onChange={e=>{pickConnectArticleCover(e.target.files?.[0]);e.target.value="";}}/></label>{connectArticleCoverBusy&&<small>Reading image…</small>}{(connectArticleCoverData||connectArticleCover)&&<><img src={connectArticleCoverData||connectArticleCover} alt="Cover preview" style={{height:52,width:78,objectFit:"cover",borderRadius:8}}/><button type="button" onClick={()=>{setConnectArticleCoverData("");setConnectArticleCover("");}}>Remove cover</button></>}</div><textarea className="body" value={connectArticleBody} onChange={e=>setConnectArticleBody(e.target.value)} placeholder="Tell the full story…"/><footer><button onClick={()=>setConnectArticlePreviewOpen(true)}>👁 Preview</button><button onClick={()=>publishConnectArticle("DRAFT")}>Save draft</button><button className="primary" onClick={()=>publishConnectArticle("PUBLISHED")}>{connectArticleEditingId?"Save & publish":"Publish article"}</button></footer></div></div>}
+      {connectArticlePreviewOpen&&<div className="hc160d-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setConnectArticlePreviewOpen(false)}}><article className="hc160d-reader"><button className="close" onClick={()=>setConnectArticlePreviewOpen(false)}>×</button>{(connectArticleCoverData||connectArticleCover)&&<img src={connectArticleCoverData||connectArticleCover} alt=""/>}<small>{connectArticleCategory} · preview</small><h1>{connectArticleTitle||"Untitled article"}</h1><p className="lead">{connectArticleExcerpt}</p><div className="content">{String(connectArticleBody||"").split("\n").map((x,i)=><p key={i}>{x}</p>)}</div></article></div>}
+      {connectArticleSelected&&<div className="hc160d-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setConnectArticleSelected(null)}}><article className="hc160d-reader"><button className="close" onClick={()=>setConnectArticleSelected(null)}>×</button>{(connectArticleSelected.article_cover_data||connectArticleSelected.article_cover_url)&&<img src={connectArticleSelected.article_cover_data||connectArticleSelected.article_cover_url} alt=""/>}<small>{connectArticleSelected.article_category} · {connectArticleSelected.article_read_minutes||1} min read</small><h1>{connectArticleSelected.article_title}</h1><div className="author"><b>{connectArticleSelected.full_name}</b><span>{connectArticleSelected.public_username?`@${connectArticleSelected.public_username}`:"HOWDI creator"}</span></div><p className="lead">{connectArticleSelected.article_excerpt}</p><div className="content">{String(connectArticleSelected.content||"").split("\n").map((x,i)=><p key={i}>{x}</p>)}</div><div style={{marginTop:16,paddingTop:12,borderTop:"1px solid #edf0f2",display:"flex",gap:9,flexWrap:"wrap"}}>
+        <button type="button" onClick={toggleConnectArticleReaction} style={{border:"1px solid #dbe3dc",borderRadius:999,padding:"8px 12px",background:connectArticleSelected.liked_by_viewer?"#eef7f0":"#fff",color:connectArticleSelected.liked_by_viewer?"#365947":"#475569",fontWeight:800,cursor:"pointer"}}>{connectArticleSelected.liked_by_viewer?"❤️ Liked":"🤍 Like"} {Number(connectArticleSelected.like_count||0)>0?`(${connectArticleSelected.like_count})`:""}</button>
+        <button type="button" onClick={()=>openConnectComments(connectArticleSelected)} style={{border:"1px solid #dbe3dc",borderRadius:999,padding:"8px 12px",background:"#fff",color:"#475569",fontWeight:800,cursor:"pointer"}}>💬 Comment {Number(connectArticleSelected.comment_count||0)>0?`(${connectArticleSelected.comment_count})`:""}</button>
+        <button type="button" onClick={()=>toggleConnectSave(connectArticleSelected.id)} style={{border:"1px solid #dbe3dc",borderRadius:999,padding:"8px 12px",background:connectSavedPosts[String(connectArticleSelected.id)]?"#eef7f0":"#fff",color:connectSavedPosts[String(connectArticleSelected.id)]?"#365947":"#475569",fontWeight:800,cursor:"pointer"}}>{connectSavedPosts[String(connectArticleSelected.id)]?"🔖 Saved":"📑 Save"}</button>
+        <button type="button" onClick={shareConnectArticle} style={{border:"1px solid #dbe3dc",borderRadius:999,padding:"8px 12px",background:"#fff",color:"#475569",fontWeight:800,cursor:"pointer"}}>↗ Share {Number(connectArticleSelected.share_count||0)>0?`(${connectArticleSelected.share_count})`:""}</button>
+      </div></article></div>}
 
-      {connectGCSelected&&<div className="hc160b-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setConnectGCSelected(null)}}><div className="hc160b-room"><header><div><small>{connectGCSelected.space_type} · {String(connectGCSelected.privacy).replaceAll("_"," ")}</small><h3>{connectGCSelected.name}</h3><span>{connectGCSelected.member_count||0} {connectGCSelected.space_type==="CHANNEL"?"subscribers":"members"}</span></div><div>{["OWNER","ADMIN","MODERATOR"].includes(connectGCSelected.membership_role)&&<button onClick={()=>createConnectGCInvite(connectGCSelected)}>🔗 Invite</button>}<button onClick={()=>setConnectGCSelected(null)}>×</button></div></header>{connectGCInvite&&<div className="hc160b-invite"><b>Invite link ready</b><input readOnly value={connectGCInvite.link}/><button onClick={()=>navigator.clipboard?.writeText(connectGCInvite.link)}>Copy</button><small>30-day link · can be shared like Telegram invitation links.</small></div>}<div className="hc160b-messages">{connectGCMessages.length?connectGCMessages.map(m=><article key={m.id}><b>{m.full_name||m.public_username||"HOWDI member"}</b><p>{m.body}</p><small>{formatConnectDate(m.created_at)}</small></article>):<div className="hc2-empty">No messages yet.</div>}</div>{connectGCSelected.joined&&<footer className="hc160b-compose"><input value={connectGCMessage} onChange={e=>setConnectGCMessage(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")sendConnectGCMessage()}} placeholder={connectGCSelected.space_type==="CHANNEL"?"Publish channel update…":"Message group…"}/><button onClick={sendConnectGCMessage}>Send ↑</button></footer>}</div></div>}
+      {connectInvitePreview&&<div className="hc160b-overlay" onMouseDown={e=>{if(e.target===e.currentTarget){setConnectInvitePreview(null);setConnectInviteToken(null);setConnectInviteStatus("");}}}>
+        <div className="hc160b-room">
+          <header>
+            <div><small>HOWDI INVITE</small><h3>{connectInvitePreview.error?"Invite link unavailable":connectInvitePreview.name}</h3>
+              {!connectInvitePreview.error&&<span>{connectInvitePreview.spaceType==="CHANNEL"?"Channel":"Group"} · {String(connectInvitePreview.privacy||"").replaceAll("_"," ")} · {connectInvitePreview.memberCount||0} {connectInvitePreview.spaceType==="CHANNEL"?"subscribers":"members"}</span>}
+            </div>
+            <button onClick={()=>{setConnectInvitePreview(null);setConnectInviteToken(null);setConnectInviteStatus("");}}>×</button>
+          </header>
+          {!connectInvitePreview.error&&<p style={{padding:"0 4px",color:"#475569"}}>{connectInvitePreview.description||`You've been invited by ${connectInvitePreview.ownerName||"a HOWDI member"} to join this ${connectInvitePreview.spaceType==="CHANNEL"?"channel":"group"}.`}</p>}
+          {connectInvitePreview.requiresApproval&&!connectInvitePreview.error&&<small style={{padding:"0 4px",display:"block",color:"#92620a"}}>Admin approval required to join.</small>}
+          {connectInviteStatus&&<em style={{padding:"0 4px",display:"block",color:"#b42318"}}>{connectInviteStatus}</em>}
+          {!connectInvitePreview.error&&<footer className="hc160b-compose" style={{justifyContent:"flex-end"}}>
+            <button disabled={connectInviteBusy} onClick={joinConnectInviteSpace}>{currentUser?.id||currentUser?.user_id?(connectInviteBusy?"Joining…":"Join"):"Log in to join"}</button>
+          </footer>}
+        </div>
+      </div>}
+      {connectGCSelected&&<div className="hc160b-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setConnectGCSelected(null)}}><div className="hc160b-room"><header><div><small>{connectGCSelected.space_type} · {String(connectGCSelected.privacy).replaceAll("_"," ")}</small><h3>{connectGCSelected.name}</h3><span>{connectGCSelected.member_count||0} {connectGCSelected.space_type==="CHANNEL"?"subscribers":"members"}</span></div><div>{["OWNER","ADMIN","MODERATOR"].includes(connectGCSelected.membership_role)&&<button onClick={()=>createConnectGCInvite(connectGCSelected)}>🔗 Invite</button>}<button onClick={()=>setConnectGCSelected(null)}>×</button></div></header>{connectGCInvite&&<div className="hc160b-invite"><b>Invite link ready</b><input readOnly value={connectGCInvite.link}/><button onClick={()=>navigator.clipboard?.writeText(connectGCInvite.link)}>Copy</button><small>30-day link · can be shared like Telegram invitation links.</small></div>}<div className="hc160b-messages">{connectGCMessages.length?connectGCMessages.map(m=><article key={m.id}><b>{m.full_name||m.public_username||"HOWDI member"}</b><p>{m.body}</p>{renderConnectSpaceAttachment(m)}<small>{formatConnectDate(m.created_at)}</small></article>):<div className="hc2-empty">No messages yet.</div>}</div>{connectGCSelected.joined&&<footer className="hc160b-compose" style={{flexWrap:"wrap"}}>{connectAttachmentPickerRow()}<input value={connectGCMessage} onChange={e=>setConnectGCMessage(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")sendConnectGCMessage()}} placeholder={connectGCSelected.space_type==="CHANNEL"?"Publish channel update…":"Message group…"}/><button onClick={sendConnectGCMessage}>Send ↑</button></footer>}</div></div>}
 
 
       {/* HOWDI CONNECT V16.0C — Call launcher + incoming calls */}
