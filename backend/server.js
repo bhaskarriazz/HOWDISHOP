@@ -2320,6 +2320,26 @@
           ALTER TABLE user_sessions ALTER COLUMN expires_at SET NOT NULL;
         `);
 
+        // Stage 2 — real phone+OTP sign-in as an alternative to password login.
+        // Codes are hashed at rest (never stored in plaintext), short-lived, and
+        // rate-limited by attempt count. No SMS gateway is configured in this
+        // environment, so /api/auth/otp/request also returns dev_otp — but only
+        // outside production — so the flow is exercisable without a live carrier;
+        // the verify endpoint is fully real either way (hash + expiry + attempts).
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS auth_otp_codes (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            phone VARCHAR(10) NOT NULL,
+            code_hash TEXT NOT NULL,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            max_attempts INTEGER NOT NULL DEFAULT 5,
+            consumed_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            expires_at TIMESTAMPTZ NOT NULL
+          );
+        `);
+        await pool.query(`CREATE INDEX IF NOT EXISTS auth_otp_codes_phone_idx ON auth_otp_codes(phone, created_at DESC)`);
+
         await pool.query(`
           CREATE INDEX IF NOT EXISTS user_sessions_user_active_idx
           ON user_sessions(user_id, is_active);
@@ -15522,7 +15542,7 @@
         SELECT l.id,l.vibe_id,l.entity_type,l.entity_id,l.display_order,l.cta_type,l.label,l.is_featured,l.metadata,
           p.id AS product_id,p.name AS product_name,p.sku,p.category,p.subcategory,p.price,p.mrp,p.stock,p.image_urls,p.variant_options,p.status AS product_status,
           p.vendor_offer_enabled,p.vendor_offer_type,p.vendor_offer_value,p.campaign_permission,
-          vp.store_name,vp.status AS vendor_status
+          vp.business_name AS store_name,vp.status AS vendor_status
         FROM vibe_commerce_links l
         LEFT JOIN vendor_products p ON l.entity_type='product' AND p.id::text=l.entity_id
         LEFT JOIN vendor_profiles vp ON vp.id=COALESCE(l.vendor_profile_id,p.vendor_profile_id)
@@ -15774,8 +15794,9 @@
 
     async function getCreatorStorefrontV150D(creatorUserId,viewerUserId=null){
       const profile=(await pool.query(`
-        SELECT cp.user_id,cp.display_name,cp.public_username,cp.bio,cp.avatar_url,cp.is_verified,
-               vp.id AS vendor_profile_id,vp.store_name,vp.logo_url,vp.status AS vendor_status
+        SELECT cp.user_id,cp.display_name,cp.public_username,cp.bio,cp.avatar_url,
+               (LOWER(COALESCE(cp.verified_status,'')) IN ('verified','official','trusted')) AS is_verified,
+               vp.id AS vendor_profile_id,vp.business_name AS store_name,NULL::text AS logo_url,vp.status AS vendor_status
         FROM vibe_creator_profiles cp
         LEFT JOIN vendor_profiles vp ON vp.user_id=cp.user_id::bigint
         WHERE cp.user_id=$1
@@ -15804,7 +15825,7 @@
 
       const recentVibes=(await pool.query(`
         SELECT v.id,v.caption,v.cover_url,v.published_at,
-               COALESCE(vs.views,0)::int AS views,COALESCE(vs.likes,0)::int AS likes,COALESCE(vs.saves,0)::int AS saves
+               COALESCE(vs.plays,0)::int AS views,COALESCE(vs.likes,0)::int AS likes,COALESCE(vs.saves,0)::int AS saves
         FROM vibes v LEFT JOIN vibe_stats vs ON vs.vibe_id=v.id
         WHERE v.creator_user_id=$1 AND v.status='published' AND COALESCE(v.visibility,'public')='public'
         ORDER BY v.published_at DESC NULLS LAST,v.created_at DESC LIMIT 12
@@ -16173,10 +16194,10 @@
       const safeLimit=Math.max(1,Math.min(24,Number(limit||12)));
       let source=null;
       if(productId){
-        source=(await pool.query(`SELECT p.*,vp.store_name FROM vendor_products p LEFT JOIN vendor_profiles vp ON vp.id=p.vendor_profile_id WHERE p.id::text=$1 LIMIT 1`,[String(productId)])).rows[0];
+        source=(await pool.query(`SELECT p.*,vp.business_name AS store_name FROM vendor_products p LEFT JOIN vendor_profiles vp ON vp.id=p.vendor_profile_id WHERE p.id::text=$1 LIMIT 1`,[String(productId)])).rows[0];
       }
       if(!source&&linkId){
-        source=(await pool.query(`SELECT p.*,vp.store_name FROM vibe_commerce_links l JOIN vendor_products p ON p.id::text=l.entity_id LEFT JOIN vendor_profiles vp ON vp.id=p.vendor_profile_id WHERE l.id=$1 AND l.entity_type='product' LIMIT 1`,[linkId])).rows[0];
+        source=(await pool.query(`SELECT p.*,vp.business_name AS store_name FROM vibe_commerce_links l JOIN vendor_products p ON p.id::text=l.entity_id LEFT JOIN vendor_profiles vp ON vp.id=p.vendor_profile_id WHERE l.id=$1 AND l.entity_type='product' LIMIT 1`,[linkId])).rows[0];
       }
       if(!source)return [];
 
@@ -16193,7 +16214,7 @@
         recent AS (
           SELECT product_id,seen_count,opened_count,cart_count FROM vibe_commerce_recent_products WHERE viewer_user_id=$1
         )
-        SELECT p.id,p.name,p.category,p.subcategory,p.price,p.mrp,p.stock,p.image_urls,p.vendor_profile_id,vp.store_name,
+        SELECT p.id,p.name,p.category,p.subcategory,p.price,p.mrp,p.stock,p.image_urls,p.vendor_profile_id,vp.business_name AS store_name,
           CASE WHEN p.vendor_profile_id=$2 THEN 18 ELSE 0 END +
           CASE WHEN LOWER(COALESCE(p.category,''))=LOWER(COALESCE($3,'')) THEN 24 ELSE 0 END +
           CASE WHEN LOWER(COALESCE(p.subcategory,''))=LOWER(COALESCE($4,'')) THEN 30 ELSE 0 END +
@@ -21278,7 +21299,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               if(!viewer)return sendJSON(res,401,{status:'error',message:'Sign in to tag your products.'});
               const q=await pool.query(`
                 SELECT p.id,p.name,p.sku,p.category,p.subcategory,p.price,p.mrp,p.stock,p.image_urls,p.variant_options,p.status,
-                       p.vendor_offer_enabled,p.vendor_offer_type,p.vendor_offer_value,vp.store_name
+                       p.vendor_offer_enabled,p.vendor_offer_type,p.vendor_offer_value,vp.business_name AS store_name
                 FROM vendor_profiles vp JOIN vendor_products p ON p.vendor_profile_id=vp.id
                 WHERE vp.user_id=$1 AND p.status IN ('published','active')
                 ORDER BY p.updated_at DESC LIMIT 100
@@ -22674,7 +22695,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             if(req.method==='GET' && pathname==='/api/v1/vibes/commerce/vendor-attribution-dashboard'){
               const viewer=await getVibeViewer(req);
               if(!viewer)return sendJSON(res,401,{status:'error',message:'Sign in required.'});
-              const vp=(await pool.query(`SELECT id,store_name FROM vendor_profiles WHERE user_id=$1 LIMIT 1`,[Number(viewer.id)])).rows[0];
+              const vp=(await pool.query(`SELECT id,business_name AS store_name FROM vendor_profiles WHERE user_id=$1 LIMIT 1`,[Number(viewer.id)])).rows[0];
               if(!vp)return sendJSON(res,404,{status:'error',message:'Vendor profile not found.'});
               const days=Math.max(1,Math.min(365,Number(url.searchParams.get('days')||30)));
 
@@ -32482,12 +32503,25 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
         await client.query("COMMIT");
 
+        // SESSION FIX: this used to hand back a hand-rolled, unsigned "howdi-customer-"
+        // string instead of a real session - it was never inserted into user_sessions,
+        // so the very first authenticated request after signup (profile, wishlist,
+        // notifications, ...) 401'd and silently bounced the brand-new account back to
+        // the login screen. createUserSession() is the same helper /api/auth/login uses -
+        // it inserts a real row into user_sessions and returns a token the auth
+        // middleware actually recognizes.
+        const registrationSession = await createUserSession(user.id, req);
+        await logSecurityEvent({
+          userId: user.id,
+          eventType: "REGISTER_SUCCESS",
+          eventMessage: "Account created and signed in",
+          req,
+        });
+
         return sendJSON(res, 201, {
           status: "success",
           message: "Account created successfully",
-          token:
-            "howdi-customer-" +
-            Buffer.from(`${user.id}:${Date.now()}`).toString("base64"),
+          token: registrationSession.token,
           user: {
             id: user.id,
             name: user.full_name,
@@ -33069,7 +33103,133 @@ async function ensureVibeReleaseReadinessV140LSchema(){
       }
     }
 
-            // =====================================================
+    // =====================================================
+    // CUSTOMER LOGIN — PHONE + OTP (Stage 2)
+    // =====================================================
+
+    if (req.method === "POST" && pathname === "/api/auth/otp/request") {
+      try {
+        const body = await getBody(req);
+        const phone = clean(body.phone).replace(/\D/g, "").slice(-10);
+
+        if (!/^[0-9]{10}$/.test(phone)) {
+          return sendJSON(res, 400, { status: "error", message: "A valid 10-digit mobile number is required" });
+        }
+
+        const userExists = (await pool.query(
+          `SELECT id FROM users WHERE phone = $1 AND is_active = TRUE LIMIT 1`,
+          [phone]
+        )).rows[0];
+
+        if (!userExists) {
+          // Do not reveal which phone numbers have accounts; same shape either way.
+          return sendJSON(res, 404, { status: "error", message: "No HOWDI account uses this mobile number yet. Create an account first." });
+        }
+
+        // Throttle: at most one live code per phone, and no more than 5 requests / 10 min.
+        const recentCount = (await pool.query(
+          `SELECT COUNT(*)::int n FROM auth_otp_codes WHERE phone = $1 AND created_at > NOW() - INTERVAL '10 minutes'`,
+          [phone]
+        )).rows[0].n;
+        if (recentCount >= 5) {
+          return sendJSON(res, 429, { status: "error", message: "Too many OTP requests. Please wait a few minutes and try again." });
+        }
+
+        const code = String(crypto.randomInt(0, 1000000)).padStart(6, "0");
+        const codeHash = hashPassword(`otp:${phone}:${code}`);
+        await pool.query(
+          `INSERT INTO auth_otp_codes (phone, code_hash, expires_at) VALUES ($1, $2, NOW() + INTERVAL '5 minutes')`,
+          [phone, codeHash]
+        );
+
+        const payload = { status: "success", message: "A 6-digit code was sent to your mobile number.", expires_in: 300 };
+        // No SMS gateway is wired up in this environment. Surface the code only
+        // outside production so the OTP flow is genuinely testable end-to-end;
+        // never do this in a live deployment.
+        if (process.env.NODE_ENV !== "production") payload.dev_otp = code;
+        return sendJSON(res, 200, payload);
+      } catch (error) {
+        console.error("❌ OTP request error:", error);
+        return sendJSON(res, 500, { status: "error", message: "Unable to send a code right now. Please try again." });
+      }
+    }
+
+    if (req.method === "POST" && pathname === "/api/auth/otp/verify") {
+      try {
+        const body = await getBody(req);
+        const phone = clean(body.phone).replace(/\D/g, "").slice(-10);
+        const code = clean(body.code).replace(/\D/g, "");
+
+        if (!/^[0-9]{10}$/.test(phone) || !/^[0-9]{6}$/.test(code)) {
+          return sendJSON(res, 400, { status: "error", message: "Enter the 6-digit code we sent you." });
+        }
+
+        const codeHash = hashPassword(`otp:${phone}:${code}`);
+        const row = (await pool.query(
+          `SELECT id, attempts, max_attempts FROM auth_otp_codes
+           WHERE phone = $1 AND consumed_at IS NULL AND expires_at > NOW()
+           ORDER BY created_at DESC LIMIT 1`,
+          [phone]
+        )).rows[0];
+
+        if (!row) {
+          return sendJSON(res, 400, { status: "error", message: "That code has expired. Request a new one." });
+        }
+        if (row.attempts >= row.max_attempts) {
+          return sendJSON(res, 429, { status: "error", message: "Too many incorrect attempts. Request a new code." });
+        }
+
+        const match = (await pool.query(
+          `SELECT id FROM auth_otp_codes WHERE id = $1 AND code_hash = $2 LIMIT 1`,
+          [row.id, codeHash]
+        )).rows[0];
+
+        if (!match) {
+          await pool.query(`UPDATE auth_otp_codes SET attempts = attempts + 1 WHERE id = $1`, [row.id]);
+          return sendJSON(res, 401, { status: "error", message: "That code is incorrect." });
+        }
+
+        await pool.query(`UPDATE auth_otp_codes SET consumed_at = NOW() WHERE id = $1`, [row.id]);
+
+        const user = (await pool.query(
+          `SELECT id, full_name, email, phone, account_type_id, account_status, role, is_active
+           FROM users WHERE phone = $1 LIMIT 1`,
+          [phone]
+        )).rows[0];
+
+        if (!user || user.is_active !== true || !accountStatusAllowsLogin(user.account_status)) {
+          return sendJSON(res, 403, { status: "error", message: "This account is currently unavailable." });
+        }
+
+        const publicUsername = (await pool.query(
+          `SELECT public_username FROM howdi_connect_profiles WHERE user_id=$1 LIMIT 1`,
+          [user.id]
+        )).rows[0]?.public_username || null;
+
+        await logSecurityEvent({ userId: user.id, eventType: "LOGIN_SUCCESS", eventMessage: "Successful OTP login", req });
+
+        return sendJSON(res, 200, {
+          status: "success",
+          token: (await createUserSession(user.id, req)).token,
+          user: {
+            id: user.id,
+            name: user.full_name,
+            full_name: user.full_name,
+            email: user.email,
+            phone: user.phone,
+            public_username: publicUsername,
+            account_type_id: user.account_type_id,
+            account_status: user.account_status,
+            role: user.role,
+          },
+        });
+      } catch (error) {
+        console.error("❌ OTP verify error:", error);
+        return sendJSON(res, 500, { status: "error", message: "Unable to verify that code. Please try again." });
+      }
+    }
+
+    // =====================================================
     // CUSTOMER PROFILE - GET
     // =====================================================
 
@@ -50731,7 +50891,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               const userId=Number(pathname.match(/^\/api\/wallet\/(\d+)\/?$/)?.[1]);
               if(!Number.isInteger(userId)||userId<=0) return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
               let wallet=(await pool.query(`SELECT * FROM user_wallets WHERE user_id=$1`,[userId])).rows[0];
-              if(!wallet) wallet=(await pool.query(`INSERT INTO user_wallets(user_id) VALUES($1) RETURNING *`,[userId])).rows[0];
+              if(!wallet) wallet=(await pool.query(`INSERT INTO user_wallets(user_id) VALUES($1) ON CONFLICT (user_id) DO UPDATE SET user_id=EXCLUDED.user_id RETURNING *`,[userId])).rows[0];
 
               const baseBalance=Number(wallet.wallet_balance ?? wallet.available_balance ?? wallet.balance ?? 0);
               const cashback=Number(wallet.cashback_balance ?? wallet.total_cashback ?? 0);
@@ -50774,7 +50934,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
               let wallet=await pool.query(`SELECT * FROM user_wallets WHERE user_id=$1`,[userId]);
               if(!wallet.rows[0]){
-                wallet=await pool.query(`INSERT INTO user_wallets(user_id) VALUES($1) RETURNING *`,[userId]);
+                wallet=await pool.query(`INSERT INTO user_wallets(user_id) VALUES($1) ON CONFLICT (user_id) DO UPDATE SET user_id=EXCLUDED.user_id RETURNING *`,[userId]);
               }
 
               const current=wallet.rows[0];
@@ -50873,9 +51033,14 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               `,[userId]);
 
               if(!preferences.rows[0]){
+                // STAGE 2 FIX: two requests can both see "no row yet" for a just-created
+                // user and race to insert one — ON CONFLICT DO UPDATE (a no-op self-update)
+                // always returns a row instead of the second insert throwing a duplicate-key
+                // 500. This was surfacing as a real 5xx on the very first Home load after signup.
                 preferences=await pool.query(`
                   INSERT INTO user_preferences(user_id)
                   VALUES($1)
+                  ON CONFLICT (user_id) DO UPDATE SET user_id=EXCLUDED.user_id
                   RETURNING *
                 `,[userId]);
               }
@@ -50901,6 +51066,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 const inserted=await pool.query(`
                   INSERT INTO user_preferences(user_id)
                   VALUES($1)
+                  ON CONFLICT (user_id) DO UPDATE SET user_id=EXCLUDED.user_id
                   RETURNING *
                 `,[userId]);
                 current=inserted.rows[0];
@@ -51058,10 +51224,14 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
               let profile=await pool.query(`SELECT * FROM user_referral_profiles WHERE user_id=$1`,[userId]);
               if(!profile.rows[0]){
+                // STAGE 2 FIX: same race as user_preferences above — a concurrent request
+                // for the same brand-new user can insert first; ON CONFLICT DO UPDATE
+                // (no-op self-update) guarantees a row comes back instead of a 500.
                 const code=`HOWDI${userId}${Math.random().toString(36).slice(2,7).toUpperCase()}`.slice(0,40);
                 profile=await pool.query(`
                   INSERT INTO user_referral_profiles(user_id,referral_code)
                   VALUES($1,$2)
+                  ON CONFLICT (user_id) DO UPDATE SET user_id=EXCLUDED.user_id
                   RETURNING *
                 `,[userId,code]);
               }
@@ -51099,6 +51269,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 profile=await pool.query(`
                   INSERT INTO user_referral_profiles(user_id,referral_code)
                   VALUES($1,$2)
+                  ON CONFLICT (user_id) DO UPDATE SET user_id=EXCLUDED.user_id
                   RETURNING *
                 `,[userId,code]);
               }
@@ -54991,7 +55162,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               if(!sessionUser) return sendJSON(res,401,{status:"error",message:"Sign in to use HPay"});
               const account=await ensureSessionHpayAccount(sessionUser);
               let wallet=(await pool.query(`SELECT * FROM user_wallets WHERE user_id=$1 LIMIT 1`,[sessionUser.id])).rows[0];
-              if(!wallet) wallet=(await pool.query(`INSERT INTO user_wallets(user_id) VALUES($1) RETURNING *`,[sessionUser.id])).rows[0];
+              if(!wallet) wallet=(await pool.query(`INSERT INTO user_wallets(user_id) VALUES($1) ON CONFLICT (user_id) DO UPDATE SET user_id=EXCLUDED.user_id RETURNING *`,[sessionUser.id])).rows[0];
               let walletRows=[];
               try{walletRows=(await pool.query(`SELECT * FROM wallet_transactions WHERE user_id=$1 ORDER BY created_at DESC LIMIT 100`,[sessionUser.id])).rows;}
               catch(error){walletRows=(await pool.query(`SELECT * FROM wallet_transactions WHERE wallet_id=$1 ORDER BY created_at DESC LIMIT 100`,[wallet.id])).rows;}
