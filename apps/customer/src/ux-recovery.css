@@ -1,0 +1,481 @@
+/* =====================================================================================================================
+   HOWDI CUSTOMER EXPERIENCE RECOVERY  (ux/customer-experience-recovery)
+   Loaded LAST so it can settle the many earlier layered shell patches in App.css.
+   Scope: shell (rail / header / mobile navigation), shared surfaces, empty states, Shop journey, Works / Learn polish, /for.
+   Does not change product content, routes, APIs or security behaviour.
+   Tokens follow the approved palette already used by the master UI: ivory / deep HOWDI green / restrained gold.
+   ===================================================================================================================== */
+:root {
+  --ux-green: #073f35;
+  --ux-green-2: #0c5949;
+  --ux-gold: #d79b22;
+  --ux-gold-ink: #7a5410;
+  --ux-ink: #173a32;
+  --ux-muted: #55665e;          /* >= 5.7:1 on ivory */
+  --ux-ivory: #fbfaf5;
+  --ux-line: #e2ded1;
+  --ux-card: #ffffff;
+  --ux-radius: 16px;
+  --ux-bnav-h: 64px;
+  --ux-safe-b: env(safe-area-inset-bottom, 0px);
+}
+
+/* ---------- shared: visible keyboard focus everywhere in the shell ---------- */
+.howdi-app :where(button, a, input, select, textarea, [role="button"]):focus-visible {
+  outline: 3px solid rgba(215, 155, 34, .75);
+  outline-offset: 2px;
+}
+
+/* ---------- desktop rail: one icon set (was ⌂ ⌂ ▢ × ▰) ---------- */
+.howdi-master-nav-group > .pillar > span { display: inline-grid; place-items: center; width: 22px; height: 22px; }
+.howdi-nav-icon { display: block; }
+.howdi-master-nav-group > .pillar.active > span { color: var(--ux-gold-ink); }
+.howdi-master-subnav button { min-height: 36px; }
+
+/* mobile-only chrome is hidden on desktop */
+@media (min-width: 901px) {
+  .howdi-mobile-nav, .howdi-mobile-subnav { display: none !important; }
+}
+
+/* =====================================================================================================================
+   TABLET + MOBILE SHELL  (<= 900px)
+   Rail is replaced by: two-row header (brand row + search row), a section strip for the current pillar, and a
+   five-tab bottom bar. Nothing is icon-only-and-hidden, nothing is clipped, the page never scrolls sideways.
+   ===================================================================================================================== */
+@media (max-width: 900px) {
+  :root { --howdi-master-sidebar: 0px !important; }
+  html, body { overflow-x: hidden; }
+  .howdi-app .howdi-master-sidebar { display: none !important; }
+
+  /* ----- header ----- */
+  .howdi-app .header {
+    left: 0 !important; right: 0 !important; width: 100% !important;
+    height: auto !important; min-height: 0 !important;
+    background: rgba(255, 255, 252, .98) !important;
+    border-bottom: 1px solid var(--ux-line) !important;
+    box-shadow: 0 6px 18px rgba(23, 58, 50, .05) !important;
+  }
+  .howdi-app .header-inner {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) 44px auto minmax(92px, auto) 44px !important;
+    grid-auto-rows: auto;
+    align-items: center;
+    column-gap: 6px !important; row-gap: 8px !important;
+    width: 100% !important; max-width: none !important;
+    height: auto !important; min-height: 0 !important;
+    margin: 0 !important; padding: 8px 12px 8px !important;
+    box-sizing: border-box;
+  }
+  .howdi-app .header-actions { display: contents !important; }
+  .howdi-app .header .main-nav { display: none !important; }
+  .howdi-app .header .menu-button { display: none !important; }
+
+  /* row 1: brand ....... bell  cart  HPay  account */
+  .howdi-app .header .brand {
+    display: flex !important; grid-row: 1 !important; grid-column: 1 !important; align-items: center; gap: 9px;
+    min-width: 0 !important; margin: 0 !important; padding: 2px 4px 2px 2px !important;
+    background: transparent !important; box-shadow: none !important; backdrop-filter: none !important;
+    position: static !important; border: 0; text-align: left; min-height: 44px;
+  }
+  .howdi-app .header .brand > div:last-child { min-width: 0; }
+  .howdi-app .header .brand-mark {
+    display: grid !important; place-items: center; flex: 0 0 auto;
+    width: 38px !important; height: 38px !important; border-radius: 12px !important;
+    background: var(--ux-green) !important; color: #f3bd46 !important; font: 700 21px Georgia, serif !important;
+  }
+  .howdi-app .header .brand-name { font: 700 17px/1 Georgia, serif !important; letter-spacing: .14em !important; color: var(--ux-green) !important; }
+  .howdi-app .header .brand-tagline {
+    display: block !important; margin-top: 3px !important; font: 500 10.5px/1.18 Georgia, serif !important; letter-spacing: 0 !important;
+    color: #6f5c33 !important; white-space: normal !important; text-wrap: balance;
+  }
+  .howdi-app .header .howdi-global-icon { grid-row: 1 !important; grid-column: 2 !important; }
+  .howdi-app .header .howdi-global-cart-context { grid-row: 1 !important; grid-column: 3 !important; }
+  .howdi-app .header .howdi-global-hpay:not(.howdi-global-cart-context) { grid-row: 1 !important; grid-column: 4 !important; }
+  .howdi-app .header .howdi-global-account { grid-row: 1 !important; grid-column: 5 !important; }
+
+  /* row 2: search ........ location  voice */
+  .howdi-app .howdi-ai-header-search { grid-row: 2 !important; grid-column: 1 / span 2 !important; min-width: 0 !important; width: 100% !important; margin: 0 !important; height: 44px !important; }
+  .howdi-app .header .location-button { grid-row: 2 !important; grid-column: 3 / span 2 !important; }
+  .howdi-app .header .howdi-global-voice { grid-row: 2 !important; grid-column: 5 !important; }
+
+  /* header controls: real touch targets, readable labels */
+  .howdi-app .header .header-actions > button:not(.menu-button),
+  .howdi-app .header .howdi-global-icon,
+  .howdi-app .header .howdi-global-hpay,
+  .howdi-app .header .howdi-global-account,
+  .howdi-app .header .location-button,
+  .howdi-app .header .howdi-global-voice {
+    order: 0 !important; margin: 0 !important; min-width: 44px !important; min-height: 44px; height: 44px !important;
+    box-sizing: border-box; padding: 0 10px !important; display: inline-flex !important; align-items: center; justify-content: center !important; gap: 6px;
+    border: 1px solid var(--ux-line); border-radius: 14px; background: #fff; color: var(--ux-green);
+    font: 700 13px/1 system-ui, -apple-system, "Segoe UI", sans-serif; white-space: nowrap;
+  }
+  .howdi-app .header .howdi-global-account { padding: 0 4px !important; border-radius: 22px; width: 44px !important; }
+  .howdi-app .header .howdi-global-account > span:not(.howdi-global-avatar),
+  .howdi-app .header .howdi-global-account > i { display: none !important; }
+  .howdi-app .header .howdi-global-avatar { width: 34px; height: 34px; margin: 0; }
+  .howdi-app .header .howdi-global-icon { position: relative; width: 44px !important; padding: 0 !important; }
+  .howdi-app .header .howdi-global-icon em, .howdi-app .header .howdi-global-cart-context em {
+    position: absolute; top: -5px; right: -5px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px;
+    display: grid; place-items: center; background: #c2410c; color: #fff; font: 700 10px/1 system-ui, sans-serif; font-style: normal;
+  }
+  /* Cart on small screens lives in the Shop section strip and on the Shop tab (with its item count) */
+  .howdi-app .header .howdi-global-cart-context { display: none !important; }
+  .howdi-app .header .location-button { width: auto !important; min-width: 44px !important; max-width: 128px !important; justify-self: end; overflow: hidden; }
+  .howdi-app .header .location-button span { overflow: hidden; text-overflow: ellipsis; max-width: 84px; font-size: 12.5px; }
+  .howdi-app .header .location-button small { display: none; }
+  .howdi-app .header .howdi-global-voice { padding: 0 !important; width: 44px !important; }
+  .howdi-app .header .howdi-global-voice b { display: none !important; }   /* label remains available to screen readers via title/aria-pressed; glyph is the visible control */
+  .howdi-app .header .howdi-global-hpay b { display: inline !important; }
+  .howdi-app .header .howdi-global-hpay { justify-self: end; }
+  .howdi-app .header .howdi-global-cart-context { justify-self: end; }
+  .howdi-app .header .location-button span { display: inline !important; }
+  .howdi-app .howdi-ai-header-search input { font-size: 14px; }
+
+  /* ----- current-pillar section strip (sits under the header) ----- */
+  .howdi-app .howdi-mobile-subnav {
+    display: flex !important; gap: 6px; padding: 0 12px 8px; margin: 0; overflow-x: auto; overflow-y: hidden;
+    scrollbar-width: none; -webkit-overflow-scrolling: touch; scroll-behavior: smooth; overscroll-behavior-x: contain;
+    mask-image: linear-gradient(90deg, transparent 0, #000 12px, #000 calc(100% - 22px), transparent 100%);
+  }
+  .howdi-app .howdi-mobile-subnav::-webkit-scrollbar { display: none; }
+  .howdi-app .howdi-mobile-subnav button {
+    flex: 0 0 auto; min-height: 40px; padding: 0 15px; border-radius: 20px; border: 1px solid var(--ux-line);
+    background: #fff; color: #33483f; font: 650 13px/1 system-ui, -apple-system, "Segoe UI", sans-serif; white-space: nowrap;
+  }
+  .howdi-app .howdi-mobile-subnav button.active { background: var(--ux-green); border-color: var(--ux-green); color: #fff; }
+
+  .howdi-app .howdi-mobile-badge {
+    display: inline-grid; place-items: center; min-width: 18px; height: 18px; margin-left: 6px; padding: 0 5px; border-radius: 9px;
+    background: #c2410c; color: #fff; font: 700 10.5px/1 system-ui, sans-serif; font-style: normal; vertical-align: middle;
+  }
+  .howdi-app .howdi-mobile-subnav button.active .howdi-mobile-badge { background: #f3bd46; color: #1f2a1a; }
+  .howdi-app .howdi-mobile-nav button { position: relative; }
+  .howdi-app .howdi-mobile-nav .howdi-mobile-badge { position: absolute; top: 2px; left: calc(50% + 6px); margin: 0; }
+
+  /* ----- bottom bar ----- */
+  .howdi-app .howdi-mobile-nav {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 9150; display: grid !important; grid-template-columns: repeat(5, 1fr);
+    height: calc(var(--ux-bnav-h) + var(--ux-safe-b)); padding: 0 4px var(--ux-safe-b); box-sizing: border-box;
+    background: rgba(255, 255, 252, .98); border-top: 1px solid var(--ux-line); box-shadow: 0 -8px 22px rgba(23, 58, 50, .07);
+  }
+  .howdi-app .howdi-mobile-nav button {
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; min-height: 48px; margin: 6px 2px;
+    border: 0; border-radius: 12px; background: transparent; color: #4b5f56; font: 650 11px/1 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .howdi-app .howdi-mobile-nav button .howdi-nav-icon { width: 22px; height: 22px; color: #8a6a1f; }
+  .howdi-app .howdi-mobile-nav button.active { background: #f3f1e6; color: var(--ux-green); }
+  .howdi-app .howdi-mobile-nav button.active .howdi-nav-icon { color: var(--ux-green); }
+
+  /* ----- workspaces: start under the (measured) header, end above the bottom bar ----- */
+  .howdi-app .howdi-os-workspace {
+    top: var(--howdi-header-bottom) !important; left: 0 !important; width: 100% !important;
+    bottom: calc(var(--ux-bnav-h) + var(--ux-safe-b)) !important; height: auto !important; max-height: none !important;
+  }
+  .howdi-app .shop-section[data-navigation-os="active"] { left: 0 !important; width: 100% !important; padding-left: 14px !important; padding-right: 14px !important; }
+  .howdi-app { padding-bottom: calc(var(--ux-bnav-h) + var(--ux-safe-b)); }
+  .howdi-app .howdi-os-connect .hc2-main { padding-bottom: 0 !important; }
+}
+
+/* very narrow phones: keep the whole tagline readable but never let the row overflow */
+@media (max-width: 360px) {
+  .howdi-app .header .brand-tagline { font-size: 9.5px !important; }
+  .howdi-app .header .howdi-global-hpay b { font-size: 12px; }
+}
+
+/* =====================================================================================================================
+   DESKTOP WORKSPACES  (>= 901px)
+   Several earlier patches read --howdi-master-sidebar-w (default 220px) while the rail is really --howdi-master-sidebar
+   (264px), which left the first ~16px of Learn content under the rail. One source of truth from here on.
+   ===================================================================================================================== */
+:root { --howdi-master-sidebar-w: var(--howdi-master-sidebar); }
+@media (min-width: 901px) {
+  .howdi-app .howdi-os-workspace,
+  .howdi-app[data-active-pillar="learn"] .howdi-os-learn,
+  .howdi-os-learn {
+    left: var(--howdi-master-sidebar) !important;
+    width: auto !important;
+    right: 0 !important;
+  }
+}
+
+/* =====================================================================================================================
+   WORKS: My Bookings + Safety + Saved Workers (markup existed, styles did not)
+   ===================================================================================================================== */
+.howdi-os-works .howdi-works-subpage-hero {
+  position: relative; margin: 0 0 16px; padding: 26px 28px; border-radius: 22px; color: #eef6ef;
+  background: radial-gradient(120% 140% at 100% 0, #14705b 0, #0a4a3c 46%, #073f35 100%);
+  box-shadow: 0 14px 34px rgba(7, 63, 53, .16);
+}
+.howdi-os-works .howdi-works-subpage-hero > span {
+  display: inline-block; font: 800 11px/1 system-ui, sans-serif; letter-spacing: .14em; color: #f3c85e; margin-bottom: 8px;
+}
+.howdi-os-works .howdi-works-subpage-hero h3 { margin: 0 0 6px; font: 700 clamp(22px, 2.6vw, 30px)/1.15 Georgia, serif; color: #fff; }
+.howdi-os-works .howdi-works-subpage-hero p { margin: 0; max-width: 62ch; font: 400 14.5px/1.55 system-ui, sans-serif; color: #d4e6dc; }
+.howdi-os-works .howdi-works-booking-kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 18px; max-width: 520px; }
+.howdi-os-works .howdi-works-booking-kpis article {
+  padding: 12px 14px; border-radius: 14px; background: rgba(255, 255, 255, .11); border: 1px solid rgba(255, 255, 255, .16);
+}
+.howdi-os-works .howdi-works-booking-kpis b { display: block; font: 700 26px/1 Georgia, serif; color: #fff; }
+.howdi-os-works .howdi-works-booking-kpis small { display: block; margin-top: 4px; font: 600 12px/1.2 system-ui, sans-serif; color: #cfe3d8; }
+
+.howdi-os-works .howdi-works-lifecycle-mini {
+  display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 16px; padding: 0;
+}
+.howdi-os-works .howdi-works-lifecycle-mini span {
+  display: inline-flex; align-items: center; gap: 7px; min-height: 32px; padding: 0 12px 0 6px; border-radius: 999px;
+  background: #fff; border: 1px solid var(--ux-line); color: #33483f; font: 650 12.5px/1 system-ui, sans-serif;
+}
+.howdi-os-works .howdi-works-lifecycle-mini b {
+  display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: #e9f1ea; color: var(--ux-green); font: 800 11px/1 system-ui, sans-serif;
+}
+
+.howdi-os-works .howdi-works-safety-hero {
+  display: flex; align-items: center; justify-content: space-between; gap: 18px; margin: 0 0 16px; padding: 26px 28px; border-radius: 22px; color: #eef6ef;
+  background: radial-gradient(120% 140% at 100% 0, #14705b 0, #0a4a3c 46%, #073f35 100%);
+  box-shadow: 0 14px 34px rgba(7, 63, 53, .16);
+}
+.howdi-os-works .howdi-works-safety-hero > div:first-child > span { display: block; font: 800 11px/1 system-ui, sans-serif; letter-spacing: .14em; color: #f3c85e; margin-bottom: 8px; }
+.howdi-os-works .howdi-works-safety-hero h3 { margin: 0 0 6px; font: 700 clamp(22px, 2.6vw, 30px)/1.15 Georgia, serif; color: #fff; }
+.howdi-os-works .howdi-works-safety-hero p { margin: 0; max-width: 60ch; font: 400 14.5px/1.55 system-ui, sans-serif; color: #d4e6dc; }
+.howdi-os-works .howdi-works-safety-shield { flex: 0 0 auto; display: grid; place-items: center; width: 76px; height: 76px; border-radius: 22px; background: rgba(255, 255, 255, .12); font-size: 38px; }
+.howdi-os-works .howdi-works-safety-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; margin: 0 0 16px; }
+.howdi-os-works .howdi-works-safety-grid article {
+  padding: 18px; border-radius: 18px; background: #fff; border: 1px solid var(--ux-line); box-shadow: 0 6px 18px rgba(23, 58, 50, .04);
+}
+.howdi-os-works .howdi-works-safety-grid article > span {
+  display: grid; place-items: center; width: 40px; height: 40px; margin-bottom: 10px; border-radius: 12px; background: #eef4ee; color: var(--ux-green); font: 700 18px/1 system-ui, sans-serif;
+}
+.howdi-os-works .howdi-works-safety-grid h4 { margin: 0 0 5px; font: 700 16px/1.25 Georgia, serif; color: var(--ux-ink); }
+.howdi-os-works .howdi-works-safety-grid p { margin: 0; font: 400 13.5px/1.55 system-ui, sans-serif; color: var(--ux-muted); }
+.howdi-os-works .howdi-works-safety-note {
+  display: flex; gap: 10px; align-items: baseline; padding: 14px 16px; border-radius: 14px; background: #fff7e6; border: 1px solid #efd9a2; color: #5f4310; font: 400 13.5px/1.55 system-ui, sans-serif;
+}
+.howdi-os-works .howdi-works-safety-note b { flex: 0 0 auto; color: #8a3b0c; }
+
+.howdi-os-works .howdi-works-saved-row {
+  display: grid; grid-template-columns: 48px minmax(0, 1fr) auto auto auto; align-items: center; gap: 10px; padding: 12px 14px; border-radius: 16px; background: #fff; border: 1px solid var(--ux-line);
+}
+.howdi-os-works .howdi-works-saved-row h4 { margin: 0; font: 700 15px/1.25 Georgia, serif; color: var(--ux-ink); }
+.howdi-os-works .howdi-works-saved-row p { margin: 3px 0 0; font: 400 13px/1.4 system-ui, sans-serif; color: var(--ux-muted); }
+.howdi-os-works .howdi-works-saved-row button { min-height: 40px; min-width: 40px; padding: 0 14px; border-radius: 12px; border: 1px solid #cfdccf; background: #fff; color: var(--ux-green); font: 700 13px/1 system-ui, sans-serif; cursor: pointer; }
+.howdi-os-works .howdi-works-saved-row button.primary { background: var(--ux-green); border-color: var(--ux-green); color: #fff; }
+.howdi-os-works .howdi-works-saved-row button.remove { padding: 0; font-size: 20px; color: #8a3b0c; }
+.howdi-os-works .howdi-works-worker-list { display: grid; gap: 10px; }
+
+/* Works empty states: keep the icon (the old rule hid it) so the panel reads as intentional */
+.howdi-os-works .howdi-works-empty > span { display: block !important; font-size: 30px; margin-bottom: 6px; }
+.howdi-os-works .howdi-works-empty h4 { margin: 0 0 6px; font: 700 17px/1.3 Georgia, serif; color: var(--ux-ink); }
+.howdi-os-works .howdi-works-empty p { margin: 0 auto 12px; max-width: 46ch; font: 400 13.5px/1.55 system-ui, sans-serif; color: var(--ux-muted); }
+.howdi-os-works .howdi-works-empty button { min-height: 44px; padding: 0 20px; border-radius: 22px; border: 0; background: var(--ux-green); color: #fff; font: 700 14px/1 system-ui, sans-serif; cursor: pointer; }
+
+@media (max-width: 700px) {
+  .howdi-os-works .howdi-works-subpage-hero, .howdi-os-works .howdi-works-safety-hero { padding: 20px 18px; border-radius: 18px; }
+  .howdi-os-works .howdi-works-safety-shield { width: 56px; height: 56px; font-size: 28px; border-radius: 16px; }
+  .howdi-os-works .howdi-works-booking-kpis { max-width: none; }
+  .howdi-os-works .howdi-works-lifecycle-mini { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin-right: -14px; padding-right: 14px; }
+  .howdi-os-works .howdi-works-lifecycle-mini span { flex: 0 0 auto; }
+  .howdi-os-works .howdi-works-saved-row { grid-template-columns: 44px minmax(0, 1fr) auto; }
+  .howdi-os-works .howdi-works-saved-row button:not(.remove) { grid-column: 2 / span 2; }
+}
+
+/* =====================================================================================================================
+   DESKTOP HEADER: never push My HOWDI off-screen (Cart appears inside Shop and used to overflow by ~60px)
+   ===================================================================================================================== */
+@media (min-width: 901px) {
+  .howdi-app .header-inner { min-width: 0; }
+  .howdi-app .header-actions { flex: 0 1 auto; min-width: 0; }
+  .howdi-app .howdi-ai-header-search { min-width: 180px !important; flex: 1 1 540px !important; }
+  .howdi-app .header .location-button { min-width: 0 !important; }
+}
+@media (min-width: 901px) and (max-width: 1240px) {
+  .howdi-app .header .howdi-global-voice b { display: none !important; }
+  .howdi-app .header .howdi-global-voice { min-width: 44px !important; width: 44px; padding: 0 !important; justify-content: center; }
+  .howdi-app .header .location-button { max-width: 120px; overflow: hidden; }
+  .howdi-app .header .location-button span { overflow: hidden; text-overflow: ellipsis; }
+  .howdi-app .header .howdi-global-account { min-width: 0 !important; }
+  .howdi-app .header .howdi-global-account > span:not(.howdi-global-avatar) { max-width: 92px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
+@media (min-width: 901px) and (max-width: 1080px) {
+  .howdi-app .header .howdi-global-account > span:not(.howdi-global-avatar), .howdi-app .header .howdi-global-account > i { display: none !important; }
+  .howdi-app .header .howdi-global-account { padding: 0 6px !important; }
+  .howdi-app .header .location-button small { display: none; }
+}
+
+/* =====================================================================================================================
+   SHOP shares the same canvas as Connect / Works / Learn (the legacy tan band behind Shop is gone)
+   ===================================================================================================================== */
+.howdi-app .shop-section[data-navigation-os="active"]::before { display: none !important; }
+.howdi-app .shop-section[data-navigation-os="active"] { background: var(--ux-canvas, #f7f8f3) !important; }
+:root { --ux-canvas: #f7f8f3; }
+@media (min-width: 901px) {
+  .howdi-app .shop-section[data-navigation-os="active"] { padding: 22px 28px 70px !important; }
+  .howdi-app .shop-section[data-navigation-os="active"] .sc-root { padding-left: 0; padding-right: 0; }
+}
+.sc-grid { grid-template-columns: repeat(auto-fill, minmax(188px, 1fr)); }
+
+/* Shop cards: creator name + public @username read as one tidy block (no orphaned avatar row) */
+.sc-card-foot .sc-creator:has(.sc-avatar) { display: grid; grid-template-columns: 28px minmax(0, 1fr); column-gap: 8px; row-gap: 0; align-items: center; }
+.sc-card-foot .sc-avatar { width: 28px; height: 28px; grid-row: 1 / span 2; }
+.sc-card-foot .sc-link { text-align: left; font-size: 13px; line-height: 1.25; text-decoration: none; font-weight: 650; overflow-wrap: anywhere; }
+.sc-card-foot .sc-link:hover { text-decoration: underline; }
+.sc-card-foot .sc-handle { grid-column: 2; font-size: 12px; line-height: 1.2; overflow-wrap: anywhere; }
+.sc-card-foot { align-items: flex-start; justify-content: space-between; gap: 8px; }
+.sc-header .sc-btn-ghost { border-color: var(--sc-line); background: #fff; padding: 0 16px; }
+.sc-card-foot .sc-handle { font-size: 11.5px; letter-spacing: -.01em; overflow-wrap: normal; word-break: normal; white-space: nowrap; }
+.sc-card-foot .sc-creator { min-width: 0; flex: 1 1 auto; }
+
+/* =====================================================================================================================
+   CONNECT HOME: empty states that explain themselves and offer the next step (no blank dashed strips)
+   ===================================================================================================================== */
+.howdi-app .hc-home-empty {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 16px 18px; border: 1px solid var(--ux-line); border-radius: 16px;
+  background: linear-gradient(180deg, #fffefb, #f8faf5); color: var(--ux-muted); font: 400 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+.howdi-app .hc-home-empty-icon {
+  flex: 0 0 auto; display: grid; place-items: center; width: 44px; height: 44px; border-radius: 14px; background: #eef4ee; color: var(--ux-green); font: 700 20px/1 system-ui, sans-serif; font-style: normal;
+}
+.howdi-app .hc-home-empty-copy { flex: 1 1 220px; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.howdi-app .hc-home-empty-copy b { font: 700 15.5px/1.3 Georgia, serif; color: var(--ux-ink); }
+.howdi-app .hc-home-empty-copy span { color: var(--ux-muted); }
+.howdi-app .hc-home-empty-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.howdi-app .hc-home-empty-actions button, .howdi-app .hc-home-welcome-actions button {
+  min-height: 44px; padding: 0 18px; border-radius: 22px; border: 1px solid #cddccf; background: #fff; color: var(--ux-green); font: 700 13.5px/1 system-ui, sans-serif; cursor: pointer;
+}
+.howdi-app .hc-home-empty-actions button.primary { background: var(--ux-green); border-color: var(--ux-green); color: #fff; }
+.howdi-app .hc-home-empty-actions button:hover, .howdi-app .hc-home-welcome-actions button:hover { border-color: var(--ux-green); }
+
+.howdi-app .hc-home-welcome {
+  display: flex; flex-direction: column; gap: 8px; padding: 22px 24px; border-radius: 20px; color: #eef6ef;
+  background: radial-gradient(120% 140% at 100% 0, #17795c 0, #0f513f 55%, #0a3d30 100%); box-shadow: 0 12px 30px rgba(7, 63, 53, .14);
+}
+.howdi-app .hc-home-welcome small { font: 800 11px/1 system-ui, sans-serif; letter-spacing: .14em; text-transform: uppercase; color: #f3c85e; }
+.howdi-app .hc-home-welcome h3 { margin: 0; font: 700 clamp(22px, 3vw, 28px)/1.2 Georgia, serif; color: #fff; }
+.howdi-app .hc-home-welcome > span { max-width: 58ch; font: 400 14.5px/1.55 system-ui, sans-serif; color: #d4e6dc; }
+.howdi-app .hc-home-welcome-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.howdi-app .hc-home-welcome-actions button { background: rgba(255, 255, 255, .12); border-color: rgba(255, 255, 255, .28); color: #fff; }
+.howdi-app .hc-home-welcome-actions button.primary { background: #f3c85e; border-color: #f3c85e; color: #1f2a1a; }
+.howdi-app .hc-home-hero-card, .howdi-app .hc-home-special-card { color: #fff; }
+
+/* section headings read as headings */
+.howdi-app .hc-home-section h4 { font: 700 17px/1.3 Georgia, serif; color: var(--ux-green); }
+@media (max-width: 700px) {
+  .howdi-app .hc-home-empty { padding: 14px; }
+  .howdi-app .hc-home-empty-actions { width: 100%; }
+  .howdi-app .hc-home-empty-actions button { flex: 1 1 auto; }
+  .howdi-app .hc-home-welcome { padding: 18px; }
+}
+
+/* Mobile header: the generic "header-actions > button" placement rule out-ranked the cart hide above; settle it explicitly.
+   (Cart stays reachable from the section strip and the Shop tab, both of which show the item count.) */
+@media (max-width: 900px) {
+  .howdi-app .header .header-actions > button.howdi-global-cart-context:not(.menu-button) { display: none !important; }
+}
+
+/* =====================================================================================================================
+   CHECKOUT (modal): steps stay in one row on phones, disabled buttons stay readable
+   ===================================================================================================================== */
+.howdi-checkout-shell .howdi-primary:disabled { background: #dfe6e1 !important; color: #3d4d45 !important; border: 1px solid #c3cfc7 !important; cursor: not-allowed; }
+@media (max-width: 700px) {
+  .howdi-checkout-shell :has(> .howdi-step-active, > .howdi-step) { display: grid !important; grid-template-columns: repeat(3, minmax(0, 1fr)) !important; gap: 6px !important; }
+  .howdi-checkout-shell .howdi-step-active, .howdi-checkout-shell .howdi-step { padding: 10px 4px !important; font-size: 12px !important; min-height: 44px; display: flex; align-items: center; justify-content: center; }
+}
+
+/* Floating HOWDI assistant on phones/tablets sits ABOVE the bottom bar (it used to cover Works and Learn) */
+@media (max-width: 900px) {
+  body > .howdi-connect-vibe { bottom: calc(var(--ux-bnav-h) + var(--ux-safe-b) + 12px) !important; z-index: 9100 !important; }
+  .howdi-app #shop[data-navigation-os="active"] {
+    top: var(--howdi-header-bottom) !important; bottom: calc(var(--ux-bnav-h) + var(--ux-safe-b)) !important; height: auto !important; max-height: none !important;
+  }
+}
+@media (max-width: 900px) {
+  /* assistant starts as a small "✦ HOWDI +" pill on phones; tap to open its actions */
+  body > .howdi-connect-vibe:not(.is-expanded) > :not(.howdi-connect-mobile-toggle) { display: none !important; }
+  body > .howdi-connect-vibe:not(.is-expanded) { width: auto !important; min-width: 0 !important; max-width: none !important; height: auto !important; padding: 0 !important; border-radius: 26px !important; overflow: hidden; }
+  body > .howdi-connect-vibe > .howdi-connect-mobile-toggle { display: flex !important; gap: 8px; min-height: 48px; padding: 0 16px !important; }
+}
+
+/* HPay: balance card actions never clip; safety list wraps cleanly */
+.howdi-app .hp-approved-balance { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; overflow: hidden; }
+.howdi-app .hp-approved-balance > div:first-child { flex: 1 1 140px; min-width: 0; }
+.howdi-app .hp-balance-actions { flex: 1 1 170px; min-width: 0; display: grid; gap: 10px; }
+.howdi-app .hp-balance-actions button { width: 100%; min-height: 44px; box-sizing: border-box; white-space: nowrap; }
+.howdi-app .hp-benefits > div { align-items: flex-start; }
+.howdi-app .hp-benefits > div b { line-height: 1.35; }
+
+/* =====================================================================================================================
+   HOWDI FOR ... pages: same brand as the rest of the app (ivory / deep green / gold), branded header, no orange, no dark flip
+   ===================================================================================================================== */
+.hf-page, .hf-feed-card {
+  --hf-bg: var(--ux-ivory); --hf-fg: var(--ux-ink); --hf-muted: var(--ux-muted); --hf-accent: var(--ux-green); --hf-card: #ffffff; --hf-border: var(--ux-line);
+}
+@media (prefers-color-scheme: dark) {
+  .hf-page, .hf-feed-card { --hf-bg: var(--ux-ivory); --hf-fg: var(--ux-ink); --hf-muted: var(--ux-muted); --hf-accent: var(--ux-green); --hf-card: #ffffff; --hf-border: var(--ux-line); }
+  .hf-app-overlay { background: var(--ux-ivory); }
+  .hf-app-overlay-head button { color: var(--ux-green); }
+}
+.hf-app-overlay { background: var(--ux-ivory); }
+.hf-app-overlay-head {
+  position: sticky; top: 0; z-index: 2; max-width: none !important; margin: 0 !important; padding: 8px 20px !important; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  background: rgba(255, 255, 252, .98); border-bottom: 1px solid var(--ux-line); box-shadow: 0 6px 18px rgba(23, 58, 50, .05);
+}
+.hf-brand { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
+.hf-brand-mark { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 12px; background: var(--ux-green); color: #f3bd46; font: 700 21px Georgia, serif; flex: 0 0 auto; }
+.hf-brand-copy { display: flex; flex-direction: column; min-width: 0; }
+.hf-brand-copy b { font: 700 17px/1 Georgia, serif; letter-spacing: .14em; color: var(--ux-green); }
+.hf-brand-copy small { margin-top: 3px; font: 500 11px/1.2 Georgia, serif; color: #6f5c33; }
+.hf-app-overlay-head > button { flex: 0 0 auto; min-height: 44px; padding: 0 14px; border: 1px solid var(--ux-line) !important; border-radius: 22px; background: #fff !important; color: var(--ux-green) !important; font: 700 14px system-ui, sans-serif; }
+.hf-page { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+.hf-title, .hf-h2 { font-family: Georgia, serif; color: var(--ux-ink); }
+.hf-title { font-size: clamp(26px, 5vw, 38px); }
+.hf-tagline { color: var(--ux-gold-ink); font-family: Georgia, serif; }
+.hf-step { background: #fff; }
+.hf-step::before { color: var(--ux-gold-ink); }
+.hf-action { background: #fff; box-shadow: 0 6px 18px rgba(23, 58, 50, .04); }
+.hf-action:hover { border-color: var(--ux-green); }
+.hf-chip { background: #fff; border-color: var(--ux-green); color: var(--ux-green); }
+.hf-crumbs a { color: var(--ux-green); }
+@media (max-width: 520px) {
+  .hf-app-overlay-head { padding: 8px 12px !important; }
+  .hf-brand-copy small { display: none; }
+}
+
+/* =====================================================================================================================
+   TOUCH TARGETS (phones / touch): every tappable control in the customer journeys is >= 44px
+   ===================================================================================================================== */
+@media (max-width: 900px), (pointer: coarse) {
+  .howdi-app .howdi-connect-access nav button,
+  .howdi-app .howdi-connect-access summary,
+  .howdi-app .howdi-connect-tool-list button,
+  .howdi-app .howdi-connect-filters button,
+  .howdi-app .hc-home-more,
+  .howdi-app .hc-home-follow,
+  .howdi-app .hc-home-error button,
+  .howdi-app .hc-home-special-card button:not(.hc-home-dismiss),
+  .howdi-app .hc-home-hero-card button { min-height: 44px; }
+  .howdi-app .hc-home-dismiss { width: 44px !important; height: 44px !important; top: 2px !important; right: 2px !important; background: transparent !important; font-size: 22px !important; }
+  .howdi-app .hc-home-rail-nav { min-width: 44px; min-height: 44px; }
+  .howdi-app .footer a, .howdi-app .footer button { display: inline-flex; align-items: center; min-height: 44px; }
+  .howdi-app .hc-home-story, .howdi-app .hc-home-vibe-card, .howdi-app .hc-home-community-card, .howdi-app .hc-home-shop-card,
+  .howdi-app .hc-home-works-card, .howdi-app .hc-home-learn-card, .howdi-app .hc-home-journey-card { min-height: 44px; }
+  .howdi-os-works .howdi-works-page button, .howdi-os-learn button { min-height: 44px; }
+}
+@media (max-width: 900px), (pointer: coarse) {
+  .howdi-app .howdi-os-connect button, .howdi-app .howdi-os-connect summary, .howdi-app .howdi-os-connect select { min-height: 44px; }
+  .howdi-app .howdi-os-connect button { min-width: 44px; }
+  .howdi-app .howdi-ai-header-search button { width: 40px !important; height: 40px !important; min-width: 40px !important; }
+  .howdi-app .hc-home-rail-nav { display: none !important; }   /* rails scroll by touch; arrows are a mouse affordance */
+}
+.howdi-os-works .howdi-works-empty-cta { min-height: 44px; padding: 0 22px; border: 0; border-radius: 22px; background: var(--ux-green); color: #fff; font: 700 14px/1 system-ui, sans-serif; cursor: pointer; }
+
+/* =====================================================================================================================
+   TEXT LEGIBILITY: a handful of real action controls / body copy were left at 6.5-8px by earlier patches.
+   Decorative kickers, counters and category badges are left as designed; only genuinely hard-to-read controls change.
+   ===================================================================================================================== */
+.howdi-os-works .howdi-works-worker-actions button { font-size: 11px !important; height: 34px !important; min-width: 84px !important; }
+.howdi-os-works .howdi-works-worker-proof > span { font-size: 9px; }
+.howdi-os-works .howdi-works-category-strip > button { font-size: 11px; }
+.hc112-discover-person > small { font-size: 10.5px; }
+.hv14b-creator-row > button { font-size: 10px; }
+.hv14d-creator-name > small { font-size: 10px; }
+.hv14b-sound { font-size: 10px; }

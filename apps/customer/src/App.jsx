@@ -1,4 +1,4 @@
-import { Component, useEffect, useRef, useState } from "react";
+import { Component, Fragment, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import "./App.css";
 import HowdiAuthPortal from "./components/HowdiAuthPortal";
@@ -15,6 +15,32 @@ import {
   getPersonalizedOffers,
   getTasteSummary,
 } from "./howdiPersonalization";
+
+// ------------------------------------------------------------------
+// Navigation OS: one source for the desktop rail, the mobile bottom bar and the mobile section strip.
+// Connect (default Home) -> Shop -> Works -> Learn & Earn; HPay, Notifications and My HOWDI stay global utilities.
+// ------------------------------------------------------------------
+const OS_PILLARS = [
+  { area: "home", view: "home", label: "Home", short: "Home" },
+  { area: "connect", view: "home", label: "Connect", short: "Connect" },
+  { area: "shop", view: "catalogue", label: "Shop", short: "Shop" },
+  { area: "works", view: "find", label: "Works", short: "Works" },
+  { area: "learn", view: "discover", label: "Learn & Earn", short: "Learn" },
+];
+const NAV_ICON_PATHS = {
+  home: "M3 11.5 12 4l9 7.5M5.5 10v9.5h13V10M10 19.5v-5h4v5",
+  connect: "M4 5.5h16v10H12l-4.5 3.5v-3.5H4zM8 9.5h8M8 12.5h5",
+  shop: "M5 8h14l-1 12H6zM9 8V6.5a3 3 0 0 1 6 0V8",
+  works: "M14.5 5a4 4 0 0 0-5 5.3L4.5 15.3a1.7 1.7 0 0 0 2.4 2.4l5-5A4 4 0 0 0 17.2 9.5l-2.4 2.4-2.2-.5-.5-2.2z",
+  learn: "M2.5 9 12 4.5 21.5 9 12 13.5zM6.5 11.3v4.4c0 1.3 2.5 2.8 5.5 2.8s5.5-1.5 5.5-2.8v-4.4M21.5 9v5",
+};
+function NavIcon({ name }) {
+  return (
+    <svg className="howdi-nav-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+      <path d={NAV_ICON_PATHS[name] || NAV_ICON_PATHS.home} />
+    </svg>
+  );
+}
 
 const slides = {
   home: [
@@ -4000,7 +4026,14 @@ function App() {
       const d=await connectApi(`/api/connect/home?sections=${encodeURIComponent(keys.join(","))}`);
       setConnectHomeSections(v=>({...v,...(d.sections||{})}));
     }catch(e){
-      setConnectNotice(e.message||"Unable to load Connect Home.");
+      const guest=!(currentUser?.id||currentUser?.user_id);
+      if(guest&&/sign in|log in|login|unauthori[sz]ed|session/i.test(String(e?.message||""))){
+        // Signed-out visitors: Connect Home personalises after sign-in. Show calm, useful empty states
+        // (with Sign in / explore actions) instead of a red "Please sign in" banner and endless placeholders.
+        setConnectHomeSections(v=>{const n={...v};keys.forEach(k=>{if(!n[k])n[k]=(k==="special"||k==="hero"||k==="dailyQuote")?{item:null}:{items:[]};});return n;});
+      }else{
+        setConnectNotice(e.message||"Unable to load Connect Home.");
+      }
     }finally{
       setConnectHomeLoading(v=>{const n={...v};keys.forEach(k=>{n[k]=false;});return n;});
     }
@@ -8808,7 +8841,7 @@ return () => window.clearInterval(timer);
     setCartPincode(value);
     setCartPincodeChecked(value.length === 6);
     setCartNotice(value.length === 6
-      ? "📦 Delivery estimate checked. Final promise will come from the backend later."
+      ? "📦 Delivery is available to this pincode. The final delivery date is confirmed at checkout."
       : "Please enter a valid 6-digit pincode.");
   };
 
@@ -8850,8 +8883,8 @@ return () => window.clearInterval(timer);
       const data=await response.json().catch(()=>({}));if(!response.ok||data.status!=="success")throw new Error(data.message||"Unable to calculate checkout price");
       setCheckoutQuote(data.pricing||null);setCheckoutQuoteToken(data.quote_token||"");setCheckoutQuoteExpiresAt(data.expires_at||"");
       const applied=Boolean(data.pricing?.coupon?.applied);setCheckoutCouponApplied(applied);
-      if(!quiet)setCheckoutMessage(applied?`🎉 ${data.pricing.coupon.code} applied by HOWDI server.`:
-        (String(couponOverride||"").trim()?`Coupon not applied: ${String(data.pricing?.coupon?.reason||"not eligible").replaceAll("_"," ").toLowerCase()}`:"Price refreshed from HOWDI server."));
+      if(!quiet)setCheckoutMessage(applied?`🎉 ${data.pricing.coupon.code} applied to your order.`:
+        (String(couponOverride||"").trim()?`Coupon not applied: ${String(data.pricing?.coupon?.reason||"not eligible").replaceAll("_"," ").toLowerCase()}`:"Your price is up to date."));
       return data.pricing||null;
     }catch(e){setCheckoutQuote(null);setCheckoutQuoteToken("");setCheckoutQuoteExpiresAt("");setCheckoutCouponApplied(false);setCheckoutQuoteError(e.message||"Unable to calculate price");if(!quiet)setCheckoutMessage(e.message||"Unable to calculate price");return null}
     finally{setCheckoutQuoteBusy(false)}
@@ -8963,12 +8996,16 @@ return () => window.clearInterval(timer);
 
       const response = await fetch(`${API_BASE}/api/orders`, {
         method: "POST",
+        // The idempotency key travels in the JSON body: the API's CORS preflight does not allow a custom
+        // "Idempotency-Key" header, so sending it as a header made every browser "Place Order" fail with "Failed to fetch".
         headers: {
           "Content-Type": "application/json",
-          "Idempotency-Key": checkoutIdempotencyRef.current || (checkoutIdempotencyRef.current=`checkout-${Date.now()}-${Math.random().toString(36).slice(2)}`),
           ...customerSessionHeaders(),
         },
-        body: JSON.stringify(orderPayload),
+        body: JSON.stringify({
+          ...orderPayload,
+          idempotency_key: checkoutIdempotencyRef.current || (checkoutIdempotencyRef.current=`checkout-${Date.now()}-${Math.random().toString(36).slice(2)}`),
+        }),
       });
 
       const data = await response.json().catch(() => ({}));
@@ -10256,7 +10293,7 @@ return () => window.clearInterval(timer);
     setReturnRequestBusy(true);
     try{
       const r=await fetch(`${API_BASE}/api/orders/${encodeURIComponent(returnRequestOrder.id)}/returns/items`,{method:"POST",
-        headers:{"Content-Type":"application/json","Idempotency-Key":returnIdempotencyRef.current||`return-${Date.now()}-${Math.random().toString(36).slice(2)}`,...customerSessionHeaders()},body:JSON.stringify({items,reason:returnRequestReason,reason_code:"CUSTOMER_REQUEST"})});
+        headers:{"Content-Type":"application/json",...customerSessionHeaders()},body:JSON.stringify({items,reason:returnRequestReason,reason_code:"CUSTOMER_REQUEST",idempotency_key:returnIdempotencyRef.current||`return-${Date.now()}-${Math.random().toString(36).slice(2)}`})});
       const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.message||"Unable to request return");
       setOrdersNotice("Return request submitted successfully.");const o=returnRequestOrder;setReturnRequestOrder(null);await loadCustomerReturnStatus(o);
     }catch(e){setOrdersNotice(e.message||"Unable to request return")}finally{setReturnRequestBusy(false)}
@@ -10830,6 +10867,7 @@ const saveProfileDetails = async (event) => {
   };
 
   const openNewAddress = () => {
+    setAddressNotice("");
     setEditingAddressId(null);
     setAddressForm({
       label: "Home",
@@ -10942,6 +10980,12 @@ const saveProfileDetails = async (event) => {
       });
       setAddressNotice(data.message || "Address saved successfully.");
       await loadAddresses();
+      if (checkoutOpen && data.address) {
+        // Adding an address from Checkout: use it and continue to Payment.
+        setSelectedCheckoutAddress(data.address);
+        setCheckoutStep(2);
+        setCheckoutMessage("");
+      }
     } catch (error) {
       console.error("Address save error:", error);
       setAddressNotice(error.message || "Unable to save address.");
@@ -12290,6 +12334,27 @@ const removeNotification = async (notificationId) => {
   // PAGE
   // ==============================
 
+  // Section lists for the current pillar (shared by the desktop rail and the mobile section strip).
+  const osSubNav = {
+    connect: [
+      ["feed", "⌂", "Home"], ["vibe", "▷", "Vibe"], ["explore", "⌕", "Explore"], ["stories", "◉", "Stories"], ["messages", "○", "Messages"], ["communities", "◇", "Communities"],
+    ].map(([id, icon, label]) => ({
+      id, icon, label,
+      active: id === "vibe" ? (connectView === "feed" && connectContentMode === "vibe") : id === "feed" ? connectView === "dashboard" : id === "explore" ? connectView === "discover" : connectView === id,
+      onClick: () => openNavigationOSArea("connect", id === "feed" ? "home" : id),
+    })),
+    shop: [["catalogue", "Catalogue"], ["home", "Shop Home"], ["cart", "Cart"], ["vendor", "Vendor / Creator"]].map(([id, label]) => ({
+      id, label, badge: id === "cart" ? cart.length : 0, active: shopOSView === id, onClick: () => openNavigationOSArea("shop", id),
+    })),
+    works: [["find", "Find Worker"], ["bookings", "My Bookings"], ["saved", "Saved Workers"], ["safety", "Safety"], ["become", "Become a Worker"]].map(([id, label]) => ({
+      id, label, active: worksExperienceTab === id,
+      onClick: () => { openNavigationOSArea("works", id); if (id === "become") { setApplyNotice(""); setApplySuccess(null); setApplyStep(1); setHowdiApplyType("worker"); } },
+    })),
+    learn: [["home", "For You"], ["discover", "Discover"], ["my-learning", "My Learning"], ["live", "Live Classes"], ["journey", "Skill Journey"], ["passport", "Skill Passport"], ["access", "Learning Access"], ["market", "Market Signals"], ["community", "Community Programs"], ["opportunities", "Opportunities"], ["hpay", "HPay Rewards"], ["earn", "Earn"]].map(([id, label]) => ({
+      id, label, active: learningPortalView === id, onClick: () => openNavigationOSArea("learn", id),
+    })),
+  };
+
   return (
     <div className="howdi-app" data-active-pillar={navigationOSArea} style={{ "--howdi-header-bottom": `${headerBottom}px`, "--howdi-location-right": `${locationRight}px` }}>
       <button
@@ -12442,6 +12507,7 @@ const removeNotification = async (notificationId) => {
               className={accountMenuOpen || myHowdiDrawer ? "howdi-global-account active" : "howdi-global-account"}
               style={{order: 60}}
               title="My HOWDI"
+              aria-label={`My HOWDI, ${currentUser?.full_name||currentUser?.name||"Account"}`}
               aria-expanded={accountMenuOpen}
               onClick={openMyHowdiMenu}
             >
@@ -12466,6 +12532,21 @@ const removeNotification = async (notificationId) => {
 
         </div>
 
+        {osSubNav[navigationOSArea]?.length > 0 && (
+          <nav className="howdi-mobile-subnav" aria-label={`${OS_PILLARS.find((p) => p.area === navigationOSArea)?.label || "HOWDI"} sections`}>
+            {osSubNav[navigationOSArea].map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className={item.active ? "active" : ""}
+                aria-current={item.active ? "page" : undefined}
+                ref={(el) => { if (el && item.active && el.parentElement) { const box = el.parentElement; const left = el.offsetLeft - (box.clientWidth - el.offsetWidth) / 2; if (Math.abs(box.scrollLeft - left) > 4) box.scrollLeft = Math.max(0, left); } }}
+                onClick={item.onClick}
+              >{item.label}{item.badge > 0 && <em className="howdi-mobile-badge" aria-label={`${item.badge} item${item.badge === 1 ? "" : "s"}`}>{item.badge}</em>}</button>
+            ))}
+          </nav>
+        )}
+
       </header>
 
       {/* HOWDI APPROVED PERSISTENT ECOSYSTEM SIDEBAR */}
@@ -12476,36 +12557,28 @@ const removeNotification = async (notificationId) => {
         </div>
 
         <div className="howdi-master-nav-group">
-          <button type="button" className={navigationOSArea==="home"?"pillar active":"pillar"} onClick={()=>openNavigationOSArea("home")}><span>⌂</span><b>Home</b></button>
-          <button type="button" className={navigationOSArea==="connect"?"pillar active":"pillar"} onClick={()=>openNavigationOSArea("connect","home")}><span>⌂</span><b>Connect</b></button>
-          {navigationOSArea==="connect" && <div className="howdi-master-subnav">
-            {[
-              ["feed","⌂","Home"],["vibe","▷","Vibe"],["explore","⌕","Explore"],["stories","◉","Stories"],["messages","○","Messages"],["communities","◇","Communities"]
-            ].map(([id,icon,label])=>{
-              const isActive=id==="vibe"?(connectView==="feed"&&connectContentMode==="vibe"):id==="feed"?connectView==="dashboard":id==="explore"?connectView==="discover":connectView===id;
-              return <button key={id} type="button" className={isActive?"active":""} onClick={()=>openNavigationOSArea("connect",id==="feed"?"home":id)}><span>{icon}</span>{label}</button>;
-            })}
-          </div>}
-
-          <button type="button" className={navigationOSArea==="shop"?"pillar active":"pillar"} onClick={()=>openNavigationOSArea("shop","catalogue")}><span>▢</span><b>Shop</b></button>
-          {navigationOSArea==="shop" && <div className="howdi-master-subnav">
-            {[["catalogue","Catalogue"],["home","Shop Home"],["cart","Cart"],["vendor","Vendor / Creator"]].map(([id,label])=><button key={id} type="button" className={shopOSView===id?"active":""} onClick={()=>openNavigationOSArea("shop",id)}>{label}</button>)}
-          </div>}
-
-          <button type="button" className={navigationOSArea==="works"?"pillar active":"pillar"} onClick={()=>openNavigationOSArea("works","find")}><span>×</span><b>Works</b></button>
-          {navigationOSArea==="works" && <div className="howdi-master-subnav">
-            {[["find","Find Worker"],["bookings","My Bookings"],["saved","Saved Workers"],["safety","Safety"],["become","Become a Worker"]].map(([id,label])=><button key={id} type="button" className={worksExperienceTab===id?"active":""} onClick={()=>{openNavigationOSArea("works",id);if(id==="become"){setApplyNotice("");setApplySuccess(null);setApplyStep(1);setHowdiApplyType("worker");}}}>{label}</button>)}
-          </div>}
-
-          <button type="button" className={navigationOSArea==="learn"?"pillar active":"pillar"} onClick={()=>openNavigationOSArea("learn","discover")}><span>▰</span><b>Learn & Earn</b></button>
-          {navigationOSArea==="learn" && <div className="howdi-master-subnav">
-            {[["home","For You"],["discover","Discover"],["my-learning","My Learning"],["live","Live Classes"],["journey","Skill Journey"],["passport","Skill Passport"],["access","Learning Access"],["market","Market Signals"],["community","Community Programs"],["opportunities","Opportunities"],["hpay","HPay Rewards"],["earn","Earn"]].map(([id,label])=><button key={id} type="button" className={learningPortalView===id?"active":""} onClick={()=>openNavigationOSArea("learn",id)}>{label}</button>)}
-          </div>}
-
+          {OS_PILLARS.map((pillar)=>(
+            <Fragment key={pillar.area}>
+              <button type="button" className={navigationOSArea===pillar.area?"pillar active":"pillar"} aria-current={navigationOSArea===pillar.area?"page":undefined} onClick={()=>openNavigationOSArea(pillar.area,pillar.view)}><span aria-hidden="true"><NavIcon name={pillar.area}/></span><b>{pillar.label}</b></button>
+              {navigationOSArea===pillar.area && osSubNav[pillar.area]?.length>0 && <div className="howdi-master-subnav">
+                {osSubNav[pillar.area].map((item)=><button key={item.id} type="button" className={item.active?"active":""} aria-current={item.active?"page":undefined} onClick={item.onClick}>{item.icon?<span aria-hidden="true">{item.icon}</span>:null}{item.label}</button>)}
+              </div>}
+            </Fragment>
+          ))}
         </div>
 
         <div className="howdi-master-motto"><b>A kinder<br/>brighter community<br/>with HOWDI</b><span>→</span></div>
       </aside>
+
+      {/* Mobile / tablet: the same five areas as the desktop rail, always reachable with the thumb. */}
+      <nav className="howdi-mobile-nav" aria-label="HOWDI sections">
+        {OS_PILLARS.map((pillar) => (
+          <button key={pillar.area} type="button" className={navigationOSArea === pillar.area ? "active" : ""} aria-current={navigationOSArea === pillar.area ? "page" : undefined} onClick={() => openNavigationOSArea(pillar.area, pillar.view)}>
+            <NavIcon name={pillar.area} /><span>{pillar.short}</span>
+            {pillar.area === "shop" && cart.length > 0 && <em className="howdi-mobile-badge" aria-label={`${cart.length} item${cart.length === 1 ? "" : "s"} in cart`}>{cart.length}</em>}
+          </button>
+        ))}
+      </nav>
 
       {locationPickerOpen && (
         <div id="howdi-location-panel" data-howdi-header-panel className="howdi-location-popover" role="dialog" aria-label="Choose your location">
@@ -13131,6 +13204,210 @@ const removeNotification = async (notificationId) => {
         </div>
       )}
 
+      {/* Address form lives at app level so it works from Checkout as well as from My HOWDI */}
+      {addressFormOpen && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 10040,
+            background: "rgba(15,23,42,.55)",
+            padding: "20px",
+            overflowY: "auto",
+          }}
+        >
+          <form
+            onSubmit={saveAddress}
+            onMouseDown={(event) => event.stopPropagation()}
+            style={{
+              maxWidth: "680px",
+              margin: "40px auto",
+              background: "#fff",
+              borderRadius: "24px",
+              padding: "28px",
+              boxShadow: "0 30px 80px rgba(15,23,42,.25)",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+              }}
+            >
+              <div>
+                <div
+                  style={{
+                    fontSize: "12px",
+                    fontWeight: 800,
+                    color: "#64748b",
+                    letterSpacing: "1px",
+                  }}
+                >
+                  {editingAddressId ? "EDIT ADDRESS" : "NEW ADDRESS"}
+                </div>
+                <h3 style={{ margin: "6px 0", fontSize: "24px" }}>
+                  {editingAddressId
+                    ? "Update your address"
+                    : "Add a new address"}
+                </h3>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setAddressFormOpen(false)}
+                style={{
+                  width: "40px",
+                  height: "40px",
+                  borderRadius: "50%",
+                  border: "1px solid #e2e8f0",
+                  background: "#f8fafc",
+                  cursor: "pointer",
+                  fontSize: "18px",
+                }}
+              >
+                ×
+              </button>
+            </div>
+
+            {addressNotice && <p role="alert" style={{ margin: "14px 0 0", padding: "10px 12px", borderRadius: "10px", background: "#fff4e5", color: "#7a3d00", fontWeight: 700, fontSize: "13px" }}>{addressNotice}</p>}
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns:
+                  "repeat(auto-fit, minmax(220px, 1fr))",
+                gap: "14px",
+                marginTop: "22px",
+              }}
+            >
+              {[
+                ["label", "Address type", "Home"],
+                ["full_name", "Full name", "Full name"],
+                ["phone", "Mobile number", "10-digit mobile number"],
+                ["address_line1", "Address line 1", "House / Flat / Street"],
+                ["address_line2", "Address line 2 (optional)", "Landmark / Area"],
+                ["city", "City", "Khammam"],
+                ["state", "State", "Telangana"],
+                ["pincode", "Pincode", "507001"],
+              ].map(([field, label, placeholder]) => (
+                <label
+                  key={field}
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "7px",
+                    gridColumn:
+                      field === "address_line1" ||
+                      field === "address_line2"
+                        ? "1 / -1"
+                        : "auto",
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: "13px",
+                      fontWeight: 800,
+                      color: "#334155",
+                    }}
+                  >
+                    {label}
+                  </span>
+
+                  <input
+                    value={addressForm[field]}
+                    onChange={(event) => {
+                      let value = event.target.value;
+
+                      if (field === "pincode") {
+                        value = value.replace(/\D/g, "").slice(0, 6);
+                      }
+
+                      if (field === "phone") {
+                        value = value.replace(/\D/g, "").slice(0, 10);
+                      }
+
+                      setAddressForm({
+                        ...addressForm,
+                        [field]: value,
+                      });
+                    }}
+                    placeholder={placeholder}
+                    inputMode={
+                      field === "phone" || field === "pincode"
+                        ? "numeric"
+                        : "text"
+                    }
+                    maxLength={
+                      field === "pincode"
+                        ? 6
+                        : field === "phone"
+                        ? 10
+                        : undefined
+                    }
+                    required={
+                      ![
+                        "address_line2",
+                      ].includes(field)
+                    }
+                    style={{
+                      width: "100%",
+                      boxSizing: "border-box",
+                      border: "1px solid #cbd5e1",
+                      borderRadius: "11px",
+                      padding: "12px 13px",
+                      fontSize: "14px",
+                      outline: "none",
+                    }}
+                  />
+                </label>
+              ))}
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "flex-end",
+                gap: "10px",
+                marginTop: "24px",
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setAddressFormOpen(false)}
+                style={{
+                  border: "1px solid #cbd5e1",
+                  background: "#fff",
+                  borderRadius: "11px",
+                  padding: "12px 18px",
+                  fontWeight: 800,
+                  cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
+
+              <button
+                type="submit"
+                style={{
+                  border: 0,
+                  background: "#0f172a",
+                  color: "#fff",
+                  borderRadius: "11px",
+                  padding: "12px 20px",
+                  fontWeight: 800,
+                  cursor: "pointer",
+                }}
+              >
+                {editingAddressId
+                  ? "Save Changes"
+                  : "Save Address"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
       {checkoutOpen && currentUser && (
         <div
           className="howdi-checkout-overlay"
@@ -13185,7 +13462,7 @@ const removeNotification = async (notificationId) => {
                 {checkoutStep === 2 && (
                   <div>
                     <h3 style={{ margin: "0 0 8px", fontSize: "22px" }}>💳 Choose payment method</h3>
-                    <p style={{ margin: "0 0 18px", color: "#64748b" }}>Your real payment gateway can be connected later. For now this completes the frontend checkout flow.</p>
+                    <p style={{ margin: "0 0 18px", color: "#64748b" }}>Choose how you would like to pay. You will review everything before your order is placed.</p>
                     <div style={{ display: "grid", gap: "10px" }}>
                       {[
                         ["COD", "💵 Cash on Delivery", "Pay when your order arrives"],
@@ -13281,7 +13558,7 @@ const removeNotification = async (notificationId) => {
                   <div style={{ display: "flex", justifyContent: "space-between" }}><span>Delivery</span><strong>{checkoutServerDelivery ? `₹${checkoutServerDelivery.toLocaleString("en-IN")}` : "FREE"}</strong></div>
                   {checkoutServerTax > 0 && <div style={{ display: "flex", justifyContent: "space-between" }}><span>GST / Tax</span><strong>₹{checkoutServerTax.toLocaleString("en-IN")}</strong></div>}
                   {checkoutQuote?.coupon?.applied && <div style={{ display: "flex", justifyContent: "space-between", color: "#16803c" }}><span>{checkoutQuote.coupon.code}</span><strong>Applied ✓</strong></div>}
-                  <div className="hv153d-verified">{checkoutQuoteBusy?"⏳ Verifying latest price…":checkoutQuote?`🛡️ Price locked by HOWDI server${checkoutQuoteExpiresAt?` · valid until ${new Date(checkoutQuoteExpiresAt).toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"})}`:""}`:"Price will be verified before order placement"}</div>
+                  <div className="hv153d-verified">{checkoutQuoteBusy?"⏳ Verifying latest price…":checkoutQuote?`🛡️ Price confirmed by HOWDI${checkoutQuoteExpiresAt?` · valid until ${new Date(checkoutQuoteExpiresAt).toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"})}`:""}`:"Price will be verified before order placement"}</div>
                   {checkoutQuoteError&&<div className="hv153d-error">{checkoutQuoteError}</div>}
                   <div style={{ display: "flex", justifyContent: "space-between", fontSize: "20px", paddingTop: "8px", borderTop: "1px solid #e2e8f0" }}><strong>Total</strong><strong>₹{checkoutServerTotal.toLocaleString("en-IN")}</strong></div>
                 </div>
@@ -13877,206 +14154,6 @@ const removeNotification = async (notificationId) => {
                       </div>
                     )}
 
-                    {addressFormOpen && (
-                      <div
-                        style={{
-                          position: "fixed",
-                          inset: 0,
-                          zIndex: 10001,
-                          background: "rgba(15,23,42,.55)",
-                          padding: "20px",
-                          overflowY: "auto",
-                        }}
-                      >
-                        <form
-                          onSubmit={saveAddress}
-                          onMouseDown={(event) => event.stopPropagation()}
-                          style={{
-                            maxWidth: "680px",
-                            margin: "40px auto",
-                            background: "#fff",
-                            borderRadius: "24px",
-                            padding: "28px",
-                            boxShadow: "0 30px 80px rgba(15,23,42,.25)",
-                          }}
-                        >
-                          <div
-                            style={{
-                              display: "flex",
-                              justifyContent: "space-between",
-                              alignItems: "center",
-                            }}
-                          >
-                            <div>
-                              <div
-                                style={{
-                                  fontSize: "12px",
-                                  fontWeight: 800,
-                                  color: "#64748b",
-                                  letterSpacing: "1px",
-                                }}
-                              >
-                                {editingAddressId ? "EDIT ADDRESS" : "NEW ADDRESS"}
-                              </div>
-                              <h3 style={{ margin: "6px 0", fontSize: "24px" }}>
-                                {editingAddressId
-                                  ? "Update your address"
-                                  : "Add a new address"}
-                              </h3>
-                            </div>
-
-                            <button
-                              type="button"
-                              onClick={() => setAddressFormOpen(false)}
-                              style={{
-                                width: "40px",
-                                height: "40px",
-                                borderRadius: "50%",
-                                border: "1px solid #e2e8f0",
-                                background: "#f8fafc",
-                                cursor: "pointer",
-                                fontSize: "18px",
-                              }}
-                            >
-                              ×
-                            </button>
-                          </div>
-
-                          <div
-                            style={{
-                              display: "grid",
-                              gridTemplateColumns:
-                                "repeat(auto-fit, minmax(220px, 1fr))",
-                              gap: "14px",
-                              marginTop: "22px",
-                            }}
-                          >
-                            {[
-                              ["label", "Address type", "Home"],
-                              ["full_name", "Full name", "Full name"],
-                              ["phone", "Mobile number", "10-digit mobile number"],
-                              ["address_line1", "Address line 1", "House / Flat / Street"],
-                              ["address_line2", "Address line 2 (optional)", "Landmark / Area"],
-                              ["city", "City", "Khammam"],
-                              ["state", "State", "Telangana"],
-                              ["pincode", "Pincode", "507001"],
-                            ].map(([field, label, placeholder]) => (
-                              <label
-                                key={field}
-                                style={{
-                                  display: "flex",
-                                  flexDirection: "column",
-                                  gap: "7px",
-                                  gridColumn:
-                                    field === "address_line1" ||
-                                    field === "address_line2"
-                                      ? "1 / -1"
-                                      : "auto",
-                                }}
-                              >
-                                <span
-                                  style={{
-                                    fontSize: "13px",
-                                    fontWeight: 800,
-                                    color: "#334155",
-                                  }}
-                                >
-                                  {label}
-                                </span>
-
-                                <input
-                                  value={addressForm[field]}
-                                  onChange={(event) => {
-                                    let value = event.target.value;
-
-                                    if (field === "pincode") {
-                                      value = value.replace(/\D/g, "").slice(0, 6);
-                                    }
-
-                                    if (field === "phone") {
-                                      value = value.replace(/\D/g, "").slice(0, 10);
-                                    }
-
-                                    setAddressForm({
-                                      ...addressForm,
-                                      [field]: value,
-                                    });
-                                  }}
-                                  placeholder={placeholder}
-                                  inputMode={
-                                    field === "phone" || field === "pincode"
-                                      ? "numeric"
-                                      : "text"
-                                  }
-                                  maxLength={
-                                    field === "pincode"
-                                      ? 6
-                                      : field === "phone"
-                                      ? 10
-                                      : undefined
-                                  }
-                                  required={
-                                    ![
-                                      "address_line2",
-                                    ].includes(field)
-                                  }
-                                  style={{
-                                    width: "100%",
-                                    boxSizing: "border-box",
-                                    border: "1px solid #cbd5e1",
-                                    borderRadius: "11px",
-                                    padding: "12px 13px",
-                                    fontSize: "14px",
-                                    outline: "none",
-                                  }}
-                                />
-                              </label>
-                            ))}
-                          </div>
-
-                          <div
-                            style={{
-                              display: "flex",
-                              justifyContent: "flex-end",
-                              gap: "10px",
-                              marginTop: "24px",
-                            }}
-                          >
-                            <button
-                              type="button"
-                              onClick={() => setAddressFormOpen(false)}
-                              style={{
-                                border: "1px solid #cbd5e1",
-                                background: "#fff",
-                                borderRadius: "11px",
-                                padding: "12px 18px",
-                                fontWeight: 800,
-                                cursor: "pointer",
-                              }}
-                            >
-                              Cancel
-                            </button>
-
-                            <button
-                              type="submit"
-                              style={{
-                                border: 0,
-                                background: "#0f172a",
-                                color: "#fff",
-                                borderRadius: "11px",
-                                padding: "12px 20px",
-                                fontWeight: 800,
-                                cursor: "pointer",
-                              }}
-                            >
-                              {editingAddressId
-                                ? "Save Changes"
-                                : "Save Address"}
-                            </button>
-                          </div>
-                        </form>
-                      </div>
-                    )}
                   </>
                 )}
 
@@ -18090,7 +18167,8 @@ const removeNotification = async (notificationId) => {
                           <div style={{ padding:"28px", textAlign:"center", border:"1px dashed #cad9d0", borderRadius:"16px", color:"#7b8981", background:"#fff" }}>
                             <div style={{ fontSize:"30px" }}>🛠️</div>
                             <strong style={{ display:"block", marginTop:"7px", color:"#365947" }}>No HOWDI Works bookings yet</strong>
-                            <span style={{ fontSize:"12px" }}>Your service requests will appear here after booking.</span>
+                            <span style={{ fontSize:"13px", display:"block", margin:"4px auto 12px", maxWidth:"44ch" }}>Book a verified local worker and your request, worker status and Job PIN will appear here.</span>
+                            <button type="button" className="howdi-works-empty-cta" onClick={()=>setWorksExperienceTab("find")}>Find a worker →</button>
                             <HowdiForEmptyStateLink context="works" onNavigate={navigateHowdiFor}/>
                           </div>
                         )}
@@ -19676,7 +19754,12 @@ const removeNotification = async (notificationId) => {
                   const who=(p)=>{const u=p?.public_username||p?.creatorPublicUsername||p?.actor_public_username;return u?`@${u}`:(p?.full_name||p?.creatorName||p?.actor_name||"HOWDI member");};
                   const avatarInitial=(p)=>(p?.full_name||p?.creatorName||"H").slice(0,1).toUpperCase();
                   const Skeleton=({rows=1})=><div className="hc-home-skel" aria-busy="true">{Array.from({length:rows}).map((_,i)=><div key={i} className="hc-home-skel-row" />)}</div>;
-                  const Empty=({label})=><div className="hc-home-empty"><span>{label}</span></div>;
+                  const Empty=({label,icon,title,actions})=><div className="hc-home-empty">
+                    {icon&&<i className="hc-home-empty-icon" aria-hidden="true">{icon}</i>}
+                    <div className="hc-home-empty-copy">{title&&<b>{title}</b>}<span>{label}</span></div>
+                    {actions&&actions.length>0&&<div className="hc-home-empty-actions">{actions.map(a=><button type="button" key={a.label} className={a.primary?"primary":""} onClick={a.onClick}>{a.label}</button>)}</div>}
+                  </div>;
+                  const go=(area,sub)=>()=>openNavigationOSArea(area,sub);
                   const SectionError=({onRetry})=><div className="hc-home-error"><span>Couldn't load this right now.</span><button type="button" onClick={onRetry}>Retry</button></div>;
                   const railNav=(dir)=>(e)=>{const wrap=e.currentTarget.closest('.hc-home-rail-wrap');const rail=wrap&&wrap.querySelector('.hc-home-rail');if(rail)rail.scrollBy({left:dir*Math.round(rail.clientWidth*0.8),behavior:'smooth'});};
                   const Rail=({label,children,className=""})=>(
@@ -19712,7 +19795,7 @@ const removeNotification = async (notificationId) => {
                           {S.special.item.cta_label&&<button type="button" onClick={()=>openSpecialCta(S.special.item)}>{S.special.item.cta_label} →</button>}
                           <button type="button" className="hc-home-dismiss" aria-label="Dismiss" onClick={(e)=>{e.stopPropagation();e.currentTarget.closest('.hc-home-special-card').style.display='none';}}>×</button>
                         </div>
-                      ):<Empty label="No HOWDI Special right now."/>}
+                      ):null}
                     </section>
 
                     {/* 2. Hero / Media of the Day (admin-managed, with intelligent fallback) */}
@@ -19725,7 +19808,16 @@ const removeNotification = async (notificationId) => {
                           <h3>{S.hero.item.title||S.hero.item.article_title||(S.hero.item.body_text||S.hero.item.content||"").slice(0,120)}</h3>
                           {S.hero.source==="admin"?(S.hero.item.cta_label&&<button type="button" onClick={(e)=>{e.stopPropagation();openSpecialCta(S.hero.item);}}>{S.hero.item.cta_label} →</button>):<span>By {who(S.hero.item)}</span>}
                         </div>
-                      ):<Empty label="Nothing featured yet."/>}
+                      ):<div className="hc-home-welcome">
+                          <small>Welcome to HOWDI</small>
+                          <h3>Made by hand. Made with heart.</h3>
+                          <span>Discover handmade shops, trusted local workers and skills you can turn into income &mdash; all in one kind community.</span>
+                          <div className="hc-home-welcome-actions">
+                            <button type="button" className="primary" onClick={go("shop","catalogue")}>Shop handmade</button>
+                            <button type="button" onClick={go("works","find")}>Find a worker</button>
+                            <button type="button" onClick={go("learn","discover")}>Start learning</button>
+                          </div>
+                        </div>}
                     </section>
 
                     {/* 3. Stories */}
@@ -19738,7 +19830,7 @@ const removeNotification = async (notificationId) => {
                             <small>{s.mine?"You":who(s)}</small>
                           </button>)}
                         </Rail>
-                      ):<Empty label="No stories yet. Share the first moment of your day."/>}
+                      ):<Empty icon="◉" title="No stories yet" label="Share the first moment of your day and it will show up here." actions={[{label:"Add a story",primary:true,onClick:go("connect","stories")}]}/>}
                     </section>
 
                     {/* 4. For You */}
@@ -19753,7 +19845,7 @@ const removeNotification = async (notificationId) => {
                           </article>)}
                           {S.forYou.nextCursor&&<button type="button" className="hc-home-more" onClick={loadConnectHomeForYouMore} disabled={L.forYou}>{L.forYou?"Loading…":"Load more"}</button>}
                         </div>
-                      ):<Empty label={loggedIn?"Follow people and interests to fill your feed.":"Log in to get a feed tailored to you — for now, here's what's trending on HOWDI Connect."}/>}
+                      ):<Empty icon="✦" title={loggedIn?"Your feed is getting ready":"Sign in for a feed made for you"} label={loggedIn?"Follow creators and join communities and their posts will appear here.":"Log in to get a feed tailored to you — meanwhile, explore what is popular on HOWDI Connect."} actions={loggedIn?[{label:"Find people to follow",primary:true,onClick:go("connect","explore")},{label:"Browse communities",onClick:go("connect","communities")}]:[{label:"Sign in",primary:true,onClick:openLogin},{label:"Explore Connect",onClick:go("connect","explore")}]}/>}
                     </section>
 
                     {/* 5. Vibe discovery */}
@@ -19766,7 +19858,7 @@ const removeNotification = async (notificationId) => {
                             <small>{v.creatorPublicUsername?`@${v.creatorPublicUsername}`:v.creatorName}</small>
                           </button>)}
                         </Rail>
-                      ):<Empty label="No Vibes yet — be the first to share one."/>}
+                      ):<Empty icon="▷" title="No Vibes yet" label="Short videos from creators will play here. Be the first to share one." actions={[{label:"Open Vibe",primary:true,onClick:go("connect","vibe")}]}/>}
                     </section>
 
                     {/* 6. Continue Watching (Vibe watch progress — visually distinct: thumbnail + progress bar) */}
@@ -19782,7 +19874,7 @@ const removeNotification = async (notificationId) => {
                             <small>{v.creatorPublicUsername?`@${v.creatorPublicUsername}`:v.creatorName}</small>
                           </button>)}
                         </Rail>
-                      ):<Empty label={loggedIn?"Watch a Vibe and your progress will appear here.":"Log in to pick up Vibes where you left off."}/>}
+                      ):<Empty icon="◔" title="Nothing to resume yet" label={loggedIn?"Watch a Vibe and you can pick it up again from here.":"Log in to pick up Vibes where you left off."} actions={[...(loggedIn?[]:[{label:"Sign in",primary:true,onClick:openLogin}]),{label:"Watch Vibes",onClick:go("connect","vibe")}]}/>}
                     </section>
 
                     {/* 7. Recommended Creators */}
@@ -19797,7 +19889,7 @@ const removeNotification = async (notificationId) => {
                             {followBtn(p)}
                           </div>)}
                         </Rail>
-                      ):<Empty label="No creators to recommend yet."/>}
+                      ):<Empty icon="☺" title="Creators will appear here" label="As more makers and teachers join, we will suggest people you may like." actions={[{label:"Explore Connect",onClick:go("connect","explore")}]}/>}
                     </section>
 
                     {/* 8. Suggested People */}
@@ -19812,7 +19904,7 @@ const removeNotification = async (notificationId) => {
                             {followBtn(p)}
                           </div>)}
                         </Rail>
-                      ):<Empty label="No suggestions right now."/>}
+                      ):<Empty icon="☺" title="No suggestions right now" label="Check back soon, or search for someone you know." actions={[{label:"Explore people",onClick:go("connect","explore")}]}/>}
                     </section>
 
                     {/* 9. Communities */}
@@ -19825,7 +19917,7 @@ const removeNotification = async (notificationId) => {
                             <small>{c.member_count||0} members</small>
                           </button>)}
                         </Rail>
-                      ):<Empty label="No public communities yet."/>}
+                      ):<Empty icon="◇" title="No communities yet" label="Communities bring makers, learners and neighbours together." actions={[{label:"Open Communities",onClick:go("connect","communities")}]}/>}
                     </section>
 
                     {/* 10. Trending Articles */}
@@ -19839,7 +19931,7 @@ const removeNotification = async (notificationId) => {
                             <small>By {who(a)} · {a.view_count||0} views</small>
                           </article>)}
                         </div>
-                      ):<Empty label="No trending articles yet."/>}
+                      ):<Empty icon="✎" title="No articles yet" label="Articles from HOWDI creators will be listed here." actions={[{label:"Browse articles",onClick:()=>loadConnectArticles("DISCOVER")}]}/>}
                     </section>
 
                     {/* 11. Shop recommendations */}
@@ -19854,7 +19946,7 @@ const removeNotification = async (notificationId) => {
                             <em className="hc-home-cta">View Product →</em>
                           </button>)}
                         </Rail>
-                      ):<Empty label="No products to recommend yet."/>}
+                      ):<Empty icon="🛍" title="Handmade picks are on the way" label="Browse the Shop to see pieces from real creators." actions={[{label:"Open Shop",primary:true,onClick:go("shop","catalogue")}]}/>}
                     </section>
 
                     {/* 12. Works recommendations */}
@@ -19870,7 +19962,7 @@ const removeNotification = async (notificationId) => {
                             <em className="hc-home-cta">View Service →</em>
                           </button>)}
                         </Rail>
-                      ):<Empty label="No Works recommendations yet."/>}
+                      ):<Empty icon="🛠" title="Find trusted local help" label="Verified workers for your home and business are listed in Works." actions={[{label:"Find a worker",primary:true,onClick:go("works","find")}]}/>}
                     </section>
 
                     {/* 13. Learn recommendations */}
@@ -19885,7 +19977,7 @@ const removeNotification = async (notificationId) => {
                             <em className="hc-home-cta">View Course →</em>
                           </button>)}
                         </Rail>
-                      ):<Empty label="No courses to recommend yet."/>}
+                      ):<Empty icon="🎓" title="Learn something new" label="Practical, creator-led courses live in Learn & Earn." actions={[{label:"Explore courses",primary:true,onClick:go("learn","discover")}]}/>}
                     </section>
 
                     {/* 14. Recent Activity */}
@@ -19898,7 +19990,7 @@ const removeNotification = async (notificationId) => {
                             <p>{n.message}</p>
                           </div>)}
                         </div>
-                      ):<Empty label={loggedIn?"No recent activity yet. Follow, comment or share to see it here.":"Log in to see follows, comments and replies as they happen."}/>}
+                      ):<Empty icon="🔔" title="You are all caught up" label={loggedIn?"Follows, comments and replies will show up here.":"Log in to see follows, comments and replies as they happen."} actions={loggedIn?undefined:[{label:"Sign in",primary:true,onClick:openLogin}]}/>}
                     </section>
 
                     {/* 15. Daily Quote (admin-managed) */}
@@ -19920,7 +20012,7 @@ const removeNotification = async (notificationId) => {
                             <small>{e.progress||0}% complete</small>
                           </button>)}
                         </div>
-                      ):<Empty label={loggedIn?"Nothing in progress right now — start a course, booking or unfinished action from Learn & Earn.":"Log in to resume courses, bookings and unfinished HOWDI actions."}/>}
+                      ):<Empty icon="➜" title="Nothing in progress" label={loggedIn?"Start a course or book a worker and you can pick it up again here.":"Log in to resume courses, bookings and unfinished HOWDI actions."} actions={[...(loggedIn?[]:[{label:"Sign in",primary:true,onClick:openLogin}]),{label:"Explore courses",onClick:go("learn","discover")},{label:"Find a worker",onClick:go("works","find")}]}/>}
                     </section>
 
                   </div>
@@ -20211,7 +20303,7 @@ const removeNotification = async (notificationId) => {
                       <div className="hp-stage3-kicker">HOWDI HPAY</div>
                       <h2>{hpayView==="home"?"HPay":hpayView==="transactions"?"Transaction History":hpayView==="requests"?"Payment Requests":"HPay Account"}</h2>
                       <b>{hpayAccount?.hpay_id||"Secure customer payments"}</b>
-                      <p>{hpayView==="home"?"Pay, request and review verified HPay activity in one place.":hpayView==="transactions"?"Your wallet and provider-confirmed HPay activity.":hpayView==="requests"?"Requests you created or received, without exposing internal account IDs.":"Your HPay identity, limits and masked linked-bank details."}</p>
+                      <p>{hpayView==="home"?"Pay, request and review verified HPay activity in one place.":hpayView==="transactions"?"Your wallet and HPay activity.":hpayView==="requests"?"Requests you sent or received.":"Your HPay identity, limits and masked linked-bank details."}</p>
                     </div>
                     <div className="hp-purpose">Payments<br/>with Purpose <span aria-hidden="true">♡</span></div>
                   </div>
@@ -20240,7 +20332,7 @@ const removeNotification = async (notificationId) => {
 
                         <div className="hp-section-head"><h3>Recent Transactions</h3><button type="button" onClick={()=>setHpayView("transactions")}>View all →</button></div>
                         <section className="hp-approved-transactions">
-                          {hpayLoading?<div className="hp-empty-transactions" role="status" aria-live="polite"><b>Loading HPay activity…</b><span>Your signed-in account is being refreshed.</span></div>:walletTransactions.length===0?<div className="hp-empty-transactions"><b>No HPay transactions yet</b><span>Your wallet and provider-confirmed HPay activity will appear here.</span></div>:walletTransactions.slice(0,5).map((item,idx)=>{const amount=Number(item.amount||0),debit=String(item.direction||item.type||"").toUpperCase().includes("DEBIT");return <article key={item.id||idx}><i aria-hidden="true">{debit?"↗":"＋"}</i><div><b>{item.description||item.title||item.transaction_type||"HPay transaction"}</b><small>{item.created_at?new Date(item.created_at).toLocaleString("en-IN"):item.date||""}</small></div><strong className={debit?"debit":"credit"}>{debit?"- ":"+ "}₹{Math.abs(amount).toLocaleString("en-IN")}</strong><em>{item.status||"Recorded"}</em></article>})}
+                          {hpayLoading?<div className="hp-empty-transactions" role="status" aria-live="polite"><b>Loading HPay activity…</b><span>Your signed-in account is being refreshed.</span></div>:walletTransactions.length===0?<div className="hp-empty-transactions"><b>No HPay transactions yet</b><span>Your wallet and HPay activity will appear here once you add or send money.</span></div>:walletTransactions.slice(0,5).map((item,idx)=>{const amount=Number(item.amount||0),debit=String(item.direction||item.type||"").toUpperCase().includes("DEBIT");return <article key={item.id||idx}><i aria-hidden="true">{debit?"↗":"＋"}</i><div><b>{item.description||item.title||item.transaction_type||"HPay transaction"}</b><small>{item.created_at?new Date(item.created_at).toLocaleString("en-IN"):item.date||""}</small></div><strong className={debit?"debit":"credit"}>{debit?"- ":"+ "}₹{Math.abs(amount).toLocaleString("en-IN")}</strong><em>{item.status||"Recorded"}</em></article>})}
                         </section>
 
                         <div className="hp-section-head"><h3>Payment Requests</h3><button type="button" onClick={()=>setHpayView("requests")}>View all →</button></div>
@@ -20251,17 +20343,17 @@ const removeNotification = async (notificationId) => {
 
                       <aside className="hp-approved-side">
                         <button className="hp-settings-card" type="button" onClick={()=>setHpayView("settings")}><i aria-hidden="true">⚙</i><div><b>Account & Security</b><small>Limits, status and masked bank details</small></div><span>›</span></button>
-                        <section className="hp-benefits"><h3><span aria-hidden="true">♕</span> &nbsp; HPay Safety</h3>{["Session-authoritative customer identity","No browser-selected account IDs","Provider-confirmed money movement","Masked linked-bank details","Public HPay IDs for requests"].map(x=><div key={x}><span aria-hidden="true">✓</span><b>{x}</b><i aria-hidden="true">›</i></div>)}</section>
+                        <section className="hp-benefits"><h3><span aria-hidden="true">♕</span> &nbsp; HPay Safety</h3>{["Your account is verified every time you sign in","Your account details stay private","Money movement is confirmed by our payment partner","Bank details are always masked","Share your HPay ID, never your bank details"].map(x=><div key={x}><span aria-hidden="true">✓</span><b>{x}</b><i aria-hidden="true">›</i></div>)}</section>
                         <section className="hp-help"><h3><span aria-hidden="true">◉</span> &nbsp; Need Help?</h3><p>Our support team is here for you.</p><button type="button" onClick={()=>setActiveSection("support")}>Contact Support</button></section>
                       </aside>
                     </div>
                   </>}
 
                   {hpayView==="transactions"&&<section className="hp-stage3-workspace" aria-label="HPay transaction history">
-                    <header className="hp-stage3-workspace-head"><div><button type="button" onClick={()=>setHpayView("home")}>← Overview</button><h3>Transaction history</h3><p>Recorded wallet activity and provider-confirmed HPay transactions for your signed-in account.</p></div><button type="button" className="hp-stage3-refresh" onClick={loadHpayDashboard} disabled={hpayLoading}>{hpayLoading?"Refreshing…":"Refresh"}</button></header>
+                    <header className="hp-stage3-workspace-head"><div><button type="button" onClick={()=>setHpayView("home")}>← Overview</button><h3>Transaction history</h3><p>Your wallet and HPay activity in one place.</p></div><button type="button" className="hp-stage3-refresh" onClick={loadHpayDashboard} disabled={hpayLoading}>{hpayLoading?"Refreshing…":"Refresh"}</button></header>
                     <div className="hp-stage3-filters" role="group" aria-label="Filter transaction history">{[["all","All"],["credit","Money in"],["debit","Money out"]].map(([id,label])=><button key={id} type="button" className={hpayHistoryFilter===id?"active":""} onClick={()=>setHpayHistoryFilter(id)}>{label}</button>)}</div>
                     <div className="hp-stage3-list">
-                      {walletTransactions.filter(item=>hpayHistoryFilter==="all"||(hpayHistoryFilter==="debit"?String(item.direction||item.type||"").toUpperCase().includes("DEBIT"):String(item.direction||item.type||"").toUpperCase().includes("CREDIT"))).length===0?<div className="hp-stage3-empty"><b>No transactions in this view</b><span>Only real wallet or provider-confirmed records appear here.</span></div>:walletTransactions.filter(item=>hpayHistoryFilter==="all"||(hpayHistoryFilter==="debit"?String(item.direction||item.type||"").toUpperCase().includes("DEBIT"):String(item.direction||item.type||"").toUpperCase().includes("CREDIT"))).map((item,idx)=>{const dir=String(item.direction||item.type||"").toUpperCase(),debit=dir.includes("DEBIT"),credit=dir.includes("CREDIT"),amount=Math.abs(Number(item.amount||0));return <article key={item.id||idx} className="hp-stage3-row"><div className="hp-stage3-row-icon" aria-hidden="true">{debit?"↗":credit?"＋":"•"}</div><div className="hp-stage3-row-main"><b>{item.description||item.title||item.transaction_type||"HPay activity"}</b><small>{item.transaction_id&&<span>{item.transaction_id} · </span>}{item.created_at?new Date(item.created_at).toLocaleString("en-IN"):item.date||""}</small><span>{item.method||item.source||"HPay"}</span></div><div className="hp-stage3-row-value"><strong className={debit?"debit":credit?"credit":"unknown"}>{debit?"- ":credit?"+ ":""}₹{amount.toLocaleString("en-IN")}</strong><em>{item.status||"Recorded"}</em></div></article>})}
+                      {walletTransactions.filter(item=>hpayHistoryFilter==="all"||(hpayHistoryFilter==="debit"?String(item.direction||item.type||"").toUpperCase().includes("DEBIT"):String(item.direction||item.type||"").toUpperCase().includes("CREDIT"))).length===0?<div className="hp-stage3-empty"><b>No transactions in this view</b><span>Wallet and payment activity for this filter will appear here.</span></div>:walletTransactions.filter(item=>hpayHistoryFilter==="all"||(hpayHistoryFilter==="debit"?String(item.direction||item.type||"").toUpperCase().includes("DEBIT"):String(item.direction||item.type||"").toUpperCase().includes("CREDIT"))).map((item,idx)=>{const dir=String(item.direction||item.type||"").toUpperCase(),debit=dir.includes("DEBIT"),credit=dir.includes("CREDIT"),amount=Math.abs(Number(item.amount||0));return <article key={item.id||idx} className="hp-stage3-row"><div className="hp-stage3-row-icon" aria-hidden="true">{debit?"↗":credit?"＋":"•"}</div><div className="hp-stage3-row-main"><b>{item.description||item.title||item.transaction_type||"HPay activity"}</b><small>{item.transaction_id&&<span>{item.transaction_id} · </span>}{item.created_at?new Date(item.created_at).toLocaleString("en-IN"):item.date||""}</small><span>{item.method||item.source||"HPay"}</span></div><div className="hp-stage3-row-value"><strong className={debit?"debit":credit?"credit":"unknown"}>{debit?"- ":credit?"+ ":""}₹{amount.toLocaleString("en-IN")}</strong><em>{item.status||"Recorded"}</em></div></article>})}
                     </div>
                   </section>}
 
@@ -21927,7 +22019,10 @@ const removeNotification = async (notificationId) => {
       </main>
 
       {howdiForRoute&&<div className="hf-app-overlay" role="dialog" aria-modal="true" aria-label="HOWDI for">
-        <header className="hf-app-overlay-head"><button type="button" onClick={()=>{window.history.pushState({},"","/");setHowdiForRoute(null);openNavigationOSArea("connect","home")}}>← Back to HOWDI</button></header>
+        <header className="hf-app-overlay-head">
+          <span className="hf-brand" aria-hidden="true"><span className="hf-brand-mark">H</span><span className="hf-brand-copy"><b>HOWDI</b><small>Made by hand. Made with heart.</small></span></span>
+          <button type="button" onClick={()=>{window.history.pushState({},"","/");setHowdiForRoute(null);openNavigationOSArea("connect","home")}}>← Back to HOWDI</button>
+        </header>
         <HowdiFor route={howdiForRoute} onNavigate={navigateHowdiFor}/>
       </div>}
 
