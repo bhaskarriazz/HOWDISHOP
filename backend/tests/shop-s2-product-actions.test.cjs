@@ -331,7 +331,10 @@ test('App wishlist: the localhost/user-id calls are gone; everything goes throug
   assert.match(app,/method: exists \? "DELETE" : "PUT"/);
   assert.match(app,/if \(response\.status === 401\) openLogin\(\);/);
   assert.match(app,/!\/\^\\d\{1,18\}\$\/\.test\(productId\)/,'only real catalogue ids are sent');
-  assert.match(app,/localStorage\.removeItem\(`howdiWishlist_\$\{currentUser\.id\}`\)/,'the old cached copy of the list is cleared');
+  // STAGE 2B: the cleanup key itself used to be built from currentUser.id (always undefined —
+  // auth responses never carry a raw numeric id, see AGENTS.md), so every account was clearing
+  // the same literal "howdiWishlist_undefined" key. It's now keyed by the account's own handle.
+  assert.match(app,/localStorage\.removeItem\(`howdiWishlist_\$\{currentUser\?\.public_username\|\|currentUser\?\.username\|\|"account"\}`\)/,'the old cached copy of the list is cleared, keyed by account handle rather than the never-populated numeric id');
   assert.doesNotMatch(app,/localStorage\.setItem\(`howdiWishlist_/);
   assert.match(app,/if \(product\?\.catalogueProduct\) \{ openCatalogueProduct\(product\.id\); return; \}/,'saved products open their real product page');
 });

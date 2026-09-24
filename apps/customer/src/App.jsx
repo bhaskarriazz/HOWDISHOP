@@ -2211,18 +2211,15 @@ function App() {
 
     setWorksBookingSubmitting(true);setWorksBookingError("");
     try{
-      const customerId=currentUser?.id||currentUser?.user_id||null;
-      if(customerId){
-        const activeResponse=await fetch(`${WORKS_API_BASE}/api/works/customer/active-booking?userId=${encodeURIComponent(customerId)}`,{cache:"no-store"});
-        const activeData=await activeResponse.json().catch(()=>({}));
-        if(activeResponse.ok&&activeData.hasActiveBooking){
-          const active=activeData.activeBooking||{};
-          throw new Error(`You already have an active HOWDI Works booking ${active.workCode||""}${active.status?` (${String(active.status).replaceAll("_"," ")})`:""}. Complete or cancel it before booking another service.`);
-        }
-      }
+      // STAGE 2B SECURITY FIX (full sweep): the old pre-check called
+      // /api/works/customer/active-booking?userId=... - a route that has never existed
+      // server-side (always 404, so this always silently no-op'd) and that leaked the
+      // raw numeric id in the URL for no functional benefit. Removed rather than sent
+      // to a route that doesn't exist. The backend still derives the customer from the
+      // session below - never from a client-supplied id.
       const response=await fetch(`${WORKS_API_BASE}/api/works/bookings`,{
         method:"POST",
-        headers:{"Content-Type":"application/json"},
+        headers:{"Content-Type":"application/json",...customerSessionHeaders()},
         body:JSON.stringify({
           workerId:worksBookingWorker.id,
           serviceName:worksBookingForm.serviceName,
@@ -2234,7 +2231,6 @@ function App() {
           scheduleTime:worksBookingForm.scheduleTime,
           urgency:worksBookingForm.urgency,
           budget:Number(worksBookingForm.budget||0),
-          customerUserId:currentUser?.id||currentUser?.user_id||null,
           customerName:worksBookingForm.customerName,
           customerPhone:worksBookingForm.customerPhone,
           customerEmail:worksBookingForm.customerEmail
@@ -2259,10 +2255,11 @@ function App() {
   }
 
   async function loadWorksNotifications(){
-    const customerId=currentUser?.id||currentUser?.user_id;
-    if(!customerId){setWorksNotifications([]);setWorksNotificationUnread(0);return;}
+    // STAGE 2B SECURITY FIX (full sweep): session-derived - gate on the signed-in object,
+    // not a raw id, and stop sending any identity value on the request.
+    if(!currentUser){setWorksNotifications([]);setWorksNotificationUnread(0);return;}
     try{
-      const r=await fetch(`${WORKS_API_BASE}/api/works/customer/notifications?userId=${encodeURIComponent(customerId)}`,{cache:"no-store"});
+      const r=await fetch(`${WORKS_API_BASE}/api/works/customer/notifications`,{cache:"no-store",headers:customerSessionHeaders()});
       const d=await r.json().catch(()=>({}));
       if(!r.ok)return;
       const rows=Array.isArray(d.notifications)?d.notifications:[];
@@ -2280,33 +2277,30 @@ function App() {
   }
 
   async function markWorksNotificationRead(id){
-    const customerId=currentUser?.id||currentUser?.user_id;
-    if(!customerId||!id)return;
+    if(!currentUser||!id)return;
     try{
-      await fetch(`${WORKS_API_BASE}/api/works/customer/notifications/${encodeURIComponent(id)}/read?userId=${encodeURIComponent(customerId)}`,{method:"PATCH"});
+      await fetch(`${WORKS_API_BASE}/api/works/customer/notifications/${encodeURIComponent(id)}/read`,{method:"PATCH",headers:customerSessionHeaders()});
       await loadWorksNotifications();
     }catch{}
   }
 
   async function markAllWorksNotificationsRead(){
-    const customerId=currentUser?.id||currentUser?.user_id;
-    if(!customerId)return;
+    if(!currentUser)return;
     try{
-      await fetch(`${WORKS_API_BASE}/api/works/customer/notifications/read-all?userId=${encodeURIComponent(customerId)}`,{method:"PATCH"});
+      await fetch(`${WORKS_API_BASE}/api/works/customer/notifications/read-all`,{method:"PATCH",headers:customerSessionHeaders()});
       await loadWorksNotifications();
     }catch{}
   }
 
   async function loadWorksLifecycle(workCode){
-    const customerId=currentUser?.id||currentUser?.user_id;
-    if(!customerId||!workCode)return null;
+    if(!currentUser||!workCode)return null;
     try{
       const endpoints=[
-        `${WORKS_API_BASE}/api/works/customer/bookings/${encodeURIComponent(workCode)}/lifecycle?userId=${encodeURIComponent(customerId)}`,
-        `${WORKS_API_BASE}/api/works/customer/bookings/${encodeURIComponent(workCode)}/lifecycle-v161c?userId=${encodeURIComponent(customerId)}`
+        `${WORKS_API_BASE}/api/works/customer/bookings/${encodeURIComponent(workCode)}/lifecycle`,
+        `${WORKS_API_BASE}/api/works/customer/bookings/${encodeURIComponent(workCode)}/lifecycle-v161c`
       ];
       for(const endpoint of endpoints){
-        const r=await fetch(endpoint,{cache:"no-store"});
+        const r=await fetch(endpoint,{cache:"no-store",headers:customerSessionHeaders()});
         const d=await r.json().catch(()=>({}));
         if(!r.ok)continue;
         const lifecycle=d.lifecycle||{journey:d.journey||null,payments:d.payments||[],completion:d.completion||null,review:d.review||null,cases:d.cases||[],reschedules:d.reschedules||[],actions:d.actions||{}};
@@ -2318,11 +2312,10 @@ function App() {
   }
 
   async function worksCustomerPost(booking,path,payload={}){
-    const customerId=currentUser?.id||currentUser?.user_id;
-    if(!customerId||!booking?.workCode)return;
+    if(!currentUser||!booking?.workCode)return;
     const key=`${path}-${booking.workCode}`;setWorksCustomerAction(key);setWorksCustomerNotice("");
     try{
-      const requestOptions={method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({customerUserId:customerId,...payload})};
+      const requestOptions={method:"POST",headers:{"Content-Type":"application/json",...customerSessionHeaders()},body:JSON.stringify({...payload})};
       const actionUrls=[
         `${WORKS_API_BASE}/api/works/customer/bookings/${encodeURIComponent(booking.workCode)}/${path}`,
         `${WORKS_API_BASE}/api/works/bookings/${encodeURIComponent(booking.workCode)}/${path}`
@@ -2373,10 +2366,10 @@ function App() {
   }
 
   async function downloadWorksInvoice(booking){
-    const customerId=currentUser?.id||currentUser?.user_id;if(!customerId||!booking?.workCode)return;
+    if(!currentUser||!booking?.workCode)return;
     setWorksCustomerAction(`invoice-${booking.workCode}`);setWorksCustomerNotice("");
     try{
-      const r=await fetch(`${WORKS_API_BASE}/api/works/customer/bookings/${encodeURIComponent(booking.workCode)}/invoice-v161c?userId=${encodeURIComponent(customerId)}`,{cache:"no-store"});
+      const r=await fetch(`${WORKS_API_BASE}/api/works/customer/bookings/${encodeURIComponent(booking.workCode)}/invoice-v161c`,{cache:"no-store",headers:customerSessionHeaders()});
       const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.message||"Invoice unavailable");
       const x=d.invoice||{};
       const esc=v=>String(v??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -2388,8 +2381,7 @@ function App() {
   }
 
   async function loadCustomerWorksBookings({silent=false}={}){
-    const customerId=currentUser?.id||currentUser?.user_id;
-    if(!customerId){
+    if(!currentUser){
       setWorksCustomerBookings([]);
       setWorksCustomerHistory([]);
       return;
@@ -2398,8 +2390,8 @@ function App() {
     if(!silent)setWorksCustomerBookingsError("");
     try{
       const [bookingResponse,historyResponse]=await Promise.all([
-        fetch(`${WORKS_API_BASE}/api/works/customer/bookings?userId=${encodeURIComponent(customerId)}`,{cache:"no-store"}),
-        fetch(`${WORKS_API_BASE}/api/works/customer/history?userId=${encodeURIComponent(customerId)}`,{cache:"no-store"})
+        fetch(`${WORKS_API_BASE}/api/works/customer/bookings`,{cache:"no-store",headers:customerSessionHeaders()}),
+        fetch(`${WORKS_API_BASE}/api/works/customer/history`,{cache:"no-store",headers:customerSessionHeaders()})
       ]);
       const data=await bookingResponse.json().catch(()=>({}));
       const historyData=await historyResponse.json().catch(()=>({}));
@@ -2480,15 +2472,14 @@ function App() {
   }
 
   async function verifyWorksJobPin(booking){
-    const customerId=currentUser?.id||currentUser?.user_id;
-    if(!customerId||!booking?.workCode||!booking?.jobPin)return;
+    if(!currentUser||!booking?.workCode||!booking?.jobPin)return;
     setWorksCustomerAction(`verify-${booking.workCode}`);
     setWorksCustomerNotice("");
     try{
       const response=await fetch(`${WORKS_API_BASE}/api/works/bookings/${encodeURIComponent(booking.workCode)}/verify-pin`,{
         method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({customerUserId:customerId,pin:String(booking.jobPin)})
+        headers:{"Content-Type":"application/json",...customerSessionHeaders()},
+        body:JSON.stringify({pin:String(booking.jobPin)})
       });
       const data=await response.json().catch(()=>({}));
       if(!response.ok)throw new Error(data.message||"Unable to verify Job PIN");
@@ -2687,12 +2678,12 @@ function App() {
 
   // One single customer identity source for header, welcome and My HOWDI.
   useEffect(() => {
-    if(currentUser?.id||currentUser?.user_id){
+    if(currentUser){
       loadCustomerWorksBookings();
     }else{
       setWorksCustomerBookings([]);
     }
-  }, [currentUser?.id, currentUser?.user_id]);
+  }, [currentUser]);
 
   const customerDisplayName = String(
     currentUser?.full_name ||
@@ -2721,8 +2712,7 @@ function App() {
   // Keep HOWDI Works journey live only while the customer is inside
   // HOWDI Works → My Bookings. My HOWDI no longer owns Works bookings.
   useEffect(() => {
-    const customerId=currentUser?.id||currentUser?.user_id;
-    if(!customerId||navigationOSArea!=="works"||worksExperienceTab!=="bookings")return;
+    if(!currentUser||navigationOSArea!=="works"||worksExperienceTab!=="bookings")return;
     loadCustomerWorksBookings({silent:true});
     loadWorksNotifications();
     const timer=window.setInterval(()=>{
@@ -2730,7 +2720,7 @@ function App() {
       loadWorksNotifications();
     },4000);
     return()=>window.clearInterval(timer);
-  }, [currentUser?.id,currentUser?.user_id,worksExperienceOpen,worksExperienceTab]);
+  }, [currentUser,worksExperienceOpen,worksExperienceTab]);
   const [profileEditOpen, setProfileEditOpen] = useState(false);
   const [profileNotice, setProfileNotice] = useState("");
   const [profileForm, setProfileForm] = useState({
@@ -3286,8 +3276,7 @@ function App() {
   // succeeds (see the currentUser watcher effect further below).
   const [connectPendingAction,setConnectPendingAction]=useState(null);
   const requireConnectLogin=(action)=>{
-    const uid=Number(currentUser?.id||currentUser?.user_id||0);
-    if(uid){action();return true;}
+    if(currentUser){action();return true;}
     setConnectPendingAction(()=>action);
     setShowLogin(true);
     setAuthMode("login");
@@ -3295,8 +3284,7 @@ function App() {
     return false;
   };
   useEffect(()=>{
-    const uid=Number(currentUser?.id||currentUser?.user_id||0);
-    if(!uid||!connectPendingAction)return;
+    if(!currentUser||!connectPendingAction)return;
     const action=connectPendingAction;
     setConnectPendingAction(null);
     action();
@@ -3713,12 +3701,12 @@ function App() {
   const [cashbackHistory, setCashbackHistory] = useState([]);
 
   const loadNotificationPreferences = async () => {
-    if (!currentUser?.id) return;
+    if (!currentUser) return;
     setNotificationPreferencesLoading(true);
     setNotificationPreferencesNotice("");
     try {
       const response = await fetch(
-        `http://localhost:5000/api/notifications/preferences/me`,
+        `${SHOP_API_BASE}/api/notifications/preferences/me`,
         { cache: "no-store", headers: customerSessionHeaders() }
       );
       const data = await response.json().catch(() => ({}));
@@ -3747,15 +3735,15 @@ function App() {
 
   useEffect(() => {
     loadNotificationPreferences();
-  }, [currentUser?.id]);
+  }, [currentUser]);
 
   const saveNotificationPreferences = async () => {
-    if (!currentUser?.id) return;
+    if (!currentUser) return;
     setNotificationPreferencesSaving(true);
     setNotificationPreferencesNotice("");
     try {
       const response = await fetch(
-        `http://localhost:5000/api/notifications/preferences/me`,
+        `${SHOP_API_BASE}/api/notifications/preferences/me`,
         {
           method: "PUT",
           headers: { "Content-Type": "application/json", ...customerSessionHeaders() },
@@ -3778,8 +3766,9 @@ function App() {
   const loadLiveOffers = async () => {
     setOffersLoading(true);
     try {
-      const userId = currentUser?.id ? `?userId=${encodeURIComponent(currentUser.id)}` : "";
-      const response = await fetch(`http://localhost:5000/api/offers${userId}`, { cache: "no-store" });
+      // STAGE 2B SECURITY FIX (full sweep): session-derived personalisation - the backend
+      // reads the Bearer session, never a client-supplied id, so send only that.
+      const response = await fetch(`${SHOP_API_BASE}/api/offers`, { cache: "no-store", headers: customerSessionHeaders() });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.status !== "success") throw new Error(data.message || "Unable to load HOWDI offers.");
       setLiveOffers(Array.isArray(data.offers) ? data.offers : []);
@@ -3792,15 +3781,15 @@ function App() {
 
   useEffect(() => {
     loadLiveOffers();
-  }, [currentUser?.id]);
+  }, [currentUser]);
 
   const trackOfferEvent = async (offerId, eventType) => {
-    if (!currentUser?.id) return;
+    if (!currentUser) return;
     try {
-      await fetch(`http://localhost:5000/api/offers/${encodeURIComponent(offerId)}/track`, {
+      await fetch(`${SHOP_API_BASE}/api/offers/${encodeURIComponent(offerId)}/track`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: currentUser.id, event_type: eventType }),
+        headers: { "Content-Type": "application/json", ...customerSessionHeaders() },
+        body: JSON.stringify({ event_type: eventType }),
       });
     } catch (error) {
       console.error("Offer tracking error:", error);
@@ -3819,13 +3808,13 @@ function App() {
   };
 
   const loadReferralData = async () => {
-    if (!currentUser?.id) return;
+    if (!currentUser) return;
     setReferralLoading(true);
 
     try {
       const response = await fetch(
-        `http://localhost:5000/api/referrals/user/${encodeURIComponent(currentUser.id)}`,
-        { cache: "no-store" }
+        `${SHOP_API_BASE}/api/referrals/user/me`,
+        { cache: "no-store", headers: customerSessionHeaders() }
       );
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.status !== "success") {
@@ -3851,7 +3840,7 @@ function App() {
 
   useEffect(() => {
     loadReferralData();
-  }, [currentUser?.id]);
+  }, [currentUser]);
 
   const getReferralLink = () => {
     if (!referralData.referral_code) return "";
@@ -3859,13 +3848,13 @@ function App() {
   };
 
   const recordReferralShare = async (channel = "COPY") => {
-    if (!currentUser?.id) return;
+    if (!currentUser) return;
     try {
       await fetch(
-        `http://localhost:5000/api/referrals/user/${encodeURIComponent(currentUser.id)}/share`,
+        `${SHOP_API_BASE}/api/referrals/user/me/share`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...customerSessionHeaders() },
           body: JSON.stringify({ channel }),
         }
       );
@@ -4044,7 +4033,7 @@ function App() {
 
   useEffect(() => {
     loadConnectFeed();
-  }, [currentUser?.id]);
+  }, [currentUser]);
 
   const connectApi=async(path,options={})=>{
     const response=await fetch(`${SHOP_API_BASE}${path}`,{cache:"no-store",...options,headers:{"Content-Type":"application/json",...customerSessionHeaders(),...(options.headers||{})}});
@@ -4062,7 +4051,7 @@ function App() {
       const d=await connectApi(`/api/connect/home?sections=${encodeURIComponent(keys.join(","))}`);
       setConnectHomeSections(v=>({...v,...(d.sections||{})}));
     }catch(e){
-      const guest=!(currentUser?.id||currentUser?.user_id);
+      const guest=!(currentUser);
       if(guest&&/sign in|log in|login|unauthori[sz]ed|session/i.test(String(e?.message||""))){
         // Signed-out visitors: Connect Home personalises after sign-in. Show calm, useful empty states
         // (with Sign in / explore actions) instead of a red "Please sign in" banner and endless placeholders.
@@ -4129,8 +4118,7 @@ function App() {
   // For You / following flags, etc.) rendered under the new identity. Reset
   // and force a reload the instant the effective identity changes.
   useEffect(()=>{
-    const uid=Number(currentUser?.id||currentUser?.user_id||0)||0;
-    const identity=uid?String(uid):"guest";
+    const identity=currentUser?String(currentUser.public_username||currentUser.username||"me"):"guest";
     if(connectHomeIdentityRef.current!==null&&connectHomeIdentityRef.current!==identity){
       setConnectHomeSections({});
       setConnectHomeLoading({});
@@ -4140,7 +4128,7 @@ function App() {
     }
     connectHomeIdentityRef.current=identity;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[currentUser?.id,currentUser?.user_id]);
+  },[currentUser]);
   useEffect(()=>{
     if(navigationOSArea==="connect"&&connectView==="dashboard"&&!connectHomeLoaded){
       loadConnectHome();
@@ -4156,16 +4144,16 @@ function App() {
   const respondConnectFollowRequest=async(person,accept)=>{if(!person?.public_username)return;try{await connectApi(`/api/connect/profile/username/${encodeURIComponent(person.public_username)}/respond-follow-request`,{method:"PATCH",body:JSON.stringify({accept})});await loadConnectSocialGraph("requests");}catch(e){setConnectNotice(e.message||"Unable to respond to request.");}};
   const saveConnectSocialSettings=async()=>{try{await connectApi('/api/connect/social-profile',{method:'PATCH',body:JSON.stringify({...connectSocialSettings})});setConnectNotice("Profile & privacy saved.");await loadConnectSocialSummary();}catch(e){setConnectNotice(e.message||"Unable to save profile privacy.");}};
   const loadConnectBootstrap=async()=>{
-    const userId=Number(currentUser?.id||currentUser?.user_id||0);if(!userId)return;
+    if(!currentUser)return;
     try{const d=await connectApi(`/api/connect/bootstrap`);setConnectBootstrap(d);
       const saved={};(d.saved_post_ids||[]).forEach(id=>saved[String(id)]=true);setConnectSavedPosts(saved);
       const following={};(d.people||[]).forEach(p=>{if(p.public_username)following[String(p.public_username)]=Boolean(p.following);});setConnectFollowing(following);
       if(d.profile){setConnectProfilePrivate(Boolean(d.profile.private_profile));setConnectActivityVisible(d.profile.activity_visible!==false);setConnectStoryAudience(d.profile.story_audience||"Everyone");setConnectMessageMode(d.profile.message_mode||"Keep");}
     }catch(e){setConnectNotice(e.message||"Unable to load Connect.");}
   };
-  const runConnectSearch=async()=>{const q=connectSearchQuery.trim();if(!q)return;const userId=Number(currentUser?.id||currentUser?.user_id||0);setConnectSearchLoading(true);try{const d=await connectApi(`/api/connect/search?q=${encodeURIComponent(q)}`);setConnectSearchResults({people:d.people||[],posts:d.posts||[],communities:d.communities||[]});setConnectView("discover");}catch(e){setConnectNotice(e.message||"Search failed.");}finally{setConnectSearchLoading(false);}};
-  const toggleConnectFollow=async(person)=>{const userId=Number(currentUser?.id||currentUser?.user_id||0);const uname=String(person?.public_username||"");if(!userId||(!uname&&!person?.id))return setConnectNotice("Please login to follow people.");try{const d=await connectApi(uname?`/api/connect/profile/username/${encodeURIComponent(uname)}/follow`:`/api/connect/users/${person.id}/follow`,{method:"POST"});const following=Boolean(d.following);const key=String(uname||person.id);setConnectFollowing(v=>({...v,[key]:following}));setConnectBootstrap(v=>({...v,people:(v.people||[]).map(p=>(uname?p.public_username===uname:Number(p.id)===Number(person.id))?{...p,following,follow_requested:Boolean(d.requested)}:p)}));setConnectNotice(d.requested?`Follow request sent to ${person.full_name||"HOWDI member"}.`:following?`Following ${person.full_name||"HOWDI member"}.`:`Unfollowed ${person.full_name||"HOWDI member"}.`);}catch(e){setConnectNotice(e.message||"Follow failed.");}};
-  const toggleConnectSave=async(postId)=>{if(!requireConnectLogin(()=>toggleConnectSave(postId)))return;const userId=Number(currentUser?.id||currentUser?.user_id||0);try{const d=await connectApi(`/api/connect/posts/${postId}/save`,{method:"POST",body:JSON.stringify({userId})});setConnectSavedPosts(v=>({...v,[String(postId)]:Boolean(d.saved)}));}catch(e){setConnectNotice(e.message||"Save failed.");}};
+  const runConnectSearch=async()=>{const q=connectSearchQuery.trim();if(!q)return;setConnectSearchLoading(true);try{const d=await connectApi(`/api/connect/search?q=${encodeURIComponent(q)}`);setConnectSearchResults({people:d.people||[],posts:d.posts||[],communities:d.communities||[]});setConnectView("discover");}catch(e){setConnectNotice(e.message||"Search failed.");}finally{setConnectSearchLoading(false);}};
+  const toggleConnectFollow=async(person)=>{const uname=String(person?.public_username||"");if(!currentUser||(!uname&&!person?.id))return setConnectNotice("Please login to follow people.");try{const d=await connectApi(uname?`/api/connect/profile/username/${encodeURIComponent(uname)}/follow`:`/api/connect/users/${person.id}/follow`,{method:"POST"});const following=Boolean(d.following);const key=String(uname||person.id);setConnectFollowing(v=>({...v,[key]:following}));setConnectBootstrap(v=>({...v,people:(v.people||[]).map(p=>(uname?p.public_username===uname:Number(p.id)===Number(person.id))?{...p,following,follow_requested:Boolean(d.requested)}:p)}));setConnectNotice(d.requested?`Follow request sent to ${person.full_name||"HOWDI member"}.`:following?`Following ${person.full_name||"HOWDI member"}.`:`Unfollowed ${person.full_name||"HOWDI member"}.`);}catch(e){setConnectNotice(e.message||"Follow failed.");}};
+  const toggleConnectSave=async(postId)=>{if(!requireConnectLogin(()=>toggleConnectSave(postId)))return;try{const d=await connectApi(`/api/connect/posts/${postId}/save`,{method:"POST",body:JSON.stringify({})});setConnectSavedPosts(v=>({...v,[String(postId)]:Boolean(d.saved)}));}catch(e){setConnectNotice(e.message||"Save failed.");}};
   const applyConnectLiveBitrate=async(mode=connectLiveBitrateMode)=>{
     const map={LOW:250000,STANDARD:900000,HIGH:1800000,AUTO:null};
     const max=map[String(mode||"AUTO").toUpperCase()];
@@ -4183,28 +4171,28 @@ function App() {
   };
 
   const spotlightConnectLiveParticipant=async(person)=>{
-    try{await connectApi(`/api/connect/live/${connectRealtimeRoom.id}/spotlight`,{method:"PATCH",body:JSON.stringify({userId:connectRealtimeUserId(),targetUserId:person?.user_id||0})});setConnectLiveSpotlightUserId(String(person?.user_id||""));setConnectLiveStageLayout("SPOTLIGHT");await connectRealtimePoll();}catch(e){setConnectNotice(e.message||"Unable to spotlight participant.");}
+    try{await connectApi(`/api/connect/live/${connectRealtimeRoom.id}/spotlight`,{method:"PATCH",body:JSON.stringify({targetUserId:person?.user_id||0})});setConnectLiveSpotlightUserId(String(person?.user_id||""));setConnectLiveStageLayout("SPOTLIGHT");await connectRealtimePoll();}catch(e){setConnectNotice(e.message||"Unable to spotlight participant.");}
   };
 
   const muteConnectLiveGuest=async(person,muted)=>{
-    try{await connectApi(`/api/connect/live/${connectRealtimeRoom.id}/guest/${person.user_id}/mute`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId(),muted})});await connectRealtimePoll();}catch(e){setConnectNotice(e.message||"Unable to update guest microphone.");}
+    try{await connectApi(`/api/connect/live/${connectRealtimeRoom.id}/guest/${person.user_id}/mute`,{method:"POST",body:JSON.stringify({muted})});await connectRealtimePoll();}catch(e){setConnectNotice(e.message||"Unable to update guest microphone.");}
   };
 
   const loadConnectLiveCostreamInbox=async()=>{
-    try{const d=await connectApi(`/api/connect/live/costream-invites/mine?userId=${connectRealtimeUserId()}`);setConnectLiveCostreamInbox(d.invites||[]);}catch{}
+    try{const d=await connectApi(`/api/connect/live/costream-invites/mine`);setConnectLiveCostreamInbox(d.invites||[]);}catch{}
   };
 
   const respondConnectLiveCostreamInvite=async(invite,accept)=>{
-    try{await connectApi(`/api/connect/live/costream-invites/${invite.id}/respond`,{method:"PATCH",body:JSON.stringify({userId:connectRealtimeUserId(),accept})});await loadConnectLiveCostreamInbox();if(accept){const room=(connectBootstrap.communities||[]).find(x=>Number(x.id)===Number(invite.community_id));if(room)await connectRealtimeOpenRoom(room);}setConnectNotice(accept?"Co-stream invite accepted.":"Co-stream invite declined.");}catch(e){setConnectNotice(e.message||"Unable to respond to co-stream invite.");}
+    try{await connectApi(`/api/connect/live/costream-invites/${invite.id}/respond`,{method:"PATCH",body:JSON.stringify({accept})});await loadConnectLiveCostreamInbox();if(accept){const room=(connectBootstrap.communities||[]).find(x=>Number(x.id)===Number(invite.community_id));if(room)await connectRealtimeOpenRoom(room);}setConnectNotice(accept?"Co-stream invite accepted.":"Co-stream invite declined.");}catch(e){setConnectNotice(e.message||"Unable to respond to co-stream invite.");}
   };
 
   const loadConnectLiveReplayLibrary=async()=>{
-    try{const d=await connectApi(`/api/connect/live-replays?userId=${connectRealtimeUserId()}`);setConnectLiveReplayLibrary(d.replays||[]);setConnectLiveReplayLibraryOpen(true);}catch(e){setConnectNotice(e.message||"Unable to load Live replays.");}
+    try{const d=await connectApi(`/api/connect/live-replays`);setConnectLiveReplayLibrary(d.replays||[]);setConnectLiveReplayLibraryOpen(true);}catch(e){setConnectNotice(e.message||"Unable to load Live replays.");}
   };
 
   const loadConnectLiveCreatorDashboard=async()=>{
     if(!connectRealtimeRoom?.id)return;
-    try{const d=await connectApi(`/api/connect/live/${connectRealtimeRoom.id}/creator-dashboard?userId=${connectRealtimeUserId()}`);setConnectLiveCreatorDashboard(d);setConnectLiveCreatorDashboardOpen(true);}catch(e){setConnectNotice(e.message||"Unable to load Live creator dashboard.");}
+    try{const d=await connectApi(`/api/connect/live/${connectRealtimeRoom.id}/creator-dashboard`);setConnectLiveCreatorDashboard(d);setConnectLiveCreatorDashboardOpen(true);}catch(e){setConnectNotice(e.message||"Unable to load Live creator dashboard.");}
   };
 
   const toggleConnectLocalMic=()=>{
@@ -4251,36 +4239,36 @@ function App() {
     if(!connectRealtimeRoom?.id)return;
     const started=connectRealtimeState?.room?.started_at?new Date(connectRealtimeState.room.started_at).getTime():Date.now();
     const sec=Math.max(0,Math.floor((Date.now()-started)/1000));
-    try{await connectApi(`/api/connect/live/${connectRealtimeRoom.id}/clip-marker`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId(),markerSecond:sec,title:connectLiveClipTitle})});await connectRealtimePoll();setConnectNotice("Live highlight marker added.");}catch(e){setConnectNotice(e.message||"Unable to mark highlight.");}
+    try{await connectApi(`/api/connect/live/${connectRealtimeRoom.id}/clip-marker`,{method:"POST",body:JSON.stringify({markerSecond:sec,title:connectLiveClipTitle})});await connectRealtimePoll();setConnectNotice("Live highlight marker added.");}catch(e){setConnectNotice(e.message||"Unable to mark highlight.");}
   };
 
   const toggleConnectLiveModerator=async(person)=>{
-    try{const d=await connectApi(`/api/connect/live/${connectRealtimeRoom.id}/moderators/${person.user_id}`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId()})});await connectRealtimePoll();setConnectNotice(d.moderator?"Moderator assigned.":"Moderator removed.");}catch(e){setConnectNotice(e.message||"Unable to update moderator.");}
+    try{const d=await connectApi(`/api/connect/live/${connectRealtimeRoom.id}/moderators/${person.user_id}`,{method:"POST",body:JSON.stringify({})});await connectRealtimePoll();setConnectNotice(d.moderator?"Moderator assigned.":"Moderator removed.");}catch(e){setConnectNotice(e.message||"Unable to update moderator.");}
   };
 
   const reportConnectLiveParticipant=async()=>{
     if(!connectLiveReportTarget)return;
-    try{await connectApi(`/api/connect/live/${connectRealtimeRoom.id}/report`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId(),targetUserId:connectLiveReportTarget.user_id,reason:connectLiveReportReason})});setConnectLiveReportTarget(null);await connectRealtimePoll();setConnectNotice("Report sent to Live moderation queue.");}catch(e){setConnectNotice(e.message||"Unable to report.");}
+    try{await connectApi(`/api/connect/live/${connectRealtimeRoom.id}/report`,{method:"POST",body:JSON.stringify({targetUserId:connectLiveReportTarget.user_id,reason:connectLiveReportReason})});setConnectLiveReportTarget(null);await connectRealtimePoll();setConnectNotice("Report sent to Live moderation queue.");}catch(e){setConnectNotice(e.message||"Unable to report.");}
   };
 
   const resolveConnectLiveModeration=async(item,status)=>{
-    try{await connectApi(`/api/connect/live/${connectRealtimeRoom.id}/moderation/${item.id}/resolve`,{method:"PATCH",body:JSON.stringify({userId:connectRealtimeUserId(),status})});await connectRealtimePoll();}catch(e){setConnectNotice(e.message||"Unable to update moderation item.");}
+    try{await connectApi(`/api/connect/live/${connectRealtimeRoom.id}/moderation/${item.id}/resolve`,{method:"PATCH",body:JSON.stringify({status})});await connectRealtimePoll();}catch(e){setConnectNotice(e.message||"Unable to update moderation item.");}
   };
 
   const inviteConnectLiveCostream=async()=>{
     const target=Number(connectLiveCostreamTarget);if(!target)return;
-    try{await connectApi(`/api/connect/live/${connectRealtimeRoom.id}/costream-invite`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId(),targetUserId:target})});setConnectLiveCostreamTarget("");await connectRealtimePoll();setConnectNotice("Co-stream invite sent.");}catch(e){setConnectNotice(e.message||"Unable to invite co-stream guest.");}
+    try{await connectApi(`/api/connect/live/${connectRealtimeRoom.id}/costream-invite`,{method:"POST",body:JSON.stringify({targetUserId:target})});setConnectLiveCostreamTarget("");await connectRealtimePoll();setConnectNotice("Co-stream invite sent.");}catch(e){setConnectNotice(e.message||"Unable to invite co-stream guest.");}
   };
 
-  const loadConnectLiveDiscovery=async()=>{try{const d=await connectApi(`/api/connect/live-discovery?userId=${connectRealtimeUserId()}&format=${encodeURIComponent(connectLiveFilterFormat)}&language=${encodeURIComponent(connectLiveFilterLanguage)}`);setConnectLiveDiscovery(d.rooms||[]);}catch(e){setConnectNotice(e.message||"Unable to load Live discovery.");}};
-  const toggleConnectLiveReminder=async(room)=>{try{const d=await connectApi(`/api/connect/live/${room.id}/reminder`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId()})});setConnectLiveDiscovery(v=>v.map(x=>x.id===room.id?{...x,reminded:d.reminded}:x));setConnectNotice(d.reminded?"Live reminder set.":"Live reminder removed.");}catch(e){setConnectNotice(e.message||"Unable to update reminder.");}};
-  const toggleConnectLiveBookmark=async(room)=>{try{const d=await connectApi(`/api/connect/live/${room.id}/bookmark`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId()})});setConnectLiveDiscovery(v=>v.map(x=>x.id===room.id?{...x,bookmarked:d.bookmarked}:x));}catch(e){setConnectNotice(e.message||"Unable to bookmark live.");}};
-  const shareConnectLive=async(room)=>{try{await connectApi(`/api/connect/live/${room.id}/share`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId()})});const link=`${window.location.origin}${window.location.pathname}#live-${room.id}`;if(navigator.share)await navigator.share({title:room.name,url:link});else{await navigator.clipboard?.writeText(link);setConnectNotice("Live link copied.");}}catch{}};
-  const saveConnectLiveStudio=async()=>{if(!connectRealtimeRoom?.id)return;try{await connectApi(`/api/connect/live/${connectRealtimeRoom.id}/studio`,{method:"PATCH",body:JSON.stringify({userId:connectRealtimeUserId(),announcement:connectLiveAnnouncement,goal:Number(connectLiveGoal)||0,ctaLabel:connectLiveCtaLabel,ctaUrl:connectLiveCtaUrl,hostNotes:connectLiveHostNotes,pinnedLabel:connectLivePinnedLabel,pinnedUrl:connectLivePinnedUrl,teachingTitle:connectLiveTeachingTitle,teachingBody:connectLiveTeachingBody,replayEnabled:connectLiveReplayEnabled,bitrateMode:connectLiveBitrateMode,stageLayout:connectLiveStageLayout,spotlightUserId:Number(connectLiveSpotlightUserId)||null,lowerThird:connectLiveLowerThird,educationMode:connectLiveEducationMode,recap:connectLiveRecap})});await applyConnectLiveBitrate(connectLiveBitrateMode);await connectRealtimePoll();setConnectNotice("Live studio updated.");}catch(e){setConnectRealtimeError(e.message||"Unable to update Live studio.");}};
-  const requestConnectLiveGuest=async()=>{if(!connectRealtimeRoom?.id)return;try{await connectApi(`/api/connect/live/${connectRealtimeRoom.id}/guest-request`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId()})});setConnectLiveGuestRequested(true);setConnectNotice("Guest request sent to host.");}catch(e){setConnectNotice(e.message||"Unable to request guest access.");}};
-  const respondConnectLiveGuest=async(person,accept)=>{try{await connectApi(`/api/connect/live/${connectRealtimeRoom.id}/guest/${person.user_id}/respond`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId(),accept})});await connectRealtimePoll();setConnectNotice(accept?`${person.full_name} is now a guest.`:"Guest request declined.");}catch(e){setConnectRealtimeError(e.message||"Unable to update guest request.");}};
-  const removeConnectLiveGuest=async(person)=>{try{await connectApi(`/api/connect/live/${connectRealtimeRoom.id}/guest/${person.user_id}/remove`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId()})});await connectRealtimePoll();}catch(e){setConnectRealtimeError(e.message||"Unable to remove guest.");}};
-  const loadConnectLiveAnalytics=async(room=connectRealtimeRoom)=>{if(!room?.id)return;try{const d=await connectApi(`/api/connect/live/${room.id}/analytics?userId=${connectRealtimeUserId()}`);setConnectLiveAnalytics(d);setConnectLiveAnalyticsOpen(true);}catch(e){setConnectNotice(e.message||"Unable to load Live analytics.");}};
+  const loadConnectLiveDiscovery=async()=>{try{const d=await connectApi(`/api/connect/live-discovery?format=${encodeURIComponent(connectLiveFilterFormat)}&language=${encodeURIComponent(connectLiveFilterLanguage)}`);setConnectLiveDiscovery(d.rooms||[]);}catch(e){setConnectNotice(e.message||"Unable to load Live discovery.");}};
+  const toggleConnectLiveReminder=async(room)=>{try{const d=await connectApi(`/api/connect/live/${room.id}/reminder`,{method:"POST",body:JSON.stringify({})});setConnectLiveDiscovery(v=>v.map(x=>x.id===room.id?{...x,reminded:d.reminded}:x));setConnectNotice(d.reminded?"Live reminder set.":"Live reminder removed.");}catch(e){setConnectNotice(e.message||"Unable to update reminder.");}};
+  const toggleConnectLiveBookmark=async(room)=>{try{const d=await connectApi(`/api/connect/live/${room.id}/bookmark`,{method:"POST",body:JSON.stringify({})});setConnectLiveDiscovery(v=>v.map(x=>x.id===room.id?{...x,bookmarked:d.bookmarked}:x));}catch(e){setConnectNotice(e.message||"Unable to bookmark live.");}};
+  const shareConnectLive=async(room)=>{try{await connectApi(`/api/connect/live/${room.id}/share`,{method:"POST",body:JSON.stringify({})});const link=`${window.location.origin}${window.location.pathname}#live-${room.id}`;if(navigator.share)await navigator.share({title:room.name,url:link});else{await navigator.clipboard?.writeText(link);setConnectNotice("Live link copied.");}}catch{}};
+  const saveConnectLiveStudio=async()=>{if(!connectRealtimeRoom?.id)return;try{await connectApi(`/api/connect/live/${connectRealtimeRoom.id}/studio`,{method:"PATCH",body:JSON.stringify({announcement:connectLiveAnnouncement,goal:Number(connectLiveGoal)||0,ctaLabel:connectLiveCtaLabel,ctaUrl:connectLiveCtaUrl,hostNotes:connectLiveHostNotes,pinnedLabel:connectLivePinnedLabel,pinnedUrl:connectLivePinnedUrl,teachingTitle:connectLiveTeachingTitle,teachingBody:connectLiveTeachingBody,replayEnabled:connectLiveReplayEnabled,bitrateMode:connectLiveBitrateMode,stageLayout:connectLiveStageLayout,spotlightUserId:Number(connectLiveSpotlightUserId)||null,lowerThird:connectLiveLowerThird,educationMode:connectLiveEducationMode,recap:connectLiveRecap})});await applyConnectLiveBitrate(connectLiveBitrateMode);await connectRealtimePoll();setConnectNotice("Live studio updated.");}catch(e){setConnectRealtimeError(e.message||"Unable to update Live studio.");}};
+  const requestConnectLiveGuest=async()=>{if(!connectRealtimeRoom?.id)return;try{await connectApi(`/api/connect/live/${connectRealtimeRoom.id}/guest-request`,{method:"POST",body:JSON.stringify({})});setConnectLiveGuestRequested(true);setConnectNotice("Guest request sent to host.");}catch(e){setConnectNotice(e.message||"Unable to request guest access.");}};
+  const respondConnectLiveGuest=async(person,accept)=>{try{await connectApi(`/api/connect/live/${connectRealtimeRoom.id}/guest/${person.user_id}/respond`,{method:"POST",body:JSON.stringify({accept})});await connectRealtimePoll();setConnectNotice(accept?`${person.full_name} is now a guest.`:"Guest request declined.");}catch(e){setConnectRealtimeError(e.message||"Unable to update guest request.");}};
+  const removeConnectLiveGuest=async(person)=>{try{await connectApi(`/api/connect/live/${connectRealtimeRoom.id}/guest/${person.user_id}/remove`,{method:"POST",body:JSON.stringify({})});await connectRealtimePoll();}catch(e){setConnectRealtimeError(e.message||"Unable to remove guest.");}};
+  const loadConnectLiveAnalytics=async(room=connectRealtimeRoom)=>{if(!room?.id)return;try{const d=await connectApi(`/api/connect/live/${room.id}/analytics`);setConnectLiveAnalytics(d);setConnectLiveAnalyticsOpen(true);}catch(e){setConnectNotice(e.message||"Unable to load Live analytics.");}};
 
   const connectProfileLayoutLabel=(p)=>{
     if(p?.profile_type==="STUDENT"||p?.professional_category==="STUDENT")return {icon:"🎓",title:"Student",sub:p.student_level||p.education_focus||"Learning on HOWDI"};
@@ -4302,7 +4290,7 @@ function App() {
   };
 
   const openConnectProject=async(project)=>{
-    try{await connectApi(`/api/connect/profile-projects/${project.id}/view`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId()})});}catch{}
+    try{await connectApi(`/api/connect/profile-projects/${project.id}/view`,{method:"POST",body:JSON.stringify({})});}catch{}
     if(project.project_url)window.open(project.project_url,"_blank","noopener,noreferrer");
   };
 
@@ -4315,49 +4303,49 @@ function App() {
   };
 
   const loadConnectProfileStudio=async(open=true)=>{
-    const uid=Number(currentUser?.id||currentUser?.user_id||0);if(!uid)return;
-    try{const d=await connectApi(`/api/connect/profile-studio?userId=${uid}`);setConnectProfileStudio(d);if(open)setConnectProfileStudioOpen(true);}catch(e){setConnectNotice(e.message||"Unable to load Profile Studio.");}
+    if(!currentUser)return;
+    try{const d=await connectApi(`/api/connect/profile-studio`);setConnectProfileStudio(d);if(open)setConnectProfileStudioOpen(true);}catch(e){setConnectNotice(e.message||"Unable to load Profile Studio.");}
   };
 
   const requestConnectProfessionalVerification=async()=>{
-    try{await connectApi(`/api/connect/profile-verification`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId(),verificationType:connectVerifyType,evidenceText:connectVerifyEvidence,evidenceUrl:connectVerifyUrl})});setConnectVerifyEvidence("");setConnectVerifyUrl("");await loadConnectProfileStudio(false);setConnectNotice("Verification request submitted.");}catch(e){setConnectNotice(e.message||"Unable to submit verification.");}
+    try{await connectApi(`/api/connect/profile-verification`,{method:"POST",body:JSON.stringify({verificationType:connectVerifyType,evidenceText:connectVerifyEvidence,evidenceUrl:connectVerifyUrl})});setConnectVerifyEvidence("");setConnectVerifyUrl("");await loadConnectProfileStudio(false);setConnectNotice("Verification request submitted.");}catch(e){setConnectNotice(e.message||"Unable to submit verification.");}
   };
 
   const addConnectProfileProject=async()=>{
     if(!connectProjectForm.title.trim())return;
-    try{await connectApi(`/api/connect/profile-projects`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId(),...connectProjectForm})});setConnectProjectForm({title:"",description:"",projectUrl:"",mediaData:""});await loadConnectProfileStudio(false);setConnectNotice("Project added.");}catch(e){setConnectNotice(e.message||"Unable to add project.");}
+    try{await connectApi(`/api/connect/profile-projects`,{method:"POST",body:JSON.stringify({...connectProjectForm})});setConnectProjectForm({title:"",description:"",projectUrl:"",mediaData:""});await loadConnectProfileStudio(false);setConnectNotice("Project added.");}catch(e){setConnectNotice(e.message||"Unable to add project.");}
   };
 
   const addConnectExperience=async()=>{
     if(!connectExperienceForm.roleTitle.trim())return;
-    try{await connectApi(`/api/connect/profile-experience`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId(),...connectExperienceForm})});setConnectExperienceForm({roleTitle:"",organization:"",startDate:"",endDate:"",isCurrent:false,description:""});await loadConnectProfileStudio(false);setConnectNotice("Experience added.");}catch(e){setConnectNotice(e.message||"Unable to add experience.");}
+    try{await connectApi(`/api/connect/profile-experience`,{method:"POST",body:JSON.stringify({...connectExperienceForm})});setConnectExperienceForm({roleTitle:"",organization:"",startDate:"",endDate:"",isCurrent:false,description:""});await loadConnectProfileStudio(false);setConnectNotice("Experience added.");}catch(e){setConnectNotice(e.message||"Unable to add experience.");}
   };
 
   const addConnectEducation=async()=>{
     if(!connectEducationForm.institution.trim())return;
-    try{await connectApi(`/api/connect/profile-education`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId(),...connectEducationForm})});setConnectEducationForm({institution:"",program:"",fieldOfStudy:"",startYear:"",endYear:"",isCurrent:false});await loadConnectProfileStudio(false);setConnectNotice("Education added.");}catch(e){setConnectNotice(e.message||"Unable to add education.");}
+    try{await connectApi(`/api/connect/profile-education`,{method:"POST",body:JSON.stringify({...connectEducationForm})});setConnectEducationForm({institution:"",program:"",fieldOfStudy:"",startYear:"",endYear:"",isCurrent:false});await loadConnectProfileStudio(false);setConnectNotice("Education added.");}catch(e){setConnectNotice(e.message||"Unable to add education.");}
   };
 
   const addConnectSkill=async()=>{
     if(!connectSkillName.trim())return;
-    try{await connectApi(`/api/connect/profile-skills`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId(),skillName:connectSkillName})});setConnectSkillName("");await loadConnectProfileStudio(false);}catch(e){setConnectNotice(e.message||"Unable to add skill.");}
+    try{await connectApi(`/api/connect/profile-skills`,{method:"POST",body:JSON.stringify({skillName:connectSkillName})});setConnectSkillName("");await loadConnectProfileStudio(false);}catch(e){setConnectNotice(e.message||"Unable to add skill.");}
   };
 
   const endorseConnectSkill=async(skill)=>{
-    try{const d=await connectApi(`/api/connect/profile-skills/${skill.id}/endorse`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId()})});setConnectPublicProfile(v=>v?{...v,skills:(v.skills||[]).map(s=>s.id===skill.id?{...s,viewer_endorsed:d.endorsed,endorsement_count:d.endorsement_count}:s)}:v);}catch(e){setConnectNotice(e.message||"Unable to endorse skill.");}
+    try{const d=await connectApi(`/api/connect/profile-skills/${skill.id}/endorse`,{method:"POST",body:JSON.stringify({})});setConnectPublicProfile(v=>v?{...v,skills:(v.skills||[]).map(s=>s.id===skill.id?{...s,viewer_endorsed:d.endorsed,endorsement_count:d.endorsement_count}:s)}:v);}catch(e){setConnectNotice(e.message||"Unable to endorse skill.");}
   };
 
   const pinConnectProfilePost=async()=>{
     const id=String(connectFeaturedPostId||"").trim();if(!id)return;
-    try{await connectApi(`/api/connect/profile-featured`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId(),contentType:"POST",contentId:id,title:"Pinned post"})});setConnectFeaturedPostId("");await loadConnectProfileStudio(false);setConnectNotice("Post pinned to profile.");}catch(e){setConnectNotice(e.message||"Unable to pin post.");}
+    try{await connectApi(`/api/connect/profile-featured`,{method:"POST",body:JSON.stringify({contentType:"POST",contentId:id,title:"Pinned post"})});setConnectFeaturedPostId("");await loadConnectProfileStudio(false);setConnectNotice("Post pinned to profile.");}catch(e){setConnectNotice(e.message||"Unable to pin post.");}
   };
 
   const removeConnectFeatured=async(item)=>{
-    try{await connectApi(`/api/connect/profile-featured/${item.id}?userId=${connectRealtimeUserId()}`,{method:"DELETE"});await loadConnectProfileStudio(false);}catch(e){setConnectNotice(e.message||"Unable to remove featured content.");}
+    try{await connectApi(`/api/connect/profile-featured/${item.id}`,{method:"DELETE"});await loadConnectProfileStudio(false);}catch(e){setConnectNotice(e.message||"Unable to remove featured content.");}
   };
 
   const respondConnectProfileFollowRequest=async(req,accept)=>{
-    try{await connectApi(`/api/connect/follow-requests/${req.requester_user_id}/respond`,{method:"PATCH",body:JSON.stringify({userId:connectRealtimeUserId(),accept})});await Promise.all([loadConnectProfileStudio(false),loadConnectBootstrap()]);setConnectNotice(accept?"Follow request accepted.":"Follow request declined.");}catch(e){setConnectNotice(e.message||"Unable to update request.");}
+    try{await connectApi(`/api/connect/follow-requests/${req.requester_user_id}/respond`,{method:"PATCH",body:JSON.stringify({accept})});await Promise.all([loadConnectProfileStudio(false),loadConnectBootstrap()]);setConnectNotice(accept?"Follow request accepted.":"Follow request declined.");}catch(e){setConnectNotice(e.message||"Unable to update request.");}
   };
 
   // K5B: prefer username addressing (no numeric id needed in the UI); numeric routes remain
@@ -4379,11 +4367,11 @@ function App() {
   };
 
   const loadConnectProfileRecommendations=async()=>{
-    try{const d=await connectApi(`/api/connect/profile-recommendations?userId=${connectRealtimeUserId()}&category=${encodeURIComponent(connectRecommendationCategory)}&type=${encodeURIComponent(connectRecommendationType)}`);setConnectProfileRecommendations(d.people||[]);}catch(e){setConnectNotice(e.message||"Unable to load recommendations.");}
+    try{const d=await connectApi(`/api/connect/profile-recommendations?category=${encodeURIComponent(connectRecommendationCategory)}&type=${encodeURIComponent(connectRecommendationType)}`);setConnectProfileRecommendations(d.people||[]);}catch(e){setConnectNotice(e.message||"Unable to load recommendations.");}
   };
 
   const shareConnectProfile=async()=>{
-    const uid=Number(currentUser?.id||currentUser?.user_id||0);const link=`${window.location.origin}${window.location.pathname}#profile-${uid}`;
+    const handle=currentUser?.public_username||currentUser?.username||"me";const link=`${window.location.origin}${window.location.pathname}#profile-${encodeURIComponent(handle)}`;
     try{if(navigator.share)await navigator.share({title:`${customerDisplayName} on HOWDI`,url:link});else{await navigator.clipboard?.writeText(link);setConnectNotice("Profile link copied.");}}catch{}
   };
 
@@ -4420,9 +4408,9 @@ function App() {
   };
 
   const saveConnectProfileIdentity=async()=>{
-    const userId=Number(currentUser?.id||currentUser?.user_id||0);if(!userId)return;
+    if(!currentUser)return;
     try{
-      await connectApi(`/api/connect/profile/${userId}`,{method:"PUT",body:JSON.stringify({
+      await connectApi(`/api/connect/profile/me`,{method:"PUT",body:JSON.stringify({
         headline:connectProfileHeadline,about:connectProfileAbout,privateProfile:connectProfilePrivate,activityVisible:connectActivityVisible,
         storyAudience:connectStoryAudience,messageMode:connectMessageMode,profileType:connectProfileType,professionalCategory:connectProfessionalCategory,
         professionTitle:connectProfessionTitle,organizationName:connectOrganizationName,educationFocus:connectEducationFocus,expertise:connectExpertise,
@@ -4437,20 +4425,19 @@ function App() {
   };
 
   const heartbeatConnectPresence=async(status="ONLINE")=>{
-    const userId=Number(currentUser?.id||currentUser?.user_id||0);if(!userId)return;
-    try{await connectApi(`/api/connect/presence/heartbeat`,{method:"POST",body:JSON.stringify({userId,status,context:connectView==="communities"?"COMMUNITY":"CONNECT",entityId:connectRealtimeRoom?.id||null})});}catch{}
+    if(!currentUser)return;
+    try{await connectApi(`/api/connect/presence/heartbeat`,{method:"POST",body:JSON.stringify({status,context:connectView==="communities"?"COMMUNITY":"CONNECT",entityId:connectRealtimeRoom?.id||null})});}catch{}
   };
 
   const openConnectPublicProfile=async(person)=>{
     // K5A REVIEW FIX: prefer the public-username-addressed route so callers
     // (e.g. Connect Home cards) never need to hold a raw numeric user id.
-    const viewerId=Number(currentUser?.id||currentUser?.user_id||0);
     const username=person?.public_username||person?.publicUsername||"";
     const target=Number(person?.id||person?.user_id||0);
     if(!username&&!target)return;
     const path=username
-      ?`/api/connect/public-profile/username/${encodeURIComponent(username)}?viewerId=${viewerId}`
-      :`/api/connect/public-profile/${target}?viewerId=${viewerId}`;
+      ?`/api/connect/public-profile/username/${encodeURIComponent(username)}`
+      :`/api/connect/public-profile/${target}`;
     try{const d=await connectApi(path);setConnectPublicProfile(d);}catch(e){setConnectNotice(e.message||"Unable to open profile.");}
   };
   // K5A REVIEW FIX: follow by public_username so Home person cards never carry a raw id.
@@ -4478,9 +4465,9 @@ function App() {
     }catch(e){setConnectNotice(e.message||"Follow failed.");}
   };
 
-  const saveConnectPreferences=async(patch={})=>{const userId=Number(currentUser?.id||currentUser?.user_id||0);if(!userId)return;try{await connectApi(`/api/connect/profile/${userId}`,{method:"PUT",body:JSON.stringify({privateProfile:patch.privateProfile??connectProfilePrivate,activityVisible:patch.activityVisible??connectActivityVisible,storyAudience:patch.storyAudience??connectStoryAudience,messageMode:patch.messageMode??connectMessageMode,headline:connectBootstrap.profile?.headline||"",about:connectBootstrap.profile?.about||"",profileType:connectBootstrap.profile?.profile_type||"PERSONAL",professionalCategory:connectBootstrap.profile?.professional_category||"GENERAL",professionTitle:connectBootstrap.profile?.profession_title||"",organizationName:connectBootstrap.profile?.organization_name||"",educationFocus:connectBootstrap.profile?.education_focus||"",expertise:connectBootstrap.profile?.expertise||"",interests:connectBootstrap.profile?.interests||"",statusMessage:connectBootstrap.profile?.status_message||"",availabilityStatus:connectBootstrap.profile?.availability_status||"AVAILABLE",discoverable:connectBootstrap.profile?.discoverable!==false,contactPermission:connectBootstrap.profile?.contact_permission||"EVERYONE",creatorMode:Boolean(connectBootstrap.profile?.creator_mode),professionalMode:Boolean(connectBootstrap.profile?.professional_mode),portfolioUrl:connectBootstrap.profile?.portfolio_url||"",socialLinks:connectBootstrap.profile?.social_links||{}})});await loadConnectBootstrap();}catch(e){setConnectNotice(e.message||"Setting save failed.");}};
-  const loadConnectConversations=async()=>{const userId=Number(currentUser?.id||currentUser?.user_id||0);if(!userId)return;try{const d=await connectApi(`/api/connect/conversations?userId=${userId}`);setConnectConversations(d.conversations||[]);}catch(e){setConnectNotice(e.message||"Chat load failed.");}};
-  const openConnectConversation=async(c)=>{const userId=Number(currentUser?.id||currentUser?.user_id||0);if(!userId||!c?.id)return;setConnectActiveConversation(c);try{const d=await connectApi(`/api/connect/conversations/${c.id}/messages?userId=${userId}`);setConnectMessages(d.messages||[]);}catch(e){setConnectNotice(e.message||"Messages load failed.");}};
+  const saveConnectPreferences=async(patch={})=>{if(!currentUser)return;try{await connectApi(`/api/connect/profile/me`,{method:"PUT",body:JSON.stringify({privateProfile:patch.privateProfile??connectProfilePrivate,activityVisible:patch.activityVisible??connectActivityVisible,storyAudience:patch.storyAudience??connectStoryAudience,messageMode:patch.messageMode??connectMessageMode,headline:connectBootstrap.profile?.headline||"",about:connectBootstrap.profile?.about||"",profileType:connectBootstrap.profile?.profile_type||"PERSONAL",professionalCategory:connectBootstrap.profile?.professional_category||"GENERAL",professionTitle:connectBootstrap.profile?.profession_title||"",organizationName:connectBootstrap.profile?.organization_name||"",educationFocus:connectBootstrap.profile?.education_focus||"",expertise:connectBootstrap.profile?.expertise||"",interests:connectBootstrap.profile?.interests||"",statusMessage:connectBootstrap.profile?.status_message||"",availabilityStatus:connectBootstrap.profile?.availability_status||"AVAILABLE",discoverable:connectBootstrap.profile?.discoverable!==false,contactPermission:connectBootstrap.profile?.contact_permission||"EVERYONE",creatorMode:Boolean(connectBootstrap.profile?.creator_mode),professionalMode:Boolean(connectBootstrap.profile?.professional_mode),portfolioUrl:connectBootstrap.profile?.portfolio_url||"",socialLinks:connectBootstrap.profile?.social_links||{}})});await loadConnectBootstrap();}catch(e){setConnectNotice(e.message||"Setting save failed.");}};
+  const loadConnectConversations=async()=>{if(!currentUser)return;try{const d=await connectApi(`/api/connect/conversations`);setConnectConversations(d.conversations||[]);}catch(e){setConnectNotice(e.message||"Chat load failed.");}};
+  const openConnectConversation=async(c)=>{if(!currentUser||!c?.id)return;setConnectActiveConversation(c);try{const d=await connectApi(`/api/connect/conversations/${c.id}/messages`);setConnectMessages(d.messages||[]);}catch(e){setConnectNotice(e.message||"Messages load failed.");}};
   const startConnectConversation=async(person)=>{
     if(!requireConnectLogin(()=>startConnectConversation(person)))return;
     const username=person?.public_username||person?.publicUsername||"";
@@ -4492,7 +4479,7 @@ function App() {
     const options=username?{method:"POST"}:{method:"POST",body:JSON.stringify({targetUserId:target})};
     try{const d=await connectApi(path,options);setConnectView("messages");await loadConnectConversations();await openConnectConversation({id:d.conversation_id,full_name:person.full_name,public_username:person.public_username});}catch(e){setConnectNotice(e.message||"Unable to start chat.");}
   };
-  const sendConnectMessage=async()=>{if(!connectActiveConversation?.id||(!connectMessageText.trim()&&!connectPendingAttachment))return;if(!requireConnectLogin(sendConnectMessage))return;const userId=Number(currentUser?.id||currentUser?.user_id||0),text=connectMessageText.trim();if(connectEditingMessage){await editConnectMessage(connectEditingMessage);return;}try{const att=connectPendingAttachment;const payload={userId,messageText:text,expireMode:connectMessageMode};if(att){payload.attachmentType=att.type;if(att.type==="LINK")payload.linkUrl=att.linkUrl;else{payload.attachmentData=att.data;payload.attachmentMime=att.mime;payload.attachmentName=att.name;}}await connectApi(`/api/connect/conversations/${connectActiveConversation.id}/messages`,{method:"POST",body:JSON.stringify(payload)});setConnectMessageText("");setConnectPendingAttachment(null);await openConnectConversation(connectActiveConversation);await loadConnectConversations();}catch(e){setConnectNotice(e.message||"Send failed.");}};
+  const sendConnectMessage=async()=>{if(!connectActiveConversation?.id||(!connectMessageText.trim()&&!connectPendingAttachment))return;if(!requireConnectLogin(sendConnectMessage))return;const text=connectMessageText.trim();if(connectEditingMessage){await editConnectMessage(connectEditingMessage);return;}try{const att=connectPendingAttachment;const payload={messageText:text,expireMode:connectMessageMode};if(att){payload.attachmentType=att.type;if(att.type==="LINK")payload.linkUrl=att.linkUrl;else{payload.attachmentData=att.data;payload.attachmentMime=att.mime;payload.attachmentName=att.name;}}await connectApi(`/api/connect/conversations/${connectActiveConversation.id}/messages`,{method:"POST",body:JSON.stringify(payload)});setConnectMessageText("");setConnectPendingAttachment(null);await openConnectConversation(connectActiveConversation);await loadConnectConversations();}catch(e){setConnectNotice(e.message||"Send failed.");}};
   // HOWDI Connect V16.6K3 — pick/validate an image, video or document for chat (mirrors backend limits)
   const CONNECT_ATTACHMENT_LIMITS={IMAGE:5*1024*1024,VIDEO:25*1024*1024,DOCUMENT:10*1024*1024};
   const connectAttachmentTypeForFile=(file)=>{
@@ -4522,30 +4509,27 @@ function App() {
     setConnectPendingAttachment({type:"LINK",linkUrl:url});
   };
   const editConnectMessage=async(message)=>{
-    const userId=Number(currentUser?.id||currentUser?.user_id||0);
     const text=connectMessageText.trim();
-    if(!message?.id||!userId||!text)return;
+    if(!message?.id||!currentUser||!text)return;
     try{
-      await connectApi(`/api/connect/messages/${message.id}`,{method:"PATCH",body:JSON.stringify({userId,messageText:text})});
+      await connectApi(`/api/connect/messages/${message.id}`,{method:"PATCH",body:JSON.stringify({messageText:text})});
       setConnectEditingMessage(null);setConnectMessageText("");
       await openConnectConversation(connectActiveConversation);
     }catch(e){setConnectNotice(e.message||"Unable to edit message.");}
   };
 
   const deleteConnectMessage=async(message)=>{
-    const userId=Number(currentUser?.id||currentUser?.user_id||0);
-    if(!message?.id||!userId)return;
+    if(!message?.id||!currentUser)return;
     try{
-      await connectApi(`/api/connect/messages/${message.id}?userId=${userId}`,{method:"DELETE"});
+      await connectApi(`/api/connect/messages/${message.id}`,{method:"DELETE"});
       await openConnectConversation(connectActiveConversation);
     }catch(e){setConnectNotice(e.message||"Unable to delete message.");}
   };
 
   const reactConnectMessage=async(message,emoji)=>{
-    const userId=Number(currentUser?.id||currentUser?.user_id||0);
-    if(!message?.id||!userId)return;
+    if(!message?.id||!currentUser)return;
     try{
-      await connectApi(`/api/connect/messages/${message.id}/reaction`,{method:"POST",body:JSON.stringify({userId,emoji})});
+      await connectApi(`/api/connect/messages/${message.id}/reaction`,{method:"POST",body:JSON.stringify({emoji})});
       await openConnectConversation(connectActiveConversation);
     }catch(e){setConnectNotice(e.message||"Unable to react.");}
   };
@@ -4555,15 +4539,15 @@ function App() {
   const markConnectNotificationRead=async(id)=>{setConnectNotifications(prev=>prev.map(n=>String(n.id)===String(id)?{...n,is_read:true}:n));try{const d=await connectApi(`/api/connect/notifications/${encodeURIComponent(id)}/read`,{method:"PATCH"});if(typeof d.unread_count==="number")setConnectBootstrap(b=>({...b,unread_notifications:d.unread_count}));}catch{}};
   const markAllConnectNotificationsRead=async()=>{setConnectNotifications(prev=>prev.map(n=>({...n,is_read:true})));try{const d=await connectApi(`/api/connect/notifications/read-all`,{method:"PATCH"});setConnectBootstrap(b=>({...b,unread_notifications:typeof d.unread_count==="number"?d.unread_count:0}));}catch{}};
   const createConnectCommunity=async()=>{
-    const userId=Number(currentUser?.id||currentUser?.user_id||0),name=connectCommunityName.trim();
-    if(!userId||!name)return setConnectNotice("Enter a name.");
+    const name=connectCommunityName.trim();
+    if(!currentUser||!name)return setConnectNotice("Enter a name.");
     const type=connectCommunityCreateType==="channel"?"CHANNEL":connectCommunityCreateType==="live"?"LIVE":connectCommunityCreateType==="space"?"SPACE":"GROUP";
     const scheduledFor=(type==="SPACE"||type==="LIVE")&&connectSpaceScheduleMode==="schedule"&&connectSpaceScheduledFor
       ? new Date(connectSpaceScheduledFor).toISOString()
       : null;
     try{
       const data=await connectApi(`/api/connect/communities`,{method:"POST",body:JSON.stringify({
-        userId,name,description:connectCommunityDescription,communityType:type,privacy:connectCommunityPrivacy,category:connectCommunityCategory,
+        name,description:connectCommunityDescription,communityType:type,privacy:connectCommunityPrivacy,category:connectCommunityCategory,
         topic:connectSpaceTopic,tags:connectSpaceTags,scheduledFor,replayEnabled:connectSpaceReplayEnabled,
         liveThumbnailData:type==="LIVE"?connectLiveThumbnailData:"",liveFormat:connectLiveFormat,liveLanguage:connectLiveLanguage,audienceLabel:connectLiveAudienceLabel,
         liveGoal:Number(connectLiveGoal)||0,liveCtaLabel:connectLiveCtaLabel,liveCtaUrl:connectLiveCtaUrl
@@ -4581,7 +4565,7 @@ function App() {
       }
     }catch(e){setConnectNotice(e.message||"Create failed.");}
   };
-  const toggleConnectCommunityJoin=async(group)=>{const userId=Number(currentUser?.id||currentUser?.user_id||0);if(!userId||!group?.id)return;try{await connectApi(`/api/connect/communities/${group.id}/join`,{method:"POST",body:JSON.stringify({userId})});await loadConnectBootstrap();}catch(e){setConnectNotice(e.message||"Join failed.");}};
+  const toggleConnectCommunityJoin=async(group)=>{if(!currentUser||!group?.id)return;try{await connectApi(`/api/connect/communities/${group.id}/join`,{method:"POST",body:JSON.stringify({})});await loadConnectBootstrap();}catch(e){setConnectNotice(e.message||"Join failed.");}};
 
   useEffect(()=>{
     const timer=window.setInterval(()=>setConnectSpaceClock(Date.now()),30000);
@@ -4595,22 +4579,22 @@ function App() {
     };
     openHashProfile();window.addEventListener("hashchange",openHashProfile);
     return()=>window.removeEventListener("hashchange",openHashProfile);
-  },[currentUser?.id,currentUser?.user_id]);
+  },[currentUser]);
 
   useEffect(()=>{
-    const uid=Number(currentUser?.id||currentUser?.user_id||0);if(!uid)return;
+    if(!currentUser)return;
     heartbeatConnectPresence("ONLINE");
     const timer=window.setInterval(()=>heartbeatConnectPresence(document.hidden?"AWAY":"ONLINE"),45000);
     const vis=()=>heartbeatConnectPresence(document.hidden?"AWAY":"ONLINE");
     document.addEventListener("visibilitychange",vis);
-    return()=>{window.clearInterval(timer);document.removeEventListener("visibilitychange",vis);connectApi(`/api/connect/presence/offline`,{method:"POST",body:JSON.stringify({userId:uid})}).catch(()=>{});};
-  },[currentUser?.id,currentUser?.user_id,connectView,connectRealtimeRoom?.id]);
+    return()=>{window.clearInterval(timer);document.removeEventListener("visibilitychange",vis);connectApi(`/api/connect/presence/offline`,{method:"POST",body:JSON.stringify({})}).catch(()=>{});};
+  },[currentUser,connectView,connectRealtimeRoom?.id]);
 
-  const loadConnectGCSpaces=async(type=connectCommunityView)=>{const uid=Number(currentUser?.id||currentUser?.user_id||0);if(!uid||!["groups","channels"].includes(type))return;setConnectGCLoading(true);try{const d=await connectApi(`/api/connect/groups-channels?userId=${uid}&type=${type==="channels"?"CHANNEL":"GROUP"}`);setConnectGCSpaces(d.spaces||[])}catch(e){setConnectNotice(e.message||"Unable to load groups and channels.")}finally{setConnectGCLoading(false)}};
-  const createConnectGCSpace=async()=>{const uid=Number(currentUser?.id||currentUser?.user_id||0);if(!uid||!connectGCCreate.name.trim())return;try{await connectApi(`/api/connect/groups-channels`,{method:"POST",body:JSON.stringify({userId:uid,spaceType:connectCommunityView==="channels"?"CHANNEL":"GROUP",...connectGCCreate})});setConnectGCCreate({name:"",description:"",privacy:"PUBLIC",category:"GENERAL"});setConnectGCCreateOpen(false);await loadConnectGCSpaces(connectCommunityView);setConnectNotice(`${connectCommunityView==="channels"?"Channel":"Group"} created.`)}catch(e){setConnectNotice(e.message||"Unable to create.")}};
-  const toggleConnectGCMembership=async(space)=>{if(!requireConnectLogin(()=>toggleConnectGCMembership(space)))return;const uid=Number(currentUser?.id||currentUser?.user_id||0);try{await connectApi(`/api/connect/groups-channels/${space.id}/${space.joined?"leave":"join"}`,{method:"POST",body:JSON.stringify({userId:uid})});await loadConnectGCSpaces(connectCommunityView)}catch(e){setConnectNotice(e.message||"Unable to update membership.")}};
-  const openConnectGCSpace=async(space)=>{const uid=Number(currentUser?.id||currentUser?.user_id||0);setConnectGCSelected(space);setConnectGCInvite(null);try{const d=await connectApi(`/api/connect/groups-channels/${space.id}/messages?userId=${uid}`);setConnectGCMessages(d.messages||[])}catch(e){setConnectGCMessages([]);setConnectNotice(e.message||"Join this space to open it.")}};
-  const sendConnectGCMessage=async()=>{const uid=Number(currentUser?.id||currentUser?.user_id||0);if(!uid||!connectGCSelected||(!connectGCMessage.trim()&&!connectPendingAttachment))return;try{const att=connectPendingAttachment;const payload={userId:uid,body:connectGCMessage};if(att){payload.attachmentType=att.type;if(att.type==="LINK")payload.linkUrl=att.linkUrl;else{payload.mediaData=att.data;payload.attachmentMime=att.mime;payload.attachmentName=att.name;}}await connectApi(`/api/connect/groups-channels/${connectGCSelected.id}/messages`,{method:"POST",body:JSON.stringify(payload)});setConnectGCMessage("");setConnectPendingAttachment(null);await openConnectGCSpace(connectGCSelected)}catch(e){setConnectNotice(e.message||"Unable to send.")}};
+  const loadConnectGCSpaces=async(type=connectCommunityView)=>{if(!currentUser||!["groups","channels"].includes(type))return;setConnectGCLoading(true);try{const d=await connectApi(`/api/connect/groups-channels?type=${type==="channels"?"CHANNEL":"GROUP"}`);setConnectGCSpaces(d.spaces||[])}catch(e){setConnectNotice(e.message||"Unable to load groups and channels.")}finally{setConnectGCLoading(false)}};
+  const createConnectGCSpace=async()=>{if(!currentUser||!connectGCCreate.name.trim())return;try{await connectApi(`/api/connect/groups-channels`,{method:"POST",body:JSON.stringify({spaceType:connectCommunityView==="channels"?"CHANNEL":"GROUP",...connectGCCreate})});setConnectGCCreate({name:"",description:"",privacy:"PUBLIC",category:"GENERAL"});setConnectGCCreateOpen(false);await loadConnectGCSpaces(connectCommunityView);setConnectNotice(`${connectCommunityView==="channels"?"Channel":"Group"} created.`)}catch(e){setConnectNotice(e.message||"Unable to create.")}};
+  const toggleConnectGCMembership=async(space)=>{if(!requireConnectLogin(()=>toggleConnectGCMembership(space)))return;try{await connectApi(`/api/connect/groups-channels/${space.id}/${space.joined?"leave":"join"}`,{method:"POST",body:JSON.stringify({})});await loadConnectGCSpaces(connectCommunityView)}catch(e){setConnectNotice(e.message||"Unable to update membership.")}};
+  const openConnectGCSpace=async(space)=>{setConnectGCSelected(space);setConnectGCInvite(null);try{const d=await connectApi(`/api/connect/groups-channels/${space.id}/messages`);setConnectGCMessages(d.messages||[])}catch(e){setConnectGCMessages([]);setConnectNotice(e.message||"Join this space to open it.")}};
+  const sendConnectGCMessage=async()=>{if(!currentUser||!connectGCSelected||(!connectGCMessage.trim()&&!connectPendingAttachment))return;try{const att=connectPendingAttachment;const payload={body:connectGCMessage};if(att){payload.attachmentType=att.type;if(att.type==="LINK")payload.linkUrl=att.linkUrl;else{payload.mediaData=att.data;payload.attachmentMime=att.mime;payload.attachmentName=att.name;}}await connectApi(`/api/connect/groups-channels/${connectGCSelected.id}/messages`,{method:"POST",body:JSON.stringify(payload)});setConnectGCMessage("");setConnectPendingAttachment(null);await openConnectGCSpace(connectGCSelected)}catch(e){setConnectNotice(e.message||"Unable to send.")}};
   // HOWDI Connect V16.6K3 — render an image/video/document/link attachment inside a chat bubble
   const renderConnectDMAttachment=(m)=>{
     const type=m.attachment_type,data=m.attachment_data;if(!type||!data)return null;
@@ -4645,10 +4629,10 @@ function App() {
       </span>}
     </div>
   );
-  const createConnectGCInvite=async(space)=>{const uid=Number(currentUser?.id||currentUser?.user_id||0);try{const d=await connectApi(`/api/connect/groups-channels/${space.id}/invite-links`,{method:"POST",body:JSON.stringify({userId:uid,label:"Share invite",expiresInDays:30,maxUses:0,requiresApproval:space.privacy==="PRIVATE"})});const origin=window.location.origin;const link=`${origin}/connect/invite/${d.invite.token}`;setConnectGCInvite({...d.invite,link});try{await navigator.clipboard?.writeText(link)}catch{}setConnectNotice("Invite link created and copied.")}catch(e){setConnectNotice(e.message||"Only admins can create invite links.")}};
-  useEffect(()=>{if(connectView==="communities"&&["groups","channels"].includes(connectCommunityView))loadConnectGCSpaces(connectCommunityView)},[connectView,connectCommunityView,currentUser?.id,currentUser?.user_id]);
-  useEffect(()=>{if(connectView==="communities"&&connectCommunityView==="spaces"){loadConnectSpaceRecommendations();loadConnectSpaceLibrary();}},[connectView,connectCommunityView,currentUser?.id,currentUser?.user_id]);
-  useEffect(()=>{if(connectView==="communities"&&connectCommunityView==="live")loadConnectLiveDiscovery();},[connectView,connectCommunityView,connectLiveFilterFormat,connectLiveFilterLanguage,currentUser?.id,currentUser?.user_id]);
+  const createConnectGCInvite=async(space)=>{try{const d=await connectApi(`/api/connect/groups-channels/${space.id}/invite-links`,{method:"POST",body:JSON.stringify({label:"Share invite",expiresInDays:30,maxUses:0,requiresApproval:space.privacy==="PRIVATE"})});const origin=window.location.origin;const link=`${origin}/connect/invite/${d.invite.token}`;setConnectGCInvite({...d.invite,link});try{await navigator.clipboard?.writeText(link)}catch{}setConnectNotice("Invite link created and copied.")}catch(e){setConnectNotice(e.message||"Only admins can create invite links.")}};
+  useEffect(()=>{if(connectView==="communities"&&["groups","channels"].includes(connectCommunityView))loadConnectGCSpaces(connectCommunityView)},[connectView,connectCommunityView,currentUser]);
+  useEffect(()=>{if(connectView==="communities"&&connectCommunityView==="spaces"){loadConnectSpaceRecommendations();loadConnectSpaceLibrary();}},[connectView,connectCommunityView,currentUser]);
+  useEffect(()=>{if(connectView==="communities"&&connectCommunityView==="live")loadConnectLiveDiscovery();},[connectView,connectCommunityView,connectLiveFilterFormat,connectLiveFilterLanguage,currentUser]);
 
   useEffect(()=>{
     if(!currentUser)return;
@@ -4668,7 +4652,7 @@ function App() {
     check();
     const timer=window.setInterval(check,60000);
     return()=>{active=false;window.clearInterval(timer);};
-  },[currentUser?.id,currentUser?.user_id]);
+  },[currentUser]);
 
 
 
@@ -4722,18 +4706,18 @@ function App() {
   };
 
   const toggleConnectSpaceReminder=async(room)=>{
-    const userId=Number(currentUser?.id||currentUser?.user_id||0);if(!userId)return setConnectNotice("Please login first.");
+    if(!currentUser)return setConnectNotice("Please login first.");
     try{
-      const d=await connectApi(`/api/connect/spaces/${room.id}/reminder`,{method:"POST",body:JSON.stringify({userId})});
+      const d=await connectApi(`/api/connect/spaces/${room.id}/reminder`,{method:"POST",body:JSON.stringify({})});
       setConnectBootstrap(prev=>({...prev,communities:(prev.communities||[]).map(c=>Number(c.id)===Number(room.id)?{...c,reminded:Boolean(d.reminded)}:c)}));
     }catch(e){setConnectNotice(e.message||"Unable to update reminder.");}
   };
 
   const openConnectSpaceAnalytics=async(room)=>{
-    const userId=Number(currentUser?.id||currentUser?.user_id||0);if(!userId)return;
+    if(!currentUser)return;
     setConnectSpaceAnalyticsOpen(true);setConnectSpaceAnalyticsLoading(true);setConnectSpaceAnalytics(null);
     try{
-      const d=await connectApi(`/api/connect/spaces/${room.id}/analytics?userId=${encodeURIComponent(userId)}`);
+      const d=await connectApi(`/api/connect/spaces/${room.id}/analytics`);
       setConnectSpaceAnalytics(d.analytics||null);
     }catch(e){setConnectNotice(e.message||"Unable to load Space analytics.");setConnectSpaceAnalyticsOpen(false);}
     finally{setConnectSpaceAnalyticsLoading(false);}
@@ -4778,11 +4762,10 @@ function App() {
     if(!requireConnectLogin(joinConnectInviteSpace))return;
     setConnectInviteBusy(true);setConnectInviteStatus("");
     try{
-      const uid=Number(currentUser?.id||currentUser?.user_id||0);
-      const d=await connectApi(`/api/connect/invite/${encodeURIComponent(connectInviteToken)}/join`,{method:"POST",body:JSON.stringify({userId:uid})});
+            const d=await connectApi(`/api/connect/invite/${encodeURIComponent(connectInviteToken)}/join`,{method:"POST",body:JSON.stringify({})});
       const spaceType=String(d.spaceType||connectInvitePreview?.spaceType||"GROUP")==="CHANNEL"?"CHANNEL":"GROUP";
       const listView=spaceType==="CHANNEL"?"channels":"groups";
-      const listing=await connectApi(`/api/connect/groups-channels?userId=${uid}&type=${spaceType}`);
+      const listing=await connectApi(`/api/connect/groups-channels?type=${spaceType}`);
       setConnectGCSpaces(listing.spaces||[]);
       setConnectCommunityView(listView);
       const found=(listing.spaces||[]).find(s=>Number(s.id)===Number(d.spaceId));
@@ -4799,7 +4782,7 @@ function App() {
     finally{setConnectInviteBusy(false);}
   };
 
-  const connectRealtimeUserId=()=>Number(currentUser?.id||currentUser?.user_id||0);
+  const connectRealtimeUserId=()=>Number(currentUser||0);
 
   const connectRealtimeParticipant=()=>{
     const userId=connectRealtimeUserId();
@@ -4807,37 +4790,37 @@ function App() {
   };
   const connectRealtimeRaiseHand=async()=>{
     const room=connectRealtimeRoom,userId=connectRealtimeUserId();if(!room?.id||!userId)return;
-    try{await connectApi(`/api/connect/realtime/${room.id}/raise-hand`,{method:"POST",body:JSON.stringify({userId})});setConnectNotice("Hand raised. Waiting for host.");await connectRealtimePoll();}catch(e){setConnectRealtimeError(e.message||"Unable to raise hand.");}
+    try{await connectApi(`/api/connect/realtime/${room.id}/raise-hand`,{method:"POST",body:JSON.stringify({})});setConnectNotice("Hand raised. Waiting for host.");await connectRealtimePoll();}catch(e){setConnectRealtimeError(e.message||"Unable to raise hand.");}
   };
   const connectRealtimeApproveSpeaker=async(userId)=>{
-    try{await connectApi(`/api/connect/realtime/${connectRealtimeRoom.id}/speaker/${userId}/approve`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId()})});await connectRealtimePoll();}catch(e){setConnectRealtimeError(e.message||"Unable to approve speaker.");}
+    try{await connectApi(`/api/connect/realtime/${connectRealtimeRoom.id}/speaker/${userId}/approve`,{method:"POST"});await connectRealtimePoll();}catch(e){setConnectRealtimeError(e.message||"Unable to approve speaker.");}
   };
   const connectRealtimeRejectSpeaker=async(userId)=>{
-    try{await connectApi(`/api/connect/realtime/${connectRealtimeRoom.id}/speaker/${userId}/reject`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId()})});await connectRealtimePoll();}catch(e){setConnectRealtimeError(e.message||"Unable to reject speaker.");}
+    try{await connectApi(`/api/connect/realtime/${connectRealtimeRoom.id}/speaker/${userId}/reject`,{method:"POST"});await connectRealtimePoll();}catch(e){setConnectRealtimeError(e.message||"Unable to reject speaker.");}
   };
   const connectRealtimeRemoveSpeaker=async(userId)=>{
-    try{await connectApi(`/api/connect/realtime/${connectRealtimeRoom.id}/speaker/${userId}/remove`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId()})});await connectRealtimePoll();}catch(e){setConnectRealtimeError(e.message||"Unable to remove speaker.");}
+    try{await connectApi(`/api/connect/realtime/${connectRealtimeRoom.id}/speaker/${userId}/remove`,{method:"POST"});await connectRealtimePoll();}catch(e){setConnectRealtimeError(e.message||"Unable to remove speaker.");}
   };
   const connectRealtimeToggleCohost=async(userId)=>{
-    try{await connectApi(`/api/connect/realtime/${connectRealtimeRoom.id}/cohost/${userId}/toggle`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId()})});await connectRealtimePoll();}catch(e){setConnectRealtimeError(e.message||"Unable to update co-host.");}
+    try{await connectApi(`/api/connect/realtime/${connectRealtimeRoom.id}/cohost/${userId}/toggle`,{method:"POST"});await connectRealtimePoll();}catch(e){setConnectRealtimeError(e.message||"Unable to update co-host.");}
   };
   const connectRealtimeModeratorMute=async(userId,muted=true)=>{
-    try{await connectApi(`/api/connect/realtime/${connectRealtimeRoom.id}/participant/${userId}/mute`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId(),muted})});await connectRealtimePoll();}catch(e){setConnectRealtimeError(e.message||"Unable to update microphone.");}
+    try{await connectApi(`/api/connect/realtime/${connectRealtimeRoom.id}/participant/${userId}/mute`,{method:"POST",body:JSON.stringify({muted})});await connectRealtimePoll();}catch(e){setConnectRealtimeError(e.message||"Unable to update microphone.");}
   };
   const connectRealtimeKick=async(userId)=>{
     if(!window.confirm("Remove this participant from the Space?"))return;
-    try{await connectApi(`/api/connect/realtime/${connectRealtimeRoom.id}/participant/${userId}/kick`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId()})});await connectRealtimePoll();}catch(e){setConnectRealtimeError(e.message||"Unable to remove participant.");}
+    try{await connectApi(`/api/connect/realtime/${connectRealtimeRoom.id}/participant/${userId}/kick`,{method:"POST"});await connectRealtimePoll();}catch(e){setConnectRealtimeError(e.message||"Unable to remove participant.");}
   };
   const connectRealtimeCanModerate=()=>Number(connectRealtimeRoom?.owner_user_id)===connectRealtimeUserId()||connectRealtimeParticipant()?.participant_role==="COHOST";
 
   const askConnectSpaceQuestion=async()=>{
     const text=connectSpaceQuestionText.trim();if(!text||!connectRealtimeRoom?.id)return;
-    try{await connectApi(`/api/connect/realtime/${connectRealtimeRoom.id}/questions`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId(),question:text})});setConnectSpaceQuestionText("");await connectRealtimePoll();}catch(e){setConnectRealtimeError(e.message||"Unable to ask question.");}
+    try{await connectApi(`/api/connect/realtime/${connectRealtimeRoom.id}/questions`,{method:"POST",body:JSON.stringify({question:text})});setConnectSpaceQuestionText("");await connectRealtimePoll();}catch(e){setConnectRealtimeError(e.message||"Unable to ask question.");}
   };
-  const upvoteConnectSpaceQuestion=async(id)=>{try{await connectApi(`/api/connect/realtime/${connectRealtimeRoom.id}/questions/${id}/upvote`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId()})});await connectRealtimePoll();}catch(e){setConnectRealtimeError(e.message||"Unable to upvote.");}};
-  const answerConnectSpaceQuestion=async(q)=>{try{await connectApi(`/api/connect/realtime/${connectRealtimeRoom.id}/questions/${q.id}/answer`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId(),answer:connectSpaceAnswerText})});setConnectSpaceAnswering(null);setConnectSpaceAnswerText("");await connectRealtimePoll();}catch(e){setConnectRealtimeError(e.message||"Unable to answer.");}};
-  const inviteConnectSpaceCohost=async(person)=>{try{await connectApi(`/api/connect/realtime/${connectRealtimeRoom.id}/cohost/${person.user_id}/invite`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId()})});setConnectNotice(`Co-host invite sent to ${person.full_name}.`);await connectRealtimePoll();}catch(e){setConnectRealtimeError(e.message||"Unable to invite co-host.");}};
-  const respondConnectSpaceCohost=async(invite,accept)=>{try{await connectApi(`/api/connect/realtime/${connectRealtimeRoom.id}/cohost-invites/${invite.id}/respond`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId(),accept})});await connectRealtimePoll();}catch(e){setConnectRealtimeError(e.message||"Unable to respond.");}};
+  const upvoteConnectSpaceQuestion=async(id)=>{try{await connectApi(`/api/connect/realtime/${connectRealtimeRoom.id}/questions/${id}/upvote`,{method:"POST",body:JSON.stringify({})});await connectRealtimePoll();}catch(e){setConnectRealtimeError(e.message||"Unable to upvote.");}};
+  const answerConnectSpaceQuestion=async(q)=>{try{await connectApi(`/api/connect/realtime/${connectRealtimeRoom.id}/questions/${q.id}/answer`,{method:"POST",body:JSON.stringify({answer:connectSpaceAnswerText})});setConnectSpaceAnswering(null);setConnectSpaceAnswerText("");await connectRealtimePoll();}catch(e){setConnectRealtimeError(e.message||"Unable to answer.");}};
+  const inviteConnectSpaceCohost=async(person)=>{try{await connectApi(`/api/connect/realtime/${connectRealtimeRoom.id}/cohost/${person.user_id}/invite`,{method:"POST",body:JSON.stringify({})});setConnectNotice(`Co-host invite sent to ${person.full_name}.`);await connectRealtimePoll();}catch(e){setConnectRealtimeError(e.message||"Unable to invite co-host.");}};
+  const respondConnectSpaceCohost=async(invite,accept)=>{try{await connectApi(`/api/connect/realtime/${connectRealtimeRoom.id}/cohost-invites/${invite.id}/respond`,{method:"POST",body:JSON.stringify({accept})});await connectRealtimePoll();}catch(e){setConnectRealtimeError(e.message||"Unable to respond.");}};
   const connectSpacePersonObject=(p)=>({id:Number(p.user_id),full_name:p.full_name,public_username:p.public_username});
   const connectSpaceHostLevelLabel=(level)=>({NEW_VOICE:"New Voice",RISING_HOST:"Rising Host",COMMUNITY_HOST:"Community Host",STAR_HOST:"Star Host"}[level]||"Host");
   const shareConnectLiveCard=async()=>{if(connectRealtimeRoom)await shareConnectSpace(connectRealtimeRoom);};
@@ -4850,58 +4833,58 @@ function App() {
       const recognition=new SpeechRecognition();recognition.continuous=true;recognition.interimResults=true;recognition.lang="en-IN";
       recognition.onresult=async(event)=>{
         const result=event.results[event.results.length-1];const text=String(result?.[0]?.transcript||"").trim();if(!text)return;
-        try{await connectApi(`/api/connect/realtime/${connectRealtimeRoom.id}/captions`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId(),text,isFinal:Boolean(result.isFinal)})});}catch{}
+        try{await connectApi(`/api/connect/realtime/${connectRealtimeRoom.id}/captions`,{method:"POST",body:JSON.stringify({text,isFinal:Boolean(result.isFinal)})});}catch{}
       };
       recognition.onend=()=>{if(connectSpaceCaptionsOn){try{recognition.start()}catch{}}};
       recognition.start();connectSpaceSpeechRef.current=recognition;setConnectSpaceCaptionsOn(true);setConnectSpaceCaptionUnsupported(false);
     }catch{setConnectSpaceCaptionUnsupported(true);setConnectRealtimeError("Unable to start live captions.");}
   };
 
-  const toggleConnectSpaceBookmark=async()=>{try{const d=await connectApi(`/api/connect/spaces/${connectRealtimeRoom.id}/bookmark`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId()})});setConnectNotice(d.bookmarked?"Space bookmarked 🔖":"Bookmark removed");await connectRealtimePoll();}catch(e){setConnectRealtimeError(e.message||"Bookmark failed.");}};
-  const sendConnectSpaceGift=async(giftCode,value=0)=>{try{await connectApi(`/api/connect/spaces/${connectRealtimeRoom.id}/gift`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId(),giftCode,value})});setConnectSpaceGiftOpen(false);setConnectNotice(`${giftCode} gift sent 🎁`);await connectRealtimePoll();}catch(e){setConnectRealtimeError(e.message||"Gift failed.");}};
-  const completeConnectSpaceQuest=async(questCode)=>{try{await connectApi(`/api/connect/spaces/${connectRealtimeRoom.id}/quest`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId(),questCode})});setConnectNotice("Quest completed ✨");await connectRealtimePoll();}catch(e){setConnectRealtimeError(e.message||"Quest failed.");}};
-  const createConnectSpaceReferral=async()=>{try{const d=await connectApi(`/api/connect/spaces/${connectRealtimeRoom.id}/referral`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId()})});setConnectSpaceReferralCode(d.referral?.invite_code||"");setConnectNotice("Invite code created.");}catch(e){setConnectRealtimeError(e.message||"Invite failed.");}};
-  const saveConnectSpacePremium=async()=>{try{await connectApi(`/api/connect/spaces/${connectRealtimeRoom.id}/premium`,{method:"PATCH",body:JSON.stringify({userId:connectRealtimeUserId(),enabled:Number(connectSpacePremiumPrice)>0,price:connectSpacePremiumPrice})});setConnectSpacePremiumOpen(false);await connectRealtimePoll();setConnectNotice("Premium Space settings updated.");}catch(e){setConnectRealtimeError(e.message||"Premium settings failed.");}};
-  const requestConnectPremiumAccess=async()=>{try{const d=await connectApi(`/api/connect/spaces/${connectRealtimeRoom.id}/premium-access`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId()})});setHpayRecipient(connectRealtimeRoom.owner_name||"Space host");setHpayAction("pay");setHpayAmount(String(d.amount||0));setHpayNote(`Premium HOWDI Space: ${connectRealtimeRoom.name}`);setConnectNotice(d.message||"Complete through HPay.");}catch(e){setConnectRealtimeError(e.message||"Premium access failed.");}};
+  const toggleConnectSpaceBookmark=async()=>{try{const d=await connectApi(`/api/connect/spaces/${connectRealtimeRoom.id}/bookmark`,{method:"POST",body:JSON.stringify({})});setConnectNotice(d.bookmarked?"Space bookmarked 🔖":"Bookmark removed");await connectRealtimePoll();}catch(e){setConnectRealtimeError(e.message||"Bookmark failed.");}};
+  const sendConnectSpaceGift=async(giftCode,value=0)=>{try{await connectApi(`/api/connect/spaces/${connectRealtimeRoom.id}/gift`,{method:"POST",body:JSON.stringify({giftCode,value})});setConnectSpaceGiftOpen(false);setConnectNotice(`${giftCode} gift sent 🎁`);await connectRealtimePoll();}catch(e){setConnectRealtimeError(e.message||"Gift failed.");}};
+  const completeConnectSpaceQuest=async(questCode)=>{try{await connectApi(`/api/connect/spaces/${connectRealtimeRoom.id}/quest`,{method:"POST",body:JSON.stringify({questCode})});setConnectNotice("Quest completed ✨");await connectRealtimePoll();}catch(e){setConnectRealtimeError(e.message||"Quest failed.");}};
+  const createConnectSpaceReferral=async()=>{try{const d=await connectApi(`/api/connect/spaces/${connectRealtimeRoom.id}/referral`,{method:"POST",body:JSON.stringify({})});setConnectSpaceReferralCode(d.referral?.invite_code||"");setConnectNotice("Invite code created.");}catch(e){setConnectRealtimeError(e.message||"Invite failed.");}};
+  const saveConnectSpacePremium=async()=>{try{await connectApi(`/api/connect/spaces/${connectRealtimeRoom.id}/premium`,{method:"PATCH",body:JSON.stringify({enabled:Number(connectSpacePremiumPrice)>0,price:connectSpacePremiumPrice})});setConnectSpacePremiumOpen(false);await connectRealtimePoll();setConnectNotice("Premium Space settings updated.");}catch(e){setConnectRealtimeError(e.message||"Premium settings failed.");}};
+  const requestConnectPremiumAccess=async()=>{try{const d=await connectApi(`/api/connect/spaces/${connectRealtimeRoom.id}/premium-access`,{method:"POST",body:JSON.stringify({})});setHpayRecipient(connectRealtimeRoom.owner_name||"Space host");setHpayAction("pay");setHpayAmount(String(d.amount||0));setHpayNote(`Premium HOWDI Space: ${connectRealtimeRoom.name}`);setConnectNotice(d.message||"Complete through HPay.");}catch(e){setConnectRealtimeError(e.message||"Premium access failed.");}};
   const connectSpaceSupporterTier=(amount)=>Number(amount)>=1000?"Gold":Number(amount)>=500?"Silver":Number(amount)>0?"Bronze":"";
 
   const saveConnectSpaceOperations=async()=>{
     try{
-      await connectApi(`/api/connect/spaces/${connectRealtimeRoom.id}/operations`,{method:"PATCH",body:JSON.stringify({userId:connectRealtimeUserId(),roomLocked:connectSpaceRoomLocked,maxAudience:Number(connectSpaceMaxAudience)||0,maxSpeakers:Number(connectSpaceMaxSpeakers)||0,checkinCode:connectSpaceCheckinCode,agenda:connectSpaceAgenda,hostChecklist:connectSpaceChecklist,recapNotes:connectSpaceRecapNotes})});
+      await connectApi(`/api/connect/spaces/${connectRealtimeRoom.id}/operations`,{method:"PATCH",body:JSON.stringify({roomLocked:connectSpaceRoomLocked,maxAudience:Number(connectSpaceMaxAudience)||0,maxSpeakers:Number(connectSpaceMaxSpeakers)||0,checkinCode:connectSpaceCheckinCode,agenda:connectSpaceAgenda,hostChecklist:connectSpaceChecklist,recapNotes:connectSpaceRecapNotes})});
       await connectRealtimePoll();setConnectNotice("Space operations saved.");
     }catch(e){setConnectRealtimeError(e.message||"Unable to save Space operations.");}
   };
 
   const promoteConnectWaitlist=async(person=null)=>{
-    try{await connectApi(`/api/connect/spaces/${connectRealtimeRoom.id}/waitlist/promote`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId(),targetUserId:person?.user_id||0})});await connectRealtimePoll();setConnectNotice("Waitlist member promoted.");}catch(e){setConnectRealtimeError(e.message||"Unable to promote waitlist.");}
+    try{await connectApi(`/api/connect/spaces/${connectRealtimeRoom.id}/waitlist/promote`,{method:"POST",body:JSON.stringify({targetUserId:person?.user_id||0})});await connectRealtimePoll();setConnectNotice("Waitlist member promoted.");}catch(e){setConnectRealtimeError(e.message||"Unable to promote waitlist.");}
   };
 
   const autoPromoteConnectWaitlist=async()=>{
-    try{const d=await connectApi(`/api/connect/spaces/${connectRealtimeRoom.id}/waitlist/auto-promote`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId()})});await connectRealtimePoll();setConnectNotice(`${d.promoted||0} waitlist member(s) promoted.`);}catch(e){setConnectRealtimeError(e.message||"Unable to auto-promote waitlist.");}
+    try{const d=await connectApi(`/api/connect/spaces/${connectRealtimeRoom.id}/waitlist/auto-promote`,{method:"POST",body:JSON.stringify({})});await connectRealtimePoll();setConnectNotice(`${d.promoted||0} waitlist member(s) promoted.`);}catch(e){setConnectRealtimeError(e.message||"Unable to auto-promote waitlist.");}
   };
 
   const checkinConnectSpace=async()=>{
     const room=connectRealtimeRoom||connectSpacePreflight?.room;if(!room)return;
-    try{const d=await connectApi(`/api/connect/spaces/${room.id}/checkin`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId(),code:connectSpaceUserCheckinCode})});setConnectSpaceLoyalty(d.loyalty);setConnectNotice(d.already_checked_in?"Already checked in.":"Checked in · +10 loyalty points.");await connectRealtimePoll();}catch(e){setConnectNotice(e.message||"Check-in failed.");}
+    try{const d=await connectApi(`/api/connect/spaces/${room.id}/checkin`,{method:"POST",body:JSON.stringify({code:connectSpaceUserCheckinCode})});setConnectSpaceLoyalty(d.loyalty);setConnectNotice(d.already_checked_in?"Already checked in.":"Checked in · +10 loyalty points.");await connectRealtimePoll();}catch(e){setConnectNotice(e.message||"Check-in failed.");}
   };
 
   const loadConnectSpaceCertificate=async()=>{
     const room=connectRealtimeRoom||connectSpacePreflight?.room;if(!room)return;
-    try{const d=await connectApi(`/api/connect/spaces/${room.id}/certificate?userId=${connectRealtimeUserId()}`);setConnectSpaceCertificate(d.certificate);}catch(e){setConnectNotice(e.message||"Certificate unavailable.");}
+    try{const d=await connectApi(`/api/connect/spaces/${room.id}/certificate`);setConnectSpaceCertificate(d.certificate);}catch(e){setConnectNotice(e.message||"Certificate unavailable.");}
   };
 
   const resolveConnectSpaceReport=async(report,status)=>{
-    try{await connectApi(`/api/connect/spaces/${connectRealtimeRoom.id}/reports/${report.id}/resolve`,{method:"PATCH",body:JSON.stringify({userId:connectRealtimeUserId(),status,note:status==="DISMISSED"?"Dismissed by host":"Resolved by host"})});await connectRealtimePoll();setConnectNotice(`Report ${status.toLowerCase()}.`);}catch(e){setConnectRealtimeError(e.message||"Unable to update report.");}
+    try{await connectApi(`/api/connect/spaces/${connectRealtimeRoom.id}/reports/${report.id}/resolve`,{method:"PATCH",body:JSON.stringify({status,note:status==="DISMISSED"?"Dismissed by host":"Resolved by host"})});await connectRealtimePoll();setConnectNotice(`Report ${status.toLowerCase()}.`);}catch(e){setConnectRealtimeError(e.message||"Unable to update report.");}
   };
 
   const submitConnectSpaceFeedback=async()=>{
     const room=connectRealtimeRoom||connectSpacePreflight?.room;if(!room)return;
-    try{await connectApi(`/api/connect/spaces/${room.id}/feedback`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId(),npsScore:Number(connectSpaceNps),feedbackTag:connectSpaceFeedbackTag,comment:connectSpaceFeedbackComment})});setConnectSpaceFeedbackComment("");setConnectNotice("Thanks — your Space feedback was saved.");}catch(e){setConnectNotice(e.message||"Unable to save feedback.");}
+    try{await connectApi(`/api/connect/spaces/${room.id}/feedback`,{method:"POST",body:JSON.stringify({npsScore:Number(connectSpaceNps),feedbackTag:connectSpaceFeedbackTag,comment:connectSpaceFeedbackComment})});setConnectSpaceFeedbackComment("");setConnectNotice("Thanks — your Space feedback was saved.");}catch(e){setConnectNotice(e.message||"Unable to save feedback.");}
   };
 
   const loadConnectSpaceCompletion=async()=>{
     if(!connectRealtimeRoom?.id)return;
-    try{const d=await connectApi(`/api/connect/spaces/${connectRealtimeRoom.id}/completion-dashboard?userId=${connectRealtimeUserId()}`);setConnectSpaceCompletion(d);setConnectSpaceCompletionOpen(true);}catch(e){setConnectNotice(e.message||"Unable to load Space completion dashboard.");}
+    try{const d=await connectApi(`/api/connect/spaces/${connectRealtimeRoom.id}/completion-dashboard`);setConnectSpaceCompletion(d);setConnectSpaceCompletionOpen(true);}catch(e){setConnectNotice(e.message||"Unable to load Space completion dashboard.");}
   };
 
   const openConnectMemberCard=(member)=>{
@@ -4914,64 +4897,64 @@ function App() {
   const saveConnectMemberCrm=async()=>{
     if(!connectMemberCard)return;
     try{
-      await connectApi(`/api/connect/creator-members/${connectMemberCard.subscriber_user_id}/crm`,{method:"PATCH",body:JSON.stringify({userId:connectRealtimeUserId(),privateNote:connectMemberNote,cohort:connectMemberCohort,tags:connectMemberTags})});
+      await connectApi(`/api/connect/creator-members/${connectMemberCard.subscriber_user_id}/crm`,{method:"PATCH",body:JSON.stringify({privateNote:connectMemberNote,cohort:connectMemberCohort,tags:connectMemberTags})});
       await loadConnectCreatorDashboard();setConnectNotice("Member CRM updated.");
     }catch(e){setConnectNotice(e.message||"Unable to update member.");}
   };
 
   const awardConnectMemberBadge=async()=>{
     if(!connectMemberCard)return;
-    try{await connectApi(`/api/connect/creator-members/${connectMemberCard.subscriber_user_id}/badges`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId(),badgeName:connectMemberBadgeName,badgeEmoji:connectMemberBadgeEmoji})});await loadConnectCreatorDashboard();setConnectNotice("Badge awarded.");}catch(e){setConnectNotice(e.message||"Unable to award badge.");}
+    try{await connectApi(`/api/connect/creator-members/${connectMemberCard.subscriber_user_id}/badges`,{method:"POST",body:JSON.stringify({badgeName:connectMemberBadgeName,badgeEmoji:connectMemberBadgeEmoji})});await loadConnectCreatorDashboard();setConnectNotice("Badge awarded.");}catch(e){setConnectNotice(e.message||"Unable to award badge.");}
   };
 
   const createConnectChallenge=async()=>{
     if(!connectChallengeTitle.trim())return;
-    try{await connectApi(`/api/connect/creator-challenges`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId(),title:connectChallengeTitle,description:connectChallengeDescription,targetCount:Number(connectChallengeTarget)||1})});setConnectChallengeTitle("");setConnectChallengeDescription("");await loadConnectCreatorDashboard();setConnectNotice("Member challenge created.");}catch(e){setConnectNotice(e.message||"Unable to create challenge.");}
+    try{await connectApi(`/api/connect/creator-challenges`,{method:"POST",body:JSON.stringify({title:connectChallengeTitle,description:connectChallengeDescription,targetCount:Number(connectChallengeTarget)||1})});setConnectChallengeTitle("");setConnectChallengeDescription("");await loadConnectCreatorDashboard();setConnectNotice("Member challenge created.");}catch(e){setConnectNotice(e.message||"Unable to create challenge.");}
   };
 
   const progressConnectChallenge=async(challenge)=>{
-    try{await connectApi(`/api/connect/creator-challenges/${challenge.id}/progress`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId(),increment:1})});setConnectNotice("Challenge progress updated.");}catch(e){setConnectNotice(e.message||"Unable to update challenge.");}
+    try{await connectApi(`/api/connect/creator-challenges/${challenge.id}/progress`,{method:"POST",body:JSON.stringify({increment:1})});setConnectNotice("Challenge progress updated.");}catch(e){setConnectNotice(e.message||"Unable to update challenge.");}
   };
 
   const createConnectMemberPoll=async()=>{
     const opts=connectMemberPollOptions.map(x=>x.trim()).filter(Boolean);if(!connectMemberPollQuestion.trim()||opts.length<2)return setConnectNotice("Add a question and at least 2 options.");
-    try{await connectApi(`/api/connect/creator-polls`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId(),question:connectMemberPollQuestion,options:opts,cohort:connectMemberPollCohort})});setConnectMemberPollQuestion("");setConnectMemberPollOptions(["",""]);await loadConnectCreatorDashboard();setConnectNotice("Subscriber poll published.");}catch(e){setConnectNotice(e.message||"Unable to create poll.");}
+    try{await connectApi(`/api/connect/creator-polls`,{method:"POST",body:JSON.stringify({question:connectMemberPollQuestion,options:opts,cohort:connectMemberPollCohort})});setConnectMemberPollQuestion("");setConnectMemberPollOptions(["",""]);await loadConnectCreatorDashboard();setConnectNotice("Subscriber poll published.");}catch(e){setConnectNotice(e.message||"Unable to create poll.");}
   };
 
   const voteConnectMemberPoll=async(poll,optionId)=>{
-    try{await connectApi(`/api/connect/creator-polls/${poll.id}/vote`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId(),optionId})});setConnectNotice("Vote recorded.");}catch(e){setConnectNotice(e.message||"Unable to vote.");}
+    try{await connectApi(`/api/connect/creator-polls/${poll.id}/vote`,{method:"POST",body:JSON.stringify({optionId})});setConnectNotice("Vote recorded.");}catch(e){setConnectNotice(e.message||"Unable to vote.");}
   };
 
   const scheduleConnectMemberAnnouncement=async()=>{
     if(!connectScheduledAnnouncement.trim()||!connectScheduledAnnouncementAt)return setConnectNotice("Enter message and schedule time.");
-    try{await connectApi(`/api/connect/scheduled-announcements`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId(),message:connectScheduledAnnouncement,targetCohort:connectScheduledAnnouncementCohort,scheduledFor:new Date(connectScheduledAnnouncementAt).toISOString()})});setConnectScheduledAnnouncement("");setConnectScheduledAnnouncementAt("");await loadConnectCreatorDashboard();setConnectNotice("Announcement scheduled.");}catch(e){setConnectNotice(e.message||"Unable to schedule announcement.");}
+    try{await connectApi(`/api/connect/scheduled-announcements`,{method:"POST",body:JSON.stringify({message:connectScheduledAnnouncement,targetCohort:connectScheduledAnnouncementCohort,scheduledFor:new Date(connectScheduledAnnouncementAt).toISOString()})});setConnectScheduledAnnouncement("");setConnectScheduledAnnouncementAt("");await loadConnectCreatorDashboard();setConnectNotice("Announcement scheduled.");}catch(e){setConnectNotice(e.message||"Unable to schedule announcement.");}
   };
 
   const runDueConnectMemberAnnouncements=async()=>{
-    try{const d=await connectApi(`/api/connect/scheduled-announcements/run-due`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId()})});setConnectNotice(d.message||"Scheduled announcements checked.");await loadConnectCreatorDashboard();}catch(e){setConnectNotice(e.message||"Unable to run announcements.");}
+    try{const d=await connectApi(`/api/connect/scheduled-announcements/run-due`,{method:"POST",body:JSON.stringify({})});setConnectNotice(d.message||"Scheduled announcements checked.");await loadConnectCreatorDashboard();}catch(e){setConnectNotice(e.message||"Unable to run announcements.");}
   };
 
   const toggleConnectSpaceWaitlist=async()=>{
     const room=connectSpacePreflight?.room;if(!room)return;
-    try{const d=await connectApi(`/api/connect/spaces/${room.id}/waitlist`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId()})});setConnectSpacePreflight(v=>v?{...v,room:{...v.room,waitlisted:d.waitlisted,waitlist_count:d.count,waitlist_position:d.position}}:v);}catch(e){setConnectNotice(e.message||"Unable to update waitlist.");}
+    try{const d=await connectApi(`/api/connect/spaces/${room.id}/waitlist`,{method:"POST",body:JSON.stringify({})});setConnectSpacePreflight(v=>v?{...v,room:{...v.room,waitlisted:d.waitlisted,waitlist_count:d.count,waitlist_position:d.position}}:v);}catch(e){setConnectNotice(e.message||"Unable to update waitlist.");}
   };
 
   const loadConnectSeriesCalendar=async()=>{
-    try{const d=await connectApi(`/api/connect/series-calendar?userId=${connectRealtimeUserId()}&days=45`);setConnectSeriesCalendar(d.events||[]);}catch{}
+    try{const d=await connectApi(`/api/connect/series-calendar?days=45`);setConnectSeriesCalendar(d.events||[]);}catch{}
   };
 
   const createConnectCreatorInvite=async()=>{
-    try{await connectApi(`/api/connect/creator-invites`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId(),rewardLabel:connectInviteRewardLabel})});await loadConnectCreatorDashboard();setConnectNotice("Referral invite created.");}catch(e){setConnectNotice(e.message||"Unable to create invite.");}
+    try{await connectApi(`/api/connect/creator-invites`,{method:"POST",body:JSON.stringify({rewardLabel:connectInviteRewardLabel})});await loadConnectCreatorDashboard();setConnectNotice("Referral invite created.");}catch(e){setConnectNotice(e.message||"Unable to create invite.");}
   };
 
   const redeemConnectCreatorInvite=async()=>{
     if(!connectInviteRedeemCode.trim())return;
-    try{const d=await connectApi(`/api/connect/creator-invites/redeem`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId(),code:connectInviteRedeemCode})});setConnectNotice(d.redeemed?`Invite redeemed · ${d.reward_label}`:"Invite was already redeemed.");}catch(e){setConnectNotice(e.message||"Unable to redeem invite.");}
+    try{const d=await connectApi(`/api/connect/creator-invites/redeem`,{method:"POST",body:JSON.stringify({code:connectInviteRedeemCode})});setConnectNotice(d.redeemed?`Invite redeemed · ${d.reward_label}`:"Invite was already redeemed.");}catch(e){setConnectNotice(e.message||"Unable to redeem invite.");}
   };
 
   const addConnectCreatorResource=async()=>{
     if(!connectResourceTitle.trim())return;
-    try{await connectApi(`/api/connect/creator-resources`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId(),title:connectResourceTitle,description:connectResourceDescription,resourceUrl:connectResourceUrl,subscribersOnly:true})});setConnectResourceTitle("");setConnectResourceDescription("");setConnectResourceUrl("");await loadConnectCreatorDashboard();setConnectNotice("Member resource added.");}catch(e){setConnectNotice(e.message||"Unable to add resource.");}
+    try{await connectApi(`/api/connect/creator-resources`,{method:"POST",body:JSON.stringify({title:connectResourceTitle,description:connectResourceDescription,resourceUrl:connectResourceUrl,subscribersOnly:true})});setConnectResourceTitle("");setConnectResourceDescription("");setConnectResourceUrl("");await loadConnectCreatorDashboard();setConnectNotice("Member resource added.");}catch(e){setConnectNotice(e.message||"Unable to add resource.");}
   };
 
   const exportConnectStatementCsv=()=>{
@@ -4985,35 +4968,35 @@ function App() {
 
   const toggleConnectSeriesFollow=async()=>{
     const series=connectSeriesEpisodesData?.series;if(!series)return;
-    try{const d=await connectApi(`/api/connect/space-series/${series.id}/follow`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId()})});setConnectSeriesEpisodesData(v=>v?{...v,followed:d.followed,followerCount:d.follower_count}:v);}catch(e){setConnectNotice(e.message||"Unable to update series follow.");}
+    try{const d=await connectApi(`/api/connect/space-series/${series.id}/follow`,{method:"POST",body:JSON.stringify({})});setConnectSeriesEpisodesData(v=>v?{...v,followed:d.followed,followerCount:d.follower_count}:v);}catch(e){setConnectNotice(e.message||"Unable to update series follow.");}
   };
 
   const saveConnectSeriesTitlePrefix=async()=>{
     const series=connectSeriesEpisodesData?.series;if(!series)return;
-    try{await connectApi(`/api/connect/space-series/${series.id}/settings`,{method:"PATCH",body:JSON.stringify({userId:connectRealtimeUserId(),titlePrefix:connectSeriesTitlePrefix})});setConnectNotice("Episode naming updated.");await openConnectSeriesEpisodes(series);}catch(e){setConnectNotice(e.message||"Unable to update series.");}
+    try{await connectApi(`/api/connect/space-series/${series.id}/settings`,{method:"PATCH",body:JSON.stringify({titlePrefix:connectSeriesTitlePrefix})});setConnectNotice("Episode naming updated.");await openConnectSeriesEpisodes(series);}catch(e){setConnectNotice(e.message||"Unable to update series.");}
   };
 
   const runConnectSeriesAutomation=async()=>{
     setConnectSeriesAutomationRunning(true);
-    try{const d=await connectApi(`/api/connect/series-automation/run`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId()})});setConnectNotice(d.message||"Series automation completed.");await Promise.all([loadConnectCreatorDashboard(),loadConnectBootstrap()]);}catch(e){setConnectNotice(e.message||"Series automation failed.");}
+    try{const d=await connectApi(`/api/connect/series-automation/run`,{method:"POST",body:JSON.stringify({})});setConnectNotice(d.message||"Series automation completed.");await Promise.all([loadConnectCreatorDashboard(),loadConnectBootstrap()]);}catch(e){setConnectNotice(e.message||"Series automation failed.");}
     finally{setConnectSeriesAutomationRunning(false);}
   };
 
   const sendConnectCreatorAnnouncement=async()=>{
     if(!connectCreatorAnnouncement.trim())return;
-    try{await connectApi(`/api/connect/creator-announcements`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId(),message:connectCreatorAnnouncement})});setConnectCreatorAnnouncement("");await loadConnectCreatorDashboard();setConnectNotice("Announcement sent to active members.");}catch(e){setConnectNotice(e.message||"Unable to send announcement.");}
+    try{await connectApi(`/api/connect/creator-announcements`,{method:"POST",body:JSON.stringify({message:connectCreatorAnnouncement})});setConnectCreatorAnnouncement("");await loadConnectCreatorDashboard();setConnectNotice("Announcement sent to active members.");}catch(e){setConnectNotice(e.message||"Unable to send announcement.");}
   };
 
   const pauseConnectCreatorMembership=async(creatorId)=>{
-    try{const d=await connectApi(`/api/connect/creator-subscriptions/${creatorId}/pause`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId()})});setConnectNotice(d.message||"Membership paused.");}catch(e){setConnectNotice(e.message||"Unable to pause membership.");}
+    try{const d=await connectApi(`/api/connect/creator-subscriptions/${creatorId}/pause`,{method:"POST",body:JSON.stringify({})});setConnectNotice(d.message||"Membership paused.");}catch(e){setConnectNotice(e.message||"Unable to pause membership.");}
   };
 
   const resumeConnectCreatorMembership=async(creatorId)=>{
-    try{const d=await connectApi(`/api/connect/creator-subscriptions/${creatorId}/resume`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId()})});setConnectNotice(d.message||"Membership resumed.");}catch(e){setConnectNotice(e.message||"Unable to resume membership.");}
+    try{const d=await connectApi(`/api/connect/creator-subscriptions/${creatorId}/resume`,{method:"POST",body:JSON.stringify({})});setConnectNotice(d.message||"Membership resumed.");}catch(e){setConnectNotice(e.message||"Unable to resume membership.");}
   };
 
   const toggleConnectMembershipCoupon=async(coupon)=>{
-    try{await connectApi(`/api/connect/membership-coupons/${coupon.id}/toggle`,{method:"PATCH",body:JSON.stringify({userId:connectRealtimeUserId()})});await loadConnectCreatorDashboard();}catch(e){setConnectNotice(e.message||"Unable to update coupon.");}
+    try{await connectApi(`/api/connect/membership-coupons/${coupon.id}/toggle`,{method:"PATCH",body:JSON.stringify({})});await loadConnectCreatorDashboard();}catch(e){setConnectNotice(e.message||"Unable to update coupon.");}
   };
 
   const exportConnectRevenueCsv=()=>{
@@ -5025,110 +5008,110 @@ function App() {
 
   const generateConnectNextSeriesEpisode=async()=>{
     const series=connectSeriesEpisodesData?.series;if(!series)return;
-    try{const d=await connectApi(`/api/connect/space-series/${series.id}/generate-next`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId()})});setConnectNotice(d.message||"Next episode generated.");await openConnectSeriesEpisodes(series);await loadConnectBootstrap();}catch(e){setConnectNotice(e.message||"Unable to generate next episode.");}
+    try{const d=await connectApi(`/api/connect/space-series/${series.id}/generate-next`,{method:"POST",body:JSON.stringify({})});setConnectNotice(d.message||"Next episode generated.");await openConnectSeriesEpisodes(series);await loadConnectBootstrap();}catch(e){setConnectNotice(e.message||"Unable to generate next episode.");}
   };
 
   const runConnectMembershipExpirySweep=async()=>{
-    try{const d=await connectApi(`/api/connect/memberships/expiry-sweep`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId()})});setConnectNotice(`${d.expired_count||0} expired membership(s) updated.`);await loadConnectCreatorDashboard();}catch(e){setConnectNotice(e.message||"Expiry check failed.");}
+    try{const d=await connectApi(`/api/connect/memberships/expiry-sweep`,{method:"POST",body:JSON.stringify({})});setConnectNotice(`${d.expired_count||0} expired membership(s) updated.`);await loadConnectCreatorDashboard();}catch(e){setConnectNotice(e.message||"Expiry check failed.");}
   };
 
   const sendConnectRenewalReminders=async()=>{
-    try{const d=await connectApi(`/api/connect/memberships/send-renewal-reminders`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId()})});setConnectNotice(`${d.reminders_sent||0} renewal reminder(s) prepared.`);}catch(e){setConnectNotice(e.message||"Reminder send failed.");}
+    try{const d=await connectApi(`/api/connect/memberships/send-renewal-reminders`,{method:"POST",body:JSON.stringify({})});setConnectNotice(`${d.reminders_sent||0} renewal reminder(s) prepared.`);}catch(e){setConnectNotice(e.message||"Reminder send failed.");}
   };
 
   const saveConnectMembershipCoupon=async()=>{
     if(!connectCouponCode.trim())return setConnectNotice("Enter a coupon code.");
-    try{await connectApi(`/api/connect/membership-coupons`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId(),code:connectCouponCode,discountType:connectCouponType,discountValue:Number(connectCouponValue)||0,maxUses:Number(connectCouponMaxUses)||0,expiresAt:connectCouponExpiresAt?new Date(connectCouponExpiresAt).toISOString():null})});setConnectCouponCode("");await loadConnectCreatorDashboard();setConnectNotice("Membership coupon saved.");}catch(e){setConnectNotice(e.message||"Unable to save coupon.");}
+    try{await connectApi(`/api/connect/membership-coupons`,{method:"POST",body:JSON.stringify({code:connectCouponCode,discountType:connectCouponType,discountValue:Number(connectCouponValue)||0,maxUses:Number(connectCouponMaxUses)||0,expiresAt:connectCouponExpiresAt?new Date(connectCouponExpiresAt).toISOString():null})});setConnectCouponCode("");await loadConnectCreatorDashboard();setConnectNotice("Membership coupon saved.");}catch(e){setConnectNotice(e.message||"Unable to save coupon.");}
   };
 
   const startConnectCreatorTrial=async(creatorId,creatorName)=>{
     const days=Math.max(1,Math.min(30,Number(connectTrialDays)||7));
-    try{const d=await connectApi(`/api/connect/creator-plans/${creatorId}/subscribe`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId(),trialDays:days})});setConnectNotice(d.message||"Trial started.");}catch(e){setConnectNotice(e.message||"Unable to start trial.");}
+    try{const d=await connectApi(`/api/connect/creator-plans/${creatorId}/subscribe`,{method:"POST",body:JSON.stringify({trialDays:days})});setConnectNotice(d.message||"Trial started.");}catch(e){setConnectNotice(e.message||"Unable to start trial.");}
   };
 
   const giftConnectCreatorMembership=async(creatorId)=>{
     const recipientUsername=String(connectGiftRecipientId||"").trim().replace(/^@/,"").toLowerCase();if(!recipientUsername)return setConnectNotice("Enter recipient public username.");
-    try{const d=await connectApi(`/api/connect/creator-memberships/${creatorId}/gift`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId(),recipientUsername})});setConnectGiftRecipientId("");setConnectNotice(d.message||"Membership gifted.");}catch(e){setConnectNotice(e.message||"Unable to gift membership.");}
+    try{const d=await connectApi(`/api/connect/creator-memberships/${creatorId}/gift`,{method:"POST",body:JSON.stringify({recipientUsername})});setConnectGiftRecipientId("");setConnectNotice(d.message||"Membership gifted.");}catch(e){setConnectNotice(e.message||"Unable to gift membership.");}
   };
 
   const saveConnectCreatorGoal=async()=>{
-    try{await connectApi(`/api/connect/creator-goals`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId(),goalType:connectGoalType,targetValue:Number(connectGoalTarget)||1,title:connectGoalTitle})});await loadConnectCreatorDashboard();setConnectNotice("Creator goal saved.");}catch(e){setConnectNotice(e.message||"Unable to save goal.");}
+    try{await connectApi(`/api/connect/creator-goals`,{method:"POST",body:JSON.stringify({goalType:connectGoalType,targetValue:Number(connectGoalTarget)||1,title:connectGoalTitle})});await loadConnectCreatorDashboard();setConnectNotice("Creator goal saved.");}catch(e){setConnectNotice(e.message||"Unable to save goal.");}
   };
 
   const addConnectCreatorTier=async()=>{
     if(!connectTierName.trim())return;
-    try{await connectApi(`/api/connect/creator-tiers`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId(),tierName:connectTierName,badgeEmoji:connectTierEmoji,minMonths:Number(connectTierMonths)||0})});await loadConnectCreatorDashboard();setConnectNotice("Member tier added.");}catch(e){setConnectNotice(e.message||"Unable to add tier.");}
+    try{await connectApi(`/api/connect/creator-tiers`,{method:"POST",body:JSON.stringify({tierName:connectTierName,badgeEmoji:connectTierEmoji,minMonths:Number(connectTierMonths)||0})});await loadConnectCreatorDashboard();setConnectNotice("Member tier added.");}catch(e){setConnectNotice(e.message||"Unable to add tier.");}
   };
 
   const loadConnectMembershipAnalytics=async()=>{
-    try{const d=await connectApi(`/api/connect/creator-membership-analytics?userId=${connectRealtimeUserId()}`);setConnectMembershipAnalytics(d);}catch{}
+    try{const d=await connectApi(`/api/connect/creator-membership-analytics`);setConnectMembershipAnalytics(d);}catch{}
   };
 
   const addConnectCreatorPerk=async()=>{
     if(!connectCreatorPerkTitle.trim())return;
-    try{await connectApi(`/api/connect/creator-perks`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId(),perkCode:connectCreatorPerkTitle.toUpperCase().replace(/[^A-Z0-9]+/g,"_"),title:connectCreatorPerkTitle,description:connectCreatorPerkDescription})});setConnectCreatorPerkTitle("");setConnectCreatorPerkDescription("");await loadConnectCreatorDashboard();}catch(e){setConnectNotice(e.message||"Unable to add perk.");}
+    try{await connectApi(`/api/connect/creator-perks`,{method:"POST",body:JSON.stringify({perkCode:connectCreatorPerkTitle.toUpperCase().replace(/[^A-Z0-9]+/g,"_"),title:connectCreatorPerkTitle,description:connectCreatorPerkDescription})});setConnectCreatorPerkTitle("");setConnectCreatorPerkDescription("");await loadConnectCreatorDashboard();}catch(e){setConnectNotice(e.message||"Unable to add perk.");}
   };
 
   const requestConnectCreatorPayout=async()=>{
-    try{const d=await connectApi(`/api/connect/creator-payouts`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId(),amount:Number(connectCreatorPayoutAmount)||0})});setConnectCreatorPayoutAmount("");setConnectNotice(`Payout requested: ${d.payout?.reference_code||""}`);await loadConnectCreatorDashboard();}catch(e){setConnectNotice(e.message||"Unable to request payout.");}
+    try{const d=await connectApi(`/api/connect/creator-payouts`,{method:"POST",body:JSON.stringify({amount:Number(connectCreatorPayoutAmount)||0})});setConnectCreatorPayoutAmount("");setConnectNotice(`Payout requested: ${d.payout?.reference_code||""}`);await loadConnectCreatorDashboard();}catch(e){setConnectNotice(e.message||"Unable to request payout.");}
   };
 
   const openConnectSeriesEpisodes=async(series)=>{
-    try{const d=await connectApi(`/api/connect/space-series/${series.id}/episodes?userId=${connectRealtimeUserId()}`);setConnectSeriesEpisodesData(d);setConnectSeriesEpisodesOpen(true);}catch(e){setConnectNotice(e.message||"Unable to load series.");}
+    try{const d=await connectApi(`/api/connect/space-series/${series.id}/episodes`);setConnectSeriesEpisodesData(d);setConnectSeriesEpisodesOpen(true);}catch(e){setConnectNotice(e.message||"Unable to load series.");}
   };
 
   const saveConnectSeriesRecurringSchedule=async()=>{
     const series=connectSeriesEpisodesData?.series;if(!series)return;
     try{
-      const d=await connectApi(`/api/connect/space-series/${series.id}/schedule`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId(),recurrenceType:connectSeriesScheduleType,weekday:Number(connectSeriesScheduleDay),localTime:connectSeriesScheduleTime,timezone:"Asia/Kolkata"})});
+      const d=await connectApi(`/api/connect/space-series/${series.id}/schedule`,{method:"POST",body:JSON.stringify({recurrenceType:connectSeriesScheduleType,weekday:Number(connectSeriesScheduleDay),localTime:connectSeriesScheduleTime,timezone:"Asia/Kolkata"})});
       setConnectNotice(d.message||"Recurring schedule saved.");
       await openConnectSeriesEpisodes(series);
     }catch(e){setConnectNotice(e.message||"Unable to save schedule.");}
   };
 
   const renewConnectCreatorMembership=async(creatorId,creatorName)=>{
-    try{const d=await connectApi(`/api/connect/creator-subscriptions/${creatorId}/renew`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId()})});setHpayRecipient(creatorName||"HOWDI creator");setHpayAction("pay");setHpayAmount(String(d.amount||0));setHpayNote(`HOWDI Membership Renewal: ${d.plan?.plan_name||"Membership"}`);setConnectNotice(d.message||"Complete renewal through HPay.");}catch(e){setConnectNotice(e.message||"Unable to renew membership.");}
+    try{const d=await connectApi(`/api/connect/creator-subscriptions/${creatorId}/renew`,{method:"POST",body:JSON.stringify({})});setHpayRecipient(creatorName||"HOWDI creator");setHpayAction("pay");setHpayAmount(String(d.amount||0));setHpayNote(`HOWDI Membership Renewal: ${d.plan?.plan_name||"Membership"}`);setConnectNotice(d.message||"Complete renewal through HPay.");}catch(e){setConnectNotice(e.message||"Unable to renew membership.");}
   };
 
   const cancelConnectCreatorMembership=async(creatorId)=>{
     if(!window.confirm("Cancel this creator membership?"))return;
-    try{const d=await connectApi(`/api/connect/creator-subscriptions/${creatorId}/cancel`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId()})});setConnectNotice(d.message||"Membership cancelled.");}catch(e){setConnectNotice(e.message||"Unable to cancel membership.");}
+    try{const d=await connectApi(`/api/connect/creator-subscriptions/${creatorId}/cancel`,{method:"POST",body:JSON.stringify({})});setConnectNotice(d.message||"Membership cancelled.");}catch(e){setConnectNotice(e.message||"Unable to cancel membership.");}
   };
 
   const loadConnectCreatorDashboard=async()=>{
     const uid=connectRealtimeUserId();if(!uid)return;
     setConnectCreatorDashboardLoading(true);
-    try{const [d,a,cal]=await Promise.all([connectApi(`/api/connect/creator-dashboard?userId=${uid}`),connectApi(`/api/connect/creator-membership-analytics?userId=${uid}`),connectApi(`/api/connect/series-calendar?userId=${uid}&days=45`)]);setConnectCreatorDashboard(d);setConnectMembershipAnalytics(a);setConnectSeriesCalendar(cal.events||[]);setConnectCreatorDashboardOpen(true);}catch(e){setConnectNotice(e.message||"Unable to load creator dashboard.");}
+    try{const [d,a,cal]=await Promise.all([connectApi(`/api/connect/creator-dashboard`),connectApi(`/api/connect/creator-membership-analytics`),connectApi(`/api/connect/series-calendar?days=45`)]);setConnectCreatorDashboard(d);setConnectMembershipAnalytics(a);setConnectSeriesCalendar(cal.events||[]);setConnectCreatorDashboardOpen(true);}catch(e){setConnectNotice(e.message||"Unable to load creator dashboard.");}
     finally{setConnectCreatorDashboardLoading(false);}
   };
 
   const saveConnectCreatorPlan=async()=>{
     try{
-      await connectApi(`/api/connect/creator-plans`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId(),planName:connectCreatorPlanName,price:Number(connectCreatorPlanPrice)||0,billingPeriod:connectCreatorPlanPeriod,benefits:connectCreatorPlanBenefits,trialDays:Number(connectCreatorPlanTrial)||0})});
+      await connectApi(`/api/connect/creator-plans`,{method:"POST",body:JSON.stringify({planName:connectCreatorPlanName,price:Number(connectCreatorPlanPrice)||0,billingPeriod:connectCreatorPlanPeriod,benefits:connectCreatorPlanBenefits,trialDays:Number(connectCreatorPlanTrial)||0})});
       await loadConnectCreatorDashboard();setConnectNotice("Creator membership plan saved.");
     }catch(e){setConnectNotice(e.message||"Unable to save membership plan.");}
   };
 
   const subscribeConnectMembershipCreator=async(creatorId,creatorName)=>{
     try{
-      const d=await connectApi(`/api/connect/creator-plans/${creatorId}/subscribe`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId(),couponCode:connectCouponCode.trim()})});
+      const d=await connectApi(`/api/connect/creator-plans/${creatorId}/subscribe`,{method:"POST",body:JSON.stringify({couponCode:connectCouponCode.trim()})});
       setHpayRecipient(creatorName||"HOWDI creator");setHpayAction("pay");setHpayAmount(String(d.amount||0));setHpayNote(`HOWDI Creator Membership: ${d.plan?.plan_name||"Supporter"}`);setConnectNotice(d.message||"Complete membership through HPay.");
     }catch(e){setConnectNotice(e.message||"Membership unavailable.");}
   };
 
   const grantConnectCreatorMembership=async(member)=>{
-    try{await connectApi(`/api/connect/creator-subscriptions/${member.subscriber_user_id}/grant`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId()})});await loadConnectCreatorDashboard();setConnectNotice(`Membership activated for ${member.full_name}.`);}catch(e){setConnectNotice(e.message||"Unable to activate membership.");}
+    try{await connectApi(`/api/connect/creator-subscriptions/${member.subscriber_user_id}/grant`,{method:"POST",body:JSON.stringify({})});await loadConnectCreatorDashboard();setConnectNotice(`Membership activated for ${member.full_name}.`);}catch(e){setConnectNotice(e.message||"Unable to activate membership.");}
   };
 
   const createConnectSpaceSeries=async()=>{
     if(!connectSpaceSeriesTitle.trim())return setConnectNotice("Enter a series title.");
-    try{const d=await connectApi(`/api/connect/space-series`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId(),title:connectSpaceSeriesTitle,topic:connectSpaceSeriesTopic})});setConnectSpaceSeriesId(String(d.series?.id||""));setConnectNotice("Space series created.");await loadConnectCreatorDashboard();}catch(e){setConnectNotice(e.message||"Unable to create series.");}
+    try{const d=await connectApi(`/api/connect/space-series`,{method:"POST",body:JSON.stringify({title:connectSpaceSeriesTitle,topic:connectSpaceSeriesTopic})});setConnectSpaceSeriesId(String(d.series?.id||""));setConnectNotice("Space series created.");await loadConnectCreatorDashboard();}catch(e){setConnectNotice(e.message||"Unable to create series.");}
   };
 
   const saveConnectSpaceSeriesSettings=async()=>{
     try{
-      await connectApi(`/api/connect/spaces/${connectRealtimeRoom.id}/series`,{method:"PATCH",body:JSON.stringify({userId:connectRealtimeUserId(),seriesId:Number(connectSpaceSeriesId)||null,recurringRule:connectSpaceRecurringRule})});
-      await connectApi(`/api/connect/spaces/${connectRealtimeRoom.id}/subscriber-only`,{method:"PATCH",body:JSON.stringify({userId:connectRealtimeUserId(),enabled:connectSpaceSubscribersOnly})});
+      await connectApi(`/api/connect/spaces/${connectRealtimeRoom.id}/series`,{method:"PATCH",body:JSON.stringify({seriesId:Number(connectSpaceSeriesId)||null,recurringRule:connectSpaceRecurringRule})});
+      await connectApi(`/api/connect/spaces/${connectRealtimeRoom.id}/subscriber-only`,{method:"PATCH",body:JSON.stringify({enabled:connectSpaceSubscribersOnly})});
       await connectRealtimePoll();setConnectNotice("Series and subscriber settings saved.");
     }catch(e){setConnectRealtimeError(e.message||"Unable to save series settings.");}
   };
@@ -5137,8 +5120,8 @@ function App() {
     const uid=connectRealtimeUserId();if(!uid)return;
     try{
       const [saved,history]=await Promise.all([
-        connectApi(`/api/connect/spaces/bookmarked?userId=${uid}`),
-        connectApi(`/api/connect/spaces/history?userId=${uid}`)
+        connectApi(`/api/connect/spaces/bookmarked`),
+        connectApi(`/api/connect/spaces/history`)
       ]);
       setConnectSpaceSaved(saved.spaces||[]);setConnectSpaceHistory(history.spaces||[]);
     }catch{}
@@ -5149,7 +5132,7 @@ function App() {
     if(Number(room.owner_user_id)===uid)return connectRealtimeOpenRoom(room);
     setConnectSpacePreflightLoading(true);setConnectSpacePreflight({room});
     try{
-      const d=await connectApi(`/api/connect/spaces/${room.id}/preflight?userId=${uid}`);
+      const d=await connectApi(`/api/connect/spaces/${room.id}/preflight`);
       setConnectSpacePreflight(d);
     }catch(e){setConnectNotice(e.message||"Unable to open Space preview.");setConnectSpacePreflight(null);}
     finally{setConnectSpacePreflightLoading(false);}
@@ -5167,13 +5150,13 @@ function App() {
 
   const saveConnectSpaceFollowup=async()=>{
     try{
-      await connectApi(`/api/connect/spaces/${connectRealtimeRoom.id}/followup`,{method:"PATCH",body:JSON.stringify({userId:connectRealtimeUserId(),followupRoomId:Number(connectSpaceFollowupId)||null})});
+      await connectApi(`/api/connect/spaces/${connectRealtimeRoom.id}/followup`,{method:"PATCH",body:JSON.stringify({followupRoomId:Number(connectSpaceFollowupId)||null})});
       setConnectNotice("Follow-up Space linked.");await connectRealtimePoll();
     }catch(e){setConnectRealtimeError(e.message||"Unable to link follow-up Space.");}
   };
 
   const grantConnectPremiumAccess=async(person)=>{
-    try{await connectApi(`/api/connect/spaces/${connectRealtimeRoom.id}/premium-grant/${person.user_id}`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId()})});setConnectNotice(`Premium access granted to ${person.full_name}.`);}catch(e){setConnectRealtimeError(e.message||"Unable to grant premium access.");}
+    try{await connectApi(`/api/connect/spaces/${connectRealtimeRoom.id}/premium-grant/${person.user_id}`,{method:"POST",body:JSON.stringify({})});setConnectNotice(`Premium access granted to ${person.full_name}.`);}catch(e){setConnectRealtimeError(e.message||"Unable to grant premium access.");}
   };
 
   // K5D: notifications carry an ID-free `target` ({kind,id}|{kind:"PROFILE",username}); map each kind to an existing Connect view.
@@ -5188,7 +5171,7 @@ function App() {
         const room=(connectBootstrap.communities||[]).find(c=>String(c.id)===String(t.id));
         setConnectView("communities");setConnectCommunityView("spaces");
         if(room)await openConnectSpacePreflight(room);
-        else{const d=await connectApi(`/api/connect/spaces/${t.id}/preflight?userId=${connectRealtimeUserId()}`);if(d.room)await openConnectSpacePreflight(d.room);}
+        else{const d=await connectApi(`/api/connect/spaces/${t.id}/preflight`);if(d.room)await openConnectSpacePreflight(d.room);}
       }
       else if(t.kind==="LIVE"){setConnectView("communities");setConnectCommunityView("live");}
       else if(t.kind==="ARTICLE"){setConnectView("articles");await openConnectArticle({id:t.id});}
@@ -5200,30 +5183,30 @@ function App() {
     }catch(e){setConnectNotice(e.message||"Unable to open this notification.");}
   };
 
-  const saveConnectSpaceChatControls=async()=>{try{await connectApi(`/api/connect/realtime/${connectRealtimeRoom.id}/chat-controls`,{method:"PATCH",body:JSON.stringify({userId:connectRealtimeUserId(),chatMode:connectSpaceChatMode,slowSeconds:Number(connectSpaceSlowSeconds)||0})});await connectRealtimePoll();setConnectNotice("Chat controls updated.");}catch(e){setConnectRealtimeError(e.message||"Chat controls failed.");}};
-  const submitConnectSpaceReport=async()=>{if(!connectSpaceReportTarget)return;try{await connectApi(`/api/connect/spaces/${connectRealtimeRoom.id}/report`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId(),targetUserId:connectSpaceReportTarget.user_id,reason:connectSpaceReportReason,details:connectSpaceReportDetails})});setConnectSpaceReportTarget(null);setConnectSpaceReportDetails("");setConnectNotice("Report submitted.");}catch(e){setConnectRealtimeError(e.message||"Report failed.");}};
-  const blockConnectSpaceUser=async(person)=>{if(!window.confirm(`Block ${person.full_name} from this Space?`))return;try{await connectApi(`/api/connect/spaces/${connectRealtimeRoom.id}/block/${person.user_id}`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId(),reason:"Host moderation"})});setConnectSpaceParticipantCard(null);await connectRealtimePoll();}catch(e){setConnectRealtimeError(e.message||"Block failed.");}};
-  const unblockConnectSpaceUser=async(userId)=>{try{await connectApi(`/api/connect/spaces/${connectRealtimeRoom.id}/block/${userId}?userId=${connectRealtimeUserId()}`,{method:"DELETE"});await connectRealtimePoll();}catch(e){setConnectRealtimeError(e.message||"Unblock failed.");}};
-  const saveConnectSpaceBoost=async()=>{try{await connectApi(`/api/connect/spaces/${connectRealtimeRoom.id}/boost`,{method:"PATCH",body:JSON.stringify({userId:connectRealtimeUserId(),boost:Number(connectSpaceBoost)||0})});await connectRealtimePoll();setConnectNotice("Discovery boost updated.");}catch(e){setConnectRealtimeError(e.message||"Boost failed.");}};
-  const loadConnectSpaceRecommendations=async()=>{const uid=connectRealtimeUserId();if(!uid)return;try{const d=await connectApi(`/api/connect/spaces/recommended?userId=${uid}&limit=8`);setConnectSpaceRecommended(d.spaces||[]);}catch{}};
+  const saveConnectSpaceChatControls=async()=>{try{await connectApi(`/api/connect/realtime/${connectRealtimeRoom.id}/chat-controls`,{method:"PATCH",body:JSON.stringify({chatMode:connectSpaceChatMode,slowSeconds:Number(connectSpaceSlowSeconds)||0})});await connectRealtimePoll();setConnectNotice("Chat controls updated.");}catch(e){setConnectRealtimeError(e.message||"Chat controls failed.");}};
+  const submitConnectSpaceReport=async()=>{if(!connectSpaceReportTarget)return;try{await connectApi(`/api/connect/spaces/${connectRealtimeRoom.id}/report`,{method:"POST",body:JSON.stringify({targetUserId:connectSpaceReportTarget.user_id,reason:connectSpaceReportReason,details:connectSpaceReportDetails})});setConnectSpaceReportTarget(null);setConnectSpaceReportDetails("");setConnectNotice("Report submitted.");}catch(e){setConnectRealtimeError(e.message||"Report failed.");}};
+  const blockConnectSpaceUser=async(person)=>{if(!window.confirm(`Block ${person.full_name} from this Space?`))return;try{await connectApi(`/api/connect/spaces/${connectRealtimeRoom.id}/block/${person.user_id}`,{method:"POST",body:JSON.stringify({reason:"Host moderation"})});setConnectSpaceParticipantCard(null);await connectRealtimePoll();}catch(e){setConnectRealtimeError(e.message||"Block failed.");}};
+  const unblockConnectSpaceUser=async(userId)=>{try{await connectApi(`/api/connect/spaces/${connectRealtimeRoom.id}/block/${userId}`,{method:"DELETE"});await connectRealtimePoll();}catch(e){setConnectRealtimeError(e.message||"Unblock failed.");}};
+  const saveConnectSpaceBoost=async()=>{try{await connectApi(`/api/connect/spaces/${connectRealtimeRoom.id}/boost`,{method:"PATCH",body:JSON.stringify({boost:Number(connectSpaceBoost)||0})});await connectRealtimePoll();setConnectNotice("Discovery boost updated.");}catch(e){setConnectRealtimeError(e.message||"Boost failed.");}};
+  const loadConnectSpaceRecommendations=async()=>{const uid=connectRealtimeUserId();if(!uid)return;try{const d=await connectApi(`/api/connect/spaces/recommended?limit=8`);setConnectSpaceRecommended(d.spaces||[]);}catch{}};
 
-  const createConnectSpacePoll=async()=>{const opts=connectSpacePollOptions.map(x=>x.trim()).filter(Boolean);if(!connectSpacePollQuestion.trim()||opts.length<2)return setConnectRealtimeError("Add a question and 2 options.");try{await connectApi(`/api/connect/realtime/${connectRealtimeRoom.id}/poll`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId(),question:connectSpacePollQuestion,options:opts})});setConnectSpacePollOpen(false);setConnectSpacePollQuestion("");setConnectSpacePollOptions(["",""]);await connectRealtimePoll();}catch(e){setConnectRealtimeError(e.message||"Poll failed.");}};
-  const voteConnectSpacePoll=async(id,optionIndex)=>{try{await connectApi(`/api/connect/realtime/${connectRealtimeRoom.id}/poll/${id}/vote`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId(),optionIndex})});await connectRealtimePoll();}catch(e){setConnectRealtimeError(e.message||"Vote failed.");}};
-  const pinConnectSpaceChat=async(id)=>{try{await connectApi(`/api/connect/realtime/${connectRealtimeRoom.id}/chat/${id}/pin`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId()})});await connectRealtimePoll();}catch(e){setConnectRealtimeError(e.message||"Pin failed.");}};
+  const createConnectSpacePoll=async()=>{const opts=connectSpacePollOptions.map(x=>x.trim()).filter(Boolean);if(!connectSpacePollQuestion.trim()||opts.length<2)return setConnectRealtimeError("Add a question and 2 options.");try{await connectApi(`/api/connect/realtime/${connectRealtimeRoom.id}/poll`,{method:"POST",body:JSON.stringify({question:connectSpacePollQuestion,options:opts})});setConnectSpacePollOpen(false);setConnectSpacePollQuestion("");setConnectSpacePollOptions(["",""]);await connectRealtimePoll();}catch(e){setConnectRealtimeError(e.message||"Poll failed.");}};
+  const voteConnectSpacePoll=async(id,optionIndex)=>{try{await connectApi(`/api/connect/realtime/${connectRealtimeRoom.id}/poll/${id}/vote`,{method:"POST",body:JSON.stringify({optionIndex})});await connectRealtimePoll();}catch(e){setConnectRealtimeError(e.message||"Vote failed.");}};
+  const pinConnectSpaceChat=async(id)=>{try{await connectApi(`/api/connect/realtime/${connectRealtimeRoom.id}/chat/${id}/pin`,{method:"POST",body:JSON.stringify({})});await connectRealtimePoll();}catch(e){setConnectRealtimeError(e.message||"Pin failed.");}};
   const openConnectSpaceExperience=()=>{setConnectSpaceRulesDraft(connectRealtimeState?.room?.space_rules||"");setConnectSpaceAnnouncementDraft(connectRealtimeState?.room?.host_announcement||"");setConnectSpaceAudienceGoalDraft(String(connectRealtimeState?.room?.audience_goal||""));setConnectSpaceExperienceOpen(true);};
-  const saveConnectSpaceExperience=async()=>{try{await connectApi(`/api/connect/realtime/${connectRealtimeRoom.id}/experience`,{method:"PATCH",body:JSON.stringify({userId:connectRealtimeUserId(),rules:connectSpaceRulesDraft,announcement:connectSpaceAnnouncementDraft,audienceGoal:connectSpaceAudienceGoalDraft})});setConnectSpaceExperienceOpen(false);await connectRealtimePoll();}catch(e){setConnectRealtimeError(e.message||"Save failed.");}};
-  const submitConnectSpaceRating=async()=>{try{await connectApi(`/api/connect/spaces/${connectRealtimeRoom.id}/rating`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId(),rating:connectSpaceRating,feedback:connectSpaceFeedback})});setConnectSpaceRatingOpen(false);setConnectNotice("Thanks for rating this Space ⭐");}catch(e){setConnectNotice(e.message||"Rating failed.");}};
+  const saveConnectSpaceExperience=async()=>{try{await connectApi(`/api/connect/realtime/${connectRealtimeRoom.id}/experience`,{method:"PATCH",body:JSON.stringify({rules:connectSpaceRulesDraft,announcement:connectSpaceAnnouncementDraft,audienceGoal:connectSpaceAudienceGoalDraft})});setConnectSpaceExperienceOpen(false);await connectRealtimePoll();}catch(e){setConnectRealtimeError(e.message||"Save failed.");}};
+  const submitConnectSpaceRating=async()=>{try{await connectApi(`/api/connect/spaces/${connectRealtimeRoom.id}/rating`,{method:"POST",body:JSON.stringify({rating:connectSpaceRating,feedback:connectSpaceFeedback})});setConnectSpaceRatingOpen(false);setConnectNotice("Thanks for rating this Space ⭐");}catch(e){setConnectNotice(e.message||"Rating failed.");}};
 
   const connectRealtimeSendChat=async()=>{
     const text=connectRealtimeChatText.trim(),room=connectRealtimeRoom,userId=connectRealtimeUserId();if(!text||!room?.id||!userId)return;
-    try{await connectApi(`/api/connect/realtime/${room.id}/chat`,{method:"POST",body:JSON.stringify({userId,messageText:text})});setConnectRealtimeChatText("");await connectRealtimePoll();}catch(e){setConnectRealtimeError(e.message||"Unable to send message.");}
+    try{await connectApi(`/api/connect/realtime/${room.id}/chat`,{method:"POST",body:JSON.stringify({messageText:text})});setConnectRealtimeChatText("");await connectRealtimePoll();}catch(e){setConnectRealtimeError(e.message||"Unable to send message.");}
   };
 
   const createConnectSpaceTip=async()=>{
     const room=connectRealtimeRoom,userId=connectRealtimeUserId(),amount=Number(connectSpaceTipAmount);
     if(!room?.id||!userId||!amount)return;
     try{
-      const d=await connectApi(`/api/connect/realtime/${room.id}/tip`,{method:"POST",body:JSON.stringify({userId,amount})});
+      const d=await connectApi(`/api/connect/realtime/${room.id}/tip`,{method:"POST",body:JSON.stringify({amount})});
       setConnectSpaceTipOpen(false);
       setConnectNotice(d.message||"Tip created. Complete through HPay.");
       const host=(connectRealtimeState?.participants||[]).find(p=>String(p.participant_role)==="HOST");
@@ -5239,7 +5222,7 @@ function App() {
     setConnectSpaceReactions(items=>[...items.slice(-7),{id,emoji}]);
     window.setTimeout(()=>setConnectSpaceReactions(items=>items.filter(item=>item.id!==id)),2200);
     try{
-      if(connectRealtimeRoom?.id&&connectRealtimeUserId())await connectApi(`/api/connect/realtime/${connectRealtimeRoom.id}/reaction`,{method:"POST",body:JSON.stringify({userId:connectRealtimeUserId(),emoji})});
+      if(connectRealtimeRoom?.id&&connectRealtimeUserId())await connectApi(`/api/connect/realtime/${connectRealtimeRoom.id}/reaction`,{method:"POST",body:JSON.stringify({emoji})});
     }catch{}
   };
 
@@ -5304,7 +5287,7 @@ function App() {
             const mediaData=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result||""));r.onerror=rej;r.readAsDataURL(blob);});
             const durationSeconds=Math.max(1,Math.round((Date.now()-connectSpaceRecordStartedAtRef.current)/1000));
             await connectApi(`/api/connect/spaces/${room.id}/replay`,{method:"POST",body:JSON.stringify({
-              userId:connectRealtimeUserId(),mediaType:type,mediaData,durationSeconds,fileSizeBytes:blob.size
+              mediaType:type,mediaData,durationSeconds,fileSizeBytes:blob.size
             })});
             setConnectSpaceRecordingNotice("Replay saved.");
           }else if(blob.size>25*1024*1024){
@@ -5325,7 +5308,7 @@ function App() {
   const openConnectSpaceReplay=async(room)=>{
     setConnectSpaceReplayOpen(true);setConnectSpaceReplayLoading(true);setConnectSpaceReplayData(null);
     try{
-      const d=await connectApi(`/api/connect/spaces/${room.id}/replay?userId=${connectRealtimeUserId()}`);
+      const d=await connectApi(`/api/connect/spaces/${room.id}/replay`);
       setConnectSpaceReplayData(d.replay||null);
     }catch(e){setConnectNotice(e.message||"Replay unavailable.");setConnectSpaceReplayOpen(false);}
     finally{setConnectSpaceReplayLoading(false);}
@@ -5350,10 +5333,11 @@ function App() {
   };
 
   const connectRealtimeSignal=async(roomId,toUserId,signalType,payload)=>{
-    const fromUserId=connectRealtimeUserId();
-    if(!fromUserId||!toUserId)return;
+    // The sender is always the session user server-side (see the guard) - only the target
+    // and the signal payload are meaningful to send.
+    if(!currentUser||!toUserId)return;
     await connectApi(`/api/connect/realtime/${roomId}/signal`,{
-      method:"POST",body:JSON.stringify({fromUserId,toUserId,signalType,payload})
+      method:"POST",body:JSON.stringify({toUserId,signalType,payload})
     });
   };
 
@@ -5422,13 +5406,13 @@ function App() {
   const connectCallMedia=async(type)=>{const s=await navigator.mediaDevices.getUserMedia({audio:true,video:type==="VIDEO"?{facingMode:"user"}:false});connectCallStreamRef.current=s;if(connectCallLocalRef.current)connectCallLocalRef.current.srcObject=s;return s;};
 
 
-  const loadConnectSubscriptions=async(mode="DISCOVER")=>{setConnectView("subscriptions");const uid=Number(currentUser?.id||currentUser?.user_id||0);setConnectSubscriptionMode(mode);setConnectSubscriptionNotice("");try{if(mode==="DISCOVER"){const d=await connectApi(`/api/connect/subscriptions/discover?userId=${uid}`);setConnectSubscriptionPlans(d.plans||[]);}else{const d=await connectApi(`/api/connect/subscriptions/mine?userId=${uid}`);setConnectMySubscriptions(d.subscriptions||[]);setConnectCreatorPlans(d.creatorPlans||[]);setConnectSubscriptionStats(d.creatorStats||null);}}catch(e){setConnectSubscriptionNotice(e.message||"Unable to load subscriptions.")}};
-  const createConnectSubscriptionPlan=async()=>{const uid=Number(currentUser?.id||currentUser?.user_id||0);try{await connectApi('/api/connect/subscription-plans',{method:'POST',body:JSON.stringify({userId:uid,planName:connectSubPlanName,description:connectSubPlanDescription,priceMonthly:Number(connectSubMonthly||0),priceYearly:Number(connectSubYearly||0),benefits:connectSubBenefits})});setConnectSubPlanEditor(false);setConnectSubscriptionNotice("Creator subscription plan saved.");await loadConnectSubscriptions("MINE");}catch(e){setConnectSubscriptionNotice(e.message||"Unable to save plan.")}};
-  const subscribeConnectCreator=async(plan,cycle="MONTHLY")=>{const uid=Number(currentUser?.id||currentUser?.user_id||0);try{const d=await connectApi(`/api/connect/subscription-plans/${plan.id}/subscribe`,{method:'POST',body:JSON.stringify({userId:uid,billingCycle:cycle})});setConnectSubscriptionNotice(d.message||"Subscribed.");await loadConnectSubscriptions("DISCOVER");}catch(e){setConnectSubscriptionNotice(e.message||"Unable to subscribe.")}};
-  const cancelConnectSubscription=async(s,resume=false)=>{const uid=Number(currentUser?.id||currentUser?.user_id||0);try{await connectApi(`/api/connect/subscriptions/${s.id}/${resume?'resume':'cancel'}`,{method:'PATCH',body:JSON.stringify({userId:uid})});setConnectSubscriptionNotice(resume?"Subscription renewal resumed.":"Subscription will end after the current period.");await loadConnectSubscriptions("MINE");}catch(e){setConnectSubscriptionNotice(e.message||"Unable to update subscription.")}};
+  const loadConnectSubscriptions=async(mode="DISCOVER")=>{setConnectView("subscriptions");setConnectSubscriptionMode(mode);setConnectSubscriptionNotice("");try{if(mode==="DISCOVER"){const d=await connectApi(`/api/connect/subscriptions/discover`);setConnectSubscriptionPlans(d.plans||[]);}else{const d=await connectApi(`/api/connect/subscriptions/mine`);setConnectMySubscriptions(d.subscriptions||[]);setConnectCreatorPlans(d.creatorPlans||[]);setConnectSubscriptionStats(d.creatorStats||null);}}catch(e){setConnectSubscriptionNotice(e.message||"Unable to load subscriptions.")}};
+  const createConnectSubscriptionPlan=async()=>{try{await connectApi('/api/connect/subscription-plans',{method:'POST',body:JSON.stringify({planName:connectSubPlanName,description:connectSubPlanDescription,priceMonthly:Number(connectSubMonthly||0),priceYearly:Number(connectSubYearly||0),benefits:connectSubBenefits})});setConnectSubPlanEditor(false);setConnectSubscriptionNotice("Creator subscription plan saved.");await loadConnectSubscriptions("MINE");}catch(e){setConnectSubscriptionNotice(e.message||"Unable to save plan.")}};
+  const subscribeConnectCreator=async(plan,cycle="MONTHLY")=>{try{const d=await connectApi(`/api/connect/subscription-plans/${plan.id}/subscribe`,{method:'POST',body:JSON.stringify({billingCycle:cycle})});setConnectSubscriptionNotice(d.message||"Subscribed.");await loadConnectSubscriptions("DISCOVER");}catch(e){setConnectSubscriptionNotice(e.message||"Unable to subscribe.")}};
+  const cancelConnectSubscription=async(s,resume=false)=>{try{await connectApi(`/api/connect/subscriptions/${s.id}/${resume?'resume':'cancel'}`,{method:'PATCH',body:JSON.stringify({})});setConnectSubscriptionNotice(resume?"Subscription renewal resumed.":"Subscription will end after the current period.");await loadConnectSubscriptions("MINE");}catch(e){setConnectSubscriptionNotice(e.message||"Unable to update subscription.")}};
 
-  const loadConnectArticles=async(mode="DISCOVER")=>{setConnectView("articles");setConnectArticleNotice("");const uid=Number(currentUser?.id||currentUser?.user_id||0);setConnectArticleMode(mode);try{const d=await connectApi(`/api/connect/articles?userId=${uid}&mode=${mode}`);setConnectArticles(d.articles||[]);}catch(e){setConnectArticleNotice(e.message||"Unable to load articles.")}};
-  const loadMyConnectArticles=async()=>{setConnectView("articles");setConnectArticleMode("MINE");setConnectArticleNotice("");const uid=Number(currentUser?.id||currentUser?.user_id||0);try{const [m,a]=await Promise.all([connectApi(`/api/connect/articles/mine?userId=${uid}`),connectApi(`/api/connect/articles/analytics?userId=${uid}`)]);setConnectArticleMine(m.articles||[]);setConnectArticleAnalytics(a.analytics||null);}catch(e){setConnectArticleNotice(e.message||"Unable to load your articles.")}};
+  const loadConnectArticles=async(mode="DISCOVER")=>{setConnectView("articles");setConnectArticleNotice("");setConnectArticleMode(mode);try{const d=await connectApi(`/api/connect/articles?mode=${mode}`);setConnectArticles(d.articles||[]);}catch(e){setConnectArticleNotice(e.message||"Unable to load articles.")}};
+  const loadMyConnectArticles=async()=>{setConnectView("articles");setConnectArticleMode("MINE");setConnectArticleNotice("");try{const [m,a]=await Promise.all([connectApi(`/api/connect/articles/mine`),connectApi(`/api/connect/articles/analytics`)]);setConnectArticleMine(m.articles||[]);setConnectArticleAnalytics(a.analytics||null);}catch(e){setConnectArticleNotice(e.message||"Unable to load your articles.")}};
   const pickConnectArticleCover=async(file)=>{
     if(!file)return;
     if(!String(file.type||"").startsWith("image/")){setConnectArticleNotice("Cover must be an image.");return;}
@@ -5440,11 +5424,10 @@ function App() {
   };
   const resetConnectArticleEditor=()=>{setConnectArticleEditor(false);setConnectArticleEditingId(null);setConnectArticlePreviewOpen(false);setConnectArticleTitle("");setConnectArticleExcerpt("");setConnectArticleCover("");setConnectArticleCoverData("");setConnectArticleTopics("");setConnectArticleBody("");setConnectArticleCategory("GENERAL");};
   const openConnectArticleEditForm=async(article)=>{
-    const uid=Number(currentUser?.id||currentUser?.user_id||0);
-    try{
+        try{
       // Re-fetch full content (the My Articles list already carries it, but this
       // keeps the editor in sync with the latest saved version).
-      const d=article?.content!==undefined?{article}:await connectApi(`/api/connect/articles/${article.id}?userId=${uid}`);
+      const d=article?.content!==undefined?{article}:await connectApi(`/api/connect/articles/${article.id}`);
       const a=d.article||article;
       setConnectArticleEditingId(a.id);
       setConnectArticleTitle(a.article_title||"");
@@ -5459,33 +5442,32 @@ function App() {
     }catch(e){setConnectArticleNotice(e.message||"Unable to open this article for editing.");}
   };
   const publishConnectArticle=async(status="PUBLISHED")=>{
-    const uid=Number(currentUser?.id||currentUser?.user_id||0);
-    const payload={title:connectArticleTitle,excerpt:connectArticleExcerpt,coverUrl:connectArticleCover,coverMime:connectArticleCoverData.match(/^data:([^;]+);base64,/)?.[1],category:connectArticleCategory,topics:connectArticleTopics,content:connectArticleBody,status};
+        const payload={title:connectArticleTitle,excerpt:connectArticleExcerpt,coverUrl:connectArticleCover,coverMime:connectArticleCoverData.match(/^data:([^;]+);base64,/)?.[1],category:connectArticleCategory,topics:connectArticleTopics,content:connectArticleBody,status};
     if(connectArticleCoverData)payload.coverData=connectArticleCoverData;
     else if(!connectArticleCover)payload.clearCoverData=true;
     try{
       if(connectArticleEditingId){
         // Edit path: update the SAME article row — never creates a duplicate.
-        await connectApi(`/api/connect/articles/${connectArticleEditingId}`,{method:'PATCH',body:JSON.stringify({userId:uid,...payload})});
+        await connectApi(`/api/connect/articles/${connectArticleEditingId}`,{method:'PATCH',body:JSON.stringify({...payload})});
         setConnectArticleNotice(status==="DRAFT"?"Draft updated.":"Article updated.");
       }else{
-        await connectApi('/api/connect/articles',{method:'POST',body:JSON.stringify({userId:uid,...payload})});
+        await connectApi('/api/connect/articles',{method:'POST',body:JSON.stringify({...payload})});
         setConnectArticleNotice(status==="DRAFT"?"Draft saved.":"Article published.");
       }
       resetConnectArticleEditor();
       await loadMyConnectArticles();
     }catch(e){setConnectArticleNotice(e.message||"Unable to save article.")}
   };
-  const openConnectArticle=async(a)=>{const uid=Number(currentUser?.id||currentUser?.user_id||0);try{const d=await connectApi(`/api/connect/articles/${a.id}?userId=${uid}`);setConnectArticleSelected(d.article);connectApi(`/api/connect/articles/${a.id}/history`,{method:'POST',body:JSON.stringify({userId:uid,readSeconds:1})}).catch(()=>{});}catch(e){setConnectArticleNotice(e.message||"Unable to open article.")}};
+  const openConnectArticle=async(a)=>{try{const d=await connectApi(`/api/connect/articles/${a.id}`);setConnectArticleSelected(d.article);connectApi(`/api/connect/articles/${a.id}/history`,{method:'POST',body:JSON.stringify({readSeconds:1})}).catch(()=>{});}catch(e){setConnectArticleNotice(e.message||"Unable to open article.")}};
   // HOWDI Connect V16.6K3 — wire Like/Save/Share into the Article reader using the existing generic post interaction system (posts/:id/reaction|save|share|comments)
   const toggleConnectArticleReaction=async()=>{
-    const uid=Number(currentUser?.id||currentUser?.user_id||0);if(!uid||!connectArticleSelected?.id){setConnectNotice("Please login before reacting.");return;}
-    try{const d=await connectApi(`/api/connect/posts/${connectArticleSelected.id}/reaction`,{method:"POST",body:JSON.stringify({userId:uid})});setConnectArticleSelected(v=>v?{...v,liked_by_viewer:d.reacted,like_count:d.reaction_count}:v);}
+    if(!currentUser||!connectArticleSelected?.id){setConnectNotice("Please login before reacting.");return;}
+    try{const d=await connectApi(`/api/connect/posts/${connectArticleSelected.id}/reaction`,{method:"POST",body:JSON.stringify({})});setConnectArticleSelected(v=>v?{...v,liked_by_viewer:d.reacted,like_count:d.reaction_count}:v);}
     catch(e){setConnectNotice(e.message||"Unable to update your reaction.");}
   };
   const shareConnectArticle=async()=>{
     if(!connectArticleSelected?.id)return;
-    try{const uid=Number(currentUser?.id||currentUser?.user_id||0);const d=await connectApi(`/api/connect/posts/${connectArticleSelected.id}/share`,{method:"POST",body:JSON.stringify({userId:uid,shareType:"COPY_LINK"})});setConnectArticleSelected(v=>v?{...v,share_count:Number(d.share_count||0)}:v);const link=`${window.location.origin}${window.location.pathname}#connect-post-${connectArticleSelected.id}`;if(navigator.clipboard)await navigator.clipboard.writeText(link);setConnectNotice("Article link copied.");}
+    try{const d=await connectApi(`/api/connect/posts/${connectArticleSelected.id}/share`,{method:"POST",body:JSON.stringify({shareType:"COPY_LINK"})});setConnectArticleSelected(v=>v?{...v,share_count:Number(d.share_count||0)}:v);const link=`${window.location.origin}${window.location.pathname}#connect-post-${connectArticleSelected.id}`;if(navigator.clipboard)await navigator.clipboard.writeText(link);setConnectNotice("Article link copied.");}
     catch(e){setConnectNotice(e.message||"Unable to share.");}
   };
 
@@ -5512,7 +5494,7 @@ function App() {
     setConnectRealtimeLobby(owner&&String(room.session_status||"CREATED")!=="LIVE");
     setConnectRealtimeOpen(true);
     try{
-      await connectApi(`/api/connect/realtime/${room.id}/join`,{method:"POST",body:JSON.stringify({userId})});
+      await connectApi(`/api/connect/realtime/${room.id}/join`,{method:"POST",body:JSON.stringify({})});
       if(owner)await connectRealtimeGetHostMedia(room);
     }catch(e){setConnectRealtimeError(e.message||"Unable to enter session.");}
   };
@@ -5522,7 +5504,7 @@ function App() {
     if(!room||!userId)return;
     try{
       if(!connectRealtimeStreamRef.current)await connectRealtimeGetHostMedia(room);
-      await connectApi(`/api/connect/realtime/${room.id}/start`,{method:"POST",body:JSON.stringify({userId})});
+      await connectApi(`/api/connect/realtime/${room.id}/start`,{method:"POST",body:JSON.stringify({})});
       setConnectRealtimeLobby(false);
       setConnectRealtimeRoom(v=>({...v,session_status:"LIVE"}));
       if(String(room.community_type||"").toUpperCase()==="SPACE"&&room.replay_enabled)await connectSpaceStartRecording(room);
@@ -5608,7 +5590,7 @@ function App() {
     const room=connectRealtimeRoom,userId=connectRealtimeUserId();
     if(!room?.id||!userId)return;
     try{
-      await connectApi(`/api/connect/realtime/${room.id}/heartbeat`,{method:"POST",body:JSON.stringify({userId})});
+      await connectApi(`/api/connect/realtime/${room.id}/heartbeat`,{method:"POST",body:JSON.stringify({})});
       const state=await connectApi(`/api/connect/realtime/${room.id}/state`);
       setConnectRealtimeState(state);
       setConnectRealtimeRoom(v=>v?{...v,...state.room}:v);
@@ -5641,7 +5623,7 @@ function App() {
           if(Number(p.user_id)!==userId)await connectRealtimeOfferToParticipant(state.room,p);
         }
       }
-      const sig=await connectApi(`/api/connect/realtime/${room.id}/signals?userId=${userId}&after=${connectRealtimeLastSignalRef.current}`);
+      const sig=await connectApi(`/api/connect/realtime/${room.id}/signals?after=${connectRealtimeLastSignalRef.current}`);
       for(const s of sig.signals||[]){
         connectRealtimeLastSignalRef.current=Math.max(connectRealtimeLastSignalRef.current,Number(s.id)||0);
         await connectRealtimeHandleSignal(state.room||room,s);
@@ -5655,8 +5637,8 @@ function App() {
       if(room?.id&&userId){
         if(end&&Number(room.owner_user_id)===userId){
           if(String(room.community_type||"").toUpperCase()==="SPACE"&&room.replay_enabled)await connectSpaceStopRecording(room);
-          await connectApi(`/api/connect/realtime/${room.id}/end`,{method:"POST",body:JSON.stringify({userId})});
-        }else await connectApi(`/api/connect/realtime/${room.id}/leave`,{method:"POST",body:JSON.stringify({userId})});
+          await connectApi(`/api/connect/realtime/${room.id}/end`,{method:"POST",body:JSON.stringify({})});
+        }else await connectApi(`/api/connect/realtime/${room.id}/leave`,{method:"POST",body:JSON.stringify({})});
       }
     }catch{}
     if(connectRealtimePollRef.current)clearInterval(connectRealtimePollRef.current);
@@ -5717,9 +5699,8 @@ function App() {
   };
 
   const publishConnectStory=async()=>{
-    const userId=Number(currentUser?.id||currentUser?.user_id||0);
     const content=connectComposer.trim();
-    if(!userId){setConnectNotice("Please login before sharing a story.");return false;}
+    if(!currentUser){setConnectNotice("Please login before sharing a story.");return false;}
     if(!content&&!connectPostMedia?.data){setConnectNotice("Add story text or choose an image before sharing.");return false;}
     setConnectPosting(true);
     try{
@@ -5735,12 +5716,12 @@ function App() {
   };
 
   const loadConnectProfileContent=async()=>{
-    const userId=Number(currentUser?.id||currentUser?.user_id||0);if(!userId)return;
-    try{const d=await connectApi(`/api/connect/profile-content?userId=${encodeURIComponent(userId)}`);setConnectProfilePosts(d.posts||[]);setConnectProfileSaved(d.saved||[]);setConnectHighlights(d.highlights||[]);}catch(e){setConnectNotice(e.message||"Unable to load profile content.");}
+    if(!currentUser)return;
+    try{const d=await connectApi(`/api/connect/profile-content`);setConnectProfilePosts(d.posts||[]);setConnectProfileSaved(d.saved||[]);setConnectHighlights(d.highlights||[]);}catch(e){setConnectNotice(e.message||"Unable to load profile content.");}
   };
   const addStoryToHighlights=async(story)=>{
-    const userId=Number(currentUser?.id||currentUser?.user_id||0);if(!userId||!story?.id)return;
-    try{await connectApi("/api/connect/highlights",{method:"POST",body:JSON.stringify({userId,storyId:story.id})});setConnectNotice("Story added to Highlights.");await loadConnectProfileContent();}catch(e){setConnectNotice(e.message||"Unable to add highlight.");}
+    if(!currentUser||!story?.id)return;
+    try{await connectApi("/api/connect/highlights",{method:"POST",body:JSON.stringify({storyId:story.id})});setConnectNotice("Story added to Highlights.");await loadConnectProfileContent();}catch(e){setConnectNotice(e.message||"Unable to add highlight.");}
   };
   const connectStoryFilterStyle=(name)=>name==="Warm"?{filter:"sepia(.18) saturate(1.15)"}:name==="Cool"?{filter:"saturate(.9) hue-rotate(8deg)"}:name==="Mono"?{filter:"grayscale(1)"}:name==="Vintage"?{filter:"sepia(.35) contrast(.92)"}:name==="Vivid"?{filter:"saturate(1.45) contrast(1.08)"}:{};
 
@@ -5753,11 +5734,11 @@ function App() {
     try{const d=await connectApi(`/api/connect/stories/${story.id}/view`,{method:"POST",body:JSON.stringify({viewerKey:connectViewerKey()})});updateConnectStoryLocal(story.id,{view_count:Number(d.view_count||story.view_count||0)});}catch{}
   };
   const reactConnectStory=async(story,reaction)=>{
-    if(!currentUser?.id&&!currentUser?.user_id){setConnectNotice("Please login to react to stories.");return;}
+    if(!currentUser&&!currentUser){setConnectNotice("Please login to react to stories.");return;}
     try{const d=await connectApi(`/api/connect/stories/${story.id}/react`,{method:"POST",body:JSON.stringify({reaction})});updateConnectStoryLocal(story.id,{viewer_reaction:d.reaction||null,reaction_count:Number(d.reaction_count||0)});}catch(e){setConnectNotice(e.message||"Unable to react to story.");}
   };
   const replyConnectStory=async(story)=>{
-    if(!currentUser?.id&&!currentUser?.user_id){setConnectNotice("Please login to reply to stories.");return;}
+    if(!currentUser&&!currentUser){setConnectNotice("Please login to reply to stories.");return;}
     const reply=window.prompt(`Reply to ${story.public_username?`@${story.public_username}`:(story.full_name||"this story")}`);
     if(!reply?.trim())return;
     try{const d=await connectApi(`/api/connect/stories/${story.id}/reply`,{method:"POST",body:JSON.stringify({reply:reply.trim()})});updateConnectStoryLocal(story.id,{reply_count:Number(d.reply_count||0)});setConnectNotice("Story reply sent.");}catch(e){setConnectNotice(e.message||"Unable to reply to story.");}
@@ -5772,14 +5753,14 @@ function App() {
     }catch(e){if(e?.name!=="AbortError")setConnectNotice(e.message||"Unable to share story.");}
   };
 
-  const connectViewerKey=()=>{const userId=Number(currentUser?.id||currentUser?.user_id||0);if(userId)return `user:${userId}`;let key=localStorage.getItem("howdiConnectViewerKey");if(!key){key=`anon:${Date.now()}:${Math.random().toString(36).slice(2)}`;localStorage.setItem("howdiConnectViewerKey",key);}return key;};
-  const registerConnectPostView=async(postId)=>{try{const d=await connectApi(`/api/connect/posts/${postId}/view`,{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||currentUser?.user_id||0),viewerKey:connectViewerKey()})});setConnectPosts(items=>items.map(p=>Number(p.id)===Number(postId)?{...p,view_count:Number(d.view_count||0),reach_count:Number(d.reach_count||0)}:p));}catch{}};
-  const toggleConnectRepost=async(post)=>{const userId=Number(currentUser?.id||currentUser?.user_id||0);if(!userId)return;try{const d=await connectApi(`/api/connect/posts/${post.id}/repost`,{method:"POST",body:JSON.stringify({userId})});setConnectPosts(items=>items.map(p=>Number(p.id)===Number(post.id)?{...p,reposted_by_viewer:Boolean(d.reposted),repost_count:Number(d.repost_count||0)}:p));}catch(e){setConnectNotice(e.message||"Unable to repost.");}};
-  const publishConnectQuote=async()=>{const userId=Number(currentUser?.id||currentUser?.user_id||0),text=connectQuoteText.trim();if(!connectQuotePost||!userId||!text)return;try{await connectApi(`/api/connect/posts/${connectQuotePost.id}/quote`,{method:"POST",body:JSON.stringify({userId,quoteText:text})});setConnectQuotePost(null);setConnectQuoteText("");setConnectNotice("Quote posted.");await loadConnectFeed();}catch(e){setConnectNotice(e.message||"Unable to quote.");}};
-  const shareConnectPost=async(post)=>{try{const userId=Number(currentUser?.id||currentUser?.user_id||0);const d=await connectApi(`/api/connect/posts/${post.id}/share`,{method:"POST",body:JSON.stringify({userId,shareType:"COPY_LINK"})});setConnectPosts(items=>items.map(p=>Number(p.id)===Number(post.id)?{...p,share_count:Number(d.share_count||0)}:p));const link=`${window.location.origin}${window.location.pathname}#connect-post-${post.id}`;if(navigator.clipboard)await navigator.clipboard.writeText(link);setConnectNotice("Post link copied.");}catch(e){setConnectNotice(e.message||"Unable to share.");}};
-  const toggleConnectSpark=async(post)=>{const userId=Number(currentUser?.id||currentUser?.user_id||0);if(!userId)return;try{const d=await connectApi(`/api/connect/posts/${post.id}/spark`,{method:"POST",body:JSON.stringify({userId})});setConnectPosts(items=>items.map(p=>Number(p.id)===Number(post.id)?{...p,sparked_by_viewer:Boolean(d.sparked),spark_count:Number(d.spark_count||0)}:p));}catch(e){setConnectNotice(e.message||"Unable to Spark.");}};
-  const createConnectTip=async()=>{const userId=Number(currentUser?.id||currentUser?.user_id||0),amount=Number(connectTipAmount);if(!connectTipPost||!userId||!amount)return;try{const post=connectTipPost;const d=await connectApi(`/api/connect/posts/${post.id}/tip`,{method:"POST",body:JSON.stringify({userId,amount})});setConnectTipPost(null);setConnectNotice(d.message||"Tip created.");setHpayRecipient(post.full_name||"Creator");setHpayAction("pay");setHpayAmount(String(amount));setHpayNote(`Tip for HOWDI Connect post #${post.id}`);}catch(e){setConnectNotice(e.message||"Unable to create tip.");}};
-  const loadConnectPostInsights=async(post)=>{const userId=Number(currentUser?.id||currentUser?.user_id||0);if(!userId)return;try{const d=await connectApi(`/api/connect/posts/${post.id}/insights?userId=${userId}`);setConnectPostInsights({post,insights:d.insights||{}});}catch(e){setConnectNotice(e.message||"Unable to load insights.");}};
+  const connectViewerKey=()=>{const handle=currentUser?.public_username||currentUser?.username||"";if(handle)return `user:${handle}`;let key=localStorage.getItem("howdiConnectViewerKey");if(!key){key=`anon:${Date.now()}:${Math.random().toString(36).slice(2)}`;localStorage.setItem("howdiConnectViewerKey",key);}return key;};
+  const registerConnectPostView=async(postId)=>{try{const d=await connectApi(`/api/connect/posts/${postId}/view`,{method:"POST",body:JSON.stringify({viewerKey:connectViewerKey()})});setConnectPosts(items=>items.map(p=>Number(p.id)===Number(postId)?{...p,view_count:Number(d.view_count||0),reach_count:Number(d.reach_count||0)}:p));}catch{}};
+  const toggleConnectRepost=async(post)=>{if(!currentUser)return;try{const d=await connectApi(`/api/connect/posts/${post.id}/repost`,{method:"POST",body:JSON.stringify({})});setConnectPosts(items=>items.map(p=>Number(p.id)===Number(post.id)?{...p,reposted_by_viewer:Boolean(d.reposted),repost_count:Number(d.repost_count||0)}:p));}catch(e){setConnectNotice(e.message||"Unable to repost.");}};
+  const publishConnectQuote=async()=>{const text=connectQuoteText.trim();if(!connectQuotePost||!currentUser||!text)return;try{await connectApi(`/api/connect/posts/${connectQuotePost.id}/quote`,{method:"POST",body:JSON.stringify({quoteText:text})});setConnectQuotePost(null);setConnectQuoteText("");setConnectNotice("Quote posted.");await loadConnectFeed();}catch(e){setConnectNotice(e.message||"Unable to quote.");}};
+  const shareConnectPost=async(post)=>{try{const d=await connectApi(`/api/connect/posts/${post.id}/share`,{method:"POST",body:JSON.stringify({shareType:"COPY_LINK"})});setConnectPosts(items=>items.map(p=>Number(p.id)===Number(post.id)?{...p,share_count:Number(d.share_count||0)}:p));const link=`${window.location.origin}${window.location.pathname}#connect-post-${post.id}`;if(navigator.clipboard)await navigator.clipboard.writeText(link);setConnectNotice("Post link copied.");}catch(e){setConnectNotice(e.message||"Unable to share.");}};
+  const toggleConnectSpark=async(post)=>{if(!currentUser)return;try{const d=await connectApi(`/api/connect/posts/${post.id}/spark`,{method:"POST",body:JSON.stringify({})});setConnectPosts(items=>items.map(p=>Number(p.id)===Number(post.id)?{...p,sparked_by_viewer:Boolean(d.sparked),spark_count:Number(d.spark_count||0)}:p));}catch(e){setConnectNotice(e.message||"Unable to Spark.");}};
+  const createConnectTip=async()=>{const amount=Number(connectTipAmount);if(!connectTipPost||!currentUser||!amount)return;try{const post=connectTipPost;const d=await connectApi(`/api/connect/posts/${post.id}/tip`,{method:"POST",body:JSON.stringify({amount})});setConnectTipPost(null);setConnectNotice(d.message||"Tip created.");setHpayRecipient(post.full_name||"Creator");setHpayAction("pay");setHpayAmount(String(amount));setHpayNote(`Tip for HOWDI Connect post #${post.id}`);}catch(e){setConnectNotice(e.message||"Unable to create tip.");}};
+  const loadConnectPostInsights=async(post)=>{if(!currentUser)return;try{const d=await connectApi(`/api/connect/posts/${post.id}/insights`);setConnectPostInsights({post,insights:d.insights||{}});}catch(e){setConnectNotice(e.message||"Unable to load insights.");}};
 
   useEffect(()=>{
     if(!connectRealtimeOpen||!connectRealtimeRoom?.id)return;
@@ -5801,25 +5782,25 @@ function App() {
   };
 
   const toggleConnectOpenCallJoin=async(post)=>{
-    const userId=Number(currentUser?.id||currentUser?.user_id||0);if(!userId)return setConnectNotice("Please login to join.");
+    if(!currentUser)return setConnectNotice("Please login to join.");
     try{
-      const d=await connectApi(`/api/connect/posts/${post.id}/join`,{method:"POST",body:JSON.stringify({userId})});
+      const d=await connectApi(`/api/connect/posts/${post.id}/join`,{method:"POST",body:JSON.stringify({})});
       setConnectPosts(items=>items.map(p=>Number(p.id)===Number(post.id)?{...p,joined_by_viewer:Boolean(d.joined),participant_count:Number(d.participant_count||0)}:p));
     }catch(e){setConnectNotice(e.message||"Unable to join this Open Call.");}
   };
 
   const toggleConnectIntentResolved=async(post)=>{
-    const userId=Number(currentUser?.id||currentUser?.user_id||0);if(!userId)return;
+    if(!currentUser)return;
     try{
-      const d=await connectApi(`/api/connect/posts/${post.id}/resolve`,{method:"POST",body:JSON.stringify({userId})});
+      const d=await connectApi(`/api/connect/posts/${post.id}/resolve`,{method:"POST",body:JSON.stringify({})});
       setConnectPosts(items=>items.map(p=>Number(p.id)===Number(post.id)?{...p,intent_status:d.intent_status}:p));
     }catch(e){setConnectNotice(e.message||"Unable to update Open Call.");}
   };
 
   const voteConnectPoll=async(post,optionId)=>{
-    const userId=Number(currentUser?.id||currentUser?.user_id||0);if(!userId)return setConnectNotice("Please login to vote.");
+    if(!currentUser)return setConnectNotice("Please login to vote.");
     try{
-      const d=await connectApi(`/api/connect/posts/${post.id}/poll-vote`,{method:"POST",body:JSON.stringify({userId,optionId})});
+      const d=await connectApi(`/api/connect/posts/${post.id}/poll-vote`,{method:"POST",body:JSON.stringify({optionId})});
       setConnectPosts(items=>items.map(p=>Number(p.id)===Number(post.id)?{...p,poll:{...(p.poll||{}),viewer_option_id:d.viewer_option_id,total_votes:d.total_votes,options:d.options}}:p));
     }catch(e){setConnectNotice(e.message||"Unable to vote.");}
   };
@@ -5829,72 +5810,72 @@ function App() {
     for(const f of list){if(!String(f.type||"").startsWith("image/"))continue;if(f.size>5*1024*1024){setConnectNotice("Each gallery image must be under 5 MB.");continue;}const data=await new Promise(resolve=>{const r=new FileReader();r.onload=()=>resolve(String(r.result||""));r.readAsDataURL(f);});if(data)results.push(data);}
     setConnectPostGallery(results);
   };
-  const loadConnectPostManager=async()=>{try{const uid=Number(currentUser?.id||currentUser?.user_id||0);const [d,s]=await Promise.all([connectApi(`/api/connect/posts/mine?userId=${uid}&status=DRAFT`),connectApi(`/api/connect/posts/mine?userId=${uid}&status=SCHEDULED`)]);setConnectMyDrafts(d.posts||[]);setConnectMyScheduled(s.posts||[]);setConnectPostManagerOpen(true);}catch(e){setConnectNotice(e.message||"Unable to load Post Manager.");}};
-  const saveConnectPostToCollection=async(post)=>{try{const d=await connectApi(`/api/connect/posts/${post.id}/collection`,{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||currentUser?.user_id||0),name:connectCollectionName||"Saved"})});setConnectNotice(d.saved?`Saved to ${d.collection.name}.`:`Removed from ${d.collection.name}.`);}catch(e){setConnectNotice(e.message||"Unable to update collection.");}};
-  const pinConnectPostToProfile=async(post)=>{try{await connectApi(`/api/connect/profile-featured`,{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||currentUser?.user_id||0),contentType:"POST",contentId:String(post.id),title:post.article_title||"Pinned post"})});setConnectNotice("Post pinned to profile.");}catch(e){setConnectNotice(e.message||"Unable to pin post.");}};
+  const loadConnectPostManager=async()=>{try{const [d,s]=await Promise.all([connectApi(`/api/connect/posts/mine?status=DRAFT`),connectApi(`/api/connect/posts/mine?status=SCHEDULED`)]);setConnectMyDrafts(d.posts||[]);setConnectMyScheduled(s.posts||[]);setConnectPostManagerOpen(true);}catch(e){setConnectNotice(e.message||"Unable to load Post Manager.");}};
+  const saveConnectPostToCollection=async(post)=>{try{const d=await connectApi(`/api/connect/posts/${post.id}/collection`,{method:"POST",body:JSON.stringify({name:connectCollectionName||"Saved"})});setConnectNotice(d.saved?`Saved to ${d.collection.name}.`:`Removed from ${d.collection.name}.`);}catch(e){setConnectNotice(e.message||"Unable to update collection.");}};
+  const pinConnectPostToProfile=async(post)=>{try{await connectApi(`/api/connect/profile-featured`,{method:"POST",body:JSON.stringify({contentType:"POST",contentId:String(post.id),title:post.article_title||"Pinned post"})});setConnectNotice("Post pinned to profile.");}catch(e){setConnectNotice(e.message||"Unable to pin post.");}};
 
-  const rebuildConnectReputation=async()=>{try{await connectApi("/api/connect/reputation/rebuild",{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||0)})});await connectApi("/api/connect/weekly-contribution/sync",{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||0)})});setConnectNotice("Reputation signals refreshed.");await loadConnectReputationOS("overview");}catch(e){setConnectNotice(e.message||"Unable to refresh reputation.");}};
-  const loadConnectReputationOS=async(tab="overview")=>{try{const d=await connectApi(`/api/connect/reputation-os?userId=${Number(currentUser?.id||0)}`);setConnectReputationOS(d);setConnectReputationOSTab(tab);setConnectReputationOSOpen(true);}catch(e){setConnectNotice(e.message||"Unable to load Reputation OS.");}};
-  const loadConnectRelationshipIntel=async()=>{try{const d=await connectApi(`/api/connect/relationship-intelligence?userId=${Number(currentUser?.id||0)}`);setConnectRelationshipIntel(d);setConnectRelationshipIntelOpen(true);}catch(e){setConnectNotice(e.message||"Unable to load relationship intelligence.");}};
-  const rebuildConnectRelationship=async(person)=>{try{const d=await connectApi("/api/connect/relationship/rebuild",{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||0),otherUserId:Number(person.user_id||person.other_user_id||person.id)})});setConnectNotice(`Relationship strength: ${d.relationship?.strength_score||0}`);await loadConnectRelationshipIntel();}catch(e){setConnectNotice(e.message||"Unable to refresh relationship.");}};
-  const requestConnectSkillEndorsement=async(skill)=>{const target=String(connectEndorsementTargetId||"").replace(/^@/,"").trim();if(!target)return setConnectNotice("Enter a member's @username to request endorsement.");try{await connectApi("/api/connect/skill-endorsement-request",{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||0),skillId:skill.id,targetUsername:target,message:`Please validate my ${skill.skill_name} skill if you have worked or learned with me.`})});setConnectNotice("Skill endorsement request sent.");}catch(e){setConnectNotice(e.message||"Unable to request endorsement.");}};
-  const respondConnectSkillEndorsement=async(req,accept)=>{try{await connectApi(`/api/connect/skill-endorsement-request/${req.id}/respond`,{method:"PATCH",body:JSON.stringify({userId:Number(currentUser?.id||0),accept})});await loadConnectRelationshipIntel();setConnectNotice(accept?"Skill endorsed.":"Endorsement declined.");}catch(e){setConnectNotice(e.message||"Unable to respond.");}};
-  const loadConnectOfficeHours=async(domain=connectOfficeHoursDomain)=>{try{const d=await connectApi(`/api/connect/office-hours?userId=${Number(currentUser?.id||0)}&domain=${encodeURIComponent(domain)}`);setConnectOfficeHours(d.officeHours||[]);setConnectOfficeHoursDomain(domain);setConnectOfficeHoursOpen(true);}catch(e){setConnectNotice(e.message||"Unable to load office hours.");}};
-  const createConnectOfficeHour=async()=>{if(!connectOfficeStartsAt)return;try{await connectApi("/api/connect/office-hours",{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||0),knowledgeDomain:connectOfficeHoursDomain,title:connectOfficeTitle,startsAt:connectOfficeStartsAt,capacity:Number(connectOfficeCapacity)||1,durationMinutes:30,locationType:"ONLINE"})});setConnectOfficeStartsAt("");await loadConnectOfficeHours(connectOfficeHoursDomain);setConnectNotice("Office hours published.");}catch(e){setConnectNotice(e.message||"Unable to publish office hours.");}};
-  const bookConnectOfficeHour=async(slot)=>{try{await connectApi(`/api/connect/office-hours/${slot.id}/book`,{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||0),question:connectOfficeQuestion})});setConnectOfficeQuestion("");await loadConnectOfficeHours(connectOfficeHoursDomain);setConnectNotice("Office hours booked.");}catch(e){setConnectNotice(e.message||"Unable to book office hours.");}};
+  const rebuildConnectReputation=async()=>{try{await connectApi("/api/connect/reputation/rebuild",{method:"POST",body:JSON.stringify({})});await connectApi("/api/connect/weekly-contribution/sync",{method:"POST",body:JSON.stringify({})});setConnectNotice("Reputation signals refreshed.");await loadConnectReputationOS("overview");}catch(e){setConnectNotice(e.message||"Unable to refresh reputation.");}};
+  const loadConnectReputationOS=async(tab="overview")=>{try{const d=await connectApi(`/api/connect/reputation-os`);setConnectReputationOS(d);setConnectReputationOSTab(tab);setConnectReputationOSOpen(true);}catch(e){setConnectNotice(e.message||"Unable to load Reputation OS.");}};
+  const loadConnectRelationshipIntel=async()=>{try{const d=await connectApi(`/api/connect/relationship-intelligence`);setConnectRelationshipIntel(d);setConnectRelationshipIntelOpen(true);}catch(e){setConnectNotice(e.message||"Unable to load relationship intelligence.");}};
+  const rebuildConnectRelationship=async(person)=>{try{const d=await connectApi("/api/connect/relationship/rebuild",{method:"POST",body:JSON.stringify({otherUserId:Number(person.user_id||person.other_user_id||person.id)})});setConnectNotice(`Relationship strength: ${d.relationship?.strength_score||0}`);await loadConnectRelationshipIntel();}catch(e){setConnectNotice(e.message||"Unable to refresh relationship.");}};
+  const requestConnectSkillEndorsement=async(skill)=>{const target=String(connectEndorsementTargetId||"").replace(/^@/,"").trim();if(!target)return setConnectNotice("Enter a member's @username to request endorsement.");try{await connectApi("/api/connect/skill-endorsement-request",{method:"POST",body:JSON.stringify({skillId:skill.id,targetUsername:target,message:`Please validate my ${skill.skill_name} skill if you have worked or learned with me.`})});setConnectNotice("Skill endorsement request sent.");}catch(e){setConnectNotice(e.message||"Unable to request endorsement.");}};
+  const respondConnectSkillEndorsement=async(req,accept)=>{try{await connectApi(`/api/connect/skill-endorsement-request/${req.id}/respond`,{method:"PATCH",body:JSON.stringify({accept})});await loadConnectRelationshipIntel();setConnectNotice(accept?"Skill endorsed.":"Endorsement declined.");}catch(e){setConnectNotice(e.message||"Unable to respond.");}};
+  const loadConnectOfficeHours=async(domain=connectOfficeHoursDomain)=>{try{const d=await connectApi(`/api/connect/office-hours?domain=${encodeURIComponent(domain)}`);setConnectOfficeHours(d.officeHours||[]);setConnectOfficeHoursDomain(domain);setConnectOfficeHoursOpen(true);}catch(e){setConnectNotice(e.message||"Unable to load office hours.");}};
+  const createConnectOfficeHour=async()=>{if(!connectOfficeStartsAt)return;try{await connectApi("/api/connect/office-hours",{method:"POST",body:JSON.stringify({knowledgeDomain:connectOfficeHoursDomain,title:connectOfficeTitle,startsAt:connectOfficeStartsAt,capacity:Number(connectOfficeCapacity)||1,durationMinutes:30,locationType:"ONLINE"})});setConnectOfficeStartsAt("");await loadConnectOfficeHours(connectOfficeHoursDomain);setConnectNotice("Office hours published.");}catch(e){setConnectNotice(e.message||"Unable to publish office hours.");}};
+  const bookConnectOfficeHour=async(slot)=>{try{await connectApi(`/api/connect/office-hours/${slot.id}/book`,{method:"POST",body:JSON.stringify({question:connectOfficeQuestion})});setConnectOfficeQuestion("");await loadConnectOfficeHours(connectOfficeHoursDomain);setConnectNotice("Office hours booked.");}catch(e){setConnectNotice(e.message||"Unable to book office hours.");}};
 
-  const loadConnectEconomy=async(tab="overview")=>{try{const d=await connectApi(`/api/connect/knowledge-economy/dashboard?userId=${Number(currentUser?.id||0)}`);setConnectEconomy(d);setConnectEconomyTab(tab);setConnectEconomyOpen(true);}catch(e){setConnectNotice(e.message||"Unable to load Knowledge Economy.");}};
-  const syncConnectBadges=async()=>{try{const d=await connectApi("/api/connect/badges/sync",{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||0)})});setConnectNotice(`${d.badges?.length||0} contribution badges active.`);await loadConnectEconomy("reputation");}catch(e){setConnectNotice(e.message||"Unable to sync badges.");}};
-  const createConnectPartnerGoal=async()=>{if(!connectPartnerGoalTitle.trim()||!connectPartnerGoalUserId)return;try{await connectApi("/api/connect/partner-goals",{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||0),partnerUsername:String(connectPartnerGoalUserId).replace(/^@/,"").trim(),title:connectPartnerGoalTitle})});setConnectPartnerGoalTitle("");setConnectPartnerGoalUserId("");await loadConnectEconomy("partners");}catch(e){setConnectNotice(e.message||"Unable to create study goal.");}};
-  const checkinConnectGoal=async(goal,status)=>{try{await connectApi(`/api/connect/partner-goals/${goal.id}/checkin`,{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||0),status})});await loadConnectEconomy("partners");}catch(e){setConnectNotice(e.message||"Unable to check in.");}};
-  const updateConnectMentorSession=async(session,status)=>{try{await connectApi(`/api/connect/mentor-session/${session.id}/status`,{method:"PATCH",body:JSON.stringify({userId:Number(currentUser?.id||0),status})});await loadConnectEconomy("sessions");}catch(e){setConnectNotice(e.message||"Unable to update mentor session.");}};
-  const validateConnectSkill=async(skill)=>{try{await connectApi(`/api/connect/skill-passport/${skill.id}/validate-note`,{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||0)})});setConnectNotice("Skill validation added.");}catch(e){setConnectNotice(e.message||"Unable to validate skill.");}};
-  const loadConnectMultilingualBridge=async()=>{try{const d=await connectApi(`/api/connect/multilingual-bridge?userId=${Number(currentUser?.id||0)}&language=${encodeURIComponent(connectBridgeLanguage)}`);setConnectMultilingualPosts(d.posts||[]);setConnectMultilingualOpen(true);}catch(e){setConnectNotice(e.message||"Unable to load multilingual bridge.");}};
-  const loadConnectGrowthLoop=async()=>{try{const d=await connectApi(`/api/connect/growth-loop-dashboard?userId=${Number(currentUser?.id||0)}`);setConnectGrowthLoop(d);setConnectGrowthLoopOpen(true);}catch(e){setConnectNotice(e.message||"Unable to load growth dashboard.");}};
+  const loadConnectEconomy=async(tab="overview")=>{try{const d=await connectApi(`/api/connect/knowledge-economy/dashboard`);setConnectEconomy(d);setConnectEconomyTab(tab);setConnectEconomyOpen(true);}catch(e){setConnectNotice(e.message||"Unable to load Knowledge Economy.");}};
+  const syncConnectBadges=async()=>{try{const d=await connectApi("/api/connect/badges/sync",{method:"POST",body:JSON.stringify({})});setConnectNotice(`${d.badges?.length||0} contribution badges active.`);await loadConnectEconomy("reputation");}catch(e){setConnectNotice(e.message||"Unable to sync badges.");}};
+  const createConnectPartnerGoal=async()=>{if(!connectPartnerGoalTitle.trim()||!connectPartnerGoalUserId)return;try{await connectApi("/api/connect/partner-goals",{method:"POST",body:JSON.stringify({partnerUsername:String(connectPartnerGoalUserId).replace(/^@/,"").trim(),title:connectPartnerGoalTitle})});setConnectPartnerGoalTitle("");setConnectPartnerGoalUserId("");await loadConnectEconomy("partners");}catch(e){setConnectNotice(e.message||"Unable to create study goal.");}};
+  const checkinConnectGoal=async(goal,status)=>{try{await connectApi(`/api/connect/partner-goals/${goal.id}/checkin`,{method:"POST",body:JSON.stringify({status})});await loadConnectEconomy("partners");}catch(e){setConnectNotice(e.message||"Unable to check in.");}};
+  const updateConnectMentorSession=async(session,status)=>{try{await connectApi(`/api/connect/mentor-session/${session.id}/status`,{method:"PATCH",body:JSON.stringify({status})});await loadConnectEconomy("sessions");}catch(e){setConnectNotice(e.message||"Unable to update mentor session.");}};
+  const validateConnectSkill=async(skill)=>{try{await connectApi(`/api/connect/skill-passport/${skill.id}/validate-note`,{method:"POST",body:JSON.stringify({})});setConnectNotice("Skill validation added.");}catch(e){setConnectNotice(e.message||"Unable to validate skill.");}};
+  const loadConnectMultilingualBridge=async()=>{try{const d=await connectApi(`/api/connect/multilingual-bridge?language=${encodeURIComponent(connectBridgeLanguage)}`);setConnectMultilingualPosts(d.posts||[]);setConnectMultilingualOpen(true);}catch(e){setConnectNotice(e.message||"Unable to load multilingual bridge.");}};
+  const loadConnectGrowthLoop=async()=>{try{const d=await connectApi(`/api/connect/growth-loop-dashboard`);setConnectGrowthLoop(d);setConnectGrowthLoopOpen(true);}catch(e){setConnectNotice(e.message||"Unable to load growth dashboard.");}};
   const loadConnectFactCheckTrail=async(post)=>{try{const d=await connectApi(`/api/connect/posts/${post.id}/fact-check-trail`);setConnectFactCheckPost(post);setConnectFactCheckTrail(d.corrections||[]);}catch(e){setConnectNotice(e.message||"Unable to load fact-check trail.");}};
 
-  const loadConnectNetworkGraph=async(tab="people")=>{try{const d=await connectApi(`/api/connect/network-graph?userId=${Number(currentUser?.id||0)}`);setConnectNetworkGraph(d);setConnectNetworkGraphTab(tab);setConnectNetworkGraphOpen(true);}catch(e){setConnectNotice(e.message||"Unable to load HOWDI Network Graph.");}};
-  const requestConnectLearningPartner=async(person,type=connectPartnerType)=>{try{await connectApi("/api/connect/learning-partner",{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||0),partnerUserId:Number(person.user_id||person.id),partnerType:type})});setConnectNotice("Learning partner request sent.");}catch(e){setConnectNotice(e.message||"Unable to send partner request.");}};
-  const respondConnectLearningPartner=async(req,accept)=>{try{await connectApi("/api/connect/learning-partner/respond",{method:"PATCH",body:JSON.stringify({userId:Number(currentUser?.id||0),fromUserId:req.user_id,partnerType:req.partner_type,accept})});await loadConnectNetworkGraph("requests");}catch(e){setConnectNotice(e.message||"Unable to respond.");}};
-  const requestConnectMentor=async(mentor)=>{try{await connectApi("/api/connect/mentor-request",{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||0),mentorUserId:Number(mentor.user_id||mentor.id),knowledgeDomain:connectMentorDomain,message:connectMentorRequestMessage})});setConnectMentorRequestMessage("");setConnectNotice("Mentor request sent.");}catch(e){setConnectNotice(e.message||"Unable to request mentorship.");}};
-  const respondConnectMentorRequest=async(req,accept)=>{try{await connectApi(`/api/connect/mentor-request/${req.id}/respond`,{method:"PATCH",body:JSON.stringify({userId:Number(currentUser?.id||0),accept})});await loadConnectNetworkGraph("requests");}catch(e){setConnectNotice(e.message||"Unable to respond.");}};
-  const giveConnectGratitude=async(person)=>{try{await connectApi("/api/connect/gratitude",{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||0),toUserId:Number(person.user_id||person.id),creditCount:1,message:"Thanks for contributing useful knowledge"})});setConnectNotice(`Gratitude sent to ${person.full_name}.`);}catch(e){setConnectNotice(e.message||"Unable to send gratitude.");}};
+  const loadConnectNetworkGraph=async(tab="people")=>{try{const d=await connectApi(`/api/connect/network-graph`);setConnectNetworkGraph(d);setConnectNetworkGraphTab(tab);setConnectNetworkGraphOpen(true);}catch(e){setConnectNotice(e.message||"Unable to load HOWDI Network Graph.");}};
+  const requestConnectLearningPartner=async(person,type=connectPartnerType)=>{try{await connectApi("/api/connect/learning-partner",{method:"POST",body:JSON.stringify({partnerUserId:Number(person.user_id||person.id),partnerType:type})});setConnectNotice("Learning partner request sent.");}catch(e){setConnectNotice(e.message||"Unable to send partner request.");}};
+  const respondConnectLearningPartner=async(req,accept)=>{try{await connectApi("/api/connect/learning-partner/respond",{method:"PATCH",body:JSON.stringify({fromUserId:req.user_id,partnerType:req.partner_type,accept})});await loadConnectNetworkGraph("requests");}catch(e){setConnectNotice(e.message||"Unable to respond.");}};
+  const requestConnectMentor=async(mentor)=>{try{await connectApi("/api/connect/mentor-request",{method:"POST",body:JSON.stringify({mentorUserId:Number(mentor.user_id||mentor.id),knowledgeDomain:connectMentorDomain,message:connectMentorRequestMessage})});setConnectMentorRequestMessage("");setConnectNotice("Mentor request sent.");}catch(e){setConnectNotice(e.message||"Unable to request mentorship.");}};
+  const respondConnectMentorRequest=async(req,accept)=>{try{await connectApi(`/api/connect/mentor-request/${req.id}/respond`,{method:"PATCH",body:JSON.stringify({accept})});await loadConnectNetworkGraph("requests");}catch(e){setConnectNotice(e.message||"Unable to respond.");}};
+  const giveConnectGratitude=async(person)=>{try{await connectApi("/api/connect/gratitude",{method:"POST",body:JSON.stringify({toUserId:Number(person.user_id||person.id),creditCount:1,message:"Thanks for contributing useful knowledge"})});setConnectNotice(`Gratitude sent to ${person.full_name}.`);}catch(e){setConnectNotice(e.message||"Unable to send gratitude.");}};
   const openConnectCircleThread=async(circle)=>{try{const d=await connectApi(`/api/connect/learning-circles/${circle.id}/messages`);setConnectSelectedCircle(circle);setConnectCircleThread(d.messages||[]);setConnectCommunityIntelTab("circle_thread");}catch(e){setConnectNotice(e.message||"Unable to open circle.");}};
-  const sendConnectCircleMessage=async()=>{if(!connectSelectedCircle||!connectCircleMessage.trim())return;try{await connectApi(`/api/connect/learning-circles/${connectSelectedCircle.id}/message`,{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||0),message:connectCircleMessage})});setConnectCircleMessage("");await openConnectCircleThread(connectSelectedCircle);}catch(e){setConnectNotice(e.message||"Unable to send message.");}};
-  const submitConnectInstitutionRequest=async()=>{if(!connectInstitutionName.trim())return;try{await connectApi("/api/connect/institution-verification-request",{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||0),institutionName:connectInstitutionName,institutionType:connectInstitutionRequestType,websiteUrl:connectInstitutionWebsite})});setConnectInstitutionName("");setConnectInstitutionRequestType("");setConnectInstitutionWebsite("");setConnectNotice("Institution verification request submitted.");}catch(e){setConnectNotice(e.message||"Unable to submit institution request.");}};
+  const sendConnectCircleMessage=async()=>{if(!connectSelectedCircle||!connectCircleMessage.trim())return;try{await connectApi(`/api/connect/learning-circles/${connectSelectedCircle.id}/message`,{method:"POST",body:JSON.stringify({message:connectCircleMessage})});setConnectCircleMessage("");await openConnectCircleThread(connectSelectedCircle);}catch(e){setConnectNotice(e.message||"Unable to send message.");}};
+  const submitConnectInstitutionRequest=async()=>{if(!connectInstitutionName.trim())return;try{await connectApi("/api/connect/institution-verification-request",{method:"POST",body:JSON.stringify({institutionName:connectInstitutionName,institutionType:connectInstitutionRequestType,websiteUrl:connectInstitutionWebsite})});setConnectInstitutionName("");setConnectInstitutionRequestType("");setConnectInstitutionWebsite("");setConnectNotice("Institution verification request submitted.");}catch(e){setConnectNotice(e.message||"Unable to submit institution request.");}};
 
-  const loadConnectCommunityIntel=async(tab="overview")=>{try{const d=await connectApi(`/api/connect/community-intelligence?userId=${Number(currentUser?.id||0)}&city=${encodeURIComponent(connectPostLocalCity||"")}`);setConnectCommunityIntel(d);setConnectCommunityIntelTab(tab);setConnectCommunityIntelOpen(true);}catch(e){setConnectNotice(e.message||"Unable to load Community Intelligence.");}};
-  const submitConnectAsk=async()=>{if(!connectAskQuestion.trim())return;try{const d=await connectApi("/api/connect/ask",{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||0),question:connectAskQuestion,knowledgeDomain:connectAskDomain,languageCode:connectPostLanguage,city:connectPostLocalCity,bountyPoints:Number(connectAskBounty)||0})});setConnectAskQuestion("");setConnectNotice(d.routedExpertUserId?"Question routed to a matching expert.":"Question posted to HOWDI knowledge network.");await loadConnectCommunityIntel("asks");}catch(e){setConnectNotice(e.message||"Unable to ask HOWDI.");}};
-  const loadConnectMentorMatches=async()=>{try{const d=await connectApi(`/api/connect/mentor-match?userId=${Number(currentUser?.id||0)}&domain=${encodeURIComponent(connectMentorDomain)}&city=${encodeURIComponent(connectPostLocalCity||"")}`);setConnectMentors(d.mentors||[]);setConnectCommunityIntelTab("mentors");setConnectCommunityIntelOpen(true);}catch(e){setConnectNotice(e.message||"Unable to find mentors.");}};
-  const saveConnectSkillPassport=async()=>{if(!connectSkillNameDraft.trim())return;try{await connectApi("/api/connect/skill-passport",{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||0),skillName:connectSkillNameDraft,skillLevel:connectSkillLevelDraft})});setConnectSkillNameDraft("");setConnectNotice("Skill added to HOWDI Skill Passport.");}catch(e){setConnectNotice(e.message||"Unable to save skill.");}};
-  const createConnectLearningCircle=async()=>{if(!connectCircleName.trim())return;try{await connectApi("/api/connect/learning-circles",{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||0),name:connectCircleName,knowledgeDomain:connectCircleDomain,city:connectPostLocalCity,circleType:"LEARNING",privacy:"PUBLIC"})});setConnectCircleName("");await loadConnectCommunityIntel("circles");setConnectNotice("Learning circle created.");}catch(e){setConnectNotice(e.message||"Unable to create circle.");}};
-  const toggleConnectLearningCircle=async(circle)=>{try{await connectApi(`/api/connect/learning-circles/${circle.id}/join`,{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||0)})});await loadConnectCommunityIntel("circles");}catch(e){setConnectNotice(e.message||"Unable to update circle.");}};
-  const createConnectMission=async()=>{if(!connectMissionTitle.trim())return;try{await connectApi("/api/connect/creator-missions",{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||0),title:connectMissionTitle,knowledgeDomain:connectMissionDomain,targetCount:10,rewardLabel:"HOWDI contribution badge"})});setConnectMissionTitle("");await loadConnectCommunityIntel("missions");}catch(e){setConnectNotice(e.message||"Unable to create mission.");}};
-  const joinConnectMission=async(mission)=>{try{await connectApi(`/api/connect/creator-missions/${mission.id}/join`,{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||0)})});await loadConnectCommunityIntel("missions");}catch(e){setConnectNotice(e.message||"Unable to join mission.");}};
-  const submitConnectCorrection=async()=>{if(!connectCorrectionPost||!connectCorrectionText.trim())return;try{await connectApi(`/api/connect/posts/${connectCorrectionPost.id}/correction`,{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||0),text:connectCorrectionText,evidenceUrl:connectCorrectionEvidence})});setConnectCorrectionPost(null);setConnectCorrectionText("");setConnectCorrectionEvidence("");setConnectNotice("Knowledge correction proposed.");}catch(e){setConnectNotice(e.message||"Unable to propose correction.");}};
-  const createConnectInviteLoop=async(context,entityId="")=>{try{const d=await connectApi("/api/connect/invite-loop",{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||0),context,entityId:String(entityId||"")})});const text=`Join my HOWDI ${context.toLowerCase()} journey · code ${d.invite.invite_code}`;await navigator.clipboard?.writeText(text);setConnectNotice(`Invite code ${d.invite.invite_code} copied.`);}catch(e){setConnectNotice(e.message||"Unable to create invite.");}};
+  const loadConnectCommunityIntel=async(tab="overview")=>{try{const d=await connectApi(`/api/connect/community-intelligence?city=${encodeURIComponent(connectPostLocalCity||"")}`);setConnectCommunityIntel(d);setConnectCommunityIntelTab(tab);setConnectCommunityIntelOpen(true);}catch(e){setConnectNotice(e.message||"Unable to load Community Intelligence.");}};
+  const submitConnectAsk=async()=>{if(!connectAskQuestion.trim())return;try{const d=await connectApi("/api/connect/ask",{method:"POST",body:JSON.stringify({question:connectAskQuestion,knowledgeDomain:connectAskDomain,languageCode:connectPostLanguage,city:connectPostLocalCity,bountyPoints:Number(connectAskBounty)||0})});setConnectAskQuestion("");setConnectNotice(d.routedExpertUserId?"Question routed to a matching expert.":"Question posted to HOWDI knowledge network.");await loadConnectCommunityIntel("asks");}catch(e){setConnectNotice(e.message||"Unable to ask HOWDI.");}};
+  const loadConnectMentorMatches=async()=>{try{const d=await connectApi(`/api/connect/mentor-match?domain=${encodeURIComponent(connectMentorDomain)}&city=${encodeURIComponent(connectPostLocalCity||"")}`);setConnectMentors(d.mentors||[]);setConnectCommunityIntelTab("mentors");setConnectCommunityIntelOpen(true);}catch(e){setConnectNotice(e.message||"Unable to find mentors.");}};
+  const saveConnectSkillPassport=async()=>{if(!connectSkillNameDraft.trim())return;try{await connectApi("/api/connect/skill-passport",{method:"POST",body:JSON.stringify({skillName:connectSkillNameDraft,skillLevel:connectSkillLevelDraft})});setConnectSkillNameDraft("");setConnectNotice("Skill added to HOWDI Skill Passport.");}catch(e){setConnectNotice(e.message||"Unable to save skill.");}};
+  const createConnectLearningCircle=async()=>{if(!connectCircleName.trim())return;try{await connectApi("/api/connect/learning-circles",{method:"POST",body:JSON.stringify({name:connectCircleName,knowledgeDomain:connectCircleDomain,city:connectPostLocalCity,circleType:"LEARNING",privacy:"PUBLIC"})});setConnectCircleName("");await loadConnectCommunityIntel("circles");setConnectNotice("Learning circle created.");}catch(e){setConnectNotice(e.message||"Unable to create circle.");}};
+  const toggleConnectLearningCircle=async(circle)=>{try{await connectApi(`/api/connect/learning-circles/${circle.id}/join`,{method:"POST",body:JSON.stringify({})});await loadConnectCommunityIntel("circles");}catch(e){setConnectNotice(e.message||"Unable to update circle.");}};
+  const createConnectMission=async()=>{if(!connectMissionTitle.trim())return;try{await connectApi("/api/connect/creator-missions",{method:"POST",body:JSON.stringify({title:connectMissionTitle,knowledgeDomain:connectMissionDomain,targetCount:10,rewardLabel:"HOWDI contribution badge"})});setConnectMissionTitle("");await loadConnectCommunityIntel("missions");}catch(e){setConnectNotice(e.message||"Unable to create mission.");}};
+  const joinConnectMission=async(mission)=>{try{await connectApi(`/api/connect/creator-missions/${mission.id}/join`,{method:"POST",body:JSON.stringify({})});await loadConnectCommunityIntel("missions");}catch(e){setConnectNotice(e.message||"Unable to join mission.");}};
+  const submitConnectCorrection=async()=>{if(!connectCorrectionPost||!connectCorrectionText.trim())return;try{await connectApi(`/api/connect/posts/${connectCorrectionPost.id}/correction`,{method:"POST",body:JSON.stringify({text:connectCorrectionText,evidenceUrl:connectCorrectionEvidence})});setConnectCorrectionPost(null);setConnectCorrectionText("");setConnectCorrectionEvidence("");setConnectNotice("Knowledge correction proposed.");}catch(e){setConnectNotice(e.message||"Unable to propose correction.");}};
+  const createConnectInviteLoop=async(context,entityId="")=>{try{const d=await connectApi("/api/connect/invite-loop",{method:"POST",body:JSON.stringify({context,entityId:String(entityId||"")})});const text=`Join my HOWDI ${context.toLowerCase()} journey · code ${d.invite.invite_code}`;await navigator.clipboard?.writeText(text);setConnectNotice(`Invite code ${d.invite.invite_code} copied.`);}catch(e){setConnectNotice(e.message||"Unable to create invite.");}};
 
-  const voteConnectUsefulness=async(post,vote)=>{try{const d=await connectApi(`/api/connect/posts/${post.id}/usefulness`,{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||0),vote})});setConnectPosts(v=>v.map(x=>x.id===post.id?{...x,useful_count:d.useful,not_useful_count:d.not_useful}:x));}catch(e){setConnectNotice(e.message||"Unable to vote.");}};
-  const toggleConnectLearnLater=async(post)=>{try{const d=await connectApi(`/api/connect/posts/${post.id}/learn-later`,{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||0)})});setConnectPosts(v=>v.map(x=>x.id===post.id?{...x,learn_later:d.saved}:x));}catch(e){setConnectNotice(e.message||"Unable to save for later.");}};
-  const submitConnectTeachBack=async()=>{if(!connectTeachBackPost||!connectTeachBackText.trim())return;try{await connectApi(`/api/connect/posts/${connectTeachBackPost.id}/teachback`,{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||0),text:connectTeachBackText})});setConnectTeachBackPost(null);setConnectTeachBackText("");setConnectNotice("Teach Back added — this strengthens your Knowledge DNA.");await loadConnectFeed();}catch(e){setConnectNotice(e.message||"Unable to submit Teach Back.");}};
-  const submitConnectProof=async()=>{if(!connectProofPost||!connectProofText.trim())return;try{await connectApi(`/api/connect/posts/${connectProofPost.id}/proof`,{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||0),proofText:connectProofText})});setConnectProofPost(null);setConnectProofText("");setConnectNotice("Proof of Learning saved.");}catch(e){setConnectNotice(e.message||"Unable to save proof.");}};
-  const loadConnectDiscovery=async(mode=connectDiscoveryMode)=>{try{const d=await connectApi(`/api/connect/discovery?userId=${Number(currentUser?.id||0)}&mode=${mode}`);setConnectDiscoveryMode(mode);setConnectDiscoveryData(d);setConnectDiscoveryOpen(true);}catch(e){setConnectNotice(e.message||"Unable to load discovery.");}};
-  const loadConnectKnowledgeDNA=async()=>{try{const d=await connectApi(`/api/connect/knowledge-dna?userId=${Number(currentUser?.id||0)}`);setConnectKnowledgeDNA(d);setConnectKnowledgeDNAOpen(true);}catch(e){setConnectNotice(e.message||"Unable to load Knowledge DNA.");}};
+  const voteConnectUsefulness=async(post,vote)=>{try{const d=await connectApi(`/api/connect/posts/${post.id}/usefulness`,{method:"POST",body:JSON.stringify({vote})});setConnectPosts(v=>v.map(x=>x.id===post.id?{...x,useful_count:d.useful,not_useful_count:d.not_useful}:x));}catch(e){setConnectNotice(e.message||"Unable to vote.");}};
+  const toggleConnectLearnLater=async(post)=>{try{const d=await connectApi(`/api/connect/posts/${post.id}/learn-later`,{method:"POST",body:JSON.stringify({})});setConnectPosts(v=>v.map(x=>x.id===post.id?{...x,learn_later:d.saved}:x));}catch(e){setConnectNotice(e.message||"Unable to save for later.");}};
+  const submitConnectTeachBack=async()=>{if(!connectTeachBackPost||!connectTeachBackText.trim())return;try{await connectApi(`/api/connect/posts/${connectTeachBackPost.id}/teachback`,{method:"POST",body:JSON.stringify({text:connectTeachBackText})});setConnectTeachBackPost(null);setConnectTeachBackText("");setConnectNotice("Teach Back added — this strengthens your Knowledge DNA.");await loadConnectFeed();}catch(e){setConnectNotice(e.message||"Unable to submit Teach Back.");}};
+  const submitConnectProof=async()=>{if(!connectProofPost||!connectProofText.trim())return;try{await connectApi(`/api/connect/posts/${connectProofPost.id}/proof`,{method:"POST",body:JSON.stringify({proofText:connectProofText})});setConnectProofPost(null);setConnectProofText("");setConnectNotice("Proof of Learning saved.");}catch(e){setConnectNotice(e.message||"Unable to save proof.");}};
+  const loadConnectDiscovery=async(mode=connectDiscoveryMode)=>{try{const d=await connectApi(`/api/connect/discovery?mode=${mode}`);setConnectDiscoveryMode(mode);setConnectDiscoveryData(d);setConnectDiscoveryOpen(true);}catch(e){setConnectNotice(e.message||"Unable to load discovery.");}};
+  const loadConnectKnowledgeDNA=async()=>{try{const d=await connectApi(`/api/connect/knowledge-dna`);setConnectKnowledgeDNA(d);setConnectKnowledgeDNAOpen(true);}catch(e){setConnectNotice(e.message||"Unable to load Knowledge DNA.");}};
   const loadConnectKnowledgePulse=async()=>{try{const d=await connectApi("/api/connect/knowledge-pulse");setConnectKnowledgePulse(d);setConnectKnowledgePulseOpen(true);}catch(e){setConnectNotice(e.message||"Unable to load Knowledge Pulse.");}};
-  const loadConnectOpportunityMatches=async()=>{try{const d=await connectApi(`/api/connect/opportunities/matches?userId=${Number(currentUser?.id||0)}`);setConnectOpportunityMatches(d.matches||[]);setConnectOpportunityOpen(true);}catch(e){setConnectNotice(e.message||"Unable to load opportunities.");}};
-  const toggleConnectDomainFollow=async(domain)=>{try{const d=await connectApi("/api/connect/knowledge/domain-follow",{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||0),domain})});setConnectNotice(d.following?`Following ${connectProfileCategoryLabel(domain)}.`:`Unfollowed ${connectProfileCategoryLabel(domain)}.`);}catch(e){setConnectNotice(e.message||"Unable to update domain.");}};
+  const loadConnectOpportunityMatches=async()=>{try{const d=await connectApi(`/api/connect/opportunities/matches`);setConnectOpportunityMatches(d.matches||[]);setConnectOpportunityOpen(true);}catch(e){setConnectNotice(e.message||"Unable to load opportunities.");}};
+  const toggleConnectDomainFollow=async(domain)=>{try{const d=await connectApi("/api/connect/knowledge/domain-follow",{method:"POST",body:JSON.stringify({domain})});setConnectNotice(d.following?`Following ${connectProfileCategoryLabel(domain)}.`:`Unfollowed ${connectProfileCategoryLabel(domain)}.`);}catch(e){setConnectNotice(e.message||"Unable to update domain.");}};
 
   const connectReadingMinutes=(text="")=>Math.max(1,Math.ceil(String(text).trim().split(/\s+/).filter(Boolean).length/220));
-  const setConnectLearningProgress=async(post,status)=>{try{await connectApi(`/api/connect/posts/${post.id}/progress`,{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||0),status})});setConnectPosts(v=>v.map(x=>x.id===post.id?{...x,learning_progress:status}:x));}catch(e){setConnectNotice(e.message||"Unable to update learning progress.");}};
-  const attemptConnectQuiz=async(post,index)=>{try{const d=await connectApi(`/api/connect/posts/${post.id}/quiz-attempt`,{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||0),selectedIndex:index})});setConnectQuizResult(v=>({...v,[post.id]:d}));}catch(e){setConnectNotice(e.message||"Unable to submit quiz.");}};
-  const followConnectTopic=async(label,domain)=>{try{const d=await connectApi("/api/connect/topics/follow",{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||0),label,knowledgeDomain:domain})});setConnectNotice(d.following?`Following ${label}.`:`Unfollowed ${label}.`);loadConnectKnowledgeHub(connectKnowledgeHubDomain);}catch(e){setConnectNotice(e.message||"Unable to follow topic.");}};
-  const loadConnectKnowledgeHub=async(domain=connectKnowledgeHubDomain)=>{try{const d=await connectApi(`/api/connect/knowledge-hub?userId=${Number(currentUser?.id||0)}&domain=${encodeURIComponent(domain)}`);setConnectKnowledgeHub(d);setConnectKnowledgeHubDomain(domain);setConnectKnowledgeHubOpen(true);}catch(e){setConnectNotice(e.message||"Unable to load Knowledge Hub.");}};
-  const loadConnectPostAnalytics=async(post)=>{try{const d=await connectApi(`/api/connect/posts/${post.id}/analytics?userId=${Number(currentUser?.id||0)}`);setConnectPostAnalytics({...d,post});setConnectPostAnalyticsOpen(true);}catch(e){setConnectNotice(e.message||"Unable to load analytics.");}};
-  const logConnectPostView=(post,completed=false)=>{connectApi(`/api/connect/posts/${post.id}/view`,{method:"POST",body:JSON.stringify({userId:Number(currentUser?.id||0)||null,viewerType:String(connectProfileType||"UNKNOWN"),readSeconds:completed?Math.max(15,connectReadingMinutes(`${post.article_title||""} ${post.content||""}`)*45):3,completed})}).catch(()=>{});};
+  const setConnectLearningProgress=async(post,status)=>{try{await connectApi(`/api/connect/posts/${post.id}/progress`,{method:"POST",body:JSON.stringify({status})});setConnectPosts(v=>v.map(x=>x.id===post.id?{...x,learning_progress:status}:x));}catch(e){setConnectNotice(e.message||"Unable to update learning progress.");}};
+  const attemptConnectQuiz=async(post,index)=>{try{const d=await connectApi(`/api/connect/posts/${post.id}/quiz-attempt`,{method:"POST",body:JSON.stringify({selectedIndex:index})});setConnectQuizResult(v=>({...v,[post.id]:d}));}catch(e){setConnectNotice(e.message||"Unable to submit quiz.");}};
+  const followConnectTopic=async(label,domain)=>{try{const d=await connectApi("/api/connect/topics/follow",{method:"POST",body:JSON.stringify({label,knowledgeDomain:domain})});setConnectNotice(d.following?`Following ${label}.`:`Unfollowed ${label}.`);loadConnectKnowledgeHub(connectKnowledgeHubDomain);}catch(e){setConnectNotice(e.message||"Unable to follow topic.");}};
+  const loadConnectKnowledgeHub=async(domain=connectKnowledgeHubDomain)=>{try{const d=await connectApi(`/api/connect/knowledge-hub?domain=${encodeURIComponent(domain)}`);setConnectKnowledgeHub(d);setConnectKnowledgeHubDomain(domain);setConnectKnowledgeHubOpen(true);}catch(e){setConnectNotice(e.message||"Unable to load Knowledge Hub.");}};
+  const loadConnectPostAnalytics=async(post)=>{try{const d=await connectApi(`/api/connect/posts/${post.id}/analytics`);setConnectPostAnalytics({...d,post});setConnectPostAnalyticsOpen(true);}catch(e){setConnectNotice(e.message||"Unable to load analytics.");}};
+  const logConnectPostView=(post,completed=false)=>{connectApi(`/api/connect/posts/${post.id}/view`,{method:"POST",body:JSON.stringify({viewerType:String(connectProfileType||"UNKNOWN"),readSeconds:completed?Math.max(15,connectReadingMinutes(`${post.article_title||""} ${post.content||""}`)*45):3,completed})}).catch(()=>{});};
 
   const publishConnectPost = async () => {
     const content = connectComposer.trim();
-    if (!currentUser?.id) {
+    if (!currentUser) {
       setConnectNotice("Please login before publishing to HOWDI Connect.");
       return;
     }
@@ -5959,7 +5940,7 @@ function App() {
   };
 
   const toggleConnectReaction = async (postId) => {
-    if (!currentUser?.id) {
+    if (!currentUser) {
       setConnectNotice("Please login before reacting.");
       return;
     }
@@ -6018,7 +5999,7 @@ function App() {
   };
 
   const submitConnectComment = async () => {
-    if (!connectCommentPost?.id || !currentUser?.id) return;
+    if (!connectCommentPost?.id || !currentUser) return;
     const content = connectCommentText.trim();
     if (!content) return;
 
@@ -6253,7 +6234,7 @@ function App() {
     const ms=Math.max(2000,Number(activeClassroom?.classroom?.sync_seconds||3)*1000);
     const timer=setInterval(sync,ms);
     return()=>{stopped=true;clearInterval(timer);};
-  },[activeClassroom?.id,currentUser?.id,classroomEnded]);
+  },[activeClassroom?.id,currentUser,classroomEnded]);
 
   const classroomDuration=(booking)=>{
     if(!booking?.joined_at)return "00:00";
@@ -7331,10 +7312,10 @@ function App() {
     }
   };
 
-  useEffect(() => { loadSubscriptionData(); }, [currentUser?.id]);
+  useEffect(() => { loadSubscriptionData(); }, [currentUser]);
 
   const saveSubscription = async ({ plan = subscriptionPlan, billing = subscriptionBilling, payment = subscriptionPayment, autoRenew = subscriptionAutoRenew, action } = {}) => {
-    if (!currentUser?.id) throw new Error("Please login again.");
+    if (!currentUser) throw new Error("Please login again.");
     const response = await fetch(`${SHOP_API_BASE}/api/subscription/user/me`, {
       method: "PUT",
       headers: { "Content-Type": "application/json", ...customerSessionHeaders() },
@@ -7413,7 +7394,7 @@ function App() {
 
   const changeSubscriptionBilling = async (billing) => {
     setSubscriptionBilling(billing);
-    if (!currentUser?.id) return;
+    if (!currentUser) return;
     setSubscriptionLoading(true);
     try {
       await saveSubscription({ billing, action: "Billing cycle changed" });
@@ -7435,10 +7416,10 @@ function App() {
 
 
   const loadCustomerNotifications = async () => {
-    if (!currentUser?.id) return;
+    if (!currentUser) return;
     setNotificationsLoading(true);
     try {
-      const response = await fetch(`http://localhost:5000/api/notifications/${encodeURIComponent(currentUser.id)}`, { cache: "no-store", headers: customerSessionHeaders() });
+      const response = await fetch(`${SHOP_API_BASE}/api/notifications/me`, { cache: "no-store", headers: customerSessionHeaders() });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.status !== "success") throw new Error(data.message || "Unable to load notifications.");
       setCustomerNotifications(Array.isArray(data.notifications) ? data.notifications : []);
@@ -7449,15 +7430,15 @@ function App() {
     }
   };
 
-  useEffect(() => { loadCustomerNotifications(); }, [currentUser?.id]);
+  useEffect(() => { loadCustomerNotifications(); }, [currentUser]);
 
   const updateNotificationReadState = async (notificationId, read) => {
-    if (!currentUser?.id) return;
+    if (!currentUser) return;
     try {
-      const response = await fetch(`http://localhost:5000/api/notifications/${notificationId}/${read ? "read" : "unread"}`, {
+      const response = await fetch(`${SHOP_API_BASE}/api/notifications/${notificationId}/${read ? "read" : "unread"}`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...customerSessionHeaders() },
-        body: JSON.stringify({ user_id: currentUser.id }),
+        body: JSON.stringify({}),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.status !== "success") throw new Error(data.message || "Unable to update notification.");
@@ -7467,11 +7448,11 @@ function App() {
     }
   };
 
-  useEffect(() => { loadWalletCenter(); }, [currentUser?.id]);
+  useEffect(() => { loadWalletCenter(); }, [currentUser]);
 
   useEffect(() => {
     loadSupportTickets();
-  }, [currentUser?.id]);
+  }, [currentUser]);
 
   const filteredSupportFaqs = supportFaqs.filter((faq) => {
     const categoryMatch = supportCategory === "all" || faq.category === supportCategory;
@@ -7490,9 +7471,9 @@ function App() {
 const calculatedUnreadNotificationCount = notifications.filter((item) => item.unread).length;
 
 const deleteNotification = async (id) => {
-    if (!currentUser?.id) return;
+    if (!currentUser) return;
     const old=notifications; setNotifications((items) => items.filter((item) => item.id !== id));
-    try { const r=await fetch(`http://localhost:5000/api/notifications/${encodeURIComponent(id)}?user_id=${encodeURIComponent(currentUser.id)}`,{method:"DELETE",headers:customerSessionHeaders()}); if(!r.ok) throw new Error(); } catch { setNotifications(old); }
+    try { const r=await fetch(`${SHOP_API_BASE}/api/notifications/${encodeURIComponent(id)}`,{method:"DELETE",headers:customerSessionHeaders()}); if(!r.ok) throw new Error(); } catch { setNotifications(old); }
   };
 
   const openNotifications = () => {
@@ -7502,29 +7483,29 @@ const deleteNotification = async (id) => {
   };
 
   const markMessageRead = async (id) => {
-    if (!currentUser?.id) return;
+    if (!currentUser) return;
     setMessages((items) => items.map((item) => item.id === id ? { ...item, unread: false } : item));
-    try { await fetch(`http://localhost:5000/api/messages/${encodeURIComponent(id)}/read`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({user_id:currentUser.id})}); } catch {}
+    try { await fetch(`${SHOP_API_BASE}/api/messages/${encodeURIComponent(id)}/read`,{method:"PUT",headers:{"Content-Type":"application/json",...customerSessionHeaders()}}); } catch {}
   };
 
   const deleteMessage = async (id) => {
-    if (!currentUser?.id) return;
+    if (!currentUser) return;
     const old=messages; setMessages((items)=>items.filter((item)=>item.id!==id));
-    try { const r=await fetch(`http://localhost:5000/api/messages/${encodeURIComponent(id)}?user_id=${encodeURIComponent(currentUser.id)}`,{method:"DELETE"}); if(!r.ok) throw new Error(); } catch { setMessages(old); }
+    try { const r=await fetch(`${SHOP_API_BASE}/api/messages/${encodeURIComponent(id)}`,{method:"DELETE",headers:customerSessionHeaders()}); if(!r.ok) throw new Error(); } catch { setMessages(old); }
   };
 
   const markAllMessagesRead = async () => {
-    if (!currentUser?.id) return;
+    if (!currentUser) return;
     setMessages((items)=>items.map((item)=>({...item,unread:false})));
-    try { await fetch("http://localhost:5000/api/messages/read-all",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({user_id:currentUser.id})}); } catch {}
+    try { await fetch(`${SHOP_API_BASE}/api/messages/read-all`,{method:"PUT",headers:{"Content-Type":"application/json",...customerSessionHeaders()}}); } catch {}
   };
 
   const sendHowdiMessage = async () => {
     const recipient=messageRecipient.trim(), body=messageBody.trim();
-    if(!recipient||!body||!currentUser?.id) return;
+    if(!recipient||!body||!currentUser) return;
     setCommunicationsLoading(true);
     try {
-      const response=await fetch("http://localhost:5000/api/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({user_id:currentUser.id,recipient,message:body})});
+      const response=await fetch(`${SHOP_API_BASE}/api/messages`,{method:"POST",headers:{"Content-Type":"application/json",...customerSessionHeaders()},body:JSON.stringify({recipient,message:body})});
       const data=await response.json().catch(()=>({}));
       if(!response.ok||data.status!=="success") throw new Error(data.message||"Unable to send message.");
       setMessageRecipient(""); setMessageBody(""); setMessageComposeOpen(false); await loadCommunications();
@@ -7548,10 +7529,10 @@ const deleteNotification = async (id) => {
   const addWalletMoney = async () => {
     const amount = Number(walletAmount);
     if (!amount || amount <= 0) { setWalletMessage("Enter a valid amount."); return; }
-    if (!currentUser?.id) { setWalletMessage("Please login again."); return; }
+    if (!currentUser) { setWalletMessage("Please login again."); return; }
     setWalletLoading(true);
     try {
-      const response=await fetch("http://localhost:5000/api/wallet/add-money",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({user_id:currentUser.id,amount})});
+      const response=await fetch(`${SHOP_API_BASE}/api/wallet/add-money`,{method:"POST",headers:{"Content-Type":"application/json",...customerSessionHeaders()},body:JSON.stringify({amount})});
       const data=await response.json().catch(()=>({}));
       if(!response.ok||data.status!=="success") throw new Error(data.message||"Unable to add money.");
       setWalletAmount(""); setWalletMessage(data.message||"Money added to wallet."); await loadWalletData();
@@ -7559,10 +7540,10 @@ const deleteNotification = async (id) => {
   };
 
   const moveCashbackToWallet = async () => {
-    if (!currentUser?.id) return;
+    if (!currentUser) return;
     setWalletLoading(true);
     try {
-      const response=await fetch("http://localhost:5000/api/wallet/transfer-cashback",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({user_id:currentUser.id})});
+      const response=await fetch(`${SHOP_API_BASE}/api/wallet/transfer-cashback`,{method:"POST",headers:{"Content-Type":"application/json",...customerSessionHeaders()}});
       const data=await response.json().catch(()=>({}));
       if(!response.ok||data.status!=="success") throw new Error(data.message||"Unable to transfer cashback.");
       setWalletMessage(data.message||"Cashback transferred to wallet."); await loadWalletData();
@@ -7570,10 +7551,10 @@ const deleteNotification = async (id) => {
   };
 
   const redeemRewards = async () => {
-    if (!currentUser?.id) return;
+    if (!currentUser) return;
     setWalletLoading(true);
     try {
-      const response=await fetch("http://localhost:5000/api/rewards/redeem",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({user_id:currentUser.id,points:500,wallet_credit:50})});
+      const response=await fetch(`${SHOP_API_BASE}/api/rewards/redeem`,{method:"POST",headers:{"Content-Type":"application/json",...customerSessionHeaders()},body:JSON.stringify({points:500,wallet_credit:50})});
       const data=await response.json().catch(()=>({}));
       if(!response.ok||data.status!=="success") throw new Error(data.message||"Unable to redeem rewards.");
       setWalletMessage(data.message||"Rewards redeemed."); await loadWalletData();
@@ -7602,7 +7583,7 @@ const deleteNotification = async (id) => {
   const [paymentsLoading, setPaymentsLoading] = useState(false);
 
   const loadPaymentMethods = async () => {
-    if (!currentUser?.id) { setPaymentMethods([]); return; }
+    if (!currentUser) { setPaymentMethods([]); return; }
     setPaymentsLoading(true);
     try {
       const response=await fetch(`${SHOP_API_BASE}/api/payments/user/me`,{cache:"no-store",headers:customerSessionHeaders()});
@@ -7622,7 +7603,7 @@ const deleteNotification = async (id) => {
     } finally { setPaymentsLoading(false); }
   };
 
-  useEffect(()=>{ loadPaymentMethods(); },[currentUser?.id]);
+  useEffect(()=>{ loadPaymentMethods(); },[currentUser]);
 
   const resetPaymentForm = () => {
     setPaymentValue(""); setPaymentHolder(""); setPaymentExpiry(""); setPaymentMessage("");
@@ -7631,7 +7612,7 @@ const deleteNotification = async (id) => {
   const handlePaymentTypeChange = (type) => { setPaymentType(type); resetPaymentForm(); };
 
   const addPaymentMethod = async () => {
-    if(!currentUser?.id){ setPaymentMessage("Please login again."); return; }
+    if(!currentUser){ setPaymentMessage("Please login again."); return; }
     const value=paymentValue.trim(), holder=paymentHolder.trim(), expiry=paymentExpiry.trim();
     if(paymentType==="UPI" && (!value||!value.includes("@"))) return setPaymentMessage("Please enter a valid UPI ID.");
     if(paymentType==="CARD"){
@@ -7654,7 +7635,7 @@ const deleteNotification = async (id) => {
   };
 
   const removePaymentMethod = async (id) => {
-    if(!currentUser?.id) return;
+    if(!currentUser) return;
     if(!window.confirm("Remove this saved payment method?")) return;
     setPaymentsLoading(true);
     try{
@@ -7982,7 +7963,7 @@ const [selectedCancellationOrder, setSelectedCancellationOrder] = useState(null)
 
     const loadMostPurchased = async () => {
       try {
-        const response = await fetch("http://localhost:5000/api/products/most-purchased", { cache: "no-store" });
+        const response = await fetch(`${SHOP_API_BASE}/api/products/most-purchased`, { cache: "no-store" });
         const data = await response.json().catch(() => ({}));
         if (!response.ok || data.status !== "success") return;
         if (!cancelled) setMostPurchased(Array.isArray(data.products) ? data.products : []);
@@ -8019,7 +8000,7 @@ const [selectedCancellationOrder, setSelectedCancellationOrder] = useState(null)
 
     recordTasteEvent({
       type: "cart",
-      customerId: currentUser?.id,
+      customerId: (currentUser?.public_username||currentUser?.username||""),
       productId: product.id ?? product.product_id ?? product._id ?? product.name,
       name: product.name,
       category: product.category,
@@ -8101,10 +8082,10 @@ const [selectedCancellationOrder, setSelectedCancellationOrder] = useState(null)
   const openProductDetails = (product) => {
     // Shop S2: wishlist cards are live catalogue products; they open the catalogue product page.
     if (product?.catalogueProduct) { openCatalogueProduct(product.id); return; }
-    rememberRecentlyViewed(product, currentUser?.id || "");
+    rememberRecentlyViewed(product, (currentUser?.public_username||currentUser?.username||""));
     recordTasteEvent({
       type: "view",
-      customerId: currentUser?.id,
+      customerId: (currentUser?.public_username||currentUser?.username||""),
       productId: product.id ?? product.product_id ?? product._id ?? product.name,
       name: product.name,
       category: product.category,
@@ -8313,7 +8294,7 @@ return () => window.clearInterval(timer);
 
     const localUsers = [
       currentUser ? {
-        id: currentUser.id || "current-user",
+        id: "current-user",
         full_name: currentUser.full_name || currentUser.name || "My HOWDI account",
         howdi_id: currentUser.howdi_id || "",
         role: currentUser.role || "customer",
@@ -8350,8 +8331,8 @@ return () => window.clearInterval(timer);
       let lastError = "";
 
       for (const endpoint of [
-        `http://localhost:5000/api/users/search?q=${encodeURIComponent(term)}`,
-        `http://localhost:5000/api/users/mention-search?q=${encodeURIComponent(term)}`,
+        `${SHOP_API_BASE}/api/users/search?q=${encodeURIComponent(term)}`,
+        `${SHOP_API_BASE}/api/users/mention-search?q=${encodeURIComponent(term)}`,
       ]) {
         try {
           const response = await fetch(endpoint, { cache: "no-store" });
@@ -8440,7 +8421,7 @@ return () => window.clearInterval(timer);
 
     const comment = {
       id: `comment-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      user_id: currentUser.id,
+      user_handle: currentUser.public_username || currentUser.username || "",
       name: currentUser.full_name || currentUser.name || "HOWDI customer",
       howdi_id: currentUser.howdi_id || "",
       text,
@@ -8510,7 +8491,7 @@ return () => window.clearInterval(timer);
 
     const reply = {
       id: `reply-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      user_id: currentUser.id,
+      user_handle: currentUser.public_username || currentUser.username || "",
       name: currentUser.full_name || currentUser.name || "HOWDI customer",
       howdi_id: currentUser.howdi_id || "",
       text,
@@ -8858,7 +8839,7 @@ return () => window.clearInterval(timer);
   // Shop S2 fix: getCartRecommendations() returns plain products; the cart card list destructures { product, reasons }
   // (which threw when the cart opened). Normalise to that shape here.
   const cartRecommendations = getCartRecommendations(cart, products, {
-    customerId: currentUser?.id,
+    customerId: (currentUser?.public_username||currentUser?.username||""),
     location: customerLocation,
     wishlist,
     recentlyViewed,
@@ -8949,7 +8930,7 @@ return () => window.clearInterval(timer);
       return;
     }
 
-    if (!currentUser?.id) {
+    if (!currentUser) {
       setCheckoutMessage("Please login again before placing the order.");
       openLogin();
       return;
@@ -8983,8 +8964,6 @@ return () => window.clearInterval(timer);
     const rewardPointsUsed = rewardsUsed * 10;
 
     const orderPayload = {
-      user_id: currentUser.id,
-      customer_id: currentUser.id,
       vibe_checkout_token: vibeDirectCheckoutToken || null,
       address_id: selectedCheckoutAddress?.id || null,
       order_number: orderNumber,
@@ -9129,7 +9108,7 @@ return () => window.clearInterval(timer);
           ),
         ];
         localStorage.setItem(
-          `howdiOrders_${currentUser.id}`,
+          `howdiOrders_${(currentUser?.public_username||currentUser?.username||"account")}`,
           JSON.stringify(cached)
         );
       } catch {}
@@ -9138,7 +9117,7 @@ return () => window.clearInterval(timer);
       if(data.payment?.confirmation_state==="CONFIRMED_COD"||data.payment?.confirmation_state==="CONFIRMED_PAID") cart.forEach((item) => {
         recordTasteEvent({
           type: "purchase",
-          customerId: currentUser.id,
+          customerId: (currentUser?.public_username||currentUser?.username||""),
           productId: item.id ?? item.product_id ?? item._id ?? item.name,
           name: item.name,
           category: item.category,
@@ -9201,8 +9180,7 @@ return () => window.clearInterval(timer);
 
   // HOWDI V16.6H — My HOWDI ↔ Learn & Earn session bridge.
   useEffect(() => {
-    const storedUserId = currentUser?.id || currentUser?.user_id;
-    if (!storedUserId) return;
+    if (!currentUser) return;
     let cancelled = false;
     (async () => {
       const token = localStorage.getItem("howdiSessionToken") || "";
@@ -9244,7 +9222,7 @@ return () => window.clearInterval(timer);
       }
     })();
     return () => { cancelled = true; };
-  }, [currentUser?.id, currentUser?.user_id]);
+  }, [currentUser?.public_username || currentUser?.username]);
 
   const [backendStatus, setBackendStatus] = useState("Checking...");
 
@@ -9253,7 +9231,7 @@ return () => window.clearInterval(timer);
   // ==============================
 
   useEffect(() => {
-    fetch("http://localhost:5000/api/health")
+    fetch(`${SHOP_API_BASE}/api/health`)
       .then((response) => response.json())
       .then((data) => {
         setBackendStatus(data.status || "online");
@@ -9648,7 +9626,7 @@ return () => window.clearInterval(timer);
 
   useEffect(() => {
     let cancelled = false;
-    fetch("http://localhost:5000/api/public/daily-quote")
+    fetch(`${SHOP_API_BASE}/api/public/daily-quote`)
       .then((response) => response.ok ? response.json() : null)
       .then((data) => {
         const quote = data?.quote?.quote_text || data?.quote?.text || data?.quote_text;
@@ -9890,7 +9868,7 @@ return () => window.clearInterval(timer);
   // ==============================
 
   const loadAddresses = async () => {
-    if (!currentUser?.id) {
+    if (!currentUser) {
       setAddresses([]);
       return;
     }
@@ -9898,7 +9876,8 @@ return () => window.clearInterval(timer);
     setAddressLoading(true);
     try {
       const response = await fetch(
-        `http://localhost:5000/api/addresses/${encodeURIComponent(currentUser.id)}`
+        `${SHOP_API_BASE}/api/addresses/me`,
+        { cache: "no-store", headers: customerSessionHeaders() }
       );
       const data = await response.json().catch(() => ({}));
 
@@ -9909,7 +9888,7 @@ return () => window.clearInterval(timer);
       const liveAddresses = Array.isArray(data.addresses) ? data.addresses : [];
       setAddresses(liveAddresses);
       localStorage.setItem(
-        `howdiAddresses_${currentUser.id}`,
+        `howdiAddresses_${currentUser?.public_username||currentUser?.username||"account"}`,
         JSON.stringify(liveAddresses)
       );
       setAddressNotice("");
@@ -9924,19 +9903,19 @@ return () => window.clearInterval(timer);
   };
 
   useEffect(() => {
-    if (!currentUser?.id) {
+    if (!currentUser) {
       setAddresses([]);
       setAddressNotice("");
       return;
     }
     loadAddresses();
-  }, [currentUser?.id]);
+  }, [currentUser]);
 
   const persistAddresses = (nextAddresses) => {
     setAddresses(nextAddresses);
-    if (currentUser?.id) {
+    if (currentUser) {
       localStorage.setItem(
-        `howdiAddresses_${currentUser.id}`,
+        `howdiAddresses_${currentUser?.public_username||currentUser?.username||"account"}`,
         JSON.stringify(nextAddresses)
       );
     }
@@ -9977,7 +9956,7 @@ return () => window.clearInterval(timer);
   };
 
   const loadWishlist = async () => {
-    if (!currentUser?.id) {
+    if (!currentUser) {
       setWishlist([]);
       return;
     }
@@ -9992,7 +9971,7 @@ return () => window.clearInterval(timer);
       setWishlist((Array.isArray(data.items) ? data.items : []).map(wishlistCardToProduct));
       setWishlistNotice(data.unavailableCount > 0 ? `${data.unavailableCount} saved ${data.unavailableCount === 1 ? "item is" : "items are"} no longer available.` : "");
       // The old client-side copy of this list (full product blobs) is no longer used.
-      try { localStorage.removeItem(`howdiWishlist_${currentUser.id}`); } catch {}
+      try { localStorage.removeItem(`howdiWishlist_${currentUser?.public_username||currentUser?.username||"account"}`); } catch {}
     } catch (error) {
       console.error("HOWDI LOAD WISHLIST ERROR:", error);
       setWishlist([]);
@@ -10003,16 +9982,16 @@ return () => window.clearInterval(timer);
   };
 
   useEffect(() => {
-    if (!currentUser?.id) {
+    if (!currentUser) {
       setWishlist([]);
       setWishlistNotice("");
       return;
     }
     loadWishlist();
-  }, [currentUser?.id]);
+  }, [currentUser]);
 
   const toggleWishlist = async (product) => {
-    if (!currentUser?.id) {
+    if (!currentUser) {
       openLogin();
       return;
     }
@@ -10046,7 +10025,7 @@ return () => window.clearInterval(timer);
       if (!exists) {
         recordTasteEvent({
           type: "wishlist",
-          customerId: currentUser.id,
+          customerId: (currentUser?.public_username||currentUser?.username||""),
           productId,
           name: product.name,
           category: product.category,
@@ -10129,7 +10108,7 @@ return () => window.clearInterval(timer);
   };
 
   const loadCustomerOrders = async () => {
-    if (!currentUser?.id) {
+    if (!currentUser) {
       setOrders([]);
       setSelectedOrder(null);
       return;
@@ -10155,7 +10134,7 @@ return () => window.clearInterval(timer);
 
       try {
         localStorage.setItem(
-          `howdiOrders_${currentUser.id}`,
+          `howdiOrders_${(currentUser?.public_username||currentUser?.username||"account")}`,
           JSON.stringify(backendOrders)
         );
       } catch {}
@@ -10166,7 +10145,7 @@ return () => window.clearInterval(timer);
       );
       try {
         const saved = JSON.parse(
-          localStorage.getItem(`howdiOrders_${currentUser.id}`) || "[]"
+          localStorage.getItem(`howdiOrders_${(currentUser?.public_username||currentUser?.username||"account")}`) || "[]"
         );
         setOrders(Array.isArray(saved) ? saved : []);
       } catch {
@@ -10179,7 +10158,7 @@ return () => window.clearInterval(timer);
 
   useEffect(() => {
     let cancelled = false;
-    if (!currentUser?.id) {
+    if (!currentUser) {
       setOrders([]);
       setSelectedOrder(null);
       return;
@@ -10187,14 +10166,14 @@ return () => window.clearInterval(timer);
 
     loadCustomerOrders().catch(() => {});
     return () => { cancelled = true; };
-  }, [currentUser?.id]);
+  }, [currentUser]);
 
 
   useEffect(() => {
-    if (!selectedTrackingOrder?.id || !currentUser?.id) return;
+    if (!selectedTrackingOrder?.id || !currentUser) return;
     const timer = setInterval(() => { loadCustomerOrders().catch(() => {}); }, 5000);
     return () => clearInterval(timer);
-  }, [selectedTrackingOrder?.id, currentUser?.id]);
+  }, [selectedTrackingOrder?.id, currentUser]);
 
   const [customerReturnStatus,setCustomerReturnStatus]=useState({});
   const [cancellationStatus,setCancellationStatus]=useState({});
@@ -10254,14 +10233,14 @@ return () => window.clearInterval(timer);
   }
   function openPrintableInvoice(doc){setPrintDocument(doc)}
 
-  useEffect(()=>{if(selectedOrder?.id&&currentUser?.id)loadOrderTaxDocuments(selectedOrder).catch(()=>{})},[selectedOrder?.id,currentUser?.id]);
+  useEffect(()=>{if(selectedOrder?.id&&currentUser)loadOrderTaxDocuments(selectedOrder).catch(()=>{})},[selectedOrder?.id,currentUser]);
 
   useEffect(() => {
-    if (!selectedOrder?.id || !currentUser?.id) return;
+    if (!selectedOrder?.id || !currentUser) return;
     loadPaymentLifecycle(selectedOrder);
     loadCancellationStatus(selectedOrder);
     loadCustomerReturnStatus(selectedOrder);
-  }, [selectedOrder?.id, currentUser?.id]);
+  }, [selectedOrder?.id, currentUser]);
 
   async function loadPaymentLifecycle(order){
     if(!order?.id)return;
@@ -10365,7 +10344,7 @@ return () => window.clearInterval(timer);
     }catch(e){setHpayStatus({type:"error",title:"Request not created",message:e.message||"Unable to create payment request"});}
     finally{setHpaySubmitting(false);}
   }
-  useEffect(()=>{if(connectView==="hpay")loadHpayDashboard();},[connectView,currentUser?.id]);
+  useEffect(()=>{if(connectView==="hpay")loadHpayDashboard();},[connectView,currentUser]);
   function openReturnRequest(order,status){
     setOrdersNotice("");
     const eligible=status?.eligibility?.eligible_items||[];
@@ -10387,7 +10366,7 @@ return () => window.clearInterval(timer);
 
   const [customerReturnBusy,setCustomerReturnBusy]=useState("");
   async function loadCustomerReturnStatus(order){
-    if(!order?.id||!currentUser?.id)return;
+    if(!order?.id||!currentUser)return;
     setCustomerReturnBusy(String(order.id));
     try{
       const r=await fetch(`${API_BASE}/api/orders/${encodeURIComponent(order.id)}/returns/status`,{cache:"no-store",headers:customerSessionHeaders()});
@@ -10467,16 +10446,15 @@ return () => window.clearInterval(timer);
   };
 
   const submitLiveOrderCancellation = async (order) => {
-    if (!order?.id || !currentUser?.id) return false;
+    if (!order?.id || !currentUser) return false;
 
     try {
       const response = await fetch(
-        `http://localhost:5000/api/orders/${encodeURIComponent(order.id)}/cancel`,
+        `${SHOP_API_BASE}/api/orders/${encodeURIComponent(order.id)}/cancel`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...customerSessionHeaders() },
           body: JSON.stringify({
-            user_id: currentUser.id,
             reason: cancellationDetails.trim() || cancellationReason || "Cancelled by customer",
           }),
         }
@@ -10523,7 +10501,7 @@ return () => window.clearInterval(timer);
     const review = { rating: reviewRating, text: reviewText.trim(), created_at: new Date().toISOString() };
     const nextOrders = orders.map((order) => (order.id || order.order_id) === reviewedId ? { ...order, review } : order);
     setOrders(nextOrders);
-    if (currentUser?.id) localStorage.setItem(`howdiOrders_${currentUser.id}`, JSON.stringify(nextOrders));
+    if (currentUser) localStorage.setItem(`howdiOrders_${(currentUser?.public_username||currentUser?.username||"account")}`, JSON.stringify(nextOrders));
     setReviewMessage("Thank you! Your review has been saved.");
     window.setTimeout(() => {
       setReviewOrder(null);
@@ -10758,7 +10736,7 @@ return () => window.clearInterval(timer);
   };
 
   useEffect(() => {
-    if (navigationOSArea !== "myhowdi" || !profileOpen || !currentUser?.id) return;
+    if (navigationOSArea !== "myhowdi" || !profileOpen || !currentUser) return;
     if (["overview", "shopping", "orders"].includes(profileTab)) loadCustomerOrders();
     if (["overview", "shopping", "wishlist"].includes(profileTab)) loadWishlist();
     if (profileTab === "addresses") loadAddresses();
@@ -10770,7 +10748,7 @@ return () => window.clearInterval(timer);
     if (profileTab === "security") loadSecurityCenter();
     if (["settings", "preferences"].includes(profileTab)) loadAccountPreferences();
     if (profileTab === "support") loadSupportTickets();
-  }, [navigationOSArea, profileOpen, profileTab, currentUser?.id]);
+  }, [navigationOSArea, profileOpen, profileTab, currentUser]);
 
 const openHowdiConnect = () => {
   openNavigationOSArea("connect", "home");
@@ -10786,7 +10764,7 @@ const openProfileSettings = () => openMyHowdiProfileDrawer();
 const saveProfileDetails = async (event) => {
   event?.preventDefault();
 
-  if (!currentUser?.id) {
+  if (!currentUser) {
     setProfileNotice(
       "Please login again to update your profile."
     );
@@ -10857,9 +10835,7 @@ const saveProfileDetails = async (event) => {
 
     const response =
       await fetch(
-        `http://localhost:5000/api/profile/${encodeURIComponent(
-          currentUser.id
-        )}`,
+        `${SHOP_API_BASE}/api/profile/me`,
         {
           method: "PUT",
 
@@ -10996,7 +10972,7 @@ const saveProfileDetails = async (event) => {
   const saveAddress = async (event) => {
     event.preventDefault();
 
-    if (!currentUser?.id) {
+    if (!currentUser) {
       setAddressNotice("Please login again before saving an address.");
       return;
     }
@@ -11019,7 +10995,6 @@ const saveProfileDetails = async (event) => {
     }
 
     const payload = {
-      user_id: currentUser.id,
       label: addressForm.label.trim() || "Other",
       full_name: addressForm.full_name.trim(),
       phone: addressForm.phone.trim(),
@@ -11039,12 +11014,12 @@ const saveProfileDetails = async (event) => {
 
     try {
       const endpoint = editingAddressId
-        ? `http://localhost:5000/api/addresses/${encodeURIComponent(editingAddressId)}`
-        : "http://localhost:5000/api/addresses";
+        ? `${SHOP_API_BASE}/api/addresses/${encodeURIComponent(editingAddressId)}`
+        : `${SHOP_API_BASE}/api/addresses`;
 
       const response = await fetch(endpoint, {
         method: editingAddressId ? "PUT" : "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...customerSessionHeaders() },
         body: JSON.stringify(payload),
       });
 
@@ -11087,7 +11062,7 @@ const saveProfileDetails = async (event) => {
 
   const deleteAddress = async (addressId) => {
     const address = addresses.find((item) => item.id === addressId);
-    if (!address || !currentUser?.id) return;
+    if (!address || !currentUser) return;
 
     if (!window.confirm(`Delete your ${address.label || "address"}?`)) return;
 
@@ -11096,8 +11071,8 @@ const saveProfileDetails = async (event) => {
 
     try {
       const response = await fetch(
-        `http://localhost:5000/api/addresses/${encodeURIComponent(addressId)}?user_id=${encodeURIComponent(currentUser.id)}`,
-        { method: "DELETE" }
+        `${SHOP_API_BASE}/api/addresses/${encodeURIComponent(addressId)}`,
+        { method: "DELETE", headers: customerSessionHeaders() }
       );
 
       const data = await response.json().catch(() => ({}));
@@ -11114,18 +11089,18 @@ const saveProfileDetails = async (event) => {
   };
 
   const setDefaultAddress = async (addressId) => {
-    if (!currentUser?.id) return;
+    if (!currentUser) return;
 
     setAddressLoading(true);
     setAddressNotice("");
 
     try {
       const response = await fetch(
-        `http://localhost:5000/api/addresses/${encodeURIComponent(addressId)}/default`,
+        `${SHOP_API_BASE}/api/addresses/${encodeURIComponent(addressId)}/default`,
         {
           method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ user_id: currentUser.id }),
+          headers: { "Content-Type": "application/json", ...customerSessionHeaders() },
+          body: JSON.stringify({}),
         }
       );
 
@@ -11246,11 +11221,12 @@ const saveProfileDetails = async (event) => {
   };
 
   const loadCustomerPreferences = async () => {
-    if (!currentUser?.id) return;
+    if (!currentUser) return;
     setPreferencesLoading(true);
     try {
-      const response = await fetch(`http://localhost:5000/api/preferences/${encodeURIComponent(currentUser.id)}`, {
+      const response = await fetch(`${SHOP_API_BASE}/api/preferences/me`, {
         cache: "no-store",
+        headers: customerSessionHeaders(),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.status !== "success") {
@@ -11266,7 +11242,7 @@ const saveProfileDetails = async (event) => {
 
   useEffect(() => {
     loadCustomerPreferences();
-  }, [currentUser?.id]);
+  }, [currentUser]);
 
   const updatePreferenceValue = (key, value) => {
     setCustomerPreferences((previous) => ({
@@ -11287,12 +11263,12 @@ const saveProfileDetails = async (event) => {
   };
 
   const saveCustomerPreferences = async () => {
-    if (!currentUser?.id || !customerPreferences) return;
+    if (!currentUser || !customerPreferences) return;
     setPreferencesSaving(true);
     try {
-      const response = await fetch(`http://localhost:5000/api/preferences/${encodeURIComponent(currentUser.id)}`, {
+      const response = await fetch(`${SHOP_API_BASE}/api/preferences/me`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...customerSessionHeaders() },
         body: JSON.stringify(customerPreferences),
       });
       const data = await response.json().catch(() => ({}));
@@ -11309,10 +11285,10 @@ const saveProfileDetails = async (event) => {
   };
 
   const loadFeedbackCenter = async () => {
-    if (!currentUser?.id) return;
+    if (!currentUser) return;
     setFeedbackLoading(true);
     try {
-      const response = await fetch(`http://localhost:5000/api/feedback/${encodeURIComponent(currentUser.id)}`, { cache: "no-store" });
+      const response = await fetch(`${SHOP_API_BASE}/api/feedback/me`, { cache: "no-store", headers: customerSessionHeaders() });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.status !== "success") throw new Error(data.message || "Unable to load feedback history.");
       setFeedbackHistory(Array.isArray(data.feedback) ? data.feedback : []);
@@ -11324,21 +11300,20 @@ const saveProfileDetails = async (event) => {
     }
   };
 
-  useEffect(() => { loadFeedbackCenter(); }, [currentUser?.id]);
+  useEffect(() => { loadFeedbackCenter(); }, [currentUser]);
 
   const submitFeedback = async (event) => {
     event?.preventDefault?.();
-    if (!currentUser?.id) return;
+    if (!currentUser) return;
     if (!feedbackSubject.trim()) {
       setFeedbackNotice("Please enter a feedback subject.");
       return;
     }
     try {
-      const response = await fetch("http://localhost:5000/api/feedback", {
+      const response = await fetch(`${SHOP_API_BASE}/api/feedback`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...customerSessionHeaders() },
         body: JSON.stringify({
-          user_id: currentUser.id,
           feedback_type: feedbackType,
           subject: feedbackSubject.trim(),
           rating: feedbackRating,
@@ -11358,9 +11333,9 @@ const saveProfileDetails = async (event) => {
   };
 
   const removeFeedback = async (feedbackId) => {
-    if (!currentUser?.id) return;
+    if (!currentUser) return;
     try {
-      const response = await fetch(`http://localhost:5000/api/feedback/${feedbackId}?user_id=${encodeURIComponent(currentUser.id)}`, { method: "DELETE" });
+      const response = await fetch(`${SHOP_API_BASE}/api/feedback/${feedbackId}`, { method: "DELETE", headers: customerSessionHeaders() });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.status !== "success") throw new Error(data.message || "Unable to remove feedback.");
       await loadFeedbackCenter();
@@ -11370,10 +11345,10 @@ const saveProfileDetails = async (event) => {
   };
 
   const loadReferralCenter = async () => {
-    if (!currentUser?.id) return;
+    if (!currentUser) return;
     setReferralLoading(true);
     try {
-      const response = await fetch(`http://localhost:5000/api/referrals/profile/${encodeURIComponent(currentUser.id)}`, { cache: "no-store" });
+      const response = await fetch(`${SHOP_API_BASE}/api/referrals/profile/me`, { cache: "no-store", headers: customerSessionHeaders() });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.status !== "success") throw new Error(data.message || "Unable to load referral center.");
       setReferralProfile(data.profile || null);
@@ -11385,21 +11360,20 @@ const saveProfileDetails = async (event) => {
     }
   };
 
-  useEffect(() => { loadReferralCenter(); }, [currentUser?.id]);
+  useEffect(() => { loadReferralCenter(); }, [currentUser]);
 
   const createReferralCenterInvite = async (event) => {
     event?.preventDefault?.();
-    if (!currentUser?.id) return;
+    if (!currentUser) return;
     if (!inviteFriendName.trim() || !inviteFriendEmail.trim()) {
       setReferralNotice("Please enter your friend's name and email.");
       return;
     }
     try {
-      const response = await fetch("http://localhost:5000/api/referrals/invite", {
+      const response = await fetch(`${SHOP_API_BASE}/api/referrals/invite`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...customerSessionHeaders() },
         body: JSON.stringify({
-          user_id: currentUser.id,
           referred_name: inviteFriendName.trim(),
           referred_email: inviteFriendEmail.trim(),
         }),
@@ -11458,10 +11432,10 @@ const saveProfileDetails = async (event) => {
   };
 
   const loadNotifications = async () => {
-    if (!currentUser?.id) return;
+    if (!currentUser) return;
     setNotificationsLoading(true);
     try {
-      const response = await fetch(`http://localhost:5000/api/notifications/${encodeURIComponent(currentUser.id)}?limit=100`, { cache: "no-store", headers: customerSessionHeaders() });
+      const response = await fetch(`${SHOP_API_BASE}/api/notifications/me?limit=100`, { cache: "no-store", headers: customerSessionHeaders() });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.status !== "success") throw new Error(data.message || "Unable to load notifications.");
       setNotifications(Array.isArray(data.notifications) ? data.notifications : []);
@@ -11473,16 +11447,16 @@ const saveProfileDetails = async (event) => {
     }
   };
 
-  useEffect(() => { loadNotifications(); }, [currentUser?.id]);
+  useEffect(() => { loadNotifications(); }, [currentUser]);
 
   const changeNotificationReadState = async (notification, makeRead) => {
-    if (!currentUser?.id) return;
+    if (!currentUser) return;
     try {
       const endpoint = makeRead ? "read" : "unread";
-      const response = await fetch(`http://localhost:5000/api/notifications/${notification.id}/${endpoint}`, {
+      const response = await fetch(`${SHOP_API_BASE}/api/notifications/${notification.id}/${endpoint}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json", ...customerSessionHeaders() },
-        body: JSON.stringify({ user_id: currentUser.id }),
+        body: JSON.stringify({}),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.status !== "success") throw new Error(data.message || "Unable to update notification.");
@@ -11493,9 +11467,9 @@ const saveProfileDetails = async (event) => {
   };
 
 const removeNotification = async (notificationId) => {
-    if (!currentUser?.id) return;
+    if (!currentUser) return;
     try {
-      const response = await fetch(`http://localhost:5000/api/notifications/${notificationId}?user_id=${encodeURIComponent(currentUser.id)}`, { method: "DELETE", headers: customerSessionHeaders() });
+      const response = await fetch(`${SHOP_API_BASE}/api/notifications/${notificationId}`, { method: "DELETE", headers: customerSessionHeaders() });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.status !== "success") throw new Error(data.message || "Unable to remove notification.");
       await loadNotifications();
@@ -11583,10 +11557,10 @@ const removeNotification = async (notificationId) => {
 };
 
   const loadAccountPreferences = async () => {
-    if (!currentUser?.id) return;
+    if (!currentUser) return;
     setPreferencesLoading(true);
     try {
-      const response = await fetch(`http://localhost:5000/api/preferences/${encodeURIComponent(currentUser.id)}`, { cache: "no-store" });
+      const response = await fetch(`${SHOP_API_BASE}/api/preferences/me`, { cache: "no-store", headers: customerSessionHeaders() });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.status !== "success") throw new Error(data.message || "Unable to load account preferences.");
       setAccountPreferences(data.preferences || null);
@@ -11597,15 +11571,15 @@ const removeNotification = async (notificationId) => {
     }
   };
 
-  useEffect(() => { loadAccountPreferences(); }, [currentUser?.id]);
+  useEffect(() => { loadAccountPreferences(); }, [currentUser]);
 
   const saveAccountPreferences = async (changes) => {
-    if (!currentUser?.id) return;
+    if (!currentUser) return;
     setPreferencesSaving(true);
     try {
-      const response = await fetch(`http://localhost:5000/api/preferences/${encodeURIComponent(currentUser.id)}`, {
+      const response = await fetch(`${SHOP_API_BASE}/api/preferences/me`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...customerSessionHeaders() },
         body: JSON.stringify(changes),
       });
       const data = await response.json().catch(() => ({}));
@@ -11711,14 +11685,14 @@ const removeNotification = async (notificationId) => {
   };
 
   const loadWalletCenter = async () => {
-    if (!currentUser?.id) return;
+    if (!currentUser) return;
     setWalletLoading(true);
     try {
-      const response = await fetch(`http://localhost:5000/api/wallet/${encodeURIComponent(currentUser.id)}`, { cache: "no-store" });
+      const response = await fetch(`${SHOP_API_BASE}/api/wallet/user/me`, { cache: "no-store", headers: customerSessionHeaders() });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.status !== "success") throw new Error(data.message || "Unable to load HOWDI wallet.");
       setWalletData(data.wallet || null);
-      setWalletCenterTransactions(Array.isArray(data.transactions) ? data.transactions : []);
+      setWalletCenterTransactions(Array.isArray(data.wallet?.transactions) ? data.wallet.transactions : []);
     } catch (error) {
       setWalletNotice(error.message || "Unable to load HOWDI wallet.");
     } finally {
@@ -11726,7 +11700,7 @@ const removeNotification = async (notificationId) => {
     }
   };
 
-  useEffect(() => { loadWalletCenter(); }, [currentUser?.id]);
+  useEffect(() => { loadWalletCenter(); }, [currentUser]);
 
   const debitWalletBalance = async () => {
     const amount = Number(walletDebitAmount);
@@ -11736,11 +11710,10 @@ const removeNotification = async (notificationId) => {
     }
     setWalletActionLoading("debit");
     try {
-      const response = await fetch("http://localhost:5000/api/wallet/debit", {
+      const response = await fetch(`${SHOP_API_BASE}/api/wallet/debit`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...customerSessionHeaders() },
         body: JSON.stringify({
-          user_id: currentUser.id,
           amount,
           description: "Customer wallet redemption request"
         }),
@@ -11792,10 +11765,10 @@ const removeNotification = async (notificationId) => {
     }
     setRewardsActionLoading("redeem");
     try {
-      const response = await fetch("http://localhost:5000/api/rewards/redeem", {
+      const response = await fetch(`${SHOP_API_BASE}/api/rewards/redeem`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: currentUser.id, points, description: "Customer reward redemption request" }),
+        headers: { "Content-Type": "application/json", ...customerSessionHeaders() },
+        body: JSON.stringify({ points, description: "Customer reward redemption request" }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.status !== "success") throw new Error(data.message || "Unable to redeem reward points.");
@@ -11810,12 +11783,12 @@ const removeNotification = async (notificationId) => {
   };
 
   const loadMessagesCenter = async () => {
-    if (!currentUser?.id) return;
+    if (!currentUser) return;
     setMessagesLoading(true);
     try {
       const [notificationResponse, messagesResponse] = await Promise.all([
-        fetch(`http://localhost:5000/api/notifications/${encodeURIComponent(currentUser.id)}`, { cache: "no-store", headers: customerSessionHeaders() }),
-        fetch(`http://localhost:5000/api/messages/${encodeURIComponent(currentUser.id)}`, { cache: "no-store" }),
+        fetch(`${SHOP_API_BASE}/api/notifications/me`, { cache: "no-store", headers: customerSessionHeaders() }),
+        fetch(`${SHOP_API_BASE}/api/messages/me`, { cache: "no-store", headers: customerSessionHeaders() }),
       ]);
       const notificationData = await notificationResponse.json().catch(() => ({}));
       const messagesData = await messagesResponse.json().catch(() => ({}));
@@ -11831,12 +11804,12 @@ const removeNotification = async (notificationId) => {
     }
   };
 
-  useEffect(() => { loadMessagesCenter(); }, [currentUser?.id]);
+  useEffect(() => { loadMessagesCenter(); }, [currentUser]);
 
   const markNotificationRead = async (notificationId) => {
     setMessageActionLoading(`notification-${notificationId}`);
     try {
-      const response = await fetch(`http://localhost:5000/api/notifications/${notificationId}/read`, { method: "POST", headers: customerSessionHeaders() });
+      const response = await fetch(`${SHOP_API_BASE}/api/notifications/${notificationId}/read`, { method: "POST", headers: customerSessionHeaders() });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.status !== "success") throw new Error(data.message || "Unable to update notification.");
       await loadMessagesCenter();
@@ -11848,13 +11821,13 @@ const removeNotification = async (notificationId) => {
   };
 
   const markAllNotificationsRead = async () => {
-    if (!currentUser?.id) return;
+    if (!currentUser) return;
     setMessageActionLoading("read-all");
     try {
-      const response = await fetch("http://localhost:5000/api/notifications/read-all", {
+      const response = await fetch(`${SHOP_API_BASE}/api/notifications/read-all`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...customerSessionHeaders() },
-        body: JSON.stringify({ user_id: currentUser.id }),
+        body: JSON.stringify({}),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.status !== "success") throw new Error(data.message || "Unable to mark notifications as read.");
@@ -11868,16 +11841,16 @@ const removeNotification = async (notificationId) => {
   };
 
   const sendSupportMessage = async () => {
-    if (!currentUser?.id || !messageSubject.trim() || !messageBody.trim()) {
+    if (!currentUser || !messageSubject.trim() || !messageBody.trim()) {
       setMessageNotice("Please enter both a subject and your message.");
       return;
     }
     setMessageActionLoading("send-message");
     try {
-      const response = await fetch("http://localhost:5000/api/messages", {
+      const response = await fetch(`${SHOP_API_BASE}/api/messages`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: currentUser.id, subject: messageSubject.trim(), message: messageBody.trim() }),
+        headers: { "Content-Type": "application/json", ...customerSessionHeaders() },
+        body: JSON.stringify({ recipient: "HOWDI Support", title: messageSubject.trim(), message: messageBody.trim() }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.status !== "success") throw new Error(data.message || "Unable to send message.");
@@ -11986,14 +11959,14 @@ const removeNotification = async (notificationId) => {
   useEffect(() => { loadMembershipCenter(); }, [currentUser]);
 
   const subscribeMembership = async (planCode) => {
-    if (!currentUser?.id) return;
+    if (!currentUser) return;
     setMembershipActionLoading(planCode);
     setMembershipNotice("");
     try {
-      const response = await fetch("http://localhost:5000/api/memberships/subscribe", {
+      const response = await fetch(`${SHOP_API_BASE}/api/memberships/subscribe`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: currentUser.id, plan_code: planCode }),
+        headers: { "Content-Type": "application/json", ...customerSessionHeaders() },
+        body: JSON.stringify({ plan_code: planCode }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.status !== "success") throw new Error(data.message || "Unable to activate membership.");
@@ -12007,14 +11980,14 @@ const removeNotification = async (notificationId) => {
   };
 
   const updateAutoRenew = async (enabled) => {
-    if (!currentUser?.id) return;
+    if (!currentUser) return;
     setMembershipActionLoading("renewal");
     setMembershipNotice("");
     try {
-      const response = await fetch("http://localhost:5000/api/memberships/renewal", {
+      const response = await fetch(`${SHOP_API_BASE}/api/memberships/renewal`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: currentUser.id, auto_renew: enabled }),
+        headers: { "Content-Type": "application/json", ...customerSessionHeaders() },
+        body: JSON.stringify({ auto_renew: enabled }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.status !== "success") throw new Error(data.message || "Unable to update renewal.");
@@ -12028,15 +12001,15 @@ const removeNotification = async (notificationId) => {
   };
 
   const cancelMembership = async () => {
-    if (!currentUser?.id) return;
+    if (!currentUser) return;
     if (!window.confirm("Are you sure you want to cancel your HOWDI membership?")) return;
     setMembershipActionLoading("cancel");
     setMembershipNotice("");
     try {
-      const response = await fetch("http://localhost:5000/api/memberships/cancel", {
+      const response = await fetch(`${SHOP_API_BASE}/api/memberships/cancel`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: currentUser.id }),
+        headers: { "Content-Type": "application/json", ...customerSessionHeaders() },
+        body: JSON.stringify({}),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.status !== "success") throw new Error(data.message || "Unable to cancel membership.");
@@ -12050,10 +12023,10 @@ const removeNotification = async (notificationId) => {
   };
 
   const loadGiftWallet = async () => {
-    if (!currentUser?.id) return;
+    if (!currentUser) return;
     setGiftLoading(true);
     try {
-      const response = await fetch(`http://localhost:5000/api/gifts/wallet/${encodeURIComponent(currentUser.id)}`, { cache: "no-store" });
+      const response = await fetch(`${SHOP_API_BASE}/api/gifts/wallet/me`, { cache: "no-store", headers: customerSessionHeaders() });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.status !== "success") throw new Error(data.message || "Unable to load gift balance.");
       setGiftWallet({
@@ -12068,20 +12041,20 @@ const removeNotification = async (notificationId) => {
     }
   };
 
-  useEffect(() => { loadGiftWallet(); }, [currentUser?.id]);
+  useEffect(() => { loadGiftWallet(); }, [currentUser]);
 
   const redeemGiftCard = async () => {
-    if (!currentUser?.id || !giftCodeInput.trim()) {
+    if (!currentUser || !giftCodeInput.trim()) {
       setGiftNotice("Please enter your HOWDI gift card code.");
       return;
     }
     setGiftRedeeming(true);
     setGiftNotice("");
     try {
-      const response = await fetch("http://localhost:5000/api/gifts/redeem", {
+      const response = await fetch(`${SHOP_API_BASE}/api/gifts/redeem`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: currentUser.id, gift_code: giftCodeInput.trim() }),
+        headers: { "Content-Type": "application/json", ...customerSessionHeaders() },
+        body: JSON.stringify({ gift_code: giftCodeInput.trim() }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.status !== "success") throw new Error(data.message || "Unable to redeem gift card.");
@@ -12096,10 +12069,10 @@ const removeNotification = async (notificationId) => {
   };
 
   const loadReferralProgram = async () => {
-    if (!currentUser?.id) return;
+    if (!currentUser) return;
     setReferralLoading(true);
     try {
-      const response = await fetch(`http://localhost:5000/api/referrals/profile/${encodeURIComponent(currentUser.id)}`, { cache: "no-store" });
+      const response = await fetch(`${SHOP_API_BASE}/api/referrals/profile/me`, { cache: "no-store", headers: customerSessionHeaders() });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.status !== "success") throw new Error(data.message || "Unable to load referral program.");
       setReferralData({ profile: data.profile || null, referrals: Array.isArray(data.referrals) ? data.referrals : [], stats: data.stats || null });
@@ -12110,7 +12083,7 @@ const removeNotification = async (notificationId) => {
     }
   };
 
-  useEffect(() => { loadReferralProgram(); }, [currentUser?.id]);
+  useEffect(() => { loadReferralProgram(); }, [currentUser]);
 
   const copyReferralCode = async () => {
     const code = referralData.profile?.referral_code;
@@ -12120,15 +12093,15 @@ const removeNotification = async (notificationId) => {
   };
 
   const createReferralInvite = async () => {
-    if (!currentUser?.id) return;
+    if (!currentUser) return;
     if (!referralInvite.referred_name.trim() && !referralInvite.referred_email.trim()) {
       setReferralNotice("Please enter a friend's name or email."); return;
     }
     setReferralSending(true); setReferralNotice("");
     try {
-      const response = await fetch("http://localhost:5000/api/referrals/invite", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: currentUser.id, ...referralInvite }),
+      const response = await fetch(`${SHOP_API_BASE}/api/referrals/invite`, {
+        method: "POST", headers: { "Content-Type": "application/json", ...customerSessionHeaders() },
+        body: JSON.stringify({ ...referralInvite }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.status !== "success") throw new Error(data.message || "Unable to create referral invitation.");
@@ -12141,10 +12114,10 @@ const removeNotification = async (notificationId) => {
   };
 
   const loadPrivacyPreferences = async () => {
-    if (!currentUser?.id) return;
+    if (!currentUser) return;
     setPrivacyLoading(true);
     try {
-      const response = await fetch(`http://localhost:5000/api/privacy/preferences/${encodeURIComponent(currentUser.id)}`, { cache: "no-store" });
+      const response = await fetch(`${SHOP_API_BASE}/api/privacy/preferences/me`, { cache: "no-store", headers: customerSessionHeaders() });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.status !== "success") throw new Error(data.message || "Unable to load privacy preferences.");
       if (data.preferences) setPrivacyPreferences((old) => ({ ...old, ...data.preferences }));
@@ -12157,16 +12130,16 @@ const removeNotification = async (notificationId) => {
 
   useEffect(() => {
     loadPrivacyPreferences();
-  }, [currentUser?.id]);
+  }, [currentUser]);
 
   const savePrivacyPreferences = async () => {
-    if (!currentUser?.id) return;
+    if (!currentUser) return;
     setPrivacySaving(true);
     setPrivacyNotice("");
     try {
-      const response = await fetch(`http://localhost:5000/api/privacy/preferences/${encodeURIComponent(currentUser.id)}`, {
+      const response = await fetch(`${SHOP_API_BASE}/api/privacy/preferences/me`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...customerSessionHeaders() },
         body: JSON.stringify(privacyPreferences),
       });
       const data = await response.json().catch(() => ({}));
@@ -12181,12 +12154,13 @@ const removeNotification = async (notificationId) => {
   };
 
   const loadSecuritySessions = async () => {
-    if (!currentUser?.id) return;
+    if (!currentUser) return;
 
     setSecurityDataLoading(true);
     try {
       const response = await fetch(
-        `http://localhost:5000/api/auth/sessions/${encodeURIComponent(currentUser.id)}`
+        `${SHOP_API_BASE}/api/auth/sessions/me`,
+        { cache: "no-store", headers: customerSessionHeaders() }
       );
       const data = await response.json().catch(() => ({}));
 
@@ -12202,7 +12176,7 @@ const removeNotification = async (notificationId) => {
 
       setSecuritySessions(sessions);
       localStorage.setItem(
-        `howdiSecuritySessions_${currentUser.id}`,
+        `howdiSecuritySessions_${currentUser?.public_username||currentUser?.username||"account"}`,
         JSON.stringify(sessions)
       );
     } catch (error) {
@@ -12216,12 +12190,13 @@ const removeNotification = async (notificationId) => {
   };
 
   const loadSecurityHistory = async () => {
-    if (!currentUser?.id) return;
+    if (!currentUser) return;
 
     setSecurityDataLoading(true);
     try {
       const response = await fetch(
-        `http://localhost:5000/api/auth/security-history/${encodeURIComponent(currentUser.id)}`
+        `${SHOP_API_BASE}/api/auth/security-history/me`,
+        { cache: "no-store", headers: customerSessionHeaders() }
       );
       const data = await response.json().catch(() => ({}));
 
@@ -12241,7 +12216,7 @@ const removeNotification = async (notificationId) => {
   };
 
   const logoutOtherDevices = async () => {
-    if (!currentUser?.id) return;
+    if (!currentUser) return;
 
     setSecurityDataLoading(true);
     setSecurityNotice("");
@@ -12250,12 +12225,11 @@ const removeNotification = async (notificationId) => {
       const sessionToken = localStorage.getItem("howdiSessionToken") || "";
 
       const response = await fetch(
-        "http://localhost:5000/api/auth/logout-all-devices",
+        `${SHOP_API_BASE}/api/auth/logout-all-devices`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...customerSessionHeaders() },
           body: JSON.stringify({
-            user_id: currentUser.id,
             session_token: sessionToken,
           }),
         }
@@ -12333,16 +12307,16 @@ const removeNotification = async (notificationId) => {
   };
 
   useEffect(() => {
-    if (!currentUser?.id) return;
-    localStorage.setItem(`howdiSecurityAlerts_${currentUser.id}`, JSON.stringify(securityAlerts));
+    if (!currentUser) return;
+    localStorage.setItem(`howdiSecurityAlerts_${currentUser?.public_username||currentUser?.username||"account"}`, JSON.stringify(securityAlerts));
   }, [securityAlerts, currentUser]);
 
   useEffect(() => {
-    if (currentUser?.id) {
+    if (currentUser) {
       loadSecuritySessions();
       loadSecurityHistory();
     }
-  }, [currentUser?.id]);
+  }, [currentUser]);
 
   const closeProfile = () => {
     if (addressFormOpen) {
@@ -12414,7 +12388,7 @@ const removeNotification = async (notificationId) => {
     loadConnectNotifications();
     loadConnectStories();
     loadConnectProfileContent();
-  }, [navigationOSArea, currentUser?.id, currentUser?.user_id]);
+  }, [navigationOSArea, currentUser]);
 
   // Both the persistent sidebar and in-page learning links load their destination.
   useEffect(() => {
@@ -12459,7 +12433,7 @@ const removeNotification = async (notificationId) => {
   const renderConnectHomeFeed = () => {
                   const S=connectHomeSections;
                   const L=connectHomeLoading;
-                  const loggedIn=Boolean(currentUser?.id||currentUser?.user_id);
+                  const loggedIn=Boolean(currentUser);
                   const who=(p)=>{const u=p?.public_username||p?.creatorPublicUsername||p?.actor_public_username;return u?`@${u}`:(p?.full_name||p?.creatorName||p?.actor_name||"HOWDI member");};
                   const avatarInitial=(p)=>(p?.full_name||p?.creatorName||"H").slice(0,1).toUpperCase();
                   const Skeleton=({rows=1})=><div className="hc-home-skel" aria-busy="true">{Array.from({length:rows}).map((_,i)=><div key={i} className="hc-home-skel-row" />)}</div>;
@@ -18946,7 +18920,7 @@ const removeNotification = async (notificationId) => {
           data-navigation-os={navigationOSArea==="shop"?"active":"inactive"}
         >
           {shopOSView==="catalogue" && <ShopCatalogue apiBase={SHOP_API_BASE} onExit={()=>openNavigationOSArea("shop","home")}
-            signedIn={Boolean(currentUser?.id)} getAuthHeaders={customerSessionHeaders} onRequireLogin={openLogin}
+            signedIn={Boolean(currentUser)} getAuthHeaders={customerSessionHeaders} onRequireLogin={openLogin}
             onAddToCart={addCatalogueLineToCart} onBuyNow={buyCatalogueLine}
             openProductId={shopCatalogueProductId} onOpenProductHandled={()=>setShopCatalogueProductId("")} />}
           <div className="hs2-layout" style={shopOSView==="catalogue"?{display:"none"}:undefined}>
@@ -19607,7 +19581,7 @@ const removeNotification = async (notificationId) => {
         ==================================== */}
         {(() => {
           const personalized = getPersonalizedProducts(products, {
-            customerId: currentUser?.id,
+            customerId: (currentUser?.public_username||currentUser?.username||""),
             location: customerLocation,
             cart,
             wishlist,
@@ -19676,7 +19650,7 @@ const removeNotification = async (notificationId) => {
                         maxWidth: "650px",
                       }}
                     >
-                      {getTasteSummary({ customerId: currentUser?.id })}
+                      {getTasteSummary({ customerId: (currentUser?.public_username||currentUser?.username||"") })}
                     </p>
                   </div>
 
@@ -20206,14 +20180,14 @@ const removeNotification = async (notificationId) => {
                       {post.intent_type&&post.intent_type!=="SHARE"&&<div className={`hc9-open-call ${String(post.intent_status||"OPEN").toLowerCase()}`}>
                         <div className="hc9-open-call-copy"><span className="hc9-intent-badge">{connectIntentMeta(post.intent_type).icon} {connectIntentMeta(post.intent_type).label}</span><b>{post.intent_status==="RESOLVED"?"Community outcome reached":"Open Call"}</b><small>{Number(post.participant_count||0)} people joined{post.intent_expires_at?` · closes ${formatConnectDate(post.intent_expires_at)}`:""}</small></div>
                         <div className="hc9-open-call-actions">
-                          {Number(post.user_id)===Number(currentUser?.id||currentUser?.user_id)?<button type="button" onClick={()=>toggleConnectIntentResolved(post)}>{post.intent_status==="RESOLVED"?"Reopen":"Mark resolved"}</button>:post.intent_status==="OPEN"&&<button type="button" className={post.joined_by_viewer?"joined":""} onClick={()=>toggleConnectOpenCallJoin(post)}>{post.joined_by_viewer?"✓ I'm in":"＋ I'm in"}</button>}
+                          {post.is_mine?<button type="button" onClick={()=>toggleConnectIntentResolved(post)}>{post.intent_status==="RESOLVED"?"Reopen":"Mark resolved"}</button>:post.intent_status==="OPEN"&&<button type="button" className={post.joined_by_viewer?"joined":""} onClick={()=>toggleConnectOpenCallJoin(post)}>{post.joined_by_viewer?"✓ I'm in":"＋ I'm in"}</button>}
                         </div>
                       </div>}
                       {post.poll&&<div className="hc9-poll-card">
                         <div className="hc9-poll-question"><b>{post.poll.question}</b><small>{Number(post.poll.total_votes||0)} votes</small></div>
                         <div className="hc9-poll-options">{(post.poll.options||[]).map(option=>{const total=Math.max(1,Number(post.poll.total_votes||0));const pct=Math.round((Number(option.votes||0)/total)*100);const selected=Number(post.poll.viewer_option_id)===Number(option.id);return <button type="button" key={option.id} className={selected?"selected":""} onClick={()=>voteConnectPoll(post,option.id)}><span className="hc9-poll-fill" style={{width:`${pct}%`}}></span><span className="hc9-poll-label">{option.text}</span><strong>{Number(post.poll.total_votes||0)>0?`${pct}%`:"Vote"}</strong></button>})}</div>
                       </div>}
-                      <div className="hc2-post-actions" id={`connect-post-${post.id}`}><button onClick={()=>toggleConnectReaction(post.id)}>{post.reacted_by_viewer?"♥":"♡"} <span>{Number(post.reaction_count||0)||"React"}</span></button><button disabled={post.allow_comments===false} onClick={()=>post.allow_comments!==false&&openConnectComments(post)}>💬 <span>{post.allow_comments===false?"Off":Number(post.comment_count||0)||"Reply"}</span></button><button disabled={post.allow_repost===false} onClick={()=>post.allow_repost!==false&&toggleConnectRepost(post)}>↻ <span>{post.allow_repost===false?"Off":Number(post.repost_count||0)||"Repost"}</span></button><button onClick={()=>{setConnectQuotePost(post);setConnectQuoteText("")}}>❝ <span>{Number(post.quote_count||0)||"Quote"}</span></button><button onClick={()=>shareConnectPost(post)}>↗ <span>{Number(post.share_count||0)||"Share"}</span></button><button onClick={()=>saveConnectPostToCollection(post)}>🗂 <span>Collect</span></button>{Number(post.user_id)===Number(currentUser?.id||currentUser?.user_id||0)&&<button onClick={()=>pinConnectPostToProfile(post)}>📌 <span>Pin</span></button>}{Number(post.user_id)===Number(currentUser?.id||currentUser?.user_id||0)&&<button onClick={()=>loadConnectPostAnalytics(post)}>📊 <span>Insights</span></button>}<button onClick={()=>toggleConnectSpark(post)}>{post.sparked_by_viewer?"💡":"✦"} <span>{Number(post.spark_count||0)||"Spark"}</span></button>{Number(post.user_id)!==Number(currentUser?.id||currentUser?.user_id)&&<button onClick={()=>{setConnectTipPost(post);setConnectTipAmount("25")}}>₹ <span>{Number(post.tip_count||0)||"Tip"}</span></button>}<button onClick={()=>toggleConnectSave(post.id)}>{connectSavedPosts[String(post.id)]||post.saved_by_viewer?"▣":"⌑"}</button></div><div style={{display:"flex",gap:14,flexWrap:"wrap",fontSize:11,color:"#6a756f",marginTop:8}}><span>👁 {Number(post.view_count||0)} views</span><span>◎ {Number(post.reach_count||0)} reached</span><span>⚡ {Number(post.reaction_count||0)+Number(post.comment_count||0)+Number(post.repost_count||0)+Number(post.quote_count||0)+Number(post.share_count||0)+Number(post.spark_count||0)} engaged</span>{Number(post.user_id)===Number(currentUser?.id||currentUser?.user_id)&&<button type="button" onClick={()=>loadConnectPostInsights(post)} style={{marginLeft:"auto",border:0,background:"transparent",fontWeight:800,cursor:"pointer"}}>Insights</button>}</div>
+                      <div className="hc2-post-actions" id={`connect-post-${post.id}`}><button onClick={()=>toggleConnectReaction(post.id)}>{post.reacted_by_viewer?"♥":"♡"} <span>{Number(post.reaction_count||0)||"React"}</span></button><button disabled={post.allow_comments===false} onClick={()=>post.allow_comments!==false&&openConnectComments(post)}>💬 <span>{post.allow_comments===false?"Off":Number(post.comment_count||0)||"Reply"}</span></button><button disabled={post.allow_repost===false} onClick={()=>post.allow_repost!==false&&toggleConnectRepost(post)}>↻ <span>{post.allow_repost===false?"Off":Number(post.repost_count||0)||"Repost"}</span></button><button onClick={()=>{setConnectQuotePost(post);setConnectQuoteText("")}}>❝ <span>{Number(post.quote_count||0)||"Quote"}</span></button><button onClick={()=>shareConnectPost(post)}>↗ <span>{Number(post.share_count||0)||"Share"}</span></button><button onClick={()=>saveConnectPostToCollection(post)}>🗂 <span>Collect</span></button>{post.is_mine&&<button onClick={()=>pinConnectPostToProfile(post)}>📌 <span>Pin</span></button>}{post.is_mine&&<button onClick={()=>loadConnectPostAnalytics(post)}>📊 <span>Insights</span></button>}<button onClick={()=>toggleConnectSpark(post)}>{post.sparked_by_viewer?"💡":"✦"} <span>{Number(post.spark_count||0)||"Spark"}</span></button>{!post.is_mine&&<button onClick={()=>{setConnectTipPost(post);setConnectTipAmount("25")}}>₹ <span>{Number(post.tip_count||0)||"Tip"}</span></button>}<button onClick={()=>toggleConnectSave(post.id)}>{connectSavedPosts[String(post.id)]||post.saved_by_viewer?"▣":"⌑"}</button></div><div style={{display:"flex",gap:14,flexWrap:"wrap",fontSize:11,color:"#6a756f",marginTop:8}}><span>👁 {Number(post.view_count||0)} views</span><span>◎ {Number(post.reach_count||0)} reached</span><span>⚡ {Number(post.reaction_count||0)+Number(post.comment_count||0)+Number(post.repost_count||0)+Number(post.quote_count||0)+Number(post.share_count||0)+Number(post.spark_count||0)} engaged</span>{post.is_mine&&<button type="button" onClick={()=>loadConnectPostInsights(post)} style={{marginLeft:"auto",border:0,background:"transparent",fontWeight:800,cursor:"pointer"}}>Insights</button>}</div>
                     </article>)}
                     </>}
 
@@ -20627,13 +20601,13 @@ const removeNotification = async (notificationId) => {
 
           {connectRelationshipIntelOpen&&createPortal(<div className="hc136-overlay howdi-connect-tool-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setConnectRelationshipIntelOpen(false)}}><div className="hc136-rel"><header><div><small>RELATIONSHIP INTELLIGENCE</small><h2>Who should you learn with next? 🔗</h2></div><button onClick={()=>setConnectRelationshipIntelOpen(false)}>×</button></header><div className="hc136-rel-body"><section><h3>People ranked by learning relationship</h3><div className="hc136-people">{(connectRelationshipIntel.people||[]).slice(0,40).map(p=><article key={p.public_username||p.user_id}><div><b>{p.full_name}</b><small>{p.public_username?`@${p.public_username}`:"HOWDI member"} · {p.reputation_level}</small></div><strong>{p.strength_score||0}</strong><p>{(p.reasons||[]).join(" · ")||"No strong shared signal yet."}</p><footer><button onClick={()=>rebuildConnectRelationship(p)}>Refresh relationship</button><button onClick={()=>requestConnectLearningPartner(p)}>Learn together</button></footer></article>)}</div></section><section><h3>Endorsement requests</h3><div className="hc136-inbox">{(connectRelationshipIntel.inboxEndorsements||[]).map(r=><article key={r.id}><div><b>{r.requester_name}</b><small>asks you to validate {r.skill_name}</small></div><button onClick={()=>respondConnectSkillEndorsement(r,true)}>Endorse</button><button onClick={()=>respondConnectSkillEndorsement(r,false)}>Decline</button></article>)}</div></section></div></div></div>, document.body)}
 
-          {connectOfficeHoursOpen&&createPortal(<div className="hc136-overlay howdi-connect-tool-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setConnectOfficeHoursOpen(false)}}><div className="hc136-office"><header><div><small>EXPERT OFFICE HOURS</small><h2>Short, focused access to knowledge 🕘</h2></div><button onClick={()=>setConnectOfficeHoursOpen(false)}>×</button></header><div className="hc136-office-tools"><select value={connectOfficeHoursDomain} onChange={e=>loadConnectOfficeHours(e.target.value)}>{["EDUCATION","AI","QUANTUM_COMPUTING","SCIENCE","TECHNOLOGY","CAREER","CODING","BUSINESS"].map(x=><option key={x} value={x}>{connectProfileCategoryLabel(x)}</option>)}</select><input value={connectOfficeQuestion} onChange={e=>setConnectOfficeQuestion(e.target.value)} placeholder="Question to ask when booking"/></div><div className="hc136-office-grid">{connectOfficeHours.map(o=><article key={o.id}><span>{connectProfileCategoryLabel(o.knowledge_domain)} · Reputation {o.reputation_score||0}</span><b>{o.title}</b><small>{o.full_name} · {new Date(o.starts_at).toLocaleString()}</small><p>{o.note||"Focused knowledge office hours"}</p><footer><span>{o.booked_count||0}/{o.capacity} booked</span>{Number(o.mentor_user_id)!==Number(currentUser?.id||0)&&<button disabled={o.booked_by_me||Number(o.booked_count)>=Number(o.capacity)} onClick={()=>bookConnectOfficeHour(o)}>{o.booked_by_me?"Booked ✓":"Book"}</button>}</footer></article>)}</div><section className="hc136-publish-office"><h3>Publish your office hours</h3><input value={connectOfficeTitle} onChange={e=>setConnectOfficeTitle(e.target.value)} placeholder="Title"/><input type="datetime-local" value={connectOfficeStartsAt} onChange={e=>setConnectOfficeStartsAt(e.target.value)}/><input type="number" min="1" max="20" value={connectOfficeCapacity} onChange={e=>setConnectOfficeCapacity(e.target.value)}/><button onClick={createConnectOfficeHour}>Publish</button></section></div></div>, document.body)}
+          {connectOfficeHoursOpen&&createPortal(<div className="hc136-overlay howdi-connect-tool-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setConnectOfficeHoursOpen(false)}}><div className="hc136-office"><header><div><small>EXPERT OFFICE HOURS</small><h2>Short, focused access to knowledge 🕘</h2></div><button onClick={()=>setConnectOfficeHoursOpen(false)}>×</button></header><div className="hc136-office-tools"><select value={connectOfficeHoursDomain} onChange={e=>loadConnectOfficeHours(e.target.value)}>{["EDUCATION","AI","QUANTUM_COMPUTING","SCIENCE","TECHNOLOGY","CAREER","CODING","BUSINESS"].map(x=><option key={x} value={x}>{connectProfileCategoryLabel(x)}</option>)}</select><input value={connectOfficeQuestion} onChange={e=>setConnectOfficeQuestion(e.target.value)} placeholder="Question to ask when booking"/></div><div className="hc136-office-grid">{connectOfficeHours.map(o=><article key={o.id}><span>{connectProfileCategoryLabel(o.knowledge_domain)} · Reputation {o.reputation_score||0}</span><b>{o.title}</b><small>{o.full_name} · {new Date(o.starts_at).toLocaleString()}</small><p>{o.note||"Focused knowledge office hours"}</p><footer><span>{o.booked_count||0}/{o.capacity} booked</span>{!o.is_mine&&<button disabled={o.booked_by_me||Number(o.booked_count)>=Number(o.capacity)} onClick={()=>bookConnectOfficeHour(o)}>{o.booked_by_me?"Booked ✓":"Book"}</button>}</footer></article>)}</div><section className="hc136-publish-office"><h3>Publish your office hours</h3><input value={connectOfficeTitle} onChange={e=>setConnectOfficeTitle(e.target.value)} placeholder="Title"/><input type="datetime-local" value={connectOfficeStartsAt} onChange={e=>setConnectOfficeStartsAt(e.target.value)}/><input type="number" min="1" max="20" value={connectOfficeCapacity} onChange={e=>setConnectOfficeCapacity(e.target.value)}/><button onClick={createConnectOfficeHour}>Publish</button></section></div></div>, document.body)}
 
           {connectEconomyOpen&&createPortal(<div className="hc135-overlay howdi-connect-tool-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setConnectEconomyOpen(false)}}><div className="hc135-economy"><header><div><small>HOWDI KNOWLEDGE ECONOMY</small><h2>Contribution should create opportunity 💠</h2></div><button onClick={()=>setConnectEconomyOpen(false)}>×</button></header><nav>{[["overview","Overview"],["reputation","XP & badges"],["skills","Skill Passport"],["sessions","Mentoring"],["partners","Study goals"]].map(([id,label])=><button className={connectEconomyTab===id?"active":""} onClick={()=>setConnectEconomyTab(id)} key={id}>{label}</button>)}</nav><div className="hc135-body">
           {connectEconomyTab==="overview"&&<div className="hc135-metrics"><article><b>{connectEconomy.gratitude?.received||0}</b><span>Gratitude received</span></article><article><b>{connectEconomy.trust?.xp||0}</b><span>Contribution XP</span></article><article><b>{connectEconomy.badges?.length||0}</b><span>Badges unlocked</span></article><article><b>{connectEconomy.sessions?.filter(x=>x.session_status==="COMPLETED").length||0}</b><span>Mentor sessions</span></article></div>}
           {connectEconomyTab==="reputation"&&<section><div className="hc135-level"><b>{connectEconomy.trust?.level||"NEW"}</b><span>{connectEconomy.trust?.xp||0} XP</span><button onClick={syncConnectBadges}>Sync badges</button></div><div className="hc135-badges">{(connectEconomy.badges||[]).map(b=><article key={b.badge_code}><b>{b.badge_name}</b><small>{b.description}</small><span>{b.min_points} XP</span></article>)}</div></section>}
           {connectEconomyTab==="skills"&&<section><div className="hc136-endorse-target"><input value={connectEndorsementTargetId} onChange={e=>setConnectEndorsementTargetId(e.target.value.toLowerCase().replace(/[^a-z0-9._@]/g,""))} placeholder="Member @username for endorsement request"/></div><div className="hc135-skill-grid">{(connectEconomy.skills||[]).map(s=><article key={s.id}><b>{s.skill_name}</b><small>{s.skill_level}</small><span>✓ {s.validation_count||0} validations</span><button onClick={()=>validateConnectSkill(s)}>Peer validate</button><button onClick={()=>requestConnectSkillEndorsement(s)}>Request endorsement</button></article>)}</div></section>}
-          {connectEconomyTab==="sessions"&&<section><div className="hc135-list">{(connectEconomy.sessions||[]).map(s=><article key={s.id}><div><b>{Number(s.mentor_user_id)===Number(currentUser?.id)?`Mentoring ${s.learner_name}`:`Mentor ${s.mentor_name}`}</b><small>{s.scheduled_for?new Date(s.scheduled_for).toLocaleString():"Time not scheduled"} · {s.duration_minutes} min</small></div><span>{s.session_status}</span>{s.session_status==="SCHEDULED"&&<><button onClick={()=>updateConnectMentorSession(s,"COMPLETED")}>Complete</button><button onClick={()=>updateConnectMentorSession(s,"CANCELLED")}>Cancel</button></>}</article>)}</div></section>}
+          {connectEconomyTab==="sessions"&&<section><div className="hc135-list">{(connectEconomy.sessions||[]).map(s=><article key={s.id}><div><b>{s.is_mentor?`Mentoring ${s.learner_name}`:`Mentor ${s.mentor_name}`}</b><small>{s.scheduled_for?new Date(s.scheduled_for).toLocaleString():"Time not scheduled"} · {s.duration_minutes} min</small></div><span>{s.session_status}</span>{s.session_status==="SCHEDULED"&&<><button onClick={()=>updateConnectMentorSession(s,"COMPLETED")}>Complete</button><button onClick={()=>updateConnectMentorSession(s,"CANCELLED")}>Cancel</button></>}</article>)}</div></section>}
           {connectEconomyTab==="partners"&&<section><div className="hc135-goal-form"><input value={connectPartnerGoalUserId} onChange={e=>setConnectPartnerGoalUserId(e.target.value.toLowerCase().replace(/[^a-z0-9._@]/g,""))} placeholder="Partner @username"/><input value={connectPartnerGoalTitle} onChange={e=>setConnectPartnerGoalTitle(e.target.value)} placeholder="Shared study goal"/><button onClick={createConnectPartnerGoal}>Create goal</button></div><div className="hc135-list">{(connectEconomy.goals||[]).map(g=><article key={g.id}><div><b>{g.title}</b><small>Partner: {g.partner_name} · {g.checkin_count||0} check-ins</small></div><span>{g.goal_status}</span>{g.goal_status==="ACTIVE"&&<><button onClick={()=>checkinConnectGoal(g,"ON_TRACK")}>On track</button><button onClick={()=>checkinConnectGoal(g,"NEEDS_HELP")}>Need help</button><button onClick={()=>checkinConnectGoal(g,"DONE")}>Done</button></>}</article>)}</div></section>}
           </div></div></div>, document.body)}
 
@@ -21022,7 +20996,7 @@ const removeNotification = async (notificationId) => {
 
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,padding:"12px 18px",borderTop:"1px solid #e5ebe7",background:"#fff",flex:"0 0 auto",position:"sticky",bottom:0,zIndex:5}}>
                   <button type="button" onClick={()=>{setConnectPostMedia(null);setConnectPostMediaPreview("");setConnectComposer("")}}>Clear</button>
-                  <button type="button" className="hc2-primary" disabled={connectPosting||!connectPostMedia?.data||!String(connectPostMedia?.type||"").startsWith("video/")} onClick={async()=>{const oldCategory=connectCategory;setConnectCategory("VIBE");try{const content=connectComposer.trim();if(!currentUser?.id){setConnectNotice("Please login before publishing.");return;}setConnectPosting(true);const response=await fetch(`${SHOP_API_BASE}/api/connect/posts`,{method:"POST",headers:{"Content-Type":"application/json",...customerSessionHeaders()},body:JSON.stringify({content:content||"HOWDI Vibe",category:"VIBE",media_data:connectPostMedia?.data||"",media_type:connectPostMedia?.type||""})});const data=await response.json().catch(()=>({}));if(!response.ok||data.status!=="success")throw new Error(data.message||"Unable to publish Vibe.");setConnectComposer("");setConnectPostMedia(null);setConnectPostMediaPreview("");setConnectCreateOpen(false);setConnectContentMode("vibe");await loadConnectFeed();}catch(error){setConnectNotice(error.message||"Unable to publish Vibe.");}finally{setConnectPosting(false);setConnectCategory(oldCategory);}}}>{connectPosting?"Publishing…":"Publish Vibe"}</button>
+                  <button type="button" className="hc2-primary" disabled={connectPosting||!connectPostMedia?.data||!String(connectPostMedia?.type||"").startsWith("video/")} onClick={async()=>{const oldCategory=connectCategory;setConnectCategory("VIBE");try{const content=connectComposer.trim();if(!currentUser){setConnectNotice("Please login before publishing.");return;}setConnectPosting(true);const response=await fetch(`${SHOP_API_BASE}/api/connect/posts`,{method:"POST",headers:{"Content-Type":"application/json",...customerSessionHeaders()},body:JSON.stringify({content:content||"HOWDI Vibe",category:"VIBE",media_data:connectPostMedia?.data||"",media_type:connectPostMedia?.type||""})});const data=await response.json().catch(()=>({}));if(!response.ok||data.status!=="success")throw new Error(data.message||"Unable to publish Vibe.");setConnectComposer("");setConnectPostMedia(null);setConnectPostMediaPreview("");setConnectCreateOpen(false);setConnectContentMode("vibe");await loadConnectFeed();}catch(error){setConnectNotice(error.message||"Unable to publish Vibe.");}finally{setConnectPosting(false);setConnectCategory(oldCategory);}}}>{connectPosting?"Publishing…":"Publish Vibe"}</button>
                 </div>
               </div>}
             </div>
@@ -22570,7 +22544,7 @@ const removeNotification = async (notificationId) => {
           {connectInvitePreview.requiresApproval&&!connectInvitePreview.error&&<small style={{padding:"0 4px",display:"block",color:"#92620a"}}>Admin approval required to join.</small>}
           {connectInviteStatus&&<em style={{padding:"0 4px",display:"block",color:"#b42318"}}>{connectInviteStatus}</em>}
           {!connectInvitePreview.error&&<footer className="hc160b-compose" style={{justifyContent:"flex-end"}}>
-            <button disabled={connectInviteBusy} onClick={joinConnectInviteSpace}>{currentUser?.id||currentUser?.user_id?(connectInviteBusy?"Joining…":"Join"):"Log in to join"}</button>
+            <button disabled={connectInviteBusy} onClick={joinConnectInviteSpace}>{currentUser?(connectInviteBusy?"Joining…":"Join"):"Log in to join"}</button>
           </footer>}
         </div>
       </div>}

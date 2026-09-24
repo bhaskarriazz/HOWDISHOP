@@ -33218,12 +33218,22 @@ async function ensureVibeReleaseReadinessV140LSchema(){
           [phone, codeHash]
         );
 
-        const payload = { ...GENERIC_OTP_PAYLOAD };
-        // No SMS gateway is wired up in this environment. Surface the code only
-        // outside production so the OTP flow is genuinely testable end-to-end;
-        // never do this in a live deployment.
-        if (process.env.NODE_ENV !== "production") payload.dev_otp = code;
-        return sendJSON(res, 200, payload);
+        // STAGE 2B SECURITY FIX (requirement #3): dev_otp used to ride along in this response's
+        // JSON body outside production — reachable by anything that can call this customer API,
+        // including a browser devtools network tab or any script on the page. The customer API
+        // response is now byte-for-byte the same in every environment (never carries the code).
+        // No SMS gateway is wired up in this environment, so for local development only, the
+        // generated code is written to a server-side-only fixture file (never sent over HTTP)
+        // that a developer or a test runner can read directly off disk.
+        if (process.env.NODE_ENV !== "production") {
+          try {
+            const devOtpLogPath = path.join(__dirname, ".dev-otp-log.jsonl");
+            fs.appendFileSync(devOtpLogPath, JSON.stringify({ phone, code, at: new Date().toISOString() }) + "\n");
+          } catch (logError) {
+            console.error("[dev-otp-fixture]", logError.message);
+          }
+        }
+        return sendJSON(res, 200, GENERIC_OTP_PAYLOAD);
       } catch (error) {
         console.error("❌ OTP request error:", error);
         return sendJSON(res, 500, { status: "error", message: "Unable to send a code right now. Please try again." });
@@ -45537,7 +45547,11 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                     ) THEN TRUE ELSE FALSE END AS sparked_by_viewer,
                     CASE WHEN $1::bigint > 0 AND EXISTS (
                       SELECT 1 FROM howdi_connect_follows ff WHERE ff.follower_user_id=$1 AND ff.following_user_id=p.user_id
-                    ) THEN TRUE ELSE FALSE END AS author_followed_by_viewer
+                    ) THEN TRUE ELSE FALSE END AS author_followed_by_viewer,
+                    -- STAGE 2B SECURITY FIX (requirement #1 — is_mine ownership flags): the frontend
+                    -- no longer has a numeric currentUser.id to compare against post.user_id itself;
+                    -- this is the same pattern as publicConnectMessage's is_mine for DMs.
+                    ($1::bigint > 0 AND p.user_id = $1) AS is_mine
                   FROM howdi_community_posts p
                   JOIN users u ON u.id = p.user_id
                   LEFT JOIN howdi_connect_profiles cp ON cp.user_id = p.user_id
@@ -46642,12 +46656,15 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               return sendJSON(res,200,{status:"success",saved});
             }
 
-            if(req.method==="PUT"&&/^\/api\/connect\/profile\/\d+\/?$/.test(pathname)){
-              // K5E: only the authenticated owner may write a profile; the path id must be the caller (403 otherwise, uniform).
+            if(req.method==="PUT"&&/^\/api\/connect\/profile\/(?:\d+|me)\/?$/.test(pathname)){
+              // STAGE 2B SECURITY FIX (full sweep): accepts the new /me path as well as the
+              // legacy numeric-self path. Always session-derived - this was already "path id
+              // must equal the caller" (self-edit only), so deriving straight from the session
+              // and dropping the path id entirely changes no authorization outcome, and it lets
+              // the frontend stop sending its own numeric id at all.
               const profileSession=await getSessionUserFromRequest(req);
               if(!profileSession)return sendJSON(res,401,{status:"error",message:"Login required"});
               const userId=Number(profileSession.id);
-              if(Number(pathname.match(/^\/api\/connect\/profile\/(\d+)\/?$/)?.[1])!==userId)return sendJSON(res,403,{status:"error",message:"You can only edit your own profile"});
               const body=await getBody(req);
               const story=["Everyone","Friends","Close friends","Only me"].includes(String(body.storyAudience??body.story_audience))?String(body.storyAudience??body.story_audience):"Everyone";
               const mode=["Keep","After viewing","24 hours"].includes(String(body.messageMode??body.message_mode))?String(body.messageMode??body.message_mode):"Keep";
@@ -48983,7 +49000,10 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               const level=Number(trust.xp||0)>=1000?'BEACON':Number(trust.xp||0)>=500?'MENTOR':Number(trust.xp||0)>=250?'GUIDE':Number(trust.xp||0)>=100?'BUILDER':Number(trust.xp||0)>=25?'RISING':'NEW';
               const badges=(await pool.query(`SELECT * FROM howdi_connect_contribution_badges WHERE min_points<=$1 ORDER BY min_points`,[Number(trust.xp||0)])).rows;
               const skills=(await pool.query(`SELECT * FROM howdi_connect_skill_passport WHERE user_id=$1 ORDER BY validation_count DESC,created_at DESC`,[uid])).rows;
-              const sessions=(await pool.query(`SELECT s.*,mu.full_name mentor_name,lu.full_name learner_name FROM howdi_connect_mentor_sessions s JOIN users mu ON mu.id=s.mentor_user_id JOIN users lu ON lu.id=s.learner_user_id WHERE s.mentor_user_id=$1 OR s.learner_user_id=$1 ORDER BY COALESCE(s.scheduled_for,s.created_at) DESC LIMIT 50`,[uid])).rows;
+              // STAGE 2B SECURITY FIX (requirement #1 — is_mine/is_mentor ownership flags): the
+              // frontend no longer has a numeric currentUser.id to compare s.mentor_user_id against,
+              // so expose an explicit boolean instead (mirrors office-hours' is_mine, feed's is_mine).
+              const sessions=(await pool.query(`SELECT s.*,mu.full_name mentor_name,lu.full_name learner_name,(s.mentor_user_id=$1) AS is_mentor FROM howdi_connect_mentor_sessions s JOIN users mu ON mu.id=s.mentor_user_id JOIN users lu ON lu.id=s.learner_user_id WHERE s.mentor_user_id=$1 OR s.learner_user_id=$1 ORDER BY COALESCE(s.scheduled_for,s.created_at) DESC LIMIT 50`,[uid])).rows;
               const goals=(await pool.query(`SELECT g.*,u.full_name partner_name,(SELECT COUNT(*)::int FROM howdi_connect_accountability_checkins c WHERE c.goal_id=g.id) checkin_count FROM howdi_connect_partner_goals g JOIN users u ON u.id=g.partner_user_id WHERE g.owner_user_id=$1 OR g.partner_user_id=$1 ORDER BY g.created_at DESC`,[uid])).rows;
               return sendJSON(res,200,{status:"success",gratitude,trust:{...trust,level},badges,skills,sessions,goals});
             }
@@ -49266,10 +49286,15 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             }
 
             if(req.method==="GET"&&pathname==="/api/connect/office-hours"){
+              // STAGE 2B SECURITY FIX: uid comes from url.searchParams.get("userId") only for the
+              // SQL param placeholder — k5eConnectGuard has ALREADY overwritten this query param with
+              // the session id before this handler runs (this route is also in K5E_PRIVATE_GET_RE, so
+              // an unauthenticated request is 401'd before reaching here). It is never client-controlled.
               const uid=Number(url.searchParams.get("userId")||0),domain=clean(url.searchParams.get("domain")||"").toUpperCase();
               const rows=(await pool.query(`SELECT o.*,u.full_name,(SELECT hpx.public_username FROM howdi_connect_profiles hpx WHERE hpx.user_id=u.id) public_username,COALESCE(r.reputation_score,0)::int reputation_score,COALESCE(r.reputation_level,'NEW') reputation_level,
                 (SELECT COUNT(*)::int FROM howdi_connect_office_hour_bookings b WHERE b.office_hour_id=o.id AND b.booking_status='BOOKED') booked_count,
-                EXISTS(SELECT 1 FROM howdi_connect_office_hour_bookings b WHERE b.office_hour_id=o.id AND b.learner_user_id=$1 AND b.booking_status='BOOKED') booked_by_me
+                EXISTS(SELECT 1 FROM howdi_connect_office_hour_bookings b WHERE b.office_hour_id=o.id AND b.learner_user_id=$1 AND b.booking_status='BOOKED') booked_by_me,
+                (o.mentor_user_id=$1) AS is_mine
                 FROM howdi_connect_office_hours o JOIN users u ON u.id=o.mentor_user_id LEFT JOIN howdi_connect_reputation_snapshots r ON r.user_id=o.mentor_user_id
                 WHERE o.active=TRUE AND o.starts_at>NOW() AND ($2='' OR o.knowledge_domain=$2) AND NOT ${K5E_BLOCKED_BETWEEN_SQL("$1::bigint","o.mentor_user_id")}
                 ORDER BY o.starts_at ASC LIMIT 60`,[uid,domain])).rows;
@@ -50884,9 +50909,12 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             // =====================================================
             // HOWDI CUSTOMER NOTIFICATIONS CENTER — LIVE API
             // =====================================================
-            if(req.method==="GET" && /^\/api\/notifications\/\d+\/?$/.test(pathname)){
-              const userId=Number(pathname.match(/^\/api\/notifications\/(\d+)\/?$/)?.[1]);
-              if(!Number.isInteger(userId)||userId<=0) return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
+            if(req.method==="GET" && /^\/api\/notifications\/(?:\d+|me)\/?$/.test(pathname)){
+              // STAGE 2B SECURITY FIX: session-derived. /me is the current contract; the numeric
+              // path is a legacy fallback already equality-checked against the session by
+              // k5eLegacyNotificationGuard above — derive from the session directly either way.
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
               const result=await pool.query(`
                 SELECT id,notification_type,title,message,action_label,action_path,reference_type,reference_id,is_read,read_at,created_at
                 FROM customer_notifications
@@ -50898,8 +50926,11 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             }
 
             if(req.method==="POST" && pathname==="/api/notifications"){
+              // STAGE 2B SECURITY FIX: session-derived actor. Previously body.user_id let any
+              // signed-in caller inject a fake notification into ANY other account (spam/phishing vector).
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
               const body=await getBody(req);
-              const userId=Number(body.user_id ?? body.userId);
               const notificationType=clean(String(body.notification_type||body.notificationType||"SYSTEM")).toUpperCase().slice(0,50)||"SYSTEM";
               const title=clean(String(body.title||"")).slice(0,220);
               const message=clean(String(body.message||"")).slice(0,5000);
@@ -50908,8 +50939,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               const referenceType=body.reference_type||body.referenceType ? clean(String(body.reference_type||body.referenceType)).slice(0,80) : null;
               const referenceId=body.reference_id||body.referenceId ? clean(String(body.reference_id||body.referenceId)).slice(0,120) : null;
 
-              if(!Number.isInteger(userId)||userId<=0||!title||!message){
-                return sendJSON(res,400,{status:"error",message:"Valid user, title and message are required"});
+              if(!title||!message){
+                return sendJSON(res,400,{status:"error",message:"Valid title and message are required"});
               }
 
               const created=await pool.query(`
@@ -50918,15 +50949,17 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 RETURNING *
               `,[userId,notificationType,title,message,actionLabel,actionPath,referenceType,referenceId]);
 
-              return sendJSON(res,201,{status:"success",message:"Notification created successfully.",notification:created.rows[0]});
+              return sendJSON(res,201,{status:"success",message:"Notification created successfully.",notification:k5eOmitUserId(created.rows[0])});
             }
 
             if(req.method==="POST" && /^\/api\/notifications\/\d+\/read\/?$/.test(pathname)){
               const notificationId=Number(pathname.match(/^\/api\/notifications\/(\d+)\/read\/?$/)?.[1]);
-              const body=await getBody(req);
-              const userId=Number(body.user_id ?? body.userId);
-              if(!Number.isInteger(notificationId)||notificationId<=0||!Number.isInteger(userId)||userId<=0){
-                return sendJSON(res,400,{status:"error",message:"Valid notification and user are required"});
+              // STAGE 2B SECURITY FIX: session-derived actor, body.user_id is no longer trusted
+              // (previously anyone with any signed-in session could mark ANY user's notification read).
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
+              if(!Number.isInteger(notificationId)||notificationId<=0){
+                return sendJSON(res,400,{status:"error",message:"Valid notification is required"});
               }
               const updated=await pool.query(`
                 UPDATE customer_notifications
@@ -50935,15 +50968,16 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 RETURNING *
               `,[notificationId,userId]);
               if(!updated.rows[0]) return sendJSON(res,404,{status:"error",message:"Notification not found"});
-              return sendJSON(res,200,{status:"success",notification:updated.rows[0]});
+              return sendJSON(res,200,{status:"success",notification:k5eOmitUserId(updated.rows[0])});
             }
 
             if(req.method==="POST" && /^\/api\/notifications\/\d+\/unread\/?$/.test(pathname)){
               const notificationId=Number(pathname.match(/^\/api\/notifications\/(\d+)\/unread\/?$/)?.[1]);
-              const body=await getBody(req);
-              const userId=Number(body.user_id ?? body.userId);
-              if(!Number.isInteger(notificationId)||notificationId<=0||!Number.isInteger(userId)||userId<=0){
-                return sendJSON(res,400,{status:"error",message:"Valid notification and user are required"});
+              // STAGE 2B SECURITY FIX: session-derived actor, body.user_id is no longer trusted
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
+              if(!Number.isInteger(notificationId)||notificationId<=0){
+                return sendJSON(res,400,{status:"error",message:"Valid notification is required"});
               }
               const updated=await pool.query(`
                 UPDATE customer_notifications
@@ -50952,7 +50986,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 RETURNING *
               `,[notificationId,userId]);
               if(!updated.rows[0]) return sendJSON(res,404,{status:"error",message:"Notification not found"});
-              return sendJSON(res,200,{status:"success",notification:updated.rows[0]});
+              return sendJSON(res,200,{status:"success",notification:k5eOmitUserId(updated.rows[0])});
             }
 
             if(req.method==="POST" && /^\/api\/notifications\/\d+\/read-all\/?$/.test(pathname)){
@@ -51603,11 +51637,12 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
             if(req.method==="PATCH" && /^\/api\/notifications\/\d+\/read\/?$/.test(pathname)){
               const notificationId=Number(pathname.match(/^\/api\/notifications\/(\d+)\/read\/?$/)?.[1]);
-              const body=await getBody(req);
-              const userId=Number(body.user_id ?? body.userId);
+              // STAGE 2B SECURITY FIX: session-derived actor, body.user_id is no longer trusted
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
 
-              if(!Number.isInteger(notificationId)||notificationId<=0||!Number.isInteger(userId)||userId<=0){
-                return sendJSON(res,400,{status:"error",message:"Valid notification and user are required"});
+              if(!Number.isInteger(notificationId)||notificationId<=0){
+                return sendJSON(res,400,{status:"error",message:"Valid notification is required"});
               }
 
               const updated=await pool.query(`
@@ -51618,16 +51653,17 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               `,[notificationId,userId]);
 
               if(!updated.rows[0]) return sendJSON(res,404,{status:"error",message:"Notification not found"});
-              return sendJSON(res,200,{status:"success",message:"Notification marked as read",notification:updated.rows[0]});
+              return sendJSON(res,200,{status:"success",message:"Notification marked as read",notification:k5eOmitUserId(updated.rows[0])});
             }
 
             if(req.method==="PATCH" && /^\/api\/notifications\/\d+\/unread\/?$/.test(pathname)){
               const notificationId=Number(pathname.match(/^\/api\/notifications\/(\d+)\/unread\/?$/)?.[1]);
-              const body=await getBody(req);
-              const userId=Number(body.user_id ?? body.userId);
+              // STAGE 2B SECURITY FIX: session-derived actor, body.user_id is no longer trusted
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
 
-              if(!Number.isInteger(notificationId)||notificationId<=0||!Number.isInteger(userId)||userId<=0){
-                return sendJSON(res,400,{status:"error",message:"Valid notification and user are required"});
+              if(!Number.isInteger(notificationId)||notificationId<=0){
+                return sendJSON(res,400,{status:"error",message:"Valid notification is required"});
               }
 
               const updated=await pool.query(`
@@ -51638,7 +51674,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               `,[notificationId,userId]);
 
               if(!updated.rows[0]) return sendJSON(res,404,{status:"error",message:"Notification not found"});
-              return sendJSON(res,200,{status:"success",message:"Notification marked as unread",notification:updated.rows[0]});
+              return sendJSON(res,200,{status:"success",message:"Notification marked as unread",notification:k5eOmitUserId(updated.rows[0])});
             }
 
             if(req.method==="PATCH" && /^\/api\/notifications\/\d+\/read-all\/?$/.test(pathname)){
@@ -51656,14 +51692,21 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
             if(req.method==="DELETE" && /^\/api\/notifications\/\d+\/?$/.test(pathname)){
               const notificationId=Number(pathname.match(/^\/api\/notifications\/(\d+)\/?$/)?.[1]);
-              const userId=Number(parsedUrl.searchParams.get("user_id")||parsedUrl.searchParams.get("userId"));
+              // STAGE 2B SECURITY FIX: session-derived actor, the ?user_id= query param is no longer trusted
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
 
-              if(!Number.isInteger(notificationId)||notificationId<=0||!Number.isInteger(userId)||userId<=0){
-                return sendJSON(res,400,{status:"error",message:"Valid notification and user are required"});
+              if(!Number.isInteger(notificationId)||notificationId<=0){
+                return sendJSON(res,400,{status:"error",message:"Valid notification is required"});
               }
 
+              // STAGE 2B FIX (discovered via live end-to-end verification, not a security issue by
+              // itself): this used to delete from user_notifications, a different, UUID-keyed table
+              // than the one GET/POST-read/unread actually serve (customer_notifications, bigint id).
+              // A numeric id here could never match a UUID row, so this endpoint always 400'd/never
+              // deleted the notification the customer was actually looking at.
               const deleted=await pool.query(`
-                DELETE FROM user_notifications
+                DELETE FROM customer_notifications
                 WHERE id=$1 AND user_id=$2
                 RETURNING id
               `,[notificationId,userId]);
@@ -51799,35 +51842,14 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             // =====================================================
             // HOWDI ACCOUNT PREFERENCES CENTER — LIVE API
             // =====================================================
-            if(req.method==="GET" && /^\/api\/preferences\/\d+\/?$/.test(pathname)){
-              // STAGE 2B SECURITY FIX: this was a second, previously-unreachable copy of the
-              // preferences route (different backing table) that a numeric-path fix elsewhere in
-              // this file un-shadowed. Session-derived like every other copy — never the URL id.
-              const userId=await k5eRequireSelf(req,res);
-              if(userId===null) return;
-
-              const result=await pool.query(`
-                INSERT INTO user_account_preferences(user_id)
-                VALUES($1)
-                ON CONFLICT(user_id) DO NOTHING
-              `,[userId]);
-
-              const preferences=await pool.query(`
-                SELECT user_id,email_orders,email_offers,email_news,sms_orders,sms_offers,
-                  push_orders,push_offers,personalized_recommendations,saved_size_preference,
-                  preferred_language,profile_visibility,activity_personalization,data_sharing_analytics,
-                  created_at,updated_at
-                FROM user_account_preferences
-                WHERE user_id=$1
-              `,[userId]);
-
-              // STAGE 2B SECURITY FIX: strip user_id FK from response body (response-leak fix — this
-              // route IS reachable directly by URL, confirmed live during the curl verification sweep)
-              return sendJSON(res,200,{status:"success",preferences:k5eOmitUserId(preferences.rows[0])||null});
+            if(/^\/api\/preferences\/\d+\/?$/.test(pathname) && (req.method==="GET"||req.method==="PUT")){
+              // STAGE 2B SECURITY FIX (requirement #2 — legacy numeric own-account route hardening):
+              // this numeric path is retired. Every client now calls /api/preferences/me. Rather than
+              // leaving a session-derived-but-still-numeric fallback reachable, it returns a fixed
+              // deprecation response and never touches the database.
+              return sendJSON(res,410,{status:"error",code:"ENDPOINT_RETIRED",message:"This endpoint has moved. Please use /api/preferences/me."});
             }
-
-            if(req.method==="PUT" && /^\/api\/preferences\/\d+\/?$/.test(pathname)){
-              // STAGE 2B SECURITY FIX: same un-shadowed second copy as the GET above — session-derived.
+            if(false && req.method==="PUT" && /^\/api\/preferences\/\d+\/?$/.test(pathname)){
               const userId=await k5eRequireSelf(req,res);
               if(userId===null) return;
               const body=await getBody(req);
@@ -52106,10 +52128,12 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             // =====================================================
             // HOWDI WALLET + CASHBACK CENTER — LIVE API
             // =====================================================
-            if(req.method==="GET" && /^\/api\/wallet\/\d+\/?$/.test(pathname)){
-              // STAGE 2B SECURITY FIX: this was a second, previously-unreachable copy of the
-              // wallet route that a numeric-path fix elsewhere in this file un-shadowed.
-              // Session-derived like every other copy — never the URL id.
+            if(/^\/api\/wallet\/\d+\/?$/.test(pathname) && req.method==="GET"){
+              // STAGE 2B SECURITY FIX (requirement #2 — legacy numeric own-account route hardening):
+              // this numeric path is retired. Every client now calls /api/wallet/user/me.
+              return sendJSON(res,410,{status:"error",code:"ENDPOINT_RETIRED",message:"This endpoint has moved. Please use /api/wallet/user/me."});
+            }
+            if(false && req.method==="GET" && /^\/api\/wallet\/\d+\/?$/.test(pathname)){
               const userId=await k5eRequireSelf(req,res);
               if(userId===null) return;
 
@@ -52442,9 +52466,9 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             }
 
             if(req.method==="POST" && pathname==="/api/notifications/read-all"){
-              const body=await getBody(req);
-              const userId=Number(body.user_id ?? body.userId);
-              if(!Number.isInteger(userId)||userId<=0) return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
+              // STAGE 2B SECURITY FIX: session-derived actor, body.user_id is no longer trusted
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
 
               await pool.query(`
                 UPDATE user_notifications SET is_read=TRUE,read_at=NOW()
@@ -52826,10 +52850,12 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               return `${base}${random}`.slice(0,40);
             };
 
-            if(req.method==="GET" && /^\/api\/referrals\/profile\/\d+\/?$/.test(pathname)){
-              // STAGE 2B SECURITY FIX: this was a second, previously-unreachable copy of the
-              // referrals/profile route that a numeric-path fix elsewhere in this file un-shadowed.
-              // Session-derived like every other copy — never the URL id.
+            if(/^\/api\/referrals\/profile\/\d+\/?$/.test(pathname) && req.method==="GET"){
+              // STAGE 2B SECURITY FIX (requirement #2 — legacy numeric own-account route hardening):
+              // this numeric path is retired. Every client now calls /api/referrals/profile/me.
+              return sendJSON(res,410,{status:"error",code:"ENDPOINT_RETIRED",message:"This endpoint has moved. Please use /api/referrals/profile/me."});
+            }
+            if(false && req.method==="GET" && /^\/api\/referrals\/profile\/\d+\/?$/.test(pathname)){
               const userId = await k5eRequireSelf(req,res);
               if(userId===null) return;
               let profile = await pool.query(`SELECT * FROM user_referral_profiles WHERE user_id=$1`,[userId]);
@@ -57714,8 +57740,33 @@ app.get("/api/works/completion-pack", async (req,res)=>{
   ]});
 });
 
+// STAGE 2B SECURITY FIX (discovered this pass — not previously flagged by name, but the same
+// class of bug already fixed on the notifications family): none of these V16.1E routes had any
+// session middleware (`req.user` was never set anywhere in this file), so every one of them took
+// its acting/target user id straight from the request body/query with zero verification. Any
+// caller could read or post booking messages for any bookingId, favourite/unfavourite on behalf
+// of any customer, or open support/incident/review records as any user. All are now gated on a
+// valid Bearer session, and message/support/incident/review routes additionally verify the caller
+// is actually a party (customer or worker) on that booking via works_work_orders before touching it.
+// Note (pre-existing, out of scope for this security pass): the *_user_id columns on
+// howdi_works_booking_messages/favourites/support_tickets/incidents/reviews are typed UUID,
+// while the real session/users identity is BIGINT — a data-model mismatch that predates this
+// fix and means writes below still fail at the database (caught, returns a generic 500) rather
+// than silently succeeding with a fabricated identity. That is a functional bug for a follow-up
+// migration, not a security one: no caller, authenticated or not, can actually persist data here.
+async function k5eWorksBookingPartyOrNull(bookingId, sessionUserId) {
+  const row = (await pool.query(
+    `SELECT id,customer_user_id,worker_user_id FROM works_work_orders WHERE id=$1 AND (customer_user_id=$2 OR worker_user_id=$2)`,
+    [bookingId, sessionUserId]
+  )).rows[0];
+  return row || null;
+}
+
 app.get("/api/works/bookings/:bookingId/messages", async(req,res)=>{
   try{
+    const session=await getSessionUserFromRequest(req);
+    if(!session) return res.status(401).json({ok:false,error:"Please sign in to continue."});
+    if(!(await k5eWorksBookingPartyOrNull(req.params.bookingId, session.id))) return res.status(404).json({ok:false,error:"Booking not found"});
     const r=await pool.query(`SELECT id,booking_id,message_text,message_type,is_read,created_at
       FROM howdi_works_booking_messages WHERE booking_id=$1 ORDER BY created_at ASC LIMIT 500`,[req.params.bookingId]);
     res.json({ok:true,messages:r.rows});
@@ -57724,29 +57775,33 @@ app.get("/api/works/bookings/:bookingId/messages", async(req,res)=>{
 
 app.post("/api/works/bookings/:bookingId/messages", async(req,res)=>{
   try{
-    const sender=String(req.body.senderUserId||req.user?.id||"").trim();
+    const session=await getSessionUserFromRequest(req);
+    if(!session) return res.status(401).json({ok:false,error:"Please sign in to continue."});
+    if(!(await k5eWorksBookingPartyOrNull(req.params.bookingId, session.id))) return res.status(404).json({ok:false,error:"Booking not found"});
     const text=String(req.body.message||"").trim();
-    if(!sender||!text) return res.status(400).json({ok:false,error:"sender and message required"});
+    if(!text) return res.status(400).json({ok:false,error:"message required"});
     const r=await pool.query(`INSERT INTO howdi_works_booking_messages(booking_id,sender_user_id,message_text)
       VALUES($1,$2,$3) RETURNING id,booking_id,message_text,message_type,is_read,created_at`,
-      [req.params.bookingId,sender,text.slice(0,5000)]);
+      [req.params.bookingId,session.id,text.slice(0,5000)]);
     res.json({ok:true,message:r.rows[0]});
   }catch(e){res.status(500).json({ok:false,error:e.message});}
 });
 
 app.post("/api/works/favourites/:workerId", async(req,res)=>{
   try{
-    const customer=String(req.body.customerUserId||req.user?.id||"").trim();
+    const session=await getSessionUserFromRequest(req);
+    if(!session) return res.status(401).json({ok:false,error:"Please sign in to continue."});
     await pool.query(`INSERT INTO howdi_works_favourites(customer_user_id,worker_user_id)
-      VALUES($1,$2) ON CONFLICT DO NOTHING`,[customer,req.params.workerId]);
+      VALUES($1,$2) ON CONFLICT DO NOTHING`,[session.id,req.params.workerId]);
     res.json({ok:true,favourite:true});
   }catch(e){res.status(500).json({ok:false,error:e.message});}
 });
 app.delete("/api/works/favourites/:workerId", async(req,res)=>{
   try{
-    const customer=String(req.query.customerUserId||req.user?.id||"").trim();
+    const session=await getSessionUserFromRequest(req);
+    if(!session) return res.status(401).json({ok:false,error:"Please sign in to continue."});
     await pool.query(`DELETE FROM howdi_works_favourites WHERE customer_user_id=$1 AND worker_user_id=$2`,
-      [customer,req.params.workerId]);
+      [session.id,req.params.workerId]);
     res.json({ok:true,favourite:false});
   }catch(e){res.status(500).json({ok:false,error:e.message});}
 });
@@ -57797,38 +57852,49 @@ app.get("/api/works/worker/performance", async(req,res)=>{
 
 app.post("/api/works/bookings/:bookingId/support", async(req,res)=>{
   try{
-    const uid=String(req.body.userId||req.user?.id||"").trim();
+    const session=await getSessionUserFromRequest(req);
+    if(!session) return res.status(401).json({ok:false,error:"Please sign in to continue."});
+    const booking=await k5eWorksBookingPartyOrNull(req.params.bookingId, session.id);
+    if(!booking) return res.status(404).json({ok:false,error:"Booking not found"});
     const {issueType="GENERAL",priority="NORMAL",description="",evidence=[]}=req.body;
     const r=await pool.query(`INSERT INTO howdi_works_support_tickets
       (booking_id,opened_by_user_id,issue_type,priority,description,evidence_json)
       VALUES($1,$2,$3,$4,$5,$6::jsonb) RETURNING *`,
-      [req.params.bookingId,uid,issueType,priority,description,JSON.stringify(evidence)]);
+      [req.params.bookingId,session.id,issueType,priority,description,JSON.stringify(evidence)]);
     res.json({ok:true,ticket:r.rows[0]});
   }catch(e){res.status(500).json({ok:false,error:e.message});}
 });
 
 app.post("/api/works/bookings/:bookingId/incident", async(req,res)=>{
   try{
-    const uid=String(req.body.userId||req.user?.id||"").trim();
+    const session=await getSessionUserFromRequest(req);
+    if(!session) return res.status(401).json({ok:false,error:"Please sign in to continue."});
+    const booking=await k5eWorksBookingPartyOrNull(req.params.bookingId, session.id);
+    if(!booking) return res.status(404).json({ok:false,error:"Booking not found"});
     const r=await pool.query(`INSERT INTO howdi_works_incidents
       (booking_id,reporter_user_id,incident_type,details) VALUES($1,$2,$3,$4) RETURNING *`,
-      [req.params.bookingId,uid,String(req.body.incidentType||"SAFETY"),String(req.body.details||"")]);
+      [req.params.bookingId,session.id,String(req.body.incidentType||"SAFETY"),String(req.body.details||"")]);
     res.json({ok:true,incident:r.rows[0]});
   }catch(e){res.status(500).json({ok:false,error:e.message});}
 });
 
 app.post("/api/works/bookings/:bookingId/review", async(req,res)=>{
   try{
-    const customer=String(req.body.customerUserId||req.user?.id||"").trim();
-    const worker=String(req.body.workerUserId||"").trim();
+    const session=await getSessionUserFromRequest(req);
+    if(!session) return res.status(401).json({ok:false,error:"Please sign in to continue."});
+    // The reviewer must be the CUSTOMER on this specific booking, and the worker being reviewed
+    // is taken from the booking record itself — never from the client — so a caller cannot leave
+    // a review against an unrelated worker by supplying an arbitrary workerUserId.
+    const booking=(await pool.query(`SELECT id,customer_user_id,worker_user_id FROM works_work_orders WHERE id=$1 AND customer_user_id=$2`,[req.params.bookingId,session.id])).rows[0];
+    if(!booking) return res.status(404).json({ok:false,error:"Booking not found"});
     const rating=Number(req.body.rating);
-    if(!worker||rating<1||rating>5) return res.status(400).json({ok:false,error:"worker and rating 1-5 required"});
+    if(!booking.worker_user_id||rating<1||rating>5) return res.status(400).json({ok:false,error:"worker and rating 1-5 required"});
     const r=await pool.query(`INSERT INTO howdi_works_reviews
       (booking_id,customer_user_id,worker_user_id,rating,review_text)
       VALUES($1,$2,$3,$4,$5)
       ON CONFLICT(booking_id) DO UPDATE SET rating=EXCLUDED.rating,review_text=EXCLUDED.review_text
       RETURNING id,booking_id,rating,review_text,is_visible,created_at`,
-      [req.params.bookingId,customer,worker,rating,String(req.body.review||"").slice(0,4000)]);
+      [req.params.bookingId,session.id,booking.worker_user_id,rating,String(req.body.review||"").slice(0,4000)]);
     res.json({ok:true,review:r.rows[0]});
   }catch(e){res.status(500).json({ok:false,error:e.message});}
 });

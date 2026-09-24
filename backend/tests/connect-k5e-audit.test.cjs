@@ -144,10 +144,15 @@ test('K5E app 1: bootstrap and search are called without a client user id; peopl
 });
 
 test('K5E app 2: every /api/notifications call from the customer app sends the session (legacy centre) and preferences use /me',()=>{
-  const calls=[...app.matchAll(/fetch\(\s*[`"]http:\/\/localhost:5000\/api\/notifications[^]*?\)\s*[;,)]/g)].map(m=>m[0]);
+  // STAGE 2B SECURITY FIX: these calls used to hit a hardcoded http://localhost:5000, which
+  // breaks in any non-local environment and, worse, addressed the endpoint by currentUser.id
+  // (always undefined). They now go through the configured SHOP_API_BASE and /me, and no
+  // hardcoded-localhost notification call remains at all.
+  assert.equal((app.match(/localhost:5000\/api\/notifications/g)||[]).length,0,'no hardcoded-localhost notification call remains');
+  const calls=[...app.matchAll(/fetch\(\s*[`"]\$\{SHOP_API_BASE\}\/api\/notifications[^]*?\)\s*[;,)]/g)].map(m=>m[0]);
   assert.ok(calls.length>=10,'found '+calls.length);
   // window after each URL is large enough to include the options object
-  for(const m of app.matchAll(/http:\/\/localhost:5000\/api\/notifications[^\n]*/g)){
+  for(const m of app.matchAll(/\$\{SHOP_API_BASE\}\/api\/notifications[^\n]*/g)){
     const at=m.index;const win=app.slice(at,at+420);
     assert.match(win,/customerSessionHeaders\(\)/,'notification call without session headers near: '+m[0].slice(0,90));
   }
