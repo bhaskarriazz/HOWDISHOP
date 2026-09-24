@@ -37,6 +37,7 @@ const MIME={'.html':'text/html','.js':'text/javascript','.css':'text/css','.svg'
       done();});
   });
   await runSuite('01-session-routes.cjs');
+  await runSuite('03-guides-and-classroom-security.cjs');
   if(process.env.LEARN_BROWSER){
     const customer=path.join(__dirname,'../../../apps/customer');
     const dist=fs.mkdtempSync(path.join(os.tmpdir(),'learn-dist-'));

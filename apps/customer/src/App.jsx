@@ -6211,11 +6211,13 @@ function App() {
   },[activeClassroom?.id,classroomEnded]);
 
   useEffect(()=>{
-    if(!activeClassroom?.id||!currentUser?.id||classroomEnded)return;
+    if(!activeClassroom?.id||!currentUser||classroomEnded)return;
     let stopped=false;
     const sync=async()=>{
       try{
-        const r=await learningFetch(`http://localhost:5000/api/learning/live/bookings/${activeClassroom.id}/classroom?user_id=${currentUser.id}`,{cache:"no-store"});
+        // STAGE 2B SECURITY FIX: never send the internal user id — learningFetch already
+        // attaches the session Bearer token, which is the only identity the backend trusts.
+        const r=await learningFetch(`http://localhost:5000/api/learning/live/bookings/${activeClassroom.id}/classroom`,{cache:"no-store"});
         const d=await r.json().catch(()=>({}));
         if(stopped||!r.ok||d.status!=="success")return;
         const latest={...activeClassroom,...d.booking,classroom:d.classroom};
@@ -6266,7 +6268,7 @@ function App() {
   const sendLearnerSignal=async(bookingId,signal_type,payload={})=>{
     const r=await learningFetch(`http://localhost:5000/api/learning/live/bookings/${bookingId}/signals`,{
       method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({sender_role:"LEARNER",user_id:currentUser.id,signal_type,payload})
+      body:JSON.stringify({sender_role:"LEARNER",signal_type,payload})
     });
     const d=await r.json().catch(()=>({}));
     if(!r.ok||d.status!=="success")throw new Error(d.message||"Classroom connection error");
@@ -6274,7 +6276,7 @@ function App() {
 
   const pollLearnerSignals=async(bookingId)=>{
     try{
-      const r=await learningFetch(`http://localhost:5000/api/learning/live/bookings/${bookingId}/signals?receiver_role=LEARNER&user_id=${currentUser.id}`,{cache:"no-store"});
+      const r=await learningFetch(`http://localhost:5000/api/learning/live/bookings/${bookingId}/signals?receiver_role=LEARNER`,{cache:"no-store"});
       const d=await r.json().catch(()=>({}));
       if(!r.ok||d.status!=="success")return;
       for(const s of d.signals||[]){
@@ -6302,7 +6304,7 @@ function App() {
 
   const loadClassMessages=async(bookingId)=>{
     try{
-      const r=await learningFetch(`http://localhost:5000/api/learning/live/bookings/${bookingId}/messages?role=LEARNER&user_id=${currentUser.id}`,{cache:"no-store"});
+      const r=await learningFetch(`http://localhost:5000/api/learning/live/bookings/${bookingId}/messages?role=LEARNER`,{cache:"no-store"});
       const d=await r.json().catch(()=>({}));
       if(r.ok&&d.status==="success")setClassMessages(d.messages||[]);
     }catch{}
@@ -6311,7 +6313,7 @@ function App() {
     const msg=classMessageText.trim();
     if(!msg||!activeClassroom?.id)return;
     try{
-      const r=await learningFetch(`http://localhost:5000/api/learning/live/bookings/${activeClassroom.id}/messages`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({role:"LEARNER",user_id:currentUser.id,message:msg})});
+      const r=await learningFetch(`http://localhost:5000/api/learning/live/bookings/${activeClassroom.id}/messages`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({role:"LEARNER",message:msg})});
       const d=await r.json().catch(()=>({}));
       if(!r.ok||d.status!=="success")throw new Error(d.message||"Unable to send message");
       setClassMessageText("");
@@ -6321,12 +6323,12 @@ function App() {
   const saveLearnerReadiness=async(next)=>{
     setClassReadiness(next);
     if(!activeClassroom?.id)return;
-    try{await learningFetch(`http://localhost:5000/api/learning/live/bookings/${activeClassroom.id}/readiness`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({role:"LEARNER",user_id:currentUser.id,...next})});}catch{}
+    try{await learningFetch(`http://localhost:5000/api/learning/live/bookings/${activeClassroom.id}/readiness`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({role:"LEARNER",...next})});}catch{}
   };
   const reportLearnerIssue=async(issue_type,reason)=>{
     if(!activeClassroom?.id)return;
     try{
-      const r=await learningFetch(`http://localhost:5000/api/learning/live/bookings/${activeClassroom.id}/report-issue`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({role:"LEARNER",user_id:currentUser.id,issue_type,severity:"MEDIUM",reason})});
+      const r=await learningFetch(`http://localhost:5000/api/learning/live/bookings/${activeClassroom.id}/report-issue`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({role:"LEARNER",issue_type,severity:"MEDIUM",reason})});
       const d=await r.json().catch(()=>({}));
       if(!r.ok||d.status!=="success")throw new Error(d.message||"Unable to report issue");
       setLiveNotice("Issue reported to HOWDI Support.");
@@ -6417,19 +6419,19 @@ function App() {
   };
 
   const openLiveClassroom=async(booking)=>{
-    if(!currentUser?.id)return;
+    if(!currentUser)return;
     setLiveBusy(true);setLiveNotice("");
     try{
       let joinedBooking=booking;
       if(!booking.joined_at||booking.left_at){
         const r=await learningFetch(`http://localhost:5000/api/learning/live/bookings/${booking.id}/join`,{
-          method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({user_id:currentUser.id})
+          method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({})
         });
         const data=await r.json().catch(()=>({}));
         if(!r.ok||data.status!=="success")throw new Error(data.message||"Unable to join class.");
         joinedBooking={...booking,...data.booking};
       }
-      const roomRes=await learningFetch(`http://localhost:5000/api/learning/live/bookings/${booking.id}/classroom?user_id=${currentUser.id}`);
+      const roomRes=await learningFetch(`http://localhost:5000/api/learning/live/bookings/${booking.id}/classroom`);
       const roomData=await roomRes.json().catch(()=>({}));
       if(roomRes.ok&&roomData.status==="success"){
         setActiveClassroom({...joinedBooking,...roomData.booking,classroom:roomData.classroom});
@@ -6449,7 +6451,7 @@ function App() {
     setLiveBusy(true);
     try{
       const r=await learningFetch(`http://localhost:5000/api/learning/live/bookings/${activeClassroom.id}/leave`,{
-        method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({user_id:currentUser.id})
+        method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({})
       });
       const data=await r.json().catch(()=>({}));
       if(!r.ok||data.status!=="success")throw new Error(data.message||"Unable to leave class.");
@@ -6504,7 +6506,7 @@ function App() {
     try{
       const [aRes,bRes]=await Promise.all([
         learningFetch("http://localhost:5000/api/learning/live/availability",{cache:"no-store"}),
-        currentUser?.id?learningFetch("http://localhost:5000/api/learning/me/live-bookings",{cache:"no-store"}):Promise.resolve(null)
+        currentUser?learningFetch("http://localhost:5000/api/learning/me/live-bookings",{cache:"no-store"}):Promise.resolve(null)
       ]);
       const a=await aRes.json().catch(()=>({}));
       if(!aRes.ok||a.status!=="success")throw new Error(a.message||"Unable to load live class slots.");
@@ -6514,11 +6516,11 @@ function App() {
     finally{setLiveBusy(false);}
   };
   const bookLiveClass=async(slot,type)=>{
-    if(!currentUser?.id){setLearningBrowseOpen(false);openLogin();return;}
+    if(!currentUser){setLearningBrowseOpen(false);openLogin();return;}
     setLiveBusy(true);setLiveNotice("");
     try{
       const scheduled_date=normalizeLearningDate(slot.available_date) || nextDateForDay(slot.day_of_week);
-      const r=await learningFetch("http://localhost:5000/api/learning/live/book",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({user_id:currentUser.id,availability_id:slot.id,session_type:type,scheduled_date})});
+      const r=await learningFetch("http://localhost:5000/api/learning/live/book",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({availability_id:slot.id,session_type:type,scheduled_date})});
       const data=await r.json().catch(()=>({}));
       if(!r.ok||data.status!=="success")throw new Error(data.message||"Unable to book this class.");
       setLiveNotice(`${type==="DEMO"?"Demo":type==="DOUBT"?"Doubt session":"1:1 class"} booked successfully · ${data.booking?.booking_code||"HOWDI booking"}`);
@@ -6527,11 +6529,15 @@ function App() {
     finally{setLiveBusy(false);}
   };
   const learnerGroupRtcConfig={iceServers:[{urls:"stun:stun.l.google.com:19302"},{urls:"stun:stun1.l.google.com:19302"}]};
-  const sendLearnerGroupSignal=async(sessionId,receiverUserId,signalType,payload={})=>{
-    if(!currentUser?.id)return;
+  const sendLearnerGroupSignal=async(sessionId,signalType,payload={})=>{
+    if(!currentUser)return;
+    // STAGE 2B SECURITY FIX: no numeric ids travel in this request at all. The sender's own id
+    // is never sent — the backend derives it from the session. A group classroom has exactly
+    // one teacher, so instead of the caller naming a receiver_user_id (an internal HOWDI user
+    // id), it asks by role ("TEACHER") and the backend resolves the actual recipient itself.
     await learningFetch(`http://localhost:5000/api/learning/batch-sessions/${sessionId}/classroom/signals`,{
       method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({user_id:currentUser.id,receiver_user_id:receiverUserId,sender_role:"LEARNER",signal_type:signalType,payload})
+      body:JSON.stringify({receiver_role:"TEACHER",sender_role:"LEARNER",signal_type:signalType,payload})
     });
   };
   const attachLearnerGroupMedia=()=>{
@@ -6544,31 +6550,33 @@ function App() {
       learnerGroupTeacherVideoRef.current.play?.().catch(()=>{});
     }
   };
-  const ensureLearnerGroupPeer=async(sessionId,teacherUserId)=>{
+  const ensureLearnerGroupPeer=async(sessionId)=>{
     if(learnerGroupPeerRef.current)return learnerGroupPeerRef.current;
     const pc=new RTCPeerConnection(learnerGroupRtcConfig);
     learnerGroupPeerRef.current=pc;
     (learnerGroupLocalStreamRef.current?.getTracks()||[]).forEach(track=>pc.addTrack(track,learnerGroupLocalStreamRef.current));
-    pc.onicecandidate=e=>{if(e.candidate)sendLearnerGroupSignal(sessionId,teacherUserId,"ICE",e.candidate.toJSON?.()||e.candidate).catch(()=>{});};
+    pc.onicecandidate=e=>{if(e.candidate)sendLearnerGroupSignal(sessionId,"ICE",e.candidate.toJSON?.()||e.candidate).catch(()=>{});};
     pc.ontrack=e=>{const stream=e.streams?.[0]||new MediaStream([e.track]);setLearnerGroupTeacherStream(stream);setLearnerGroupRtcState("connected");};
     pc.onconnectionstatechange=()=>{if(pc.connectionState==="connected")setLearnerGroupRtcState("connected");if(["failed","disconnected"].includes(pc.connectionState))setLearnerGroupRtcState("reconnecting");};
     return pc;
   };
-  const processLearnerGroupSignals=async(sessionId,teacherUserId)=>{
+  const processLearnerGroupSignals=async(sessionId)=>{
     try{
-      const r=await learningFetch(`http://localhost:5000/api/learning/batch-sessions/${sessionId}/classroom/signals?user_id=${currentUser.id}`,{cache:"no-store"});
+      const r=await learningFetch(`http://localhost:5000/api/learning/batch-sessions/${sessionId}/classroom/signals`,{cache:"no-store"});
       const d=await r.json().catch(()=>({}));
       for(const sig of (d.signals||[])){
-        if(Number(sig.sender_user_id)!==Number(teacherUserId))continue;
+        // STAGE 2B SECURITY FIX: the backend no longer returns raw sender_user_id — a group
+        // classroom has exactly one teacher, so sender_role is sufficient to identify them.
+        if(sig.sender_role!=="TEACHER")continue;
         if(sig.signal_type==="OFFER"){
-          const pc=await ensureLearnerGroupPeer(sessionId,teacherUserId);
+          const pc=await ensureLearnerGroupPeer(sessionId);
           await pc.setRemoteDescription(new RTCSessionDescription(sig.payload));
           for(const ice of learnerGroupPendingIceRef.current){try{await pc.addIceCandidate(new RTCIceCandidate(ice));}catch{}}
           learnerGroupPendingIceRef.current=[];
           const answer=await pc.createAnswer();await pc.setLocalDescription(answer);
-          await sendLearnerGroupSignal(sessionId,teacherUserId,"ANSWER",pc.localDescription);
+          await sendLearnerGroupSignal(sessionId,"ANSWER",pc.localDescription);
         }else if(sig.signal_type==="ICE"){
-          const pc=await ensureLearnerGroupPeer(sessionId,teacherUserId);
+          const pc=await ensureLearnerGroupPeer(sessionId);
           if(pc.remoteDescription){try{await pc.addIceCandidate(new RTCIceCandidate(sig.payload));}catch{}}
           else learnerGroupPendingIceRef.current.push(sig.payload);
         }else if(sig.signal_type==="HANGUP"){
@@ -6580,9 +6588,11 @@ function App() {
   const startLearnerGroupMedia=async(room)=>{
     try{
       const sessionId=room?.session?.id;
+      // STAGE 2B SECURITY FIX: the classroom response no longer carries a raw teacher user id
+      // (see the backend's is_teacher/is_self fix) — presence of a TEACHER participant is all
+      // this needs to know a teacher has opened the room.
       const teacherParticipant=(room?.participants||[]).find(p=>p.participant_role==="TEACHER");
-      const teacherUserId=Number(teacherParticipant?.user_id);
-      if(!sessionId||!teacherUserId)throw new Error("Teacher has not opened the classroom yet.");
+      if(!sessionId||!teacherParticipant)throw new Error("Teacher has not opened the classroom yet.");
       setLearnerGroupRtcError("");setLearnerGroupRtcState("starting");
       const stream=await navigator.mediaDevices.getUserMedia({video:true,audio:true});
       learnerGroupLocalStreamRef.current=stream;
@@ -6590,17 +6600,17 @@ function App() {
       setLearnerGroupCamOn(stream.getVideoTracks().some(x=>x.enabled));
       setLearnerGroupRtcState("waiting");
       setTimeout(attachLearnerGroupMedia,0);
-      await ensureLearnerGroupPeer(sessionId,teacherUserId);
-      await sendLearnerGroupSignal(sessionId,teacherUserId,"READY",{});
+      await ensureLearnerGroupPeer(sessionId);
+      await sendLearnerGroupSignal(sessionId,"READY",{});
       if(learnerGroupPollRef.current)clearInterval(learnerGroupPollRef.current);
-      learnerGroupPollRef.current=setInterval(()=>processLearnerGroupSignals(sessionId,teacherUserId),1000);
-      await processLearnerGroupSignals(sessionId,teacherUserId);
+      learnerGroupPollRef.current=setInterval(()=>processLearnerGroupSignals(sessionId),1000);
+      await processLearnerGroupSignals(sessionId);
     }catch(error){setLearnerGroupRtcState("error");setLearnerGroupRtcError(error?.message||"Unable to start camera/microphone.");}
   };
   const stopLearnerGroupMedia=async()=>{
     const sessionId=groupLearnerRoom?.session?.id;
-    const teacherUserId=Number((groupLearnerRoom?.participants||[]).find(p=>p.participant_role==="TEACHER")?.user_id);
-    if(sessionId&&teacherUserId)sendLearnerGroupSignal(sessionId,teacherUserId,"HANGUP",{}).catch(()=>{});
+    const hasTeacher=(groupLearnerRoom?.participants||[]).some(p=>p.participant_role==="TEACHER");
+    if(sessionId&&hasTeacher)sendLearnerGroupSignal(sessionId,"HANGUP",{}).catch(()=>{});
     if(learnerGroupPollRef.current){clearInterval(learnerGroupPollRef.current);learnerGroupPollRef.current=null;}
     try{learnerGroupPeerRef.current?.close();}catch{}learnerGroupPeerRef.current=null;learnerGroupPendingIceRef.current=[];
     learnerGroupLocalStreamRef.current?.getTracks().forEach(x=>x.stop());learnerGroupLocalStreamRef.current=null;
@@ -6611,20 +6621,20 @@ function App() {
   const toggleLearnerGroupMic=()=>{const next=!learnerGroupMicOn;(learnerGroupLocalStreamRef.current?.getAudioTracks()||[]).forEach(x=>x.enabled=next);setLearnerGroupMicOn(next);};
   const toggleLearnerGroupCam=()=>{const next=!learnerGroupCamOn;(learnerGroupLocalStreamRef.current?.getVideoTracks()||[]).forEach(x=>x.enabled=next);setLearnerGroupCamOn(next);};
   const refreshLearnerGroupRoom=async(sessionId)=>{
-    if(!currentUser?.id)return;
+    if(!currentUser)return;
     try{
-      const r=await learningFetch(`http://localhost:5000/api/learning/batch-sessions/${sessionId}/classroom?user_id=${currentUser.id}`,{cache:"no-store"});
+      const r=await learningFetch(`http://localhost:5000/api/learning/batch-sessions/${sessionId}/classroom`,{cache:"no-store"});
       const d=await r.json().catch(()=>({}));
       if(r.ok&&d.status==="success"){setGroupLearnerRoom(d);return d;}
     }catch{}
     return null;
   };
   const openLearnerGroupRoom=async(session)=>{
-    if(!currentUser?.id)return;
+    if(!currentUser)return;
     setActiveClassroom(null);
     setGroupLearnerRoomBusy(true);setLiveNotice("");
     try{
-      const r=await learningFetch(`http://localhost:5000/api/learning/batch-sessions/${session.id}/classroom/join`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({user_id:currentUser.id})});
+      const r=await learningFetch(`http://localhost:5000/api/learning/batch-sessions/${session.id}/classroom/join`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({})});
       const d=await r.json().catch(()=>({}));
       if(!r.ok||d.status!=="success")throw new Error(d.message||"Unable to join group classroom.");
       const room=await refreshLearnerGroupRoom(session.id);
@@ -6636,9 +6646,9 @@ function App() {
   const leaveLearnerGroupRoom=async()=>{
     await stopLearnerGroupMedia();
     const sessionId=groupLearnerRoom?.session?.id;
-    if(!sessionId||!currentUser?.id){setGroupLearnerRoom(null);return;}
+    if(!sessionId||!currentUser){setGroupLearnerRoom(null);return;}
     try{
-      await learningFetch(`http://localhost:5000/api/learning/batch-sessions/${sessionId}/classroom/leave`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({user_id:currentUser.id})});
+      await learningFetch(`http://localhost:5000/api/learning/batch-sessions/${sessionId}/classroom/leave`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({})});
     }catch{}
     setGroupLearnerRoom(null);
     await loadGroupClassSessions();
@@ -6647,9 +6657,9 @@ function App() {
 
   const sendLearnerGroupMessage=async()=>{
     const msg=groupLearnerMessage.trim();const sessionId=groupLearnerRoom?.session?.id;
-    if(!msg||!sessionId||!currentUser?.id)return;
+    if(!msg||!sessionId||!currentUser)return;
     try{
-      const r=await learningFetch(`http://localhost:5000/api/learning/batch-sessions/${sessionId}/classroom/message`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({user_id:currentUser.id,message:msg})});
+      const r=await learningFetch(`http://localhost:5000/api/learning/batch-sessions/${sessionId}/classroom/message`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({message:msg})});
       const d=await r.json().catch(()=>({}));
       if(!r.ok||d.status!=="success")throw new Error(d.message||"Unable to send message.");
       setGroupLearnerMessage("");
@@ -6657,7 +6667,7 @@ function App() {
     }catch(error){setLiveNotice(error.message);}
   };
   const loadGroupClassSessions=async()=>{
-    if(!currentUser?.id){setGroupClassSessions([]);return;}
+    if(!currentUser){setGroupClassSessions([]);return;}
     try{
       const r=await learningFetch("http://localhost:5000/api/learning/me/batch-sessions",{cache:"no-store"});
       const d=await r.json().catch(()=>({}));
@@ -6665,10 +6675,10 @@ function App() {
     }catch{}
   };
   const groupClassAction=async(session,action)=>{
-    if(!currentUser?.id)return;
+    if(!currentUser)return;
     setGroupClassBusy(true);setLiveNotice("");
     try{
-      const r=await learningFetch(`http://localhost:5000/api/learning/batch-sessions/${session.id}/${action}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({user_id:currentUser.id})});
+      const r=await learningFetch(`http://localhost:5000/api/learning/batch-sessions/${session.id}/${action}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({})});
       const d=await r.json().catch(()=>({}));
       if(!r.ok||d.status!=="success")throw new Error(d.message||`Unable to ${action} group class.`);
       setLiveNotice(d.message||`Group class ${action}ed.`);
@@ -6679,20 +6689,20 @@ function App() {
     setBatchBusy(true);
     try{
       const calls=[learningFetch("http://localhost:5000/api/learning/batches",{cache:"no-store"})];
-      if(currentUser?.id)calls.push(learningFetch("http://localhost:5000/api/learning/me/batches",{cache:"no-store"}));
+      if(currentUser)calls.push(learningFetch("http://localhost:5000/api/learning/me/batches",{cache:"no-store"}));
       const responses=await Promise.all(calls);
       const publicData=await responses[0].json().catch(()=>({}));
       if(responses[0].ok&&publicData.status==="success")setLearningBatches(publicData.batches||[]);
       if(responses[1]){const mine=await responses[1].json().catch(()=>({}));if(responses[1].ok&&mine.status==="success")setMyLearningBatches(mine.batches||[]);}
     }catch(error){setLiveNotice(error.message||"Unable to load group batches.");}
     finally{setBatchBusy(false);}
-    if(currentUser?.id)loadGroupClassSessions();
+    if(currentUser)loadGroupClassSessions();
   };
   const enrollLearningBatch=async(batch)=>{
-    if(!currentUser?.id){setLearningBrowseOpen(false);openLogin();return;}
+    if(!currentUser){setLearningBrowseOpen(false);openLogin();return;}
     setBatchBusy(true);setLiveNotice("");
     try{
-      const r=await learningFetch(`http://localhost:5000/api/learning/batches/${batch.id}/enroll`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({user_id:currentUser.id})});
+      const r=await learningFetch(`http://localhost:5000/api/learning/batches/${batch.id}/enroll`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({})});
       const d=await r.json().catch(()=>({}));
       if(!r.ok||d.status!=="success")throw new Error(d.message||"Unable to join batch.");
       setLiveNotice(d.message||"Batch updated.");
@@ -6701,27 +6711,27 @@ function App() {
     finally{setBatchBusy(false);}
   };
   const leaveLearningBatch=async(batch)=>{
-    if(!currentUser?.id)return;
+    if(!currentUser)return;
     if(!window.confirm(`Leave ${batch.title}?`))return;
     setBatchBusy(true);setLiveNotice("");
     try{
-      const r=await learningFetch(`http://localhost:5000/api/learning/batches/${batch.id}/leave`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({user_id:currentUser.id})});
+      const r=await learningFetch(`http://localhost:5000/api/learning/batches/${batch.id}/leave`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({})});
       const d=await r.json().catch(()=>({}));
       if(!r.ok||d.status!=="success")throw new Error(d.message||"Unable to leave batch.");
       setLiveNotice(d.message);await loadLearningBatches();
     }catch(error){setLiveNotice(error.message);}
     finally{setBatchBusy(false);}
   };
-  useEffect(()=>{if(learningBrowseOpen&&learningPortalView==="live")Promise.all([loadLiveClasses(),loadLearningBatches()]);},[learningBrowseOpen,learningPortalView,currentUser?.id]);
+  useEffect(()=>{if(learningBrowseOpen&&learningPortalView==="live")Promise.all([loadLiveClasses(),loadLearningBatches()]);},[learningBrowseOpen,learningPortalView,currentUser]);
 
   const cancelLiveBooking=async(booking)=>{
-    if(!currentUser?.id)return;
+    if(!currentUser)return;
     const ok=window.confirm(`Cancel this ${booking.session_type==='DEMO'?'demo':'1:1 class'} with ${booking.teacher_name}?`);
     if(!ok)return;
     setLiveBusy(true);setLiveNotice("");
     try{
       const r=await learningFetch(`http://localhost:5000/api/learning/live/bookings/${booking.id}/cancel`,{
-        method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({user_id:currentUser.id})
+        method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({})
       });
       const data=await r.json().catch(()=>({}));
       if(!r.ok||data.status!=="success")throw new Error(data.message||"Unable to cancel class.");
@@ -6732,11 +6742,11 @@ function App() {
   };
 
   const updateLearnerSession=async(booking,action)=>{
-    if(!currentUser?.id)return;
+    if(!currentUser)return;
     setLiveBusy(true);setLiveNotice("");
     try{
       const r=await learningFetch(`http://localhost:5000/api/learning/live/bookings/${booking.id}/${action}`,{
-        method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({user_id:currentUser.id})
+        method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({})
       });
       const data=await r.json().catch(()=>({}));
       if(!r.ok||data.status!=="success")throw new Error(data.message||`Unable to ${action} class.`);
@@ -6747,13 +6757,13 @@ function App() {
   };
 
   const rescheduleLiveBooking=async(slot)=>{
-    if(!currentUser?.id||!liveRescheduleBookingId)return;
+    if(!currentUser||!liveRescheduleBookingId)return;
     setLiveBusy(true);setLiveNotice("");
     try{
       const scheduled_date=slot.available_date||nextDateForDay(slot.day_of_week);
       const r=await learningFetch(`http://localhost:5000/api/learning/live/bookings/${liveRescheduleBookingId}/reschedule`,{
         method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({user_id:currentUser.id,availability_id:slot.id,scheduled_date})
+        body:JSON.stringify({availability_id:slot.id,scheduled_date})
       });
       const data=await r.json().catch(()=>({}));
       if(!r.ok||data.status!=="success")throw new Error(data.message||"Unable to reschedule class.");
@@ -6765,12 +6775,12 @@ function App() {
   };
 
   const openCoursePlayer=async(courseOrId)=>{
-    if(!currentUser?.id){setLearningBrowseOpen(false);openLogin();return;}
+    if(!currentUser){setLearningBrowseOpen(false);openLogin();return;}
     const courseId=typeof courseOrId==="object"?(courseOrId.course_id||courseOrId.id):courseOrId;
     if(!courseId)return;
     setCoursePlayerBusy(true);setCoursePlayerNotice("");
     try{
-      const response=await learningFetch(`http://localhost:5000/api/learning/course/${encodeURIComponent(courseId)}/player?user_id=${encodeURIComponent(currentUser.id)}`,{cache:"no-store"});
+      const response=await learningFetch(`http://localhost:5000/api/learning/course/${encodeURIComponent(courseId)}/player`,{cache:"no-store"});
       const data=await response.json().catch(()=>({}));
       if(!response.ok||data.status!=="success")throw new Error(data.message||"Unable to open this course.");
       setCoursePlayer(data);
@@ -6783,10 +6793,10 @@ function App() {
     finally{setCoursePlayerBusy(false);}
   };
   const markLessonOpened=async(courseId,lessonId,refresh=true)=>{
-    if(!currentUser?.id||!courseId||!lessonId)return;
+    if(!currentUser||!courseId||!lessonId)return;
     try{
       const r=await learningFetch(`http://localhost:5000/api/learning/course/${encodeURIComponent(courseId)}/lesson/${encodeURIComponent(lessonId)}/open`,{
-        method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({user_id:currentUser.id})
+        method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({})
       });
       const d=await r.json().catch(()=>({}));
       if(!r.ok||d.status!=="success")throw new Error(d.message||"Unable to open lesson.");
@@ -6794,8 +6804,8 @@ function App() {
     }catch(error){setCoursePlayerNotice(error.message||"Unable to update lesson.");}
   };
   const refreshCoursePlayer=async(courseId,keepLessonId)=>{
-    if(!currentUser?.id||!courseId)return;
-    const r=await learningFetch(`http://localhost:5000/api/learning/course/${encodeURIComponent(courseId)}/player?user_id=${encodeURIComponent(currentUser.id)}`,{cache:"no-store"});
+    if(!currentUser||!courseId)return;
+    const r=await learningFetch(`http://localhost:5000/api/learning/course/${encodeURIComponent(courseId)}/player`,{cache:"no-store"});
     const d=await r.json().catch(()=>({}));
     if(!r.ok||d.status!=="success")throw new Error(d.message||"Unable to refresh course.");
     setCoursePlayer(d);
@@ -6813,11 +6823,11 @@ function App() {
   };
   const completeCurrentLesson=async()=>{
     const courseId=coursePlayer?.course?.course_id||coursePlayer?.course?.id;
-    if(!courseId||!activeLesson?.id||!currentUser?.id)return;
+    if(!courseId||!activeLesson?.id||!currentUser)return;
     setCoursePlayerBusy(true);setCoursePlayerNotice("");
     try{
       const r=await learningFetch(`http://localhost:5000/api/learning/course/${encodeURIComponent(courseId)}/lesson/${encodeURIComponent(activeLesson.id)}/complete`,{
-        method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({user_id:currentUser.id})
+        method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({})
       });
       const d=await r.json().catch(()=>({}));
       if(!r.ok||d.status!=="success")throw new Error(d.message||"Unable to complete lesson.");
@@ -6835,7 +6845,7 @@ function App() {
   const lessonTypeIcon=(type)=>({VIDEO:"🎥",AUDIO:"🎧",PDF:"📄",TEXT:"📖",PRACTICE:"🧶",IMAGE:"🖼️",LINK:"🔗",PRINT_LEARN:"🖨️"}[String(type||"").toUpperCase()]||"▶");
 
   const loadPracticeProof=async(courseIdOverride)=>{
-    if(!currentUser?.id)return;
+    if(!currentUser)return;
     const courseId=courseIdOverride||journeyCourseId||journeyData?.course?.course_id;
     if(!courseId)return;
     setProofBusy(true);setProofNotice("");
@@ -6859,7 +6869,7 @@ function App() {
     setProofTarget(target);setProofFile(null);setProofNote(target?.learner_note||"");setProofNotice("");
   };
   const submitProofEvidence=async()=>{
-    if(!proofTarget||!currentUser?.id)return;
+    if(!proofTarget||!currentUser)return;
     setProofBusy(true);setProofNotice("");
     try{
       const file=await evidenceFileToDataUrl(proofFile);
@@ -6894,7 +6904,7 @@ function App() {
     headers:{...learningAuthHeaders(),...(options.headers||{})}
   });
   const loadLearningAccessHealth=async()=>{
-    if(!currentUser?.id)return;
+    if(!currentUser)return;
     try{
       const r=await learningFetch("http://localhost:5000/api/learning/access-health",{cache:"no-store",headers:learningAuthHeaders()});
       const d=await r.json().catch(()=>({}));
@@ -6903,7 +6913,7 @@ function App() {
   };
 
   const loadLearningHpay=async()=>{
-    if(!currentUser?.id){setLearningHpayNotice("Sign in to view your Learn & Earn HPay activity.");return;}
+    if(!currentUser){setLearningHpayNotice("Sign in to view your Learn & Earn HPay activity.");return;}
     setLearningHpayBusy(true);setLearningHpayNotice("");
     try{
       const r=await learningFetch("http://localhost:5000/api/learning/hpay/rewards",{cache:"no-store",headers:learningAuthHeaders()});
@@ -6926,7 +6936,7 @@ function App() {
     finally{setLearningCommunityBusy(false);}
   };
   const requestLearningCommunityProgram=async(program)=>{
-    if(!currentUser?.id){setLearningCommunityNotice("Sign in to express interest in this program.");return;}
+    if(!currentUser){setLearningCommunityNotice("Sign in to express interest in this program.");return;}
     setLearningCommunityBusy(true);setLearningCommunityNotice("");
     try{
       const r=await learningFetch(`http://localhost:5000/api/learning/community-programs/${encodeURIComponent(program.id)}/join`,{
@@ -6955,7 +6965,7 @@ function App() {
   };
 
   const loadLearningMarketIntelligence=async()=>{
-    if(!currentUser?.id){setLearningMarketNotice("Sign in to see skill signals matched to your verified proof.");return;}
+    if(!currentUser){setLearningMarketNotice("Sign in to see skill signals matched to your verified proof.");return;}
     setLearningMarketBusy(true);setLearningMarketNotice("");
     try{
       const r=await learningFetch("http://localhost:5000/api/learning/market-intelligence",{cache:"no-store",headers:learningAuthHeaders()});
@@ -6981,7 +6991,7 @@ function App() {
     finally{setLearningAccessBusy(false);}
   };
   const requestLearningAccessPlan=async(plan)=>{
-    if(!currentUser?.id){setLearningAccessNotice("Sign in to request a learning access plan.");return;}
+    if(!currentUser){setLearningAccessNotice("Sign in to request a learning access plan.");return;}
     setLearningAccessBusy(true);setLearningAccessNotice("");
     try{
       const r=await learningFetch(`http://localhost:5000/api/learning/access-plans/${encodeURIComponent(plan.id)}/request`,{
@@ -7000,7 +7010,7 @@ function App() {
   };
 
   const loadLearningOpportunities=async()=>{
-    if(!currentUser?.id){setLearningOpportunities([]);setLearningOpportunitySummary(null);return;}
+    if(!currentUser){setLearningOpportunities([]);setLearningOpportunitySummary(null);return;}
     setLearningOpportunityBusy(true);setLearningOpportunityNotice("");
     try{
       const r=await learningFetch("http://localhost:5000/api/learning/opportunities",{cache:"no-store",headers:learningAuthHeaders()});
@@ -7012,7 +7022,7 @@ function App() {
     finally{setLearningOpportunityBusy(false);}
   };
   const expressLearningOpportunityInterest=async(opportunity)=>{
-    if(!currentUser?.id)return;
+    if(!currentUser)return;
     setLearningOpportunityBusy(true);setLearningOpportunityNotice("");
     try{
       const r=await learningFetch(`http://localhost:5000/api/learning/opportunities/${encodeURIComponent(opportunity.id)}/interest`,{
@@ -7043,7 +7053,7 @@ function App() {
   const opportunityFitClass=(value)=>String(value||"possible").toLowerCase().replaceAll("_","-");
 
   const loadSkillPassport=async()=>{
-    if(!currentUser?.id)return;
+    if(!currentUser)return;
     setSkillPassportBusy(true);setSkillPassportNotice("");
     try{
       const r=await learningFetch(`http://localhost:5000/api/learning/skill-passport`,{cache:"no-store",headers:learningAuthHeaders()});
@@ -7055,7 +7065,7 @@ function App() {
     finally{setSkillPassportBusy(false);}
   };
   const saveSkillPassportSettings=async(rotate=false)=>{
-    if(!currentUser?.id)return;
+    if(!currentUser)return;
     setSkillPassportBusy(true);setSkillPassportNotice("");
     try{
       const r=await learningFetch(`http://localhost:5000/api/learning/skill-passport/settings`,{method:"POST",headers:{"Content-Type":"application/json",...learningAuthHeaders()},body:JSON.stringify({...skillPassportForm,rotate_share_token:rotate})});
@@ -7078,7 +7088,7 @@ function App() {
     catch{setSkillPassportNotice(link);}
   };
   const loadSkillAssessments=async()=>{
-    if(!currentUser?.id){setSkillAssessments([]);return;}
+    if(!currentUser){setSkillAssessments([]);return;}
     setSkillAssessmentBusy(true);setSkillAssessmentNotice("");
     try{
       const r=await learningFetch(`http://localhost:5000/api/learning/assessments`,{cache:"no-store",headers:learningAuthHeaders()});
@@ -7091,7 +7101,7 @@ function App() {
     }finally{setSkillAssessmentBusy(false);}
   };
   const submitSkillAssessment=async(assessment)=>{
-    if(!currentUser?.id||!assessment?.id)return;
+    if(!currentUser||!assessment?.id)return;
     const response=String(skillAssessmentResponses[assessment.id]||"").trim();
     if(response.length<20){setSkillAssessmentNotice("Please write a meaningful response of at least 20 characters.");return;}
     setSkillAssessmentBusy(true);setSkillAssessmentNotice("");
@@ -7142,7 +7152,7 @@ function App() {
   },[]);
 
   const loadSkillJourney=async(courseIdOverride)=>{
-    if(!currentUser?.id)return;
+    if(!currentUser)return;
     const preferred=courseIdOverride||journeyCourseId||
       learningCourses.find(x=>x.status==="in-progress")?.id||
       learningCourses.find(x=>x.status==="saved")?.id||
@@ -7150,7 +7160,7 @@ function App() {
     if(!preferred){setJourneyData(null);setJourneyCourseId("");return;}
     setJourneyCourseId(String(preferred));setJourneyBusy(true);setJourneyNotice("");
     try{
-      const r=await learningFetch(`http://localhost:5000/api/learning/course/${encodeURIComponent(preferred)}/journey?user_id=${encodeURIComponent(currentUser.id)}`,{cache:"no-store"});
+      const r=await learningFetch(`http://localhost:5000/api/learning/course/${encodeURIComponent(preferred)}/journey`,{cache:"no-store"});
       const d=await r.json().catch(()=>({}));
       if(!r.ok||d.status!=="success")throw new Error(d.message||"Unable to load skill journey.");
       setJourneyData(d);
@@ -7193,7 +7203,7 @@ function App() {
   };
 
   const loadLearnerHome=async()=>{
-    if(!currentUser?.id){setLearnerHome(null);return;}
+    if(!currentUser){setLearnerHome(null);return;}
     setLearnerHomeBusy(true);setLearnerHomeNotice("");
     try{
       const response=await learningFetch("http://localhost:5000/api/learning/me/home",{cache:"no-store"});
@@ -7222,7 +7232,7 @@ function App() {
   };
 
   const loadLearningData = async () => {
-    if (!currentUser?.id) return;
+    if (!currentUser) return;
     setLearningLoading(true);
     try {
       const response=await learningFetch("http://localhost:5000/api/learning/me/courses",{cache:"no-store"});
@@ -7240,25 +7250,25 @@ function App() {
     finally { setLearningLoading(false); }
   };
 
-  useEffect(()=>{ loadLearningData(); loadLearnerHome(); },[currentUser?.id]);
+  useEffect(()=>{ loadLearningData(); loadLearnerHome(); },[currentUser]);
 
   const openLearningCatalog = () => {
     setLearningNotice("");
     setLearningCatalogNotice("");
-    openNavigationOSArea("learn", currentUser?.id ? "home" : "discover");
+    openNavigationOSArea("learn", currentUser ? "home" : "discover");
     loadPublishedLearningCatalog();
-    if(currentUser?.id){loadLearningData();loadLearnerHome();loadLiveClasses();loadLearningBatches();}
+    if(currentUser){loadLearningData();loadLearnerHome();loadLiveClasses();loadLearningBatches();}
   };
 
   const moneyLearning=(value,currency="INR")=>{const n=Number(value||0);try{return new Intl.NumberFormat("en-IN",{style:"currency",currency,maximumFractionDigits:0}).format(n);}catch{return `₹${Math.round(n)}`;}};
-  const openCourseDetails=async(course)=>{setCourseDetailsBusy(true);setCoursePurchaseNotice("");setCourseCheckout(null);try{const userQ=currentUser?.id?`?user_id=${encodeURIComponent(currentUser.id)}`:"";const r=await learningFetch(`http://localhost:5000/api/learning/course/${encodeURIComponent(course.id)}/details${userQ}`,{cache:"no-store"});const d=await r.json().catch(()=>({}));if(!r.ok||d.status!=="success")throw new Error(d.message||"Unable to load course details.");setCourseDetails(d);setLearningPortalView("course-details");}catch(error){setLearningCatalogNotice(error.message||"Unable to load course details.");}finally{setCourseDetailsBusy(false);}};
-  const beginCoursePurchase=async()=>{if(!courseDetails?.course)return;if(!currentUser?.id){setLearningBrowseOpen(false);openLogin();return;}setCourseCheckoutBusy(true);setCoursePurchaseNotice("");try{const r=await learningFetch("http://localhost:5000/api/learning/course-purchases",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({user_id:currentUser.id,course_id:courseDetails.course.id,payment_method:coursePaymentMethod})});const d=await r.json().catch(()=>({}));if(!r.ok||d.status!=="success")throw new Error(d.message||"Unable to create checkout.");setCourseCheckout(d);setCoursePurchaseNotice(d.message||"Checkout created.");if(!d.requires_payment||d.already_active){await Promise.all([loadLearningData(),loadLearnerHome(),loadPublishedLearningCatalog()]);setLearningPortalView("my-learning");}}catch(error){setCoursePurchaseNotice(error.message||"Unable to create checkout.");}finally{setCourseCheckoutBusy(false);}};
+  const openCourseDetails=async(course)=>{setCourseDetailsBusy(true);setCoursePurchaseNotice("");setCourseCheckout(null);try{const r=await learningFetch(`http://localhost:5000/api/learning/course/${encodeURIComponent(course.id)}/details`,{cache:"no-store"});const d=await r.json().catch(()=>({}));if(!r.ok||d.status!=="success")throw new Error(d.message||"Unable to load course details.");setCourseDetails(d);setLearningPortalView("course-details");}catch(error){setLearningCatalogNotice(error.message||"Unable to load course details.");}finally{setCourseDetailsBusy(false);}};
+  const beginCoursePurchase=async()=>{if(!courseDetails?.course)return;if(!currentUser){setLearningBrowseOpen(false);openLogin();return;}setCourseCheckoutBusy(true);setCoursePurchaseNotice("");try{const r=await learningFetch("http://localhost:5000/api/learning/course-purchases",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({course_id:courseDetails.course.id,payment_method:coursePaymentMethod})});const d=await r.json().catch(()=>({}));if(!r.ok||d.status!=="success")throw new Error(d.message||"Unable to create checkout.");setCourseCheckout(d);setCoursePurchaseNotice(d.message||"Checkout created.");if(!d.requires_payment||d.already_active){await Promise.all([loadLearningData(),loadLearnerHome(),loadPublishedLearningCatalog()]);setLearningPortalView("my-learning");}}catch(error){setCoursePurchaseNotice(error.message||"Unable to create checkout.");}finally{setCourseCheckoutBusy(false);}};
   const loadRazorpayCheckout=()=>new Promise((resolve,reject)=>{if(typeof window==="undefined")return reject(new Error("Payment window is unavailable."));if(window.Razorpay)return resolve(true);const existing=document.querySelector('script[data-howdi-razorpay="1"]');if(existing){existing.addEventListener("load",()=>resolve(true),{once:true});existing.addEventListener("error",()=>reject(new Error("Unable to load secure payment window.")),{once:true});return;}const script=document.createElement("script");script.src="https://checkout.razorpay.com/v1/checkout.js";script.async=true;script.dataset.howdiRazorpay="1";script.onload=()=>resolve(true);script.onerror=()=>reject(new Error("Unable to load secure payment window."));document.body.appendChild(script);});
-  const payCourseWithRazorpay=async()=>{const purchaseId=courseCheckout?.purchase?.id||courseDetails?.access?.purchase?.id;if(!purchaseId||!currentUser?.id)return;setCourseCheckoutBusy(true);setCoursePurchaseNotice("");try{await loadRazorpayCheckout();const r=await learningFetch(`http://localhost:5000/api/learning/course-purchases/${encodeURIComponent(purchaseId)}/razorpay-order`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({user_id:currentUser.id})});const d=await r.json().catch(()=>({}));if(!r.ok||d.status!=="success")throw new Error(d.message||"Unable to start payment.");setCourseCheckoutBusy(false);const options={key:d.key_id,amount:d.order.amount,currency:d.order.currency,name:"HOWDI",description:courseDetails?.course?.title||"HOWDI Learning",order_id:d.order.id,prefill:{name:currentUser?.full_name||currentUser?.name||"",email:currentUser?.email||"",contact:currentUser?.phone||""},theme:{},handler:async(response)=>{setCourseCheckoutBusy(true);setCoursePurchaseNotice("Payment received. Verifying securely…");try{const vr=await learningFetch(`http://localhost:5000/api/learning/course-purchases/${encodeURIComponent(purchaseId)}/razorpay-verify`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({user_id:currentUser.id,...response})});const vd=await vr.json().catch(()=>({}));if(!vr.ok||vd.status!=="success")throw new Error(vd.message||"Unable to verify payment.");setCoursePurchaseNotice("Payment verified. Course unlocked successfully.");await Promise.all([loadLearningData(),loadLearnerHome(),loadPublishedLearningCatalog()]);setCourseDetails(null);setCourseCheckout(null);setLearningPortalView("my-learning");}catch(error){setCoursePurchaseNotice(error.message||"Payment verification failed. Your course has not been unlocked.");}finally{setCourseCheckoutBusy(false);}}};const rz=new window.Razorpay(options);rz.on("payment.failed",(response)=>setCoursePurchaseNotice(response?.error?.description||"Payment was not completed. You can try again."));rz.open();}catch(error){setCourseCheckoutBusy(false);setCoursePurchaseNotice(error.message||"Unable to open secure payment.");}};
-  const confirmDevCoursePayment=async()=>{const purchaseId=courseCheckout?.purchase?.id||courseDetails?.access?.purchase?.id;if(!purchaseId||!currentUser?.id)return;setCourseCheckoutBusy(true);setCoursePurchaseNotice("");try{const r=await learningFetch(`http://localhost:5000/api/learning/course-purchases/${encodeURIComponent(purchaseId)}/dev-confirm`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({user_id:currentUser.id})});const d=await r.json().catch(()=>({}));if(!r.ok||d.status!=="success")throw new Error(d.message||"Unable to confirm development payment.");await Promise.all([loadLearningData(),loadLearnerHome(),loadPublishedLearningCatalog()]);setCourseDetails(null);setCourseCheckout(null);setLearningPortalView("my-learning");}catch(error){setCoursePurchaseNotice(error.message||"Unable to confirm payment.");}finally{setCourseCheckoutBusy(false);}};
+  const payCourseWithRazorpay=async()=>{const purchaseId=courseCheckout?.purchase?.id||courseDetails?.access?.purchase?.id;if(!purchaseId||!currentUser)return;setCourseCheckoutBusy(true);setCoursePurchaseNotice("");try{await loadRazorpayCheckout();const r=await learningFetch(`http://localhost:5000/api/learning/course-purchases/${encodeURIComponent(purchaseId)}/razorpay-order`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({})});const d=await r.json().catch(()=>({}));if(!r.ok||d.status!=="success")throw new Error(d.message||"Unable to start payment.");setCourseCheckoutBusy(false);const options={key:d.key_id,amount:d.order.amount,currency:d.order.currency,name:"HOWDI",description:courseDetails?.course?.title||"HOWDI Learning",order_id:d.order.id,prefill:{name:currentUser?.full_name||currentUser?.name||"",email:currentUser?.email||"",contact:currentUser?.phone||""},theme:{},handler:async(response)=>{setCourseCheckoutBusy(true);setCoursePurchaseNotice("Payment received. Verifying securely…");try{const vr=await learningFetch(`http://localhost:5000/api/learning/course-purchases/${encodeURIComponent(purchaseId)}/razorpay-verify`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({...response})});const vd=await vr.json().catch(()=>({}));if(!vr.ok||vd.status!=="success")throw new Error(vd.message||"Unable to verify payment.");setCoursePurchaseNotice("Payment verified. Course unlocked successfully.");await Promise.all([loadLearningData(),loadLearnerHome(),loadPublishedLearningCatalog()]);setCourseDetails(null);setCourseCheckout(null);setLearningPortalView("my-learning");}catch(error){setCoursePurchaseNotice(error.message||"Payment verification failed. Your course has not been unlocked.");}finally{setCourseCheckoutBusy(false);}}};const rz=new window.Razorpay(options);rz.on("payment.failed",(response)=>setCoursePurchaseNotice(response?.error?.description||"Payment was not completed. You can try again."));rz.open();}catch(error){setCourseCheckoutBusy(false);setCoursePurchaseNotice(error.message||"Unable to open secure payment.");}};
+  const confirmDevCoursePayment=async()=>{const purchaseId=courseCheckout?.purchase?.id||courseDetails?.access?.purchase?.id;if(!purchaseId||!currentUser)return;setCourseCheckoutBusy(true);setCoursePurchaseNotice("");try{const r=await learningFetch(`http://localhost:5000/api/learning/course-purchases/${encodeURIComponent(purchaseId)}/dev-confirm`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({})});const d=await r.json().catch(()=>({}));if(!r.ok||d.status!=="success")throw new Error(d.message||"Unable to confirm development payment.");await Promise.all([loadLearningData(),loadLearnerHome(),loadPublishedLearningCatalog()]);setCourseDetails(null);setCourseCheckout(null);setLearningPortalView("my-learning");}catch(error){setCoursePurchaseNotice(error.message||"Unable to confirm payment.");}finally{setCourseCheckoutBusy(false);}};
 
   const startCatalogCourse = async (course) => {
-    if(!currentUser?.id){
+    if(!currentUser){
       setLearningBrowseOpen(false);
       setLearningNotice("Sign in to start this course.");
       openLogin();
@@ -7266,7 +7276,7 @@ function App() {
     }
     setLearningLoading(true);
     try{
-      const response=await learningFetch("http://localhost:5000/api/learning/enroll",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({user_id:currentUser.id,course_id:course.id})});
+      const response=await learningFetch("http://localhost:5000/api/learning/enroll",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({course_id:course.id})});
       const data=await response.json().catch(()=>({}));
       if(!response.ok||data.status!=="success") throw new Error(data.message||"Unable to add course.");
       setLearningFilter("in-progress");
@@ -7283,13 +7293,13 @@ function App() {
 
   const updateLearningCourse = async (id) => {
     const course=learningCourses.find((x)=>String(x.id)===String(id));
-    if(!course||!currentUser?.id)return;
+    if(!course||!currentUser)return;
     if(course.status==="completed"){viewLearningCertificate(course);return;}
     await openCoursePlayer(course);
   };
 
   const loadSubscriptionData = async () => {
-    if (!currentUser?.id) return;
+    if (!currentUser) return;
     setSubscriptionLoading(true);
     try {
       const response = await fetch(`${SHOP_API_BASE}/api/subscription/user/me`, { cache: "no-store", headers: customerSessionHeaders() });
@@ -9744,7 +9754,7 @@ return () => window.clearInterval(timer);
     if(next==="learn"){
       setLearningPortalView(view);
       setLearningBrowseOpen(true);
-      if(currentUser?.id||currentUser?.user_id)loadLearnerHome();
+      if(currentUser)loadLearnerHome();
       return;
     }
     if(next==="hpay"){
@@ -11598,19 +11608,21 @@ const removeNotification = async (notificationId) => {
     saveAccountPreferences({ [key]: !accountPreferences[key] });
   };
 
-  useEffect(() => { loadLearningCenter(); }, [currentUser?.id]);
+  useEffect(() => { loadLearningCenter(); }, [currentUser]);
 
   const toggleSavedGuide = async (guide) => {
     setLearningActionLoading(`save-${guide.id}`);
     try {
       const method = guide.is_saved ? "DELETE" : "POST";
-      const url = guide.is_saved
-        ? `http://localhost:5000/api/learning/guides/${guide.id}/save?user_id=${encodeURIComponent(currentUser.id)}`
-        : `http://localhost:5000/api/learning/guides/${guide.id}/save`;
-      const response = await fetch(url, guide.is_saved ? { method } : {
+      // STAGE 2B SECURITY FIX: no numeric id in the URL or body — the backend now requires
+      // (and only trusts) the session, so this must go through learningFetch, which attaches
+      // the Authorization bearer token. It used to use plain fetch with a client-supplied
+      // user_id and no session check at all — a real cross-account save/unsave bug fixed here.
+      const url = `http://localhost:5000/api/learning/guides/${guide.id}/save`;
+      const response = await learningFetch(url, guide.is_saved ? { method } : {
         method,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: currentUser.id }),
+        body: JSON.stringify({}),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.status !== "success") throw new Error(data.message || "Unable to update saved guide.");
@@ -11629,7 +11641,7 @@ const removeNotification = async (notificationId) => {
       const response = await learningFetch(`http://localhost:5000/api/learning/guides/${guideId}/progress`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: currentUser.id, progress_percent: progress }),
+        body: JSON.stringify({ progress_percent: progress }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.status !== "success") throw new Error(data.message || "Unable to update learning progress.");
@@ -11866,7 +11878,7 @@ const removeNotification = async (notificationId) => {
   };
 
   const loadLearningCenter = async () => {
-    if (!currentUser?.id) return;
+    if (!currentUser) return;
     setLearningLoading(true);
     try {
       const [contentResponse, progressResponse] = await Promise.all([
@@ -11886,21 +11898,21 @@ const removeNotification = async (notificationId) => {
     }
   };
 
-  useEffect(() => { loadLearningCenter(); }, [currentUser?.id]);
+  useEffect(() => { loadLearningCenter(); }, [currentUser]);
 
   const getLearningProgress = (contentId) => {
     return learningProgress.find((item) => Number(item.content_id) === Number(contentId)) || null;
   };
 
   const saveLearningProgress = async (contentId, progressPercent) => {
-    if (!currentUser?.id) return;
+    if (!currentUser) return;
     setLearningActionLoading(`progress-${contentId}`);
     setLearningNotice("");
     try {
       const response = await learningFetch("http://localhost:5000/api/learning/progress", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...customerSessionHeaders() },
-        body: JSON.stringify({ user_id: currentUser.id, content_id: contentId, progress_percent: progressPercent }),
+        body: JSON.stringify({ content_id: contentId, progress_percent: progressPercent }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.status !== "success") throw new Error(data.message || "Unable to save learning progress.");
@@ -11914,14 +11926,14 @@ const removeNotification = async (notificationId) => {
   };
 
   const completeLearning = async (contentId) => {
-    if (!currentUser?.id) return;
+    if (!currentUser) return;
     setLearningActionLoading(`complete-${contentId}`);
     setLearningNotice("");
     try {
       const response = await learningFetch("http://localhost:5000/api/learning/complete", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: currentUser.id, content_id: contentId }),
+        body: JSON.stringify({ content_id: contentId }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.status !== "success") throw new Error(data.message || "Unable to complete learning item.");
@@ -12403,7 +12415,7 @@ const removeNotification = async (notificationId) => {
     if (learningPortalView === "community") loadLearningCommunityPrograms();
     if (learningPortalView === "opportunities") loadLearningOpportunities();
     if (learningPortalView === "hpay") loadLearningHpay();
-  }, [navigationOSArea, learningPortalView, currentUser?.id]);
+  }, [navigationOSArea, learningPortalView, currentUser]);
 
   // ==============================
   // PAGE
@@ -21182,12 +21194,13 @@ const removeNotification = async (notificationId) => {
                     {!learnerGroupCamOn&&<div className="howdi-group-self-off">Camera off</div>}
                     <b>You</b><small>{learnerGroupRtcState}</small>
                   </article>
-                  {(groupLearnerRoom.participants||[]).filter(p=>p.participant_role==="LEARNER"&&Number(p.user_id)!==Number(currentUser?.id)).map(p=><article key={p.id}><div>{(p.participant_name||"L").slice(0,1).toUpperCase()}</div><b>{p.participant_name}</b><small>{p.connection_status}</small></article>)}
+                  {/* STAGE 2B SECURITY FIX: the backend no longer returns raw p.user_id — is_self is computed server-side from the session. */}
+                  {(groupLearnerRoom.participants||[]).filter(p=>p.participant_role==="LEARNER"&&!p.is_self).map(p=><article key={p.id}><div>{(p.participant_name||"L").slice(0,1).toUpperCase()}</div><b>{p.participant_name}</b><small>{p.connection_status}</small></article>)}
                 </div>
               </main>
               <aside className="howdi-group-sidebar">
                 <section><div className="howdi-group-side-title"><b>Participants</b><button onClick={()=>refreshLearnerGroupRoom(groupLearnerRoom.session.id)}>↻</button></div>
-                  {(groupLearnerRoom.participants||[]).map(p=><div className="howdi-group-person" key={p.id}><span>{p.participant_role==="TEACHER"?"🎓":"👤"}</span><div><b>{Number(p.user_id)===Number(currentUser?.id)?"You":p.participant_name}</b><small>{p.participant_role} · {p.connection_status}</small></div></div>)}
+                  {(groupLearnerRoom.participants||[]).map(p=><div className="howdi-group-person" key={p.id}><span>{p.participant_role==="TEACHER"?"🎓":"👤"}</span><div><b>{p.is_self?"You":p.participant_name}</b><small>{p.participant_role} · {p.connection_status}</small></div></div>)}
                 </section>
                 <section className="howdi-group-chat"><b>Class Chat</b><div className="howdi-group-chat-feed">{(groupLearnerRoom.messages||[]).map(m=><div key={m.id}><small>{m.sender_name}</small><span>{m.message}</span></div>)}</div><div className="howdi-group-chat-compose"><input value={groupLearnerMessage} onChange={e=>setGroupLearnerMessage(e.target.value)} onKeyDown={e=>e.key==="Enter"&&sendLearnerGroupMessage()} placeholder="Message class…"/><button onClick={sendLearnerGroupMessage}>Send</button></div></section>
               </aside>

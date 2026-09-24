@@ -14064,7 +14064,11 @@
         VALUES($1::uuid,$2::uuid,$3::bigint,$4::uuid,'PAYMENT_VERIFIED','PAYMENT_ADAPTER',$5::text,$6::jsonb)
       `,[purchase.id,entitlement.id,purchase.user_id,purchase.course_id,'Verified payment activated learner access',JSON.stringify({provider:providerName,provider_payment_id:providerPaymentId,provider_reference:providerReference})]);
 
-      return {purchase:updated,entitlement,enrollment};
+      // STAGE 2B SECURITY FIX: both customer-facing callers of this helper (Razorpay verify,
+      // provider-adapter verify) return this object straight to the browser. purchase/
+      // entitlement/enrollment all come from `RETURNING *` on tables with a raw user_id
+      // column — strip it here once rather than at every call site.
+      return {purchase:k5eOmitUserId(updated),entitlement:k5eOmitUserId(entitlement),enrollment:k5eOmitUserId(enrollment)};
     }
 
     // =========================================================
@@ -35174,7 +35178,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 res.setHeader('Pragma','no-cache');
                 res.setHeader('Expires','0');
                 return sendJSON(res,200,{status:'success',user:{id:user.id,full_name:user.full_name,email:user.email,phone:user.phone,howdi_id:user.howdi_id,master_id:user.master_id,account_status:user.account_status},teacher,modes,courses,nav:['Today','My Schedule','Learners','Batches','Classes','Courses','AI Studio','Messages','Performance','Earnings','My Profile'],release:'V19.1G'});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to load Teacher Portal',detail:error.message||null});}
+              }catch(error){console.error("Unable to load Teacher Portal:", error);return sendJSON(res,500,{status:'error',message:'Unable to load Teacher Portal'});}
             }
 
             if(req.method==="POST" && (pathname==="/api/teacher/profile/demo-video" || pathname==="/api/teacher/profile/demo-video/")){
@@ -35212,7 +35216,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   RETURNING *
                 `,[user.id,clean(body.display_name)||user.full_name,clean(body.headline)||null,clean(body.bio)||null,arrays('languages'),arrays('skills'),arrays('specializations'),Math.max(0,Number(body.experience_years||0)),clean(body.demo_video_url)||null,clean(body.profile_photo_url)||null,clean(body.city)||null,clean(body.state)||null,arrays('teaching_modes')])).rows[0];
                 return sendJSON(res,200,{status:'success',message:'Teacher profile saved',teacher:row});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to save teacher profile',detail:error.message||null});}
+              }catch(error){console.error("Unable to save teacher profile:", error);return sendJSON(res,500,{status:'error',message:'Unable to save teacher profile'});}
             }
 
 
@@ -35226,7 +35230,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 const row=(await pool.query(`UPDATE learning_teacher_profiles SET kyc_status='PENDING',kyc_reference=$2,kyc_submitted_at=NOW(),updated_at=NOW() WHERE id=$1::uuid RETURNING *`,[teacher.id,reference])).rows[0];
                 await pool.query(`INSERT INTO learning_teacher_verification_events(teacher_profile_id,event_type,from_status,to_status,actor,note,metadata) VALUES($1,'KYC_SUBMIT',$2,'PENDING',$3,'Teacher requested KYC verification',$4::jsonb)`,[teacher.id,teacher.kyc_status,user.howdi_id||user.email||'Teacher',JSON.stringify({reference})]);
                 return sendJSON(res,200,{status:'success',message:'KYC verification request submitted',teacher:row,reference});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to submit teacher KYC',detail:error.message||null});}
+              }catch(error){console.error("Unable to submit teacher KYC:", error);return sendJSON(res,500,{status:'error',message:'Unable to submit teacher KYC'});}
             }
 
             if(req.method==="POST" && (pathname==="/api/teacher/onboarding/payout" || pathname==="/api/teacher/onboarding/payout/")){
@@ -35242,7 +35246,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 const row=(await pool.query(`UPDATE learning_teacher_profiles SET payout_status='PENDING',payout_method=$2,payout_reference=$3,payout_submitted_at=NOW(),updated_at=NOW() WHERE id=$1::uuid RETURNING *`,[teacher.id,method,reference])).rows[0];
                 await pool.query(`INSERT INTO learning_teacher_verification_events(teacher_profile_id,event_type,from_status,to_status,actor,note,metadata) VALUES($1,'PAYOUT_CONNECT',$2,'PENDING',$3,'Teacher requested payout verification',$4::jsonb)`,[teacher.id,teacher.payout_status,user.howdi_id||user.email||'Teacher',JSON.stringify({method,reference})]);
                 return sendJSON(res,200,{status:'success',message:method==='HPAY'?'HPay connection submitted for verification':'Payout reference submitted for verification',teacher:row,reference});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to connect teacher payout',detail:error.message||null});}
+              }catch(error){console.error("Unable to connect teacher payout:", error);return sendJSON(res,500,{status:'error',message:'Unable to connect teacher payout'});}
             }
 
             if(req.method==="POST" && (pathname==="/api/teacher/profile/submit" || pathname==="/api/teacher/profile/submit/")){
@@ -35255,7 +35259,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 const row=(await pool.query(`UPDATE learning_teacher_profiles SET application_status='SUBMITTED',verification_status=CASE WHEN verification_status='NOT_SUBMITTED' THEN 'PENDING' ELSE verification_status END,submitted_at=NOW(),updated_at=NOW() WHERE user_id=$1 RETURNING *`,[user.id])).rows[0];
                 await pool.query(`INSERT INTO learning_teacher_verification_events(teacher_profile_id,event_type,from_status,to_status,actor,note) VALUES($1,'SUBMIT',$2,'SUBMITTED',$3,'Teacher submitted profile for HOWDI review')`,[row.id,current.application_status,user.howdi_id||user.email||'Teacher']);
                 return sendJSON(res,200,{status:'success',message:'Teacher application submitted for HOWDI review',teacher:row});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to submit teacher application',detail:error.message||null});}
+              }catch(error){console.error("Unable to submit teacher application:", error);return sendJSON(res,500,{status:'error',message:'Unable to submit teacher application'});}
             }
 
             // =====================================================
@@ -35764,7 +35768,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   group_sessions:todayGroups
                 });
               }catch(error){
-                return sendJSON(res,500,{status:'error',message:'Unable to load Today dashboard',detail:error.message||null});
+                console.error("Unable to load Today dashboard:", error);
+                return sendJSON(res,500,{status:'error',message:'Unable to load Today dashboard'});
               }
             }
 
@@ -35872,7 +35877,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 };
                 return sendJSON(res,200,{status:'success',summary,learners:rows});
               }catch(error){
-                return sendJSON(res,500,{status:'error',message:'Unable to load learners',detail:error.message||null});
+                console.error("Unable to load learners:", error);
+                return sendJSON(res,500,{status:'error',message:'Unable to load learners'});
               }
             }
 
@@ -35920,7 +35926,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 const note=(await pool.query(`SELECT note,updated_at FROM learning_teacher_learner_notes WHERE teacher_profile_id=$1::uuid AND user_id=$2::bigint LIMIT 1`,[teacher.id,learnerId])).rows[0]||null;
                 return sendJSON(res,200,{status:'success',learner,bookings,batches,attendance,note});
               }catch(error){
-                return sendJSON(res,500,{status:'error',message:'Unable to load learner profile',detail:error.message||null});
+                console.error("Unable to load learner profile:", error);
+                return sendJSON(res,500,{status:'error',message:'Unable to load learner profile'});
               }
             }
 
@@ -35949,7 +35956,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 `,[teacher.id,learnerId,note,user.id])).rows[0];
                 return sendJSON(res,200,{status:'success',message:'Learner note saved',note:row});
               }catch(error){
-                return sendJSON(res,500,{status:'error',message:'Unable to save learner note',detail:error.message||null});
+                console.error("Unable to save learner note:", error);
+                return sendJSON(res,500,{status:'error',message:'Unable to save learner note'});
               }
             }
 
@@ -36041,7 +36049,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 };
                 return sendJSON(res,200,{status:'success',summary,classes:all});
               }catch(error){
-                return sendJSON(res,500,{status:'error',message:'Unable to load classes',detail:error.message||null});
+                console.error("Unable to load classes:", error);
+                return sendJSON(res,500,{status:'error',message:'Unable to load classes'});
               }
             }
 
@@ -36094,7 +36103,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 };
                 return sendJSON(res,200,{status:'success',summary,courses});
               }catch(error){
-                return sendJSON(res,500,{status:'error',message:'Unable to load teacher courses',detail:error.message||null});
+                console.error("Unable to load teacher courses:", error);
+                return sendJSON(res,500,{status:'error',message:'Unable to load teacher courses'});
               }
             }
 
@@ -36189,7 +36199,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   enrollment_stats:enrollmentStats
                 });
               }catch(error){
-                return sendJSON(res,500,{status:'error',message:'Unable to load course workspace',detail:error.message||null});
+                console.error("Unable to load course workspace:", error);
+                return sendJSON(res,500,{status:'error',message:'Unable to load course workspace'});
               }
             }
 
@@ -36253,7 +36264,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 };
                 return sendJSON(res,200,{status:'success',summary,threads});
               }catch(error){
-                return sendJSON(res,500,{status:'error',message:'Unable to load messages',detail:error.message||null});
+                console.error("Unable to load messages:", error);
+                return sendJSON(res,500,{status:'error',message:'Unable to load messages'});
               }
             }
 
@@ -36298,7 +36310,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
                 return sendJSON(res,200,{status:'success',learner,messages});
               }catch(error){
-                return sendJSON(res,500,{status:'error',message:'Unable to load conversation',detail:error.message||null});
+                console.error("Unable to load conversation:", error);
+                return sendJSON(res,500,{status:'error',message:'Unable to load conversation'});
               }
             }
 
@@ -36333,7 +36346,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 `,[teacher.id,learnerId,user.id,message])).rows[0];
                 return sendJSON(res,200,{status:'success',message:'Message sent',item:row});
               }catch(error){
-                return sendJSON(res,500,{status:'error',message:'Unable to send message',detail:error.message||null});
+                console.error("Unable to send message:", error);
+                return sendJSON(res,500,{status:'error',message:'Unable to send message'});
               }
             }
 
@@ -36538,7 +36552,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   generated_at:new Date().toISOString()
                 });
               }catch(error){
-                console.error('V19.2P performance error:',error); return sendJSON(res,500,{status:'error',message:'Unable to load teacher performance',detail:error.message||null});
+                console.error("Unable to load teacher performance:", error);
+                console.error('V19.2P performance error:',error); return sendJSON(res,500,{status:'error',message:'Unable to load teacher performance'});
               }
             }
 
@@ -36572,7 +36587,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   return sendJSON(res,200,{status:'success',message:'Message sent to finance review.',item:row});
                 }
               }catch(error){
-                return sendJSON(res,500,{status:'error',message:'Unable to process dispute conversation',detail:error.message||null});
+                console.error("Unable to process dispute conversation:", error);
+                return sendJSON(res,500,{status:'error',message:'Unable to process dispute conversation'});
               }
             }
 
@@ -36595,7 +36611,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   await recordTeacherStatementCaseEvent(caseId,'TEACHER_FEEDBACK','TEACHER',user.howdi_id||user.email||String(user.id),item.status,item.status,`Teacher rated resolution ${rating}/5`,{rating});
                   return sendJSON(res,200,{status:'success',message:'Feedback recorded.',feedback:row});
                 }
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to save feedback',detail:error.message||null});}
+              }catch(error){console.error("Unable to save feedback:", error);return sendJSON(res,500,{status:'error',message:'Unable to save feedback'});}
             }
 
             const teacherEvidenceMatch=pathname.match(/^\/api\/teacher\/earnings\/statement-cases\/(\d+)\/evidence\/?$/);
@@ -36621,7 +36637,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   await recordTeacherStatementCaseEvent(caseId,'EVIDENCE_ADDED','TEACHER',actor,item.status,item.status,title,{evidenceId:row.id});
                   return sendJSON(res,200,{status:'success',message:'Evidence added.',evidence:row});
                 }
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to process evidence',detail:error.message||null});}
+              }catch(error){console.error("Unable to process evidence:", error);return sendJSON(res,500,{status:'error',message:'Unable to process evidence'});}
             }
 
             const teacherCaseSummaryMatch=pathname.match(/^\/api\/teacher\/earnings\/statement-cases\/(\d+)\/summary-export\/?$/);
@@ -36643,7 +36659,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 if(!item)return sendJSON(res,404,{status:'error',message:'Case not found'});
                 const evidence=(await pool.query(`SELECT title,reference_code,note,created_at FROM learning_teacher_statement_case_evidence WHERE case_id=$1 ORDER BY created_at,id`,[caseId])).rows;
                 return sendJSON(res,200,{status:'success',release:'V19.41',summary:{...item,evidence_count:evidence.length,evidence}});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to export case summary',detail:error.message||null});}
+              }catch(error){console.error("Unable to export case summary:", error);return sendJSON(res,500,{status:'error',message:'Unable to export case summary'});}
             }
 
             const teacherReopenMatch=pathname.match(/^\/api\/teacher\/earnings\/statement-cases\/(\d+)\/reopen-request\/?$/);
@@ -36672,7 +36688,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   await recordTeacherStatementCaseEvent(caseId,'REOPEN_REQUESTED','TEACHER',actor,item.status,item.status,reason,{reopenRequestId:row.id});
                   return sendJSON(res,200,{status:'success',message:'Reopen request submitted for HOWDI review.',request:row});
                 }
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to process reopen request',detail:error.message||null});}
+              }catch(error){console.error("Unable to process reopen request:", error);return sendJSON(res,500,{status:'error',message:'Unable to process reopen request'});}
             }
 
             const teacherResolutionConfirmMatch=pathname.match(/^\/api\/teacher\/earnings\/statement-cases\/(\d+)\/resolution-confirmation\/?$/);
@@ -36697,7 +36713,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   await recordTeacherStatementCaseEvent(caseId,'TEACHER_RESOLUTION_'+decision,'TEACHER',actor,item.status,item.status,comment||decision,{});
                   return sendJSON(res,200,{status:'success',message:decision==='ACCEPTED'?'Resolution accepted. Thank you.':'Resolution concern recorded for HOWDI review.',case:row});
                 }
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to process resolution confirmation',detail:error.message||null});}
+              }catch(error){console.error("Unable to process resolution confirmation:", error);return sendJSON(res,500,{status:'error',message:'Unable to process resolution confirmation'});}
             }
 
             const teacherTransparencyMatch=pathname.match(/^\/api\/teacher\/earnings\/statement-cases\/(\d+)\/transparency\/?$/);
@@ -36713,7 +36729,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 const blockers=(await pool.query(`SELECT blocker_type,title,due_at,status FROM learning_teacher_statement_case_blockers WHERE case_id=$1 AND status='OPEN' ORDER BY due_at NULLS LAST,created_at`,[caseId])).rows;
                 const followups=(await pool.query(`SELECT due_at,note,status FROM learning_teacher_statement_case_followups WHERE case_id=$1 AND status='PENDING' ORDER BY due_at LIMIT 10`,[caseId])).rows;
                 return sendJSON(res,200,{status:'success',release:'V19.57',snapshot:{case:item,open_blockers:blockers,next_followups:followups,financial_policy:'Case visibility does not trigger payment or alter historical statements.'}});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to load case transparency snapshot',detail:error.message||null});}
+              }catch(error){console.error("Unable to load case transparency snapshot:", error);return sendJSON(res,500,{status:'error',message:'Unable to load case transparency snapshot'});}
             }
 
             if(req.method==='GET' && (pathname==="/api/teacher/earnings/resolution-health" || pathname==="/api/teacher/earnings/resolution-health/")){
@@ -36722,7 +36738,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 const rows=(await pool.query(`SELECT id,case_number,statement_month,status,priority,category,resolution,teacher_resolution_confirmation,teacher_resolution_confirmed_at,resolution_effectiveness_score,resolution_effectiveness_level,created_at,resolved_at,closed_at FROM learning_teacher_statement_cases WHERE teacher_profile_id=$1 ORDER BY created_at DESC LIMIT 100`,[teacher.id])).rows;
                 const resolved=rows.filter(x=>['RESOLVED','CLOSED'].includes(x.status)).length,accepted=rows.filter(x=>x.teacher_resolution_confirmation==='ACCEPTED').length;
                 return sendJSON(res,200,{status:'success',release:'V19.61',summary:{total_cases:rows.length,open_cases:rows.length-resolved,resolved_cases:resolved,accepted_resolutions:accepted,acceptance_rate:resolved?Math.round(accepted*10000/resolved)/100:0},cases:rows});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to load resolution health',detail:error.message||null});}
+              }catch(error){console.error("Unable to load resolution health:", error);return sendJSON(res,500,{status:'error',message:'Unable to load resolution health'});}
             }
 
             const v1965Digest=pathname.match(/^\/api\/teacher\/earnings\/statement-cases\/(\d+)\/closure-digest\/?$/);
@@ -36737,7 +36753,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 const timeline=(await pool.query(`SELECT event_type,actor_type,created_at,note FROM learning_teacher_statement_case_events WHERE case_id=$1 ORDER BY created_at ASC`,[caseId])).rows;
                 const evidence=(await pool.query(`SELECT COUNT(*)::int AS count FROM learning_teacher_statement_case_evidence WHERE case_id=$1`,[caseId])).rows[0];
                 return sendJSON(res,200,{status:'success',release:'V19.65',digest:{case:item,timeline_events:timeline.length,evidence_count:Number(evidence.count||0),milestones:timeline.slice(-8),policy:'This digest summarizes the case resolution. It does not alter earnings, settlement, payout, or historical statements.'}});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to generate closure digest',detail:error.message||null});}
+              }catch(error){console.error("Unable to generate closure digest:", error);return sendJSON(res,500,{status:'error',message:'Unable to generate closure digest'});}
             }
 
             if(req.method==='GET' && (pathname==="/api/teacher/earnings/case-experience" || pathname==="/api/teacher/earnings/case-experience/")){
@@ -36748,13 +36764,13 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 for(const x of ids){try{await scoreTeacherCaseExperience(x.id);}catch{}}
                 const rows=(await pool.query(`SELECT id,case_number,status,category,experience_score,experience_level,teacher_resolution_confirmation,resolution_effectiveness_score,resolution_effectiveness_level FROM learning_teacher_statement_cases WHERE teacher_profile_id=$1 AND experience_score IS NOT NULL ORDER BY created_at DESC LIMIT 50`,[teacher.id])).rows;
                 return sendJSON(res,200,{status:'success',release:'V19.70',cases:rows});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to load case experience',detail:error.message||null});}
+              }catch(error){console.error("Unable to load case experience:", error);return sendJSON(res,500,{status:'error',message:'Unable to load case experience'});}
             }
 
             if(req.method==='GET' && (pathname==="/api/teacher/earnings/trust-summary" || pathname==="/api/teacher/earnings/trust-summary/")){
               try{const user=await getSessionUserFromRequest(req);if(!user)return sendJSON(res,401,{status:'error',message:'Teacher sign in required'});const teacher=(await pool.query(`SELECT id FROM learning_teacher_profiles WHERE user_id=$1 LIMIT 1`,[user.id])).rows[0];if(!teacher)return sendJSON(res,404,{status:'error',message:'Teacher profile not found'});
                 const rows=await getTeacherTrustIndex(),mine=rows.find(x=>String(x.teacher_profile_id)===String(teacher.id));return sendJSON(res,200,{status:'success',release:'V19.80',trust:mine||{teacher_profile_id:teacher.id,trust_score:70,trust_level:'STRONG',total_cases:0}});}
-              catch(error){return sendJSON(res,500,{status:'error',message:'Unable to load trust summary',detail:error.message||null});}
+              catch(error){console.error("Unable to load trust summary:", error);return sendJSON(res,500,{status:'error',message:'Unable to load trust summary'});}
             }
 
             if(req.method==='GET' && (pathname==="/api/teacher/earnings/trust-trend" || pathname==="/api/teacher/earnings/trust-trend/")){
@@ -36763,7 +36779,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 const teacher=(await pool.query(`SELECT id FROM learning_teacher_profiles WHERE user_id=$1 LIMIT 1`,[user.id])).rows[0];if(!teacher)return sendJSON(res,404,{status:'error',message:'Teacher profile not found'});
                 const rows=(await pool.query(`SELECT trust_score,trust_level,total_cases,accepted,not_accepted,created_at FROM learning_teacher_trust_snapshots WHERE teacher_profile_id=$1 ORDER BY created_at DESC LIMIT 24`,[teacher.id])).rows;
                 return sendJSON(res,200,{status:'success',release:'V19.92',trend:rows});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to load trust trend',detail:error.message||null});}
+              }catch(error){console.error("Unable to load trust trend:", error);return sendJSON(res,500,{status:'error',message:'Unable to load trust trend'});}
             }
 
             // V20.06 — Teacher compensation agreement
@@ -36782,7 +36798,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   COALESCE(SUM(eligible_learners),0)::int AS eligible_learners
                   FROM learning_teacher_compensation_calculations WHERE teacher_profile_id=$1`,[tp.id])).rows[0];
                 return sendJSON(res,200,{status:'success',release:'V20.10',agreements,calculations,summary});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to load teacher compensation',detail:error.message||null});}
+              }catch(error){console.error("Unable to load teacher compensation:", error);return sendJSON(res,500,{status:'error',message:'Unable to load teacher compensation'});}
             }
             const v2006Accept=pathname.match(/^\/api\/teacher\/compensation\/(\d+)\/decision\/?$/);
             if(req.method==='POST' && v2006Accept){
@@ -36819,7 +36835,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 return sendJSON(res,200,{status:'success',message:`Compensation agreement ${decision.toLowerCase()}.`,agreement:row});
               }catch(error){
                 console.error('[Teacher Compensation Decision]',error.message);
-                return sendJSON(res,500,{status:'error',message:'Unable to update compensation agreement',detail:error.message||null});
+                console.error("Unable to update compensation agreement:", error);
+                return sendJSON(res,500,{status:'error',message:'Unable to update compensation agreement'});
               }
             }
 
@@ -36906,7 +36923,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   note:'Ask HOWDI uses current HOWDI teacher data and governed portal rules. It is not an external generative-AI provider connection.'
                 });
               }catch(error){
-                return sendJSON(res,500,{status:'error',message:'Unable to answer through Ask HOWDI',detail:error.message||null});
+                console.error("Unable to answer through Ask HOWDI:", error);
+                return sendJSON(res,500,{status:'error',message:'Unable to answer through Ask HOWDI'});
               }
             }
 
@@ -36982,7 +37000,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 }
               }catch(error){
                 console.error('V20.13 HOWDI Connect load error:',error.message);
-                return sendJSON(res,500,{status:'error',message:'Unable to load HOWDI Connect',detail:error.message||null});
+                console.error("Unable to load HOWDI Connect:", error);
+                return sendJSON(res,500,{status:'error',message:'Unable to load HOWDI Connect'});
               }
             }
 
@@ -36998,7 +37017,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   ON CONFLICT(teacher_profile_id) DO UPDATE SET headline=EXCLUDED.headline,about=EXCLUDED.about,discoverable=EXCLUDED.discoverable,allow_learner_messages=EXCLUDED.allow_learner_messages,allow_teacher_messages=EXCLUDED.allow_teacher_messages,updated_at=NOW() RETURNING *`,
                   [tp.id,clean(body.headline).slice(0,240),clean(body.about).slice(0,8000),body.discoverable!==false,body.allow_learner_messages!==false,body.allow_teacher_messages!==false])).rows[0];
                 return sendJSON(res,200,{status:'success',message:'HOWDI Connect profile updated.',profile:row});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to update Connect profile',detail:error.message||null});}
+              }catch(error){console.error("Unable to update Connect profile:", error);return sendJSON(res,500,{status:'error',message:'Unable to update Connect profile'});}
             }
             if(req.method==='POST' && (pathname==="/api/teacher/connect/posts" || pathname==="/api/teacher/connect/posts/")){
               try{
@@ -37010,7 +37029,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 const row=(await pool.query(`INSERT INTO learning_teacher_connect_posts(teacher_profile_id,post_type,title,content,course_id,visibility) VALUES($1,$2,NULLIF($3,''),$4,$5,$6) RETURNING *`,
                   [tp.id,type,clean(body.title).slice(0,240),content,body.course_id?Number(body.course_id):null,['PUBLIC','TEACHERS'].includes(visibility)?visibility:'PUBLIC'])).rows[0];
                 return sendJSON(res,200,{status:'success',message:'Posted to HOWDI Connect.',post:row});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to create Connect post',detail:error.message||null});}
+              }catch(error){console.error("Unable to create Connect post:", error);return sendJSON(res,500,{status:'error',message:'Unable to create Connect post'});}
             }
 
             const v2010React=pathname.match(/^\/api\/teacher\/connect\/posts\/(\d+)\/react\/?$/);
@@ -37022,7 +37041,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 if(existing)await pool.query(`DELETE FROM learning_teacher_connect_post_reactions WHERE id=$1`,[existing.id]);
                 else await pool.query(`INSERT INTO learning_teacher_connect_post_reactions(post_id,user_id,reaction) VALUES($1,$2::text,'LIKE')`,[postId,user.id]);
                 return sendJSON(res,200,{status:'success',liked:!existing});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to update reaction',detail:error.message||null});}
+              }catch(error){console.error("Unable to update reaction:", error);return sendJSON(res,500,{status:'error',message:'Unable to update reaction'});}
             }
             const v2010Save=pathname.match(/^\/api\/teacher\/connect\/posts\/(\d+)\/save\/?$/);
             if(req.method==='POST' && v2010Save){
@@ -37033,7 +37052,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 if(existing)await pool.query(`DELETE FROM learning_teacher_connect_post_saves WHERE id=$1`,[existing.id]);
                 else await pool.query(`INSERT INTO learning_teacher_connect_post_saves(post_id,user_id) VALUES($1,$2::text)`,[postId,user.id]);
                 return sendJSON(res,200,{status:'success',saved:!existing});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to save post',detail:error.message||null});}
+              }catch(error){console.error("Unable to save post:", error);return sendJSON(res,500,{status:'error',message:'Unable to save post'});}
             }
             const v2010Comments=pathname.match(/^\/api\/teacher\/connect\/posts\/(\d+)\/comments\/?$/);
             if(v2010Comments){
@@ -37049,7 +37068,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   const row=(await pool.query(`INSERT INTO learning_teacher_connect_post_comments(post_id,user_id,comment_text) VALUES($1,$2::text,$3) RETURNING *`,[postId,user.id,comment])).rows[0];
                   return sendJSON(res,200,{status:'success',message:'Comment added.',comment:row});
                 }
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to process comments',detail:error.message||null});}
+              }catch(error){console.error("Unable to process comments:", error);return sendJSON(res,500,{status:'error',message:'Unable to process comments'});}
             }
             const v2010Follow=pathname.match(/^\/api\/teacher\/connect\/follow\/([0-9a-f-]+)\/?$/i);
             if(req.method==='POST' && v2010Follow){
@@ -37060,7 +37079,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 if(existing)await pool.query(`DELETE FROM learning_teacher_connect_follows WHERE id=$1`,[existing.id]);
                 else await pool.query(`INSERT INTO learning_teacher_connect_follows(follower_user_id,teacher_profile_id) VALUES($1::text,$2)`,[user.id,teacherId]);
                 return sendJSON(res,200,{status:'success',following:!existing});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to update follow',detail:error.message||null});}
+              }catch(error){console.error("Unable to update follow:", error);return sendJSON(res,500,{status:'error',message:'Unable to update follow'});}
             }
             if(req.method==='POST' && (pathname==="/api/teacher/connect/groups" || pathname==="/api/teacher/connect/groups/")){
               try{
@@ -37071,7 +37090,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   [tp.id,name,clean(body.description).slice(0,4000),clean(body.group_type||'LEARNING').toUpperCase(),clean(body.visibility||'PUBLIC').toUpperCase()])).rows[0];
                 await pool.query(`INSERT INTO learning_teacher_connect_group_members(group_id,user_id,member_role) VALUES($1,$2::text,'OWNER') ON CONFLICT DO NOTHING`,[row.id,user.id]);
                 return sendJSON(res,200,{status:'success',message:'Learning group created.',group:row});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to create learning group',detail:error.message||null});}
+              }catch(error){console.error("Unable to create learning group:", error);return sendJSON(res,500,{status:'error',message:'Unable to create learning group'});}
             }
             const v2010GroupJoin=pathname.match(/^\/api\/teacher\/connect\/groups\/(\d+)\/join\/?$/);
             if(req.method==='POST' && v2010GroupJoin){
@@ -37082,7 +37101,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 if(existing)await pool.query(`DELETE FROM learning_teacher_connect_group_members WHERE id=$1 AND member_role<>'OWNER'`,[existing.id]);
                 else await pool.query(`INSERT INTO learning_teacher_connect_group_members(group_id,user_id) VALUES($1,$2::text)`,[groupId,user.id]);
                 return sendJSON(res,200,{status:'success',joined:!existing});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to update group membership',detail:error.message||null});}
+              }catch(error){console.error("Unable to update group membership:", error);return sendJSON(res,500,{status:'error',message:'Unable to update group membership'});}
             }
 
             // =====================================================
@@ -37178,7 +37197,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 });
               }catch(error){
                 console.error('[V19.29.2][teacher statement-cases]',error?.stack||error?.message||error);
-                return sendJSON(res,500,{status:'error',message:'Unable to load statement cases',detail:error.message||null});
+                console.error("Unable to load statement cases:", error);
+                return sendJSON(res,500,{status:'error',message:'Unable to load statement cases'});
               }
             }
 
@@ -37239,7 +37259,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 );
                 return sendJSON(res,200,{status:'success',message:type==='ACKNOWLEDGEMENT'?'Statement acknowledged.':'Statement dispute submitted for finance review.',case:row,
                   policy:{money_changed:false,payout_frozen:false}});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to submit statement case',detail:error.message||null});}
+              }catch(error){console.error("Unable to submit statement case:", error);return sendJSON(res,500,{status:'error',message:'Unable to submit statement case'});}
             }
 
             // =====================================================
@@ -37370,7 +37390,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   disclaimer:'HOWDI earnings statement is a platform ledger summary. Historical earnings remain unchanged; posted finance adjustments are shown separately as statement supplements. This is not a tax invoice, Form 16/16A, bank statement, or proof of bank transfer.'
                 });
               }catch(error){
-                return sendJSON(res,500,{status:'error',message:'Unable to generate teacher earnings statement',detail:error.message||null});
+                console.error("Unable to generate teacher earnings statement:", error);
+                return sendJSON(res,500,{status:'error',message:'Unable to generate teacher earnings statement'});
               }
             }
 
@@ -37576,7 +37597,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 });
               }catch(error){
                 console.error('V19.2Q teacher earnings error:',error);
-                return sendJSON(res,500,{status:'error',message:'Unable to load teacher earnings',detail:error.message||null});
+                console.error("Unable to load teacher earnings:", error);
+                return sendJSON(res,500,{status:'error',message:'Unable to load teacher earnings'});
               }
             }
 
@@ -37661,7 +37683,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 });
               }catch(error){
                 console.error('V19.2R teacher profile summary error:',error);
-                return sendJSON(res,500,{status:'error',message:'Unable to load teacher profile summary',detail:error.message||null});
+                console.error("Unable to load teacher profile summary:", error);
+                return sendJSON(res,500,{status:'error',message:'Unable to load teacher profile summary'});
               }
             }
 
@@ -37696,7 +37719,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   LIMIT 100
                 `,[teacher.id])).rows;
                 return sendJSON(res,200,{status:'success',availability,bookings});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to load teacher schedule',detail:error.message||null});}
+              }catch(error){console.error("Unable to load teacher schedule:", error);return sendJSON(res,500,{status:'error',message:'Unable to load teacher schedule'});}
             }
 
             if(req.method==="POST" && (pathname==="/api/teacher/schedule/availability" || pathname==="/api/teacher/schedule/availability/")){
@@ -37724,7 +37747,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                             start_time,end_time,slot_minutes,session_types,timezone,is_active,created_at,updated_at
                 `,[teacher.id,day,availableDate,start,end,slotMinutes,types])).rows[0];
                 return sendJSON(res,201,{status:'success',message:'Availability added',availability:row});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to save availability',detail:error.message||null});}
+              }catch(error){console.error("Unable to save availability:", error);return sendJSON(res,500,{status:'error',message:'Unable to save availability'});}
             }
 
             const teacherAvailabilityDeleteMatch=pathname.match(/^\/api\/teacher\/schedule\/availability\/([0-9a-f-]+)\/?$/i);
@@ -37737,7 +37760,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 const removed=(await pool.query(`DELETE FROM learning_teacher_availability WHERE id=$1::uuid AND teacher_profile_id=$2::uuid RETURNING id`,[teacherAvailabilityDeleteMatch[1],teacher.id])).rows[0];
                 if(!removed)return sendJSON(res,404,{status:'error',message:'Availability slot not found'});
                 return sendJSON(res,200,{status:'success',message:'Availability removed'});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to remove availability',detail:error.message||null});}
+              }catch(error){console.error("Unable to remove availability:", error);return sendJSON(res,500,{status:'error',message:'Unable to remove availability'});}
             }
 
             if(req.method==="GET" && (pathname==="/api/learning/live/availability" || pathname==="/api/learning/live/availability/")){
@@ -37761,7 +37784,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   ORDER BY a.available_date NULLS LAST,a.start_time,tp.display_name
                 `)).rows;
                 return sendJSON(res,200,{status:'success',availability:rows});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to load live class availability',detail:error.message||null});}
+              }catch(error){console.error("Unable to load live class availability:", error);return sendJSON(res,500,{status:'error',message:'Unable to load live class availability'});}
             }
 
             if(req.method==="POST" && (pathname==="/api/learning/live/book" || pathname==="/api/learning/live/book/")){
@@ -37820,8 +37843,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   RETURNING *
                 `,[bookingCode,userId,slot.teacher_profile_id,slot.course_id||null,availabilityId,sessionType,scheduledStart,Number(slot.slot_minutes||60),learnerNote||null])).rows[0];
                 await client.query('COMMIT');
-                return sendJSON(res,201,{status:'success',message:'Live class booked',booking:booked});
-              }catch(error){try{await client.query('ROLLBACK')}catch{};return sendJSON(res,500,{status:'error',message:'Unable to book live class',detail:error.message||null});}
+                return sendJSON(res,201,{status:'success',message:'Live class booked',booking:k5eOmitUserId(booked)});
+              }catch(error){console.error("Unable to book live class:", error);try{await client.query('ROLLBACK')}catch{};return sendJSON(res,500,{status:'error',message:'Unable to book live class'});}
               finally{client.release();}
             }
 
@@ -37938,7 +37961,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 }
                 await client.query('COMMIT');
                 return sendJSON(res,200,{status:'success',message:`Booking ${nextStatus.toLowerCase().replaceAll('_',' ')}`,booking:updated});
-              }catch(error){try{await client.query('ROLLBACK')}catch{};return sendJSON(res,500,{status:'error',message:'Unable to update booking',detail:error.message||null});}
+              }catch(error){console.error("Unable to update booking:", error);try{await client.query('ROLLBACK')}catch{};return sendJSON(res,500,{status:'error',message:'Unable to update booking'});}
               finally{client.release();}
             }
 
@@ -37966,8 +37989,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   WHERE id=$1::uuid AND user_id=$2
                   RETURNING *
                 `,[learnerBookingCancelMatch[1],userId])).rows[0];
-                await pool.query(`INSERT INTO learning_credit_ledger(user_id,booking_id,state,units,reason) VALUES($1,$2::uuid,'RESTORED',1,'Learner cancelled within policy window')`,[userId,current.id]);await appendLearningEvent(current.id,'LEARNER_CANCELLED','LEARNER',userId,{credit_state:'RESTORED'});return sendJSON(res,200,{status:'success',message:'Class booking cancelled. Your class credit has been restored.',booking:updated});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to cancel booking',detail:error.message||null});}
+                await pool.query(`INSERT INTO learning_credit_ledger(user_id,booking_id,state,units,reason) VALUES($1,$2::uuid,'RESTORED',1,'Learner cancelled within policy window')`,[userId,current.id]);await appendLearningEvent(current.id,'LEARNER_CANCELLED','LEARNER',userId,{credit_state:'RESTORED'});return sendJSON(res,200,{status:'success',message:'Class booking cancelled. Your class credit has been restored.',booking:k5eOmitUserId(updated)});
+              }catch(error){console.error("Unable to cancel booking:", error);return sendJSON(res,500,{status:'error',message:'Unable to cancel booking'});}
             }
 
             const classroomSignalPostMatch=pathname.match(/^\/api\/learning\/live\/bookings\/([0-9a-f-]+)\/signals\/?$/i);
@@ -38003,7 +38026,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   VALUES($1::uuid,$2,$3,$4,$5::jsonb) RETURNING id,signal_type,created_at
                 `,[bookingId,senderRole,receiverRole,signalType,JSON.stringify(payload)])).rows[0];
                 return sendJSON(res,201,{status:'success',signal:row});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to send classroom signal',detail:error.message||null});}
+              }catch(error){console.error("Unable to send classroom signal:", error);return sendJSON(res,500,{status:'error',message:'Unable to send classroom signal'});}
             }
 
             const classroomSignalGetMatch=pathname.match(/^\/api\/learning\/live\/bookings\/([0-9a-f-]+)\/signals\/?$/i);
@@ -38038,7 +38061,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   await pool.query(`UPDATE learning_classroom_signals SET consumed_at=NOW() WHERE id=ANY($1::uuid[])`,[rows.map(r=>r.id)]);
                 }
                 return sendJSON(res,200,{status:'success',signals:rows});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to receive classroom signals',detail:error.message||null});}
+              }catch(error){console.error("Unable to receive classroom signals:", error);return sendJSON(res,500,{status:'error',message:'Unable to receive classroom signals'});}
             }
 
             const classroomSignalClearMatch=pathname.match(/^\/api\/learning\/live\/bookings\/([0-9a-f-]+)\/signals\/clear\/?$/i);
@@ -38093,7 +38116,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   `,[batch.id])).rows;
                 }
                 return sendJSON(res,200,{status:'success',batches:rows});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to load batches',detail:error.message||null});}
+              }catch(error){console.error("Unable to load batches:", error);return sendJSON(res,500,{status:'error',message:'Unable to load batches'});}
             }
 
             if(req.method==="POST" && (pathname==="/api/teacher/batches" || pathname==="/api/teacher/batches/")){
@@ -38128,7 +38151,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   RETURNING *,TO_CHAR(start_date,'YYYY-MM-DD') AS start_date,TO_CHAR(end_date,'YYYY-MM-DD') AS end_date
                 `,[code,teacher.id,courseId,title,language,level,capacity,recurrence,days,startDate,endDate,startTime,duration])).rows[0];
                 return sendJSON(res,201,{status:'success',message:'Group batch created and opened for learners',batch:row});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to create batch',detail:error.message||null});}
+              }catch(error){console.error("Unable to create batch:", error);return sendJSON(res,500,{status:'error',message:'Unable to create batch'});}
             }
 
             const teacherBatchStatusMatch=pathname.match(/^\/api\/teacher\/batches\/([0-9a-f-]+)\/status\/?$/i);
@@ -38141,7 +38164,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 const row=(await pool.query(`UPDATE learning_batches SET status=$3,updated_at=NOW() WHERE id=$1::uuid AND teacher_profile_id=$2::uuid RETURNING *`,[teacherBatchStatusMatch[1],teacher?.id,status])).rows[0];
                 if(!row)return sendJSON(res,404,{status:'error',message:'Batch not found'});
                 return sendJSON(res,200,{status:'success',message:`Batch ${status.toLowerCase()}`,batch:row});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to update batch',detail:error.message||null});}
+              }catch(error){console.error("Unable to update batch:", error);return sendJSON(res,500,{status:'error',message:'Unable to update batch'});}
             }
 
             // =====================================================
@@ -38167,7 +38190,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   ORDER BY b.start_date,b.start_time
                 `)).rows;
                 return sendJSON(res,200,{status:'success',batches:rows});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to load group batches',detail:error.message||null});}
+              }catch(error){console.error("Unable to load group batches:", error);return sendJSON(res,500,{status:'error',message:'Unable to load group batches'});}
             }
 
             const learnerBatchEnrollMatch=pathname.match(/^\/api\/learning\/batches\/([0-9a-f-]+)\/enroll\/?$/i);
@@ -38305,15 +38328,17 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   message:membershipStatus==='ENROLLED'
                     ?'Batch joined successfully'
                     :'Batch is full. You have been added to the waitlist.',
-                  membership
+                  // STAGE 2B SECURITY FIX: this membership row is selected with an explicit
+                  // user_id column (unlike the "already enrolled" short-circuit above, which
+                  // never selects it) — strip it before it reaches the browser.
+                  membership:k5eOmitUserId(membership)
                 });
               }catch(error){
                 try{await client.query('ROLLBACK')}catch{}
                 console.error('[HOWDI V19.2I.2 JOIN BATCH ERROR]',error);
                 return sendJSON(res,500,{
                   status:'error',
-                  message:`Unable to join batch${error?.message ? `: ${error.message}` : ''}`,
-                  detail:error?.message||null
+                  message:'Unable to join batch'
                 });
               }finally{
                 client.release();
@@ -38340,7 +38365,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 if(count<capacity)await client.query(`UPDATE learning_batches SET status='OPEN',updated_at=NOW() WHERE id=$1::uuid AND status='FULL'`,[learnerBatchLeaveMatch[1]]);
                 await client.query('COMMIT');
                 return sendJSON(res,200,{status:'success',message:'You left the group batch'});
-              }catch(error){try{await client.query('ROLLBACK')}catch{};return sendJSON(res,500,{status:'error',message:'Unable to leave batch',detail:error.message||null});}
+              }catch(error){console.error("Unable to leave batch:", error);try{await client.query('ROLLBACK')}catch{};return sendJSON(res,500,{status:'error',message:'Unable to leave batch'});}
               finally{client.release();}
             }
 
@@ -38366,7 +38391,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   ORDER BY b.start_date,b.start_time
                 `,[userId])).rows;
                 return sendJSON(res,200,{status:'success',batches:rows});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to load your batches',detail:error.message||null});}
+              }catch(error){console.error("Unable to load your batches:", error);return sendJSON(res,500,{status:'error',message:'Unable to load your batches'});}
             }
 
 
@@ -38391,7 +38416,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   GROUP BY s.id ORDER BY s.scheduled_start
                 `,[batch.id])).rows;
                 return sendJSON(res,200,{status:'success',batch,sessions:rows});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to load batch sessions',detail:error.message||null});}
+              }catch(error){console.error("Unable to load batch sessions:", error);return sendJSON(res,500,{status:'error',message:'Unable to load batch sessions'});}
             }
 
             if(req.method==="POST" && teacherBatchSessionsMatch){
@@ -38424,7 +38449,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 `,[session.id,batch.id]);
                 await client.query('COMMIT');
                 return sendJSON(res,201,{status:'success',message:'Group class session created',session});
-              }catch(error){try{await client.query('ROLLBACK')}catch{};return sendJSON(res,500,{status:'error',message:'Unable to create batch session',detail:error.message||null});}
+              }catch(error){console.error("Unable to create batch session:", error);try{await client.query('ROLLBACK')}catch{};return sendJSON(res,500,{status:'error',message:'Unable to create batch session'});}
               finally{client.release();}
             }
 
@@ -38458,7 +38483,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   row=(await pool.query(`UPDATE learning_batch_sessions SET status='CANCELLED',ended_at=NOW(),updated_at=NOW() WHERE id=$1::uuid AND status IN ('SCHEDULED','LIVE') RETURNING *`,[session.id])).rows[0];
                 }
                 return sendJSON(res,200,{status:'success',message:`Group class ${action==='complete'?'completed':action==='start'?'started':'cancelled'}`,session:row});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to update group class',detail:error.message||null});}
+              }catch(error){console.error("Unable to update group class:", error);return sendJSON(res,500,{status:'error',message:'Unable to update group class'});}
             }
 
             const teacherBatchSessionRosterMatch=pathname.match(/^\/api\/teacher\/batch-sessions\/([0-9a-f-]+)\/roster\/?$/i);
@@ -38474,7 +38499,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   WHERE a.batch_session_id=$1::uuid ORDER BY learner_name
                 `,[teacherBatchSessionRosterMatch[1]])).rows;
                 return sendJSON(res,200,{status:'success',roster:rows});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to load class roster',detail:error.message||null});}
+              }catch(error){console.error("Unable to load class roster:", error);return sendJSON(res,500,{status:'error',message:'Unable to load class roster'});}
             }
 
             // =====================================================
@@ -38502,7 +38527,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   ORDER BY s.scheduled_start
                 `,[userId])).rows;
                 return sendJSON(res,200,{status:'success',sessions:rows});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to load group classes',detail:error.message||null});}
+              }catch(error){console.error("Unable to load group classes:", error);return sendJSON(res,500,{status:'error',message:'Unable to load group classes'});}
             }
 
             const learnerBatchSessionActionMatch=pathname.match(/^\/api\/learning\/batch-sessions\/([0-9a-f-]+)\/(join|leave)\/?$/i);
@@ -38522,15 +38547,17 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 if(action==='join'){
                   if(attendance.session_status!=='LIVE')return sendJSON(res,409,{status:'error',message:'Teacher has not started this group class yet'});
                   const row=(await pool.query(`UPDATE learning_batch_session_attendance SET joined_at=COALESCE(joined_at,NOW()),left_at=NULL,attendance_status='PRESENT',updated_at=NOW() WHERE id=$1::uuid RETURNING *`,[attendance.id])).rows[0];
-                  return sendJSON(res,200,{status:'success',message:'Joined group class',attendance:row});
+                  // STAGE 2B SECURITY FIX: RETURNING * carries this row's own user_id (BIGINT) —
+                  // strip it before it reaches the browser, same as every other Learn response.
+                  return sendJSON(res,200,{status:'success',message:'Joined group class',attendance:k5eOmitUserId(row)});
                 }
                 const row=(await pool.query(`
                   UPDATE learning_batch_session_attendance SET left_at=NOW(),
                     attended_minutes=GREATEST(attended_minutes,CASE WHEN joined_at IS NULL THEN 0 ELSE FLOOR(EXTRACT(EPOCH FROM (NOW()-joined_at))/60)::int END),
                     attendance_status='LEFT',updated_at=NOW() WHERE id=$1::uuid RETURNING *
                 `,[attendance.id])).rows[0];
-                return sendJSON(res,200,{status:'success',message:'Left group class',attendance:row});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to update group attendance',detail:error.message||null});}
+                return sendJSON(res,200,{status:'success',message:'Left group class',attendance:k5eOmitUserId(row)});
+              }catch(error){console.error("Unable to update group attendance:", error);return sendJSON(res,500,{status:'error',message:'Unable to update group attendance'});}
             }
 
 
@@ -38559,7 +38586,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   DO UPDATE SET participant_role='TEACHER',left_at=NULL,last_seen_at=NOW(),connection_status='CONNECTED',updated_at=NOW()
                 `,[session.id,user.id]);
                 return sendJSON(res,200,{status:'success',message:'Group classroom opened',session});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to open group classroom',detail:error.message||null});}
+              }catch(error){console.error("Unable to open group classroom:", error);return sendJSON(res,500,{status:'error',message:'Unable to open group classroom'});}
             }
 
             const teacherGroupRoomMatch=pathname.match(/^\/api\/teacher\/batch-sessions\/([0-9a-f-]+)\/classroom\/?$/i);
@@ -38589,7 +38616,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   WHERE m.batch_session_id=$1::uuid ORDER BY m.created_at ASC LIMIT 200
                 `,[session.id])).rows;
                 return sendJSON(res,200,{status:'success',session,participants,messages,media_mode:'FOUNDATION_ONLY'});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to load group classroom',detail:error.message||null});}
+              }catch(error){console.error("Unable to load group classroom:", error);return sendJSON(res,500,{status:'error',message:'Unable to load group classroom'});}
             }
 
             const teacherGroupRoomMessageMatch=pathname.match(/^\/api\/teacher\/batch-sessions\/([0-9a-f-]+)\/classroom\/message\/?$/i);
@@ -38605,7 +38632,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 if(message.length>1000)return sendJSON(res,400,{status:'error',message:'Message is too long'});
                 const row=(await pool.query(`INSERT INTO learning_group_classroom_messages(batch_session_id,sender_user_id,sender_role,message) VALUES($1::uuid,$2::bigint,'TEACHER',$3) RETURNING *`,[teacherGroupRoomMessageMatch[1],user.id,message])).rows[0];
                 return sendJSON(res,201,{status:'success',message:row});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to send group classroom message',detail:error.message||null});}
+              }catch(error){console.error("Unable to send group classroom message:", error);return sendJSON(res,500,{status:'error',message:'Unable to send group classroom message'});}
             }
 
             const learnerGroupRoomJoinMatch=pathname.match(/^\/api\/learning\/batch-sessions\/([0-9a-f-]+)\/classroom\/join\/?$/i);
@@ -38633,7 +38660,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   DO UPDATE SET participant_role='LEARNER',left_at=NULL,last_seen_at=NOW(),connection_status='CONNECTED',updated_at=NOW()
                 `,[row.session_id,userId]);
                 return sendJSON(res,200,{status:'success',message:'Joined HOWDI group classroom'});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to join group classroom',detail:error.message||null});}
+              }catch(error){console.error("Unable to join group classroom:", error);return sendJSON(res,500,{status:'error',message:'Unable to join group classroom'});}
             }
 
             const learnerGroupRoomMatch=pathname.match(/^\/api\/learning\/batch-sessions\/([0-9a-f-]+)\/classroom\/?$/i);
@@ -38653,21 +38680,29 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   JOIN users tu ON tu.id=tp.user_id
                   WHERE s.id=$1::uuid LIMIT 1
                 `,[learnerGroupRoomMatch[1]])).rows[0];
+                // STAGE 2B SECURITY FIX (independent-review blocker #2): this response used to
+                // return p.user_id and u.howdi_id raw for every participant, and m.sender_user_id
+                // raw for every message — internal database/HOWDI ids reaching the customer
+                // browser. Callers never need another learner's numeric id to render a roster;
+                // they need to know who is a teacher and which row is themselves. is_self is
+                // computed server-side from the session (userId), never from a client value.
                 const participants=(await pool.query(`
-                  SELECT p.id,p.user_id,p.participant_role,p.joined_at,p.left_at,p.last_seen_at,p.mic_enabled,p.camera_enabled,p.hand_raised,p.connection_status,
+                  SELECT p.id,p.participant_role,p.joined_at,p.left_at,p.last_seen_at,p.mic_enabled,p.camera_enabled,p.hand_raised,p.connection_status,
                          COALESCE(NULLIF(TRIM(u.full_name),''),CASE WHEN p.participant_role='TEACHER' THEN 'HOWDI Teacher' ELSE 'HOWDI Learner' END) AS participant_name,
-                         u.howdi_id
+                         (p.participant_role='TEACHER') AS is_teacher,
+                         (p.user_id=$2::bigint) AS is_self
                   FROM learning_group_classroom_participants p JOIN users u ON u.id=p.user_id
                   WHERE p.batch_session_id=$1::uuid ORDER BY CASE WHEN p.participant_role='TEACHER' THEN 0 ELSE 1 END,p.joined_at
-                `,[learnerGroupRoomMatch[1]])).rows;
+                `,[learnerGroupRoomMatch[1],userId])).rows;
                 const messages=(await pool.query(`
-                  SELECT m.id,m.sender_user_id,m.sender_role,m.message,m.created_at,
-                         COALESCE(NULLIF(TRIM(u.full_name),''),CASE WHEN m.sender_role='TEACHER' THEN 'HOWDI Teacher' ELSE 'HOWDI Learner' END) AS sender_name
+                  SELECT m.id,m.sender_role,m.message,m.created_at,
+                         COALESCE(NULLIF(TRIM(u.full_name),''),CASE WHEN m.sender_role='TEACHER' THEN 'HOWDI Teacher' ELSE 'HOWDI Learner' END) AS sender_name,
+                         (m.sender_user_id=$2::bigint) AS is_self
                   FROM learning_group_classroom_messages m JOIN users u ON u.id=m.sender_user_id
                   WHERE m.batch_session_id=$1::uuid ORDER BY m.created_at ASC LIMIT 200
-                `,[learnerGroupRoomMatch[1]])).rows;
+                `,[learnerGroupRoomMatch[1],userId])).rows;
                 return sendJSON(res,200,{status:'success',session,participants,messages,media_mode:'FOUNDATION_ONLY'});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to load group classroom',detail:error.message||null});}
+              }catch(error){console.error("Unable to load group classroom:", error);return sendJSON(res,500,{status:'error',message:'Unable to load group classroom'});}
             }
 
             const learnerGroupRoomLeaveMatch=pathname.match(/^\/api\/learning\/batch-sessions\/([0-9a-f-]+)\/classroom\/leave\/?$/i);
@@ -38687,7 +38722,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   WHERE id=$1::uuid
                 `,[att.id]);
                 return sendJSON(res,200,{status:'success',message:'Left group classroom'});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to leave group classroom',detail:error.message||null});}
+              }catch(error){console.error("Unable to leave group classroom:", error);return sendJSON(res,500,{status:'error',message:'Unable to leave group classroom'});}
             }
 
             const learnerGroupRoomMessageMatch=pathname.match(/^\/api\/learning\/batch-sessions\/([0-9a-f-]+)\/classroom\/message\/?$/i);
@@ -38702,8 +38737,11 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 if(!message)return sendJSON(res,400,{status:'error',message:'Message is required'});
                 if(message.length>1000)return sendJSON(res,400,{status:'error',message:'Message is too long'});
                 const row=(await pool.query(`INSERT INTO learning_group_classroom_messages(batch_session_id,sender_user_id,sender_role,message) VALUES($1::uuid,$2::bigint,'LEARNER',$3) RETURNING *`,[learnerGroupRoomMessageMatch[1],userId,message])).rows[0];
-                return sendJSON(res,201,{status:'success',message:row});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to send group classroom message',detail:error.message||null});}
+                // STAGE 2B SECURITY FIX: RETURNING * carries this message's own raw sender_user_id
+                // (internal HOWDI user id) — strip it before it reaches the browser.
+                const {sender_user_id:_su,...safeMessage}=row;
+                return sendJSON(res,201,{status:'success',message:safeMessage});
+              }catch(error){console.error("Unable to send group classroom message:", error);return sendJSON(res,500,{status:'error',message:'Unable to send group classroom message'});}
             }
 
             const groupSignalMatch=pathname.match(/^\/api\/learning\/batch-sessions\/([0-9a-f-]+)\/classroom\/signals\/?$/i);
@@ -38719,7 +38757,25 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 if(req.method==='POST'){
                   const body=await getBody(req);
                   const senderUserId=actorUserId;
-                  const receiverUserId=body.receiver_user_id?Number(body.receiver_user_id):null;
+                  // STAGE 2B SECURITY FIX: a LEARNER sender used to hand this route a raw
+                  // receiver_user_id — an internal HOWDI user id — in the request body. A group
+                  // classroom has exactly one teacher, so the learner side now only ever asks to
+                  // reach "the teacher" by role, and the actual target id is resolved here, on
+                  // the server, from the session itself. The client never supplies or sees it.
+                  // (The TEACHER-side of this route is an unwired, frozen demo surface; it is
+                  // left accepting a raw receiver_user_id so that frozen prototype is unaffected.)
+                  let receiverUserId=null;
+                  if(!actorTeacher && clean(body.receiver_role).toUpperCase()==='TEACHER'){
+                    const sessionTeacher=(await pool.query(`
+                      SELECT tp.user_id FROM learning_batch_sessions s
+                      JOIN learning_batches b ON b.id=s.batch_id
+                      JOIN learning_teacher_profiles tp ON tp.id=b.teacher_profile_id
+                      WHERE s.id=$1::uuid LIMIT 1
+                    `,[sessionId])).rows[0];
+                    receiverUserId=sessionTeacher?Number(sessionTeacher.user_id):null;
+                  }else if(actorTeacher && body.receiver_user_id){
+                    receiverUserId=Number(body.receiver_user_id);
+                  }
                   const senderRole=actorTeacher?'TEACHER':'LEARNER';const signalType=clean(body.signal_type).toUpperCase();
                   if(!signalType)return sendJSON(res,400,{status:'error',message:'Invalid group classroom signal'});
                   if(receiverUserId){
@@ -38727,7 +38783,11 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                     if(!receiverAllowed)return sendJSON(res,403,{status:'error',message:'Signal receiver is not in this classroom'});
                   }
                   const row=(await pool.query(`INSERT INTO learning_group_classroom_signals(batch_session_id,sender_user_id,receiver_user_id,sender_role,signal_type,payload) VALUES($1::uuid,$2::bigint,$3::bigint,$4,$5,$6::jsonb) RETURNING *`,[sessionId,senderUserId,receiverUserId,senderRole,signalType,JSON.stringify(body.payload||{})])).rows[0];
-                  return sendJSON(res,201,{status:'success',signal:row});
+                  // STAGE 2B SECURITY FIX: RETURNING * carries raw sender_user_id/receiver_user_id
+                  // (internal HOWDI user ids). k5eOmitUserId only strips the user_id/referrer_user_id/
+                  // customer_user_id family, so these two are stripped explicitly here.
+                  const {sender_user_id:_su,receiver_user_id:_ru,...safeSignal}=row;
+                  return sendJSON(res,201,{status:'success',signal:safeSignal});
                 }
                 const receiverUserId=actorUserId;
                 const rows=(await pool.query(`
@@ -38738,8 +38798,12 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   ORDER BY created_at ASC LIMIT 100
                 `,[sessionId,receiverUserId])).rows;
                 if(rows.length)await pool.query(`UPDATE learning_group_classroom_signals SET consumed_at=NOW() WHERE id=ANY($1::uuid[])`,[rows.map(x=>x.id)]);
-                return sendJSON(res,200,{status:'success',signals:rows});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to handle group classroom signaling',detail:error.message||null});}
+                // STAGE 2B SECURITY FIX: same as above — sender_role is already present and is
+                // all a caller needs (a group classroom has exactly one teacher), so the raw
+                // sender_user_id/receiver_user_id ids never need to reach the browser.
+                const safeSignals=rows.map(({sender_user_id:_su,receiver_user_id:_ru,...safe})=>safe);
+                return sendJSON(res,200,{status:'success',signals:safeSignals});
+              }catch(error){console.error("Unable to handle group classroom signaling:", error);return sendJSON(res,500,{status:'error',message:'Unable to handle group classroom signaling'});}
             }
 
             const classroomMessagesMatch=pathname.match(/^\/api\/learning\/live\/bookings\/([0-9a-f-]+)\/messages\/?$/i);
@@ -38777,7 +38841,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 if(message.length>1000)return sendJSON(res,400,{status:'error',message:'Message is too long'});
                 const row=(await pool.query(`INSERT INTO learning_classroom_messages(booking_id,sender_role,sender_user_id,message) VALUES($1::uuid,$2,$3,$4) RETURNING id,sender_role,message,created_at`,[bookingId,normalizedRole,actorUserId,message])).rows[0];
                 return sendJSON(res,201,{status:'success',message:row});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to handle classroom messages',detail:error.message||null});}
+              }catch(error){console.error("Unable to handle classroom messages:", error);return sendJSON(res,500,{status:'error',message:'Unable to handle classroom messages'});}
             }
 
             const classroomReadinessMatch=pathname.match(/^\/api\/learning\/live\/bookings\/([0-9a-f-]+)\/readiness\/?$/i);
@@ -38821,7 +38885,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   RETURNING role,camera_ready,microphone_ready,materials_ready,internet_ready,updated_at
                 `,[bookingId,role,Boolean(body.camera_ready),Boolean(body.microphone_ready),Boolean(body.materials_ready),Boolean(body.internet_ready)])).rows[0];
                 return sendJSON(res,200,{status:'success',readiness:row});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to update readiness',detail:error.message||null});}
+              }catch(error){console.error("Unable to update readiness:", error);return sendJSON(res,500,{status:'error',message:'Unable to update readiness'});}
             }
 
             const classroomIssueMatch=pathname.match(/^\/api\/learning\/live\/bookings\/([0-9a-f-]+)\/report-issue\/?$/i);
@@ -38854,7 +38918,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 `,[incidentCode(),bookingId,booking.teacher_profile_id,booking.user_id,issueType,clean(body.severity).toUpperCase()||'MEDIUM',`${role}: ${reason}`])).rows[0];
                 await appendLearningEvent(bookingId,'CLASSROOM_ISSUE_REPORTED',role,reporterUserId,{incident_id:incident.id,issue_type:issueType});
                 return sendJSON(res,201,{status:'success',message:'Issue reported to HOWDI Support',incident});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to report classroom issue',detail:error.message||null});}
+              }catch(error){console.error("Unable to report classroom issue:", error);return sendJSON(res,500,{status:'error',message:'Unable to report classroom issue'});}
             }
 
             const learnerClassroomMatch=pathname.match(/^\/api\/learning\/live\/bookings\/([0-9a-f-]+)\/classroom\/?$/i);
@@ -38885,7 +38949,12 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   ORDER BY created_at DESC LIMIT 20
                 `,[booking.id])).rows;
                 const isEnded=['COMPLETED','NO_SHOW','CANCELLED'].includes(String(booking.status||'')) || String(booking.session_status||'')==='ENDED';
-                return sendJSON(res,200,{status:'success',booking,events,classroom:{
+                // STAGE 2B SECURITY FIX: `b.*` above still carries the booking's own user_id
+                // (BIGINT) column. This route already only returns a booking that belongs to the
+                // caller (WHERE b.user_id=$2), so it was never a cross-user leak, but the
+                // non-negotiable rule is "never in a customer-facing API response", full stop —
+                // strip it with the same helper Connect uses for the same reason.
+                return sendJSON(res,200,{status:'success',booking:k5eOmitUserId(booking),events,classroom:{
                   provider_connected:false,
                   provider_name:null,
                   is_live:String(booking.session_status||'')==='LIVE' && !isEnded,
@@ -38894,7 +38963,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   sync_seconds:Number(await getLearningRule('CLASSROOM_SYNC_SECONDS',booking.policy_version)||3),
                   message:'HOWDI classroom session tracking is active. Live video provider is not connected yet.'
                 }});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to load classroom',detail:error.message||null});}
+              }catch(error){console.error("Unable to load classroom:", error);return sendJSON(res,500,{status:'error',message:'Unable to load classroom'});}
             }
 
             const learnerSessionActionMatch=pathname.match(/^\/api\/learning\/live\/bookings\/([0-9a-f-]+)\/(join|leave)\/?$/i);
@@ -38922,7 +38991,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                     RETURNING *
                   `,[bookingId,userId])).rows[0];
                   await appendLearningEvent(bookingId,'LEARNER_JOINED','LEARNER',userId,{joined_at:updated.joined_at});
-                  return sendJSON(res,200,{status:'success',message:'You joined the HOWDI class session',booking:updated});
+                  // STAGE 2B SECURITY FIX: RETURNING * carries this booking's own user_id — strip it.
+                  return sendJSON(res,200,{status:'success',message:'You joined the HOWDI class session',booking:k5eOmitUserId(updated)});
                 }
                 if(action==='leave'){
                   if(!current.joined_at)return sendJSON(res,409,{status:'error',message:'Join the class before leaving'});
@@ -38936,9 +39006,9 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                     RETURNING *
                   `,[bookingId,userId])).rows[0];
                   await appendLearningEvent(bookingId,'LEARNER_LEFT','LEARNER',userId,{left_at:updated.left_at,attended_minutes:updated.attended_minutes});
-                  return sendJSON(res,200,{status:'success',message:'Class session left safely',booking:updated});
+                  return sendJSON(res,200,{status:'success',message:'Class session left safely',booking:k5eOmitUserId(updated)});
                 }
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to update class session',detail:error.message||null});}
+              }catch(error){console.error("Unable to update class session:", error);return sendJSON(res,500,{status:'error',message:'Unable to update class session'});}
             }
 
             const learnerRescheduleMatch=pathname.match(/^\/api\/learning\/live\/bookings\/([0-9a-f-]+)\/reschedule\/?$/i);
@@ -39002,8 +39072,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   RETURNING *
                 `,[availabilityId,scheduledStart,Number(slot.slot_minutes||60),current.id])).rows[0];
                 await client.query('COMMIT');
-                return sendJSON(res,200,{status:'success',message:'Class rescheduled. Teacher confirmation is required again.',booking:updated});
-              }catch(error){try{await client.query('ROLLBACK')}catch{};return sendJSON(res,500,{status:'error',message:'Unable to reschedule class',detail:error.message||null});}
+                return sendJSON(res,200,{status:'success',message:'Class rescheduled. Teacher confirmation is required again.',booking:k5eOmitUserId(updated)});
+              }catch(error){console.error("Unable to reschedule class:", error);try{await client.query('ROLLBACK')}catch{};return sendJSON(res,500,{status:'error',message:'Unable to reschedule class'});}
               finally{client.release();}
             }
 
@@ -39166,7 +39236,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 });
               }catch(error){
                 console.error("V19.3A learner home error:",error);
-                return sendJSON(res,500,{status:"error",message:"Unable to load learner home",detail:error.message||null});
+                console.error("Unable to load learner home:", error);
+                return sendJSON(res,500,{status:"error",message:"Unable to load learner home"});
               }
             }
 
@@ -39229,7 +39300,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 res.setHeader('Cache-Control','no-store, no-cache, must-revalidate');
                 return sendJSON(res,200,{status:"success",courses:courses.rows});
               }catch(error){
-                return sendJSON(res,500,{status:"error",message:"Unable to load published learning catalog",detail:error.message||null});
+                console.error("Unable to load published learning catalog:", error);
+                return sendJSON(res,500,{status:"error",message:"Unable to load published learning catalog"});
               }
             }
 
@@ -39267,7 +39339,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 }
                 const listPrice=Number(course.price||0),salePrice=course.sale_price==null?null:Number(course.sale_price),payable=Math.max(0,salePrice!=null?salePrice:listPrice);
                 return sendJSON(res,200,{status:"success",course:{...course,list_price:listPrice,payable_amount:payable,is_free:payable<=0||course.purchase_mode==='FREE'},modules,access,dev_payment_simulation:process.env.HOWDI_DEV_PAYMENT_SIMULATION==="true"});
-              }catch(error){return sendJSON(res,500,{status:"error",message:"Unable to load course details",detail:error.message||null});}
+              }catch(error){console.error("Unable to load course details:", error);return sendJSON(res,500,{status:"error",message:"Unable to load course details"});}
             }
 
             if(req.method==="POST" && pathname==="/api/learning/course-purchases"){
@@ -39282,7 +39354,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 if(!course||!course.is_active||course.publish_status!=='PUBLISHED'){await client.query("ROLLBACK");return sendJSON(res,404,{status:"error",message:"Course is not available for purchase"});}
                 const payable=Math.max(0,Number(course.sale_price==null?course.price:course.sale_price)||0),listPrice=Math.max(0,Number(course.price||0)),discount=Math.max(0,listPrice-payable),isFree=payable<=0||course.purchase_mode==='FREE';
                 const existing=(await client.query(`SELECT * FROM learning_course_purchases WHERE user_id=$1 AND course_id=$2::uuid FOR UPDATE`,[userId,courseId])).rows[0];
-                if(existing?.payment_status==='PAID'&&existing?.purchase_status==='ACTIVE'){await client.query("ROLLBACK");return sendJSON(res,200,{status:"success",message:"Course already purchased",purchase:existing,already_active:true});}
+                if(existing?.payment_status==='PAID'&&existing?.purchase_status==='ACTIVE'){await client.query("ROLLBACK");return sendJSON(res,200,{status:"success",message:"Course already purchased",purchase:k5eOmitUserId(existing),already_active:true});}
                 const purchaseCode=existing?.purchase_code||`HOWDI-LEARN-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2,7).toUpperCase()}`;
                 let txId=existing?.payment_transaction_id||null;
                 if(!isFree&&!txId){
@@ -39323,14 +39395,13 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   enrollment=(await client.query(`INSERT INTO user_course_enrollments(user_id,course_id) VALUES($1,$2::uuid) ON CONFLICT(user_id,course_id) DO UPDATE SET updated_at=NOW() RETURNING *`,[userId,courseId])).rows[0];
                 }
                 await client.query("COMMIT");
-                return sendJSON(res,200,{status:"success",message:isFree?"Course unlocked and added to My Learning":"Checkout created. Complete payment to unlock the course.",purchase,entitlement,enrollment,requires_payment:!isFree,dev_payment_simulation:process.env.HOWDI_DEV_PAYMENT_SIMULATION==="true"});
+                return sendJSON(res,200,{status:"success",message:isFree?"Course unlocked and added to My Learning":"Checkout created. Complete payment to unlock the course.",purchase:k5eOmitUserId(purchase),entitlement:k5eOmitUserId(entitlement),enrollment:k5eOmitUserId(enrollment),requires_payment:!isFree,dev_payment_simulation:process.env.HOWDI_DEV_PAYMENT_SIMULATION==="true"});
               }catch(error){
                 try{await client.query("ROLLBACK")}catch{}
                 console.error("V19.3F.2 course checkout error:",error);
                 return sendJSON(res,500,{
                   status:"error",
-                  message:error?.message ? `Unable to create course checkout — ${error.message}` : "Unable to create course checkout",
-                  detail:error?.message||null
+                  message:"Unable to create course checkout"
                 });
               }finally{client.release();}
             }
@@ -39365,7 +39436,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 await client.query(`UPDATE learning_course_purchases SET provider_name='RAZORPAY',provider_checkout_id=$1,updated_at=NOW() WHERE id=$2::uuid`,[order.id,purchase.id]);
                 await client.query("COMMIT");
                 return sendJSON(res,200,{status:"success",provider:"RAZORPAY",key_id:String(process.env.RAZORPAY_KEY_ID),order:{id:order.id,amount:order.amount,currency:order.currency,status:order.status},session,purchase:{id:purchase.id,purchase_code:purchase.purchase_code,title:purchase.title,payable_amount:purchase.payable_amount,currency:purchase.currency}});
-              }catch(error){try{await client.query("ROLLBACK")}catch{};console.error('V19.3J Razorpay order error:',error);return sendJSON(res,500,{status:"error",message:"Unable to start Razorpay payment",detail:error.message||null});}finally{client.release();}
+              }catch(error){console.error("Unable to start Razorpay payment:", error);try{await client.query("ROLLBACK")}catch{};console.error('V19.3J Razorpay order error:',error);return sendJSON(res,500,{status:"error",message:"Unable to start Razorpay payment"});}finally{client.release();}
             }
 
             const razorpayVerifyMatch=pathname.match(/^\/api\/learning\/course-purchases\/([0-9a-f-]+)\/razorpay-verify\/?$/i);
@@ -39392,7 +39463,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 await client.query(`INSERT INTO learning_payment_provider_events(provider,event_id,checkout_session_id,purchase_id,payment_transaction_id,event_type,payment_status,provider_payment_id,provider_reference,signature_valid,processing_status,payload,processed_at) SELECT 'RAZORPAY',$1,id,$2::uuid,$3::bigint,'CHECKOUT_SIGNATURE_VERIFIED','PAID',$4,$4,TRUE,'PROCESSED',$5::jsonb,NOW() FROM learning_payment_checkout_sessions WHERE purchase_id=$2::uuid AND provider_checkout_id=$6 ORDER BY created_at DESC LIMIT 1 ON CONFLICT(provider,event_id) DO NOTHING`,[`checkout:${paymentId}`,purchase.id,purchase.payment_transaction_id,paymentId,JSON.stringify({order_id:orderId,payment_status:payment.status,method:payment.method||null}),orderId]);
                 await client.query("COMMIT");
                 return sendJSON(res,200,{status:"success",message:"Payment verified. Your course is now unlocked.",activation,payment:{id:paymentId,status:payment.status}});
-              }catch(error){try{await client.query("ROLLBACK")}catch{};console.error('V19.3J Razorpay verify error:',error);return sendJSON(res,500,{status:"error",message:"Unable to verify Razorpay payment",detail:error.message||null});}finally{client.release();}
+              }catch(error){console.error("Unable to verify Razorpay payment:", error);try{await client.query("ROLLBACK")}catch{};console.error('V19.3J Razorpay verify error:',error);return sendJSON(res,500,{status:"error",message:"Unable to verify Razorpay payment"});}finally{client.release();}
             }
 
             // =====================================================
@@ -39458,7 +39529,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 });
               }catch(error){
                 try{await client.query("ROLLBACK")}catch{}
-                return sendJSON(res,500,{status:"error",message:"Unable to create payment provider session",detail:error.message||null});
+                console.error("Unable to create payment provider session:", error);
+                return sendJSON(res,500,{status:"error",message:"Unable to create payment provider session"});
               }finally{client.release();}
             }
 
@@ -39547,8 +39619,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 const updated=(await client.query(`UPDATE learning_course_purchases SET payment_status='PAID',purchase_status='ACTIVE',provider_reference=$1,paid_at=NOW(),updated_at=NOW() WHERE id=$2::uuid RETURNING *`,[`DEV-${purchase.purchase_code}`,purchase.id])).rows[0];
                 const entitlement=(await client.query(`INSERT INTO learning_course_entitlements(user_id,course_id,purchase_id,entitlement_status,source,starts_at,ends_at) VALUES($1,$2::uuid,$3::uuid,'ACTIVE','PURCHASE',NOW(),CASE WHEN $4::int IS NULL THEN NULL ELSE NOW()+($4::int*INTERVAL '1 day') END) ON CONFLICT(user_id,course_id) DO UPDATE SET entitlement_status='ACTIVE',purchase_id=EXCLUDED.purchase_id,starts_at=NOW(),ends_at=EXCLUDED.ends_at,revoked_at=NULL,updated_at=NOW() RETURNING *`,[purchase.user_id,purchase.course_id,purchase.id,purchase.access_days||null])).rows[0];
                 const enrollment=(await client.query(`INSERT INTO user_course_enrollments(user_id,course_id) VALUES($1,$2::uuid) ON CONFLICT(user_id,course_id) DO UPDATE SET updated_at=NOW() RETURNING *`,[purchase.user_id,purchase.course_id])).rows[0];
-                await client.query("COMMIT"); return sendJSON(res,200,{status:"success",message:"Development payment confirmed. Course unlocked.",purchase:updated,entitlement,enrollment});
-              }catch(error){try{await client.query("ROLLBACK")}catch{};return sendJSON(res,500,{status:"error",message:"Unable to confirm development payment",detail:error.message||null});}finally{client.release();}
+                await client.query("COMMIT"); return sendJSON(res,200,{status:"success",message:"Development payment confirmed. Course unlocked.",purchase:k5eOmitUserId(updated),entitlement:k5eOmitUserId(entitlement),enrollment:k5eOmitUserId(enrollment)});
+              }catch(error){console.error("Unable to confirm development payment:", error);try{await client.query("ROLLBACK")}catch{};return sendJSON(res,500,{status:"error",message:"Unable to confirm development payment"});}finally{client.release();}
             }
 
             if(req.method==="GET" && (pathname==="/api/learning/my-learning" || pathname==="/api/learning/my-learning/")){
@@ -39607,9 +39679,10 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   RETURNING *
                 `,[userId,courseId]);
 
-                return sendJSON(res,200,{status:"success",message:"Course added to My Learning",enrollment:result.rows[0]});
+                return sendJSON(res,200,{status:"success",message:"Course added to My Learning",enrollment:k5eOmitUserId(result.rows[0])});
               }catch(error){
-                return sendJSON(res,500,{status:"error",message:"Unable to start this course",detail:error.message||null});
+                console.error("Unable to start this course:", error);
+                return sendJSON(res,500,{status:"error",message:"Unable to start this course"});
               }
             }
 
@@ -39633,7 +39706,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   ORDER BY c.title
                 `,[user.id])).rows;
                 return sendJSON(res,200,{status:'success',assessments:rows});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to load assessments',detail:error.message||null});}
+              }catch(error){console.error("Unable to load assessments:", error);return sendJSON(res,500,{status:'error',message:'Unable to load assessments'});}
             }
 
             const assessmentSubmitMatch=pathname.match(/^\/api\/learning\/assessments\/([0-9a-f-]+)\/submit\/?$/i);
@@ -39652,7 +39725,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 if(pending)return sendJSON(res,409,{status:'error',message:'Your previous assessment is still waiting for teacher review'});
                 const row=(await pool.query(`INSERT INTO learning_skill_assessment_attempts(assessment_id,user_id,attempt_number,learner_response) VALUES($1::uuid,$2,$3,$4) RETURNING *`,[assessmentId,user.id,count+1,response])).rows[0];
                 return sendJSON(res,201,{status:'success',message:'Assessment submitted for teacher review',attempt:row});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to submit assessment',detail:error.message||null});}
+              }catch(error){console.error("Unable to submit assessment:", error);return sendJSON(res,500,{status:'error',message:'Unable to submit assessment'});}
             }
 
             if(req.method==="GET" && (pathname==="/api/teacher/assessments" || pathname==="/api/teacher/assessments/")){
@@ -39685,7 +39758,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   certificate_ready:rows.filter(r=>Number(r.progress||0)>=100 && Number(r.verified_proof_count||0)>0 && (!r.project_required || Number(r.verified_project_count||0)>0)).length
                 };
                 return sendJSON(res,200,{status:'success',release:'V19.16',summary,assessments:rows});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to load assessment reviews',detail:error.message||null});}
+              }catch(error){console.error("Unable to load assessment reviews:", error);return sendJSON(res,500,{status:'error',message:'Unable to load assessment reviews'});}
             }
 
             const assessmentReviewMatch=pathname.match(/^\/api\/teacher\/assessments\/([0-9a-f-]+)\/review\/?$/i);
@@ -39726,7 +39799,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 }
                 await client.query('COMMIT');client.release();
                 return sendJSON(res,200,{status:'success',message:passed?(eligible?'Assessment passed. Certificate issued.':'Assessment passed. Certificate waits for required verified proof.'):'Assessment reviewed. Learner can retry if attempts remain.',attempt:updated,certificate,certificate_eligible:eligible,eligibility_reason:reason});
-              }catch(error){try{await client.query('ROLLBACK')}catch{};client.release();return sendJSON(res,500,{status:'error',message:'Unable to review assessment',detail:error.message||null});}
+              }catch(error){console.error("Unable to review assessment:", error);try{await client.query('ROLLBACK')}catch{};client.release();return sendJSON(res,500,{status:'error',message:'Unable to review assessment'});}
             }
 
             const certVerifyMatch=pathname.match(/^\/api\/learning\/certificates\/verify\/([^/]+)\/?$/i);
@@ -39834,7 +39907,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   governance:{saved:false,published:false,human_review_required:true}
                 });
               }catch(error){
-                return sendJSON(res,502,{status:'error',message:'Unable to generate AI-assisted draft',detail:error.message||null});
+                console.error("Unable to generate AI-assisted draft:", error);
+                return sendJSON(res,502,{status:'error',message:'Unable to generate AI-assisted draft'});
               }
             }
 
@@ -39877,7 +39951,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   changes_required:assets.filter(x=>x.status==='CHANGES_REQUIRED').length
                 };
                 return sendJSON(res,200,{status:'success',release:'V19.5A',summary,courses,assets,policy:{human_review_required:true,auto_publish:false,external_ai_provider:false}});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to load AI Studio',detail:error.message||null});}
+              }catch(error){console.error("Unable to load AI Studio:", error);return sendJSON(res,500,{status:'error',message:'Unable to load AI Studio'});}
             }
 
             if(req.method==="POST" && (pathname==="/api/teacher/ai-studio/assets" || pathname==="/api/teacher/ai-studio/assets/")){
@@ -39908,7 +39982,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 await client.query(`INSERT INTO learning_ai_asset_events(asset_id,event_type,actor,metadata) VALUES($1::uuid,'CREATED',$2,$3::jsonb)`,[asset.id,teacher.display_name||'HOWDI Teacher',JSON.stringify({asset_type:assetType,course_id:courseId})]);
                 await client.query('COMMIT');client.release();
                 return sendJSON(res,200,{status:'success',message:'AI Studio draft created. Human review is required before approval.',asset});
-              }catch(error){try{await client.query('ROLLBACK')}catch{};client.release();return sendJSON(res,500,{status:'error',message:'Unable to create AI Studio draft',detail:error.message||null});}
+              }catch(error){console.error("Unable to create AI Studio draft:", error);try{await client.query('ROLLBACK')}catch{};client.release();return sendJSON(res,500,{status:'error',message:'Unable to create AI Studio draft'});}
             }
 
             const aiAssetVersionMatch=pathname.match(/^\/api\/teacher\/ai-studio\/assets\/([0-9a-f-]+)\/versions\/?$/i);
@@ -39930,7 +40004,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 await client.query(`INSERT INTO learning_ai_asset_events(asset_id,event_type,actor,metadata) VALUES($1::uuid,'VERSION_CREATED',$2,$3::jsonb)`,[asset.id,teacher.display_name||'HOWDI Teacher',JSON.stringify({version_number:next})]);
                 await client.query('COMMIT');client.release();
                 return sendJSON(res,200,{status:'success',message:`Version ${next} saved as draft`,asset:updated});
-              }catch(error){try{await client.query('ROLLBACK')}catch{};client.release();return sendJSON(res,500,{status:'error',message:'Unable to save AI Studio version',detail:error.message||null});}
+              }catch(error){console.error("Unable to save AI Studio version:", error);try{await client.query('ROLLBACK')}catch{};client.release();return sendJSON(res,500,{status:'error',message:'Unable to save AI Studio version'});}
             }
 
             const aiAssetSubmitMatch=pathname.match(/^\/api\/teacher\/ai-studio\/assets\/([0-9a-f-]+)\/submit-review\/?$/i);
@@ -39945,7 +40019,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 await pool.query(`INSERT INTO learning_ai_asset_reviews(asset_id,version_number,decision,reviewer,feedback) VALUES($1::uuid,$2,'SUBMITTED',$3,NULL)`,[asset.id,asset.current_version,teacher.display_name||'HOWDI Teacher']);
                 await pool.query(`INSERT INTO learning_ai_asset_events(asset_id,event_type,actor,metadata) VALUES($1::uuid,'SUBMITTED_FOR_REVIEW',$2,$3::jsonb)`,[asset.id,teacher.display_name||'HOWDI Teacher',JSON.stringify({version_number:asset.current_version})]);
                 return sendJSON(res,200,{status:'success',message:'Submitted for human review. This content is not published yet.',asset});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to submit AI Studio draft for review',detail:error.message||null});}
+              }catch(error){console.error("Unable to submit AI Studio draft for review:", error);return sendJSON(res,500,{status:'error',message:'Unable to submit AI Studio draft for review'});}
             }
 
             if(req.method==="GET" && (pathname==="/api/admin/learn-earn/ai-studio" || pathname==="/api/admin/learn-earn/ai-studio/")){
@@ -42780,7 +42854,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   learner:{id:learner.id,howdi_id:learner.howdi_id,full_name:learner.full_name,email:learner.email},
                   policy:{learner_identity_from_session:true,request_body_user_id_not_trusted:true,
                     protected_flows:["COURSE_PURCHASE","ENROLLMENT","LEARNING_PROGRESS","LIVE_BOOKING"]}});
-              }catch(error){return sendJSON(res,500,{status:"error",message:"Unable to validate learner session",detail:error.message||null});}
+              }catch(error){console.error("Unable to validate learner session:", error);return sendJSON(res,500,{status:"error",message:"Unable to validate learner session"});}
             }
 
             // =====================================================
@@ -42973,7 +43047,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   ORDER BY s.updated_at DESC
                 `,[user.id])).rows;
                 return sendJSON(res,200,{status:'success',release:'V19.13',subscriptions:subs,server_time:new Date().toISOString()});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to load learner access health',detail:error.message||null});}
+              }catch(error){console.error("Unable to load learner access health:", error);return sendJSON(res,500,{status:'error',message:'Unable to load learner access health'});}
             }
 
             // =====================================================
@@ -43046,7 +43120,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                     payout_is_separate_governed_process:true
                   }
                 });
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to load learner HPay rewards',detail:error.message||null});}
+              }catch(error){console.error("Unable to load learner HPay rewards:", error);return sendJSON(res,500,{status:'error',message:'Unable to load learner HPay rewards'});}
             }
 
             if(req.method==="GET" && (pathname==="/api/admin/learn-earn/hpay-economy" || pathname==="/api/admin/learn-earn/hpay-economy/")){
@@ -43188,7 +43262,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 `,[type,row.id,teacher.id,row.user_id,row.course_id,ai.model||HOWDI_OPENAI_MODEL,ai.id||null,prompt,ai.text,JSON.stringify(structured)])).rows[0];
                 return sendJSON(res,200,{status:'success',message:'AI Vision draft created. Teacher review is required before any decision.',analysis:saved,structured_analysis:structured,
                   policy:{advisory_only:true,teacher_final_decision:true,no_auto_approval:true}});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to run AI Vision',detail:error.message||null});}
+              }catch(error){console.error("Unable to run AI Vision:", error);return sendJSON(res,500,{status:'error',message:'Unable to run AI Vision'});}
             }
 
             const teacherAiVisionUseMatch=pathname.match(/^\/api\/teacher\/ai-vision\/([0-9a-f-]+)\/(use|discard)\/?$/i);
@@ -43205,7 +43279,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 `,[teacherAiVisionUseMatch[1],teacher.id,next])).rows[0];
                 if(!row)return sendJSON(res,404,{status:'error',message:'AI Vision analysis not found'});
                 return sendJSON(res,200,{status:'success',message:next==='USED_BY_TEACHER'?'AI suggestion marked as used by teacher.':'AI suggestion discarded.',analysis:row});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to update AI Vision status',detail:error.message||null});}
+              }catch(error){console.error("Unable to update AI Vision status:", error);return sendJSON(res,500,{status:'error',message:'Unable to update AI Vision status'});}
             }
 
             if(req.method==="GET" && (pathname==="/api/admin/learn-earn/ai-vision" || pathname==="/api/admin/learn-earn/ai-vision/")){
@@ -43265,7 +43339,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 }
                 return sendJSON(res,200,{status:'success',release:'V19.10',programs:rows,memberships,
                   policy:{partner_verification_required:true,program_membership_not_employment:true}});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to load community programs',detail:error.message||null});}
+              }catch(error){console.error("Unable to load community programs:", error);return sendJSON(res,500,{status:'error',message:'Unable to load community programs'});}
             }
 
             const learnerCommunityJoinMatch=pathname.match(/^\/api\/learning\/community-programs\/([0-9a-f-]+)\/join\/?$/i);
@@ -43293,7 +43367,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 await pool.query(`INSERT INTO learning_partner_events(partner_id,program_id,user_id,event_type,actor,metadata) VALUES($1::uuid,$2::uuid,$3,'PROGRAM_INTERESTED','LEARNER',$4::jsonb)`,
                   [program.partner_id,program.id,user.id,JSON.stringify({partner_name:program.partner_name})]);
                 return sendJSON(res,200,{status:'success',message:'Interest shared with the HOWDI community program. Approval may be required.',membership:row});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to join community program',detail:error.message||null});}
+              }catch(error){console.error("Unable to join community program:", error);return sendJSON(res,500,{status:'error',message:'Unable to join community program'});}
             }
 
             if(req.method==="GET" && (pathname==="/api/admin/learn-earn/partners" || pathname==="/api/admin/learn-earn/partners/")){
@@ -43549,7 +43623,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 `,[interest.id])).rows;
                 return sendJSON(res,200,{status:'success',release:'V19.9',interest,events,
                   policy:{status_is_process_visibility_not_job_guarantee:true}});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to load opportunity status',detail:error.message||null});}
+              }catch(error){console.error("Unable to load opportunity status:", error);return sendJSON(res,500,{status:'error',message:'Unable to load opportunity status'});}
             }
 
             // =====================================================
@@ -43643,7 +43717,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                     recommendation_is_signal_not_outcome:true
                   }
                 });
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to load HOWDI market intelligence',detail:error.message||null});}
+              }catch(error){console.error("Unable to load HOWDI market intelligence:", error);return sendJSON(res,500,{status:'error',message:'Unable to load HOWDI market intelligence'});}
             }
 
             if(req.method==="GET" && (pathname==="/api/admin/learn-earn/market-intelligence" || pathname==="/api/admin/learn-earn/market-intelligence/")){
@@ -43760,7 +43834,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   `,[user.id])).rows;
                 }
                 return sendJSON(res,200,{status:'success',release:'V19.7',plans,subscriptions,policy:{paid_self_activation:false,verified_payment_or_admin_grant_required:true}});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to load learning access plans',detail:error.message||null});}
+              }catch(error){console.error("Unable to load learning access plans:", error);return sendJSON(res,500,{status:'error',message:'Unable to load learning access plans'});}
             }
 
             const learnerPlanRequestMatch=pathname.match(/^\/api\/learning\/access-plans\/([0-9a-f-]+)\/request\/?$/i);
@@ -43790,7 +43864,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   payment_required:!isFree,
                   entitlement_granted:false
                 });
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to request learning access plan',detail:error.message||null});}
+              }catch(error){console.error("Unable to request learning access plan:", error);return sendJSON(res,500,{status:'error',message:'Unable to request learning access plan'});}
             }
 
             if(req.method==="GET" && (pathname==="/api/admin/learn-earn/access-plans" || pathname==="/api/admin/learn-earn/access-plans/")){
@@ -44020,7 +44094,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   opportunities,
                   policy:{selection_guaranteed:false,income_guaranteed:false,proof_is_signal_only:true,interest_is_not_application_acceptance:true}
                 });
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to load matched opportunities',detail:error.message||null});}
+              }catch(error){console.error("Unable to load matched opportunities:", error);return sendJSON(res,500,{status:'error',message:'Unable to load matched opportunities'});}
             }
 
             const learnerOpportunityInterestMatch=pathname.match(/^\/api\/learning\/opportunities\/([0-9a-f-]+)\/interest\/?$/i);
@@ -44053,7 +44127,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 `,[opportunity.id,user.id,note,JSON.stringify(snapshot)])).rows[0];
                 await pool.query(`INSERT INTO learning_opportunity_events(opportunity_id,user_id,event_type,actor,metadata) VALUES($1::uuid,$2,'INTEREST_EXPRESSED','LEARNER',$3::jsonb)`,[opportunity.id,user.id,JSON.stringify(snapshot)]);
                 return sendJSON(res,200,{status:'success',message:'Interest shared with HOWDI. This does not guarantee selection, work or income.',interest:row});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to express interest',detail:error.message||null});}
+              }catch(error){console.error("Unable to express interest:", error);return sendJSON(res,500,{status:'error',message:'Unable to express interest'});}
             }
 
             const learnerOpportunityWithdrawMatch=pathname.match(/^\/api\/learning\/opportunities\/([0-9a-f-]+)\/withdraw\/?$/i);
@@ -44069,7 +44143,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 if(!row)return sendJSON(res,404,{status:'error',message:'Interest record not found'});
                 await pool.query(`INSERT INTO learning_opportunity_events(opportunity_id,user_id,event_type,actor) VALUES($1::uuid,$2,'INTEREST_WITHDRAWN','LEARNER')`,[row.opportunity_id,user.id]);
                 return sendJSON(res,200,{status:'success',message:'Interest withdrawn.',interest:row});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to withdraw interest',detail:error.message||null});}
+              }catch(error){console.error("Unable to withdraw interest:", error);return sendJSON(res,500,{status:'error',message:'Unable to withdraw interest'});}
             }
 
             if(req.method==="GET" && (pathname==="/api/admin/learn-earn/opportunities" || pathname==="/api/admin/learn-earn/opportunities/")){
@@ -44242,7 +44316,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   course_title:x.course_title
                 }));
                 return sendJSON(res,200,{status:'success',profile:safeProfile,summary:{verified_evidence:evidence.length,verified_projects:projectCount,courses_proven:courseCount,certificates:certificates.length,average_score:averageScore,readiness,readiness_label:readinessLabel},evidence:safeEvidence,certificates:safeCertificates,events});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to load Skill Passport',detail:error.message||null});}
+              }catch(error){console.error("Unable to load Skill Passport:", error);return sendJSON(res,500,{status:'error',message:'Unable to load Skill Passport'});}
             }
 
             if(req.method==="POST" && (pathname==="/api/learning/skill-passport/settings" || pathname==="/api/learning/skill-passport/settings/")){
@@ -44267,7 +44341,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 `,[user.id,visibility,headline,summary,rotate])).rows[0];
                 await pool.query(`INSERT INTO learning_skill_passport_events(user_id,event_type,actor,metadata) VALUES($1,'SETTINGS_UPDATED','LEARNER',$2::jsonb)`,[user.id,JSON.stringify({visibility,rotate_share_token:rotate})]);
                 return sendJSON(res,200,{status:'success',message:'Skill Passport settings saved',profile:row});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to save Skill Passport settings',detail:error.message||null});}
+              }catch(error){console.error("Unable to save Skill Passport settings:", error);return sendJSON(res,500,{status:'error',message:'Unable to save Skill Passport settings'});}
             }
 
             const sharedPassportMatch=pathname.match(/^\/api\/learning\/skill-passport\/shared\/([0-9a-f-]+)\/?$/i);
@@ -44299,7 +44373,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 const projectCount=evidence.filter(x=>x.evidence_type==='PROJECT').length;
                 const readiness=Math.min(100,(evidence.length*12)+(projectCount*18)+(certificates.length*12));
                 return sendJSON(res,200,{status:'success',profile:{visibility:profile.visibility,headline:profile.headline,summary:profile.summary,learner_name:profile.learner_name,public_username:profile.public_username||null,last_published_at:profile.last_published_at},summary:{verified_evidence:evidence.length,verified_projects:projectCount,courses_proven:new Set(evidence.map(x=>String(x.course_id))).size,certificates:certificates.length,readiness,readiness_label:readiness>=75?'STRONG PROOF':readiness>=40?'PROVEN PROGRESS':'BUILDING PROOF'},evidence,certificates});
-              }catch(error){return sendJSON(res,500,{status:'error',message:'Unable to open shared Skill Passport',detail:error.message||null});}
+              }catch(error){console.error("Unable to open shared Skill Passport:", error);return sendJSON(res,500,{status:'error',message:'Unable to open shared Skill Passport'});}
             }
 
             if(req.method==="GET" && (pathname==="/api/admin/learn-earn/skill-passports" || pathname==="/api/admin/learn-earn/skill-passports/")){
@@ -44368,7 +44442,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 return sendJSON(res,200,{status:"success",enrollment,practice,project,skill_passport:passport});
               }catch(error){
                 console.error("V19.4A practice-proof load error:",error);
-                return sendJSON(res,500,{status:"error",message:"Unable to load Practice & Proof",detail:error.message||null});
+                console.error("Unable to load Practice & Proof:", error);
+                return sendJSON(res,500,{status:"error",message:"Unable to load Practice & Proof"});
               }
             }
 
@@ -44496,7 +44571,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   submissions:all
                 });
               }catch(error){
-                return sendJSON(res,500,{status:"error",message:"Unable to load Practice & Proof review queue",detail:error.message||null});
+                console.error("Unable to load Practice & Proof review queue:", error);
+                return sendJSON(res,500,{status:"error",message:"Unable to load Practice & Proof review queue"});
               }
             }
 
@@ -44567,7 +44643,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               }catch(error){
                 try{await client.query("ROLLBACK")}catch{}
                 try{client.release()}catch{}
-                return sendJSON(res,500,{status:"error",message:"Unable to save review",detail:error.message||null});
+                console.error("Unable to save review:", error);
+                return sendJSON(res,500,{status:"error",message:"Unable to save review"});
               }
             }
 
@@ -44768,7 +44845,9 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
                 return sendJSON(res,200,{
                   status:"success",
-                  course:{...enrollment,progress},
+                  // STAGE 2B SECURITY FIX: `enrollment` was selected with an explicit e.user_id
+                  // column above — omit it from the spread before it reaches the browser.
+                  course:{...k5eOmitUserId(enrollment),progress},
                   lesson_summary:{
                     total:totalLessons,
                     completed:completedLessons,
@@ -44796,7 +44875,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 });
               }catch(error){
                 console.error("V19.3C learner journey error:",error);
-                return sendJSON(res,500,{status:"error",message:"Unable to load skill journey",detail:error.message||null});
+                console.error("Unable to load skill journey:", error);
+                return sendJSON(res,500,{status:"error",message:"Unable to load skill journey"});
               }
             }
 
@@ -44886,14 +44966,17 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
                 return sendJSON(res,200,{
                   status:"success",
-                  course:{...enrollment,progress:derivedProgress},
+                  // STAGE 2B SECURITY FIX: `enrollment` is `e.*` from user_course_enrollments,
+                  // which carries a raw user_id column — omit it from the spread.
+                  course:{...k5eOmitUserId(enrollment),progress:derivedProgress},
                   modules,resources,projects,
                   lesson_summary:{total,completed,remaining:Math.max(0,total-completed),progress:derivedProgress},
                   next_lesson:nextLesson
                 });
               }catch(error){
                 console.error("V19.3B course player error:",error);
-                return sendJSON(res,500,{status:"error",message:"Unable to open course",detail:error.message||null});
+                console.error("Unable to open course:", error);
+                return sendJSON(res,500,{status:"error",message:"Unable to open course"});
               }
             }
 
@@ -44935,9 +45018,10 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   WHERE user_id=$1 AND course_id=$2::uuid
                 `,[userId,courseId]);
 
-                return sendJSON(res,200,{status:"success",progress:row});
+                return sendJSON(res,200,{status:"success",progress:k5eOmitUserId(row)});
               }catch(error){
-                return sendJSON(res,500,{status:"error",message:"Unable to open lesson",detail:error.message||null});
+                console.error("Unable to open lesson:", error);
+                return sendJSON(res,500,{status:"error",message:"Unable to open lesson"});
               }
             }
 
@@ -45005,13 +45089,14 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 return sendJSON(res,200,{
                   status:"success",
                   message:progress>=100?"Course completed!":"Lesson completed",
-                  enrollment,certificate,
+                  enrollment:k5eOmitUserId(enrollment),certificate,
                   lesson_summary:{total,completed,remaining:Math.max(0,total-completed),progress}
                 });
               }catch(error){
                 try{await client.query("ROLLBACK")}catch{}
                 console.error("V19.3B lesson completion error:",error);
-                return sendJSON(res,500,{status:"error",message:"Unable to complete lesson",detail:error.message||null});
+                console.error("Unable to complete lesson:", error);
+                return sendJSON(res,500,{status:"error",message:"Unable to complete lesson"});
               }finally{client.release()}
             }
 
@@ -51930,8 +52015,17 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             }
 
             if(req.method==="GET" && /^\/api\/learning\/guides\/\d+\/?$/.test(pathname)){
-              const userId=Number(pathname.match(/^\/api\/learning\/guides\/(\d+)\/?$/)?.[1]);
+              // STAGE 2B SECURITY FIX: this route used to treat the numeric URL segment as the
+              // target user id with NO session check at all — anyone could read any other
+              // user's saved-guide/progress flags by guessing an id. Identity must come from
+              // the session; a legacy path id is accepted only if it matches the caller.
+              const learner=await getSessionUserFromRequest(req);
+              if(!learner)return sendJSON(res,401,{status:"error",message:"Learner sign in required",code:"LEARNER_SESSION_REQUIRED"});
+              const legacyPathUserId=Number(pathname.match(/^\/api\/learning\/guides\/(\d+)\/?$/)?.[1]);
+              const userId=Number(learner.id);
               if(!Number.isInteger(userId)||userId<=0) return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
+              if(Number.isInteger(legacyPathUserId)&&legacyPathUserId>0&&legacyPathUserId!==userId)
+                return sendJSON(res,403,{status:"error",message:"You can only view your own saved guides"});
 
               const guides=await pool.query(`
                 SELECT
@@ -51951,9 +52045,18 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             }
 
             if(req.method==="POST" && /^\/api\/learning\/guides\/\d+\/save\/?$/.test(pathname)){
+              // STAGE 2B SECURITY FIX: this route used to trust body.user_id/body.userId with no
+              // session check at all — anyone could save a guide as any other account. Identity
+              // now comes only from the session; a legacy client-supplied id is rejected if it
+              // doesn't match the caller, never trusted on its own.
               const guideId=Number(pathname.match(/^\/api\/learning\/guides\/(\d+)\/save\/?$/)?.[1]);
-              const body=await getBody(req);
-              const userId=Number(body.user_id ?? body.userId);
+              const learner=await getSessionUserFromRequest(req);
+              if(!learner)return sendJSON(res,401,{status:"error",message:"Learner sign in required",code:"LEARNER_SESSION_REQUIRED"});
+              const saveBody=await getBody(req);
+              const userId=Number(learner.id);
+              const legacyUserId=Number(saveBody?.user_id ?? saveBody?.userId);
+              if(Number.isInteger(legacyUserId)&&legacyUserId>0&&legacyUserId!==userId)
+                return sendJSON(res,403,{status:"error",message:"You can only save guides to your own account"});
               if(!Number.isInteger(userId)||userId<=0||!Number.isInteger(guideId)||guideId<=0) return sendJSON(res,400,{status:"error",message:"Valid user and guide are required"});
 
               const exists=await pool.query(`SELECT id FROM learning_guides WHERE id=$1 AND is_active=TRUE`,[guideId]);
@@ -51970,18 +52073,34 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             }
 
             if(req.method==="DELETE" && /^\/api\/learning\/guides\/\d+\/save\/?$/.test(pathname)){
+              // STAGE 2B SECURITY FIX: this route used to trust a ?user_id= query param with no
+              // session check at all — anyone could unsave another account's guide. Identity now
+              // comes only from the session.
               const guideId=Number(pathname.match(/^\/api\/learning\/guides\/(\d+)\/save\/?$/)?.[1]);
-              const userId=Number(parsedUrl.searchParams.get("user_id") || parsedUrl.searchParams.get("userId"));
+              const learner=await getSessionUserFromRequest(req);
+              if(!learner)return sendJSON(res,401,{status:"error",message:"Learner sign in required",code:"LEARNER_SESSION_REQUIRED"});
+              const legacyUserId=Number(parsedUrl.searchParams.get("user_id") || parsedUrl.searchParams.get("userId"));
+              const userId=Number(learner.id);
               if(!Number.isInteger(userId)||userId<=0||!Number.isInteger(guideId)||guideId<=0) return sendJSON(res,400,{status:"error",message:"Valid user and guide are required"});
+              if(Number.isInteger(legacyUserId)&&legacyUserId>0&&legacyUserId!==userId)
+                return sendJSON(res,403,{status:"error",message:"You can only manage your own saved guides"});
 
               await pool.query(`DELETE FROM user_saved_guides WHERE user_id=$1 AND guide_id=$2`,[userId,guideId]);
               return sendJSON(res,200,{status:"success",message:"Guide removed from saved guides"});
             }
 
             if(req.method==="POST" && /^\/api\/learning\/guides\/\d+\/progress\/?$/.test(pathname)){
+              // STAGE 2B SECURITY FIX: this route used to trust body.user_id/body.userId with no
+              // session check at all — anyone could overwrite another account's guide progress.
+              // Identity now comes only from the session.
               const guideId=Number(pathname.match(/^\/api\/learning\/guides\/(\d+)\/progress\/?$/)?.[1]);
+              const learner=await getSessionUserFromRequest(req);
+              if(!learner)return sendJSON(res,401,{status:"error",message:"Learner sign in required",code:"LEARNER_SESSION_REQUIRED"});
               const body=await getBody(req);
-              const userId=Number(body.user_id ?? body.userId);
+              const legacyUserId=Number(body.user_id ?? body.userId);
+              const userId=Number(learner.id);
+              if(Number.isInteger(legacyUserId)&&legacyUserId>0&&legacyUserId!==userId)
+                return sendJSON(res,403,{status:"error",message:"You can only update your own learning progress"});
               const progress=Math.max(0,Math.min(100,Math.floor(Number(body.progress_percent ?? body.progressPercent))));
               if(!Number.isInteger(userId)||userId<=0||!Number.isInteger(guideId)||guideId<=0) return sendJSON(res,400,{status:"error",message:"Valid user and guide are required"});
               if(!Number.isFinite(progress)) return sendJSON(res,400,{status:"error",message:"Valid progress is required"});
@@ -51997,7 +52116,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 RETURNING *
               `,[userId,guideId,progress]);
 
-              return sendJSON(res,200,{status:"success",message:progress===100?"Guide marked as completed":"Learning progress updated",progress:updated.rows[0]});
+              return sendJSON(res,200,{status:"success",message:progress===100?"Guide marked as completed":"Learning progress updated",progress:k5eOmitUserId(updated.rows[0])});
             }
 
             // =====================================================
