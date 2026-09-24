@@ -46741,7 +46741,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               return sendJSON(res,200,{status:"success",saved});
             }
 
-            if(req.method==="PUT"&&/^\/api\/connect\/profile\/(?:\d+|me)\/?$/.test(pathname)){
+            if(req.method==="PUT"&&/^\/api\/connect\/profile\/[^/]+\/?$/.test(pathname)){
               // STAGE 2B SECURITY FIX (full sweep): accepts the new /me path as well as the
               // legacy numeric-self path. Always session-derived - this was already "path id
               // must equal the caller" (self-edit only), so deriving straight from the session
@@ -46758,8 +46758,13 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               // caller is left as-is, and anything else (a foreign raw id, or a decoded reference to a
               // different real account) becomes 0 — so any numeric path id that is NOT the caller's
               // own id is now rejected outright, before any query runs, rather than silently redirected.
-              const pathProfileId=pathname.match(/^\/api\/connect\/profile\/(\d+)\/?$/)?.[1];
-              if(pathProfileId!==undefined&&Number(pathProfileId)!==userId)
+              // Treat non-canonical path references as a mismatched legacy reference too.  This
+              // makes encoded digits, a public handle, or any other non-`/me` segment fail closed
+              // with the same 403/no-write contract instead of falling through to a route-shaped
+              // 404.  k5eConnectGuard has already canonicalised raw/leading-zero numeric segments.
+              const pathProfileRef=pathname.match(/^\/api\/connect\/profile\/([^/]+)\/?$/)?.[1];
+              const pathProfileId=pathProfileRef==="me"?userId:(/^\d+$/.test(String(pathProfileRef||""))?Number(pathProfileRef):0);
+              if(pathProfileId!==userId)
                 return sendJSON(res,403,{status:"error",message:"You can only edit your own profile"});
               const body=await getBody(req);
               const story=["Everyone","Friends","Close friends","Only me"].includes(String(body.storyAudience??body.story_audience))?String(body.storyAudience??body.story_audience):"Everyone";

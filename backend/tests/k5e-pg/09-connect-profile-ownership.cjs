@@ -57,6 +57,40 @@ const S=(r)=>r.status;
   ok(S(r)===403,'PUT profile with a nonexistent foreign numeric id -> 403, not a 500 (got '+S(r)+')');
   ok(await headlineOf(A.id)===aBefore2,'nonexistent-foreign-id request left A\'s own profile unchanged too');
 
+  // ---- adversarial spellings of a foreign reference must all fail closed before a write.
+  // URL.pathname intentionally keeps percent escapes, so exercise both the guard's canonical
+  // numeric handling and the route's explicit non-canonical-reference rejection.
+  const encodedForeignId=[...String(B.id)].map((digit)=>'%'+digit.charCodeAt(0).toString(16)).join('');
+  const foreignCases=[
+    {label:'URL-encoded foreign digits',path:'/api/connect/profile/'+encodedForeignId},
+    {label:'leading-zero foreign id',path:'/api/connect/profile/00'+B.id},
+    {label:'foreign id with trailing slash',path:'/api/connect/profile/'+B.id+'/'},
+    {label:'foreign id with query string',path:'/api/connect/profile/'+B.id+'?source=profile-test'},
+    {label:'foreign public username reference',path:'/api/connect/profile/@'+B.username},
+  ];
+  for(const probe of foreignCases){
+    const ownBefore=await headlineOf(A.id), foreignBefore=await headlineOf(B.id);
+    r=await api('PUT',probe.path,{...t(A),body:{headline:'probe '+probe.label}});
+    ok(S(r)===403,'PUT profile with '+probe.label+' -> 403 (got '+S(r)+')');
+    ok(await headlineOf(A.id)===ownBefore,probe.label+' did not fall back to change caller profile');
+    ok(await headlineOf(B.id)===foreignBefore,probe.label+' left foreign profile unchanged');
+  }
+
+  // Actor fields in the body are never authorization inputs.  Supplying B's id cannot change
+  // ownership: the K5E request normalizer derives the actor from A's session and this path remains
+  // foreign, so it must reject before any write.
+  const bodyOwnBefore=await headlineOf(A.id), bodyForeignBefore=await headlineOf(B.id);
+  r=await api('PUT','/api/connect/profile/'+B.id,{...t(A),body:{headline:'body spoof',userId:B.id,user_id:B.id,ownerId:B.id}});
+  ok(S(r)===403,'PUT foreign profile with spoofed body actor ids -> 403 (got '+S(r)+')');
+  ok(await headlineOf(A.id)===bodyOwnBefore,'spoofed body actor ids did not change caller profile');
+  ok(await headlineOf(B.id)===bodyForeignBefore,'spoofed body actor ids did not change foreign profile');
+
+  // The same hostile body on the legitimate /me endpoint must still update only the session owner.
+  r=await api('PUT','/api/connect/profile/me',{...t(A),body:{headline:'alice session-owned despite body spoof',userId:B.id,user_id:B.id,ownerId:B.id}});
+  ok(S(r)===200,'PUT /me with spoofed body actor ids still succeeds for the session owner (got '+S(r)+')');
+  ok(await headlineOf(A.id)==='alice session-owned despite body spoof','/me with spoofed body actor ids updates only A');
+  ok(await headlineOf(B.id)===bodyForeignBefore,'/me with spoofed body actor ids never changes B');
+
   console.log(`PASS ${pass}  FAIL ${fail}`);
   await pool.end();
   process.exit(fail?1:0);
