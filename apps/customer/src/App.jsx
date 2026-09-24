@@ -1962,6 +1962,7 @@ function App() {
   const [applyNotice,setApplyNotice]=useState("");
   const [applyStep,setApplyStep]=useState(1);
   const [applySubmitting,setApplySubmitting]=useState(false);
+  const [applyDraftSaving,setApplyDraftSaving]=useState(false);
   const [applySuccess,setApplySuccess]=useState(null);
   const [workerApply,setWorkerApply]=useState({
     fullName:"",phone:"",email:"",gender:"",age:"",engagementIntent:"individual_worker",city:"",state:"",pincode:"",addressLine:"",claimedSkill:"",
@@ -1979,6 +1980,51 @@ function App() {
   const [whatsappAssistBusy,setWhatsappAssistBusy]=useState(false);
   const HOWDI_WHATSAPP_NUMBER=(import.meta.env.VITE_HOWDI_WHATSAPP_NUMBER||"").replace(/\D/g,"");
   const [vendorApply,setVendorApply]=useState({businessName:"",ownerName:"",phone:"",email:"",businessType:"Individual Creator",city:"",state:"",pincode:"",category:"Crochet & Handmade",productSummary:"",gstin:"",consent:false});
+  async function openHowdiApplication(type){
+    setApplyNotice("");setApplySuccess(null);setApplyStep(1);setHowdiApplyType(type);
+    try{
+      const token=localStorage.getItem("howdiSessionToken")||"";
+      if(!token){setApplyNotice("Sign in to save your progress and return whenever you are ready.");return;}
+      const r=await fetch(`${WORKS_API_BASE}/api/onboarding/${type}/draft`,{headers:{Authorization:`Bearer ${token}`}});
+      const d=await r.json().catch(()=>({}));
+      if(!r.ok)throw new Error(d.message||"Unable to restore your saved progress.");
+      const draft=d.draft||{};
+      setApplyStep(Number(draft.step)||1);
+      if(type==="worker")setWorkerApply(prev=>({...prev,...(draft.fields||{})}));
+      else setVendorApply(prev=>({...prev,...(draft.fields||{})}));
+    }catch(error){setApplyNotice(error.message||"Your saved progress could not be restored.");}
+  }
+  async function saveHowdiDraft(type,step,fields){
+    const token=localStorage.getItem("howdiSessionToken")||"";
+    if(!token)return false;
+    setApplyDraftSaving(true);
+    try{
+      const r=await fetch(`${WORKS_API_BASE}/api/onboarding/${type}/draft`,{method:"PUT",headers:{"Content-Type":"application/json",Authorization:`Bearer ${token}`},body:JSON.stringify({step,fields})});
+      const d=await r.json().catch(()=>({}));
+      if(!r.ok)throw new Error(d.message||"Unable to save this step.");
+      return true;
+    }catch(error){setApplyNotice(error.message||"Unable to save this step.");return false;}
+    finally{setApplyDraftSaving(false);}
+  }
+  async function continueWorkerStep(){
+    const validators={
+      1:()=>workerApply.fullName&&workerApply.phone&&workerApply.gender&&Number(workerApply.age)>=18&&workerApply.city,
+      2:()=>workerApply.claimedSkill&&workerApply.workingDays.length>0,
+      3:()=>true,
+      4:()=>workerApply.kycDocumentType&&workerApply.kycIdLast4.length===4
+    };
+    if(!validators[applyStep]()){setApplyNotice("Please complete the required fields before continuing.");return;}
+    if(await saveHowdiDraft("worker",applyStep+1,workerApply)){setApplyNotice("");setApplyStep(applyStep+1);}
+  }
+  async function continueVendorStep(){
+    const validators={
+      1:()=>vendorApply.businessName&&vendorApply.ownerName,
+      2:()=>vendorApply.phone&&vendorApply.category,
+      3:()=>vendorApply.city&&vendorApply.productSummary
+    };
+    if(!validators[applyStep]()){setApplyNotice("Please complete the required fields before continuing.");return;}
+    if(await saveHowdiDraft("vendor",applyStep+1,vendorApply)){setApplyNotice("");setApplyStep(applyStep+1);}
+  }
   async function apiPostAny(paths,payload){
     let lastMessage="Application endpoint unavailable";
     for(const path of paths){
@@ -2045,7 +2091,7 @@ function App() {
     if(!workerApply.consent||!workerApply.declaration){setApplyNotice("Please accept consent and declaration.");return;}
     setApplySubmitting(true);
     try{
-      const d=await apiPostAny(["/api/works/applications","/api/worker/applications","/api/works/worker-applications"],workerApply);
+      const d=await apiPostAny(["/api/onboarding/worker/submit"],workerApply);
       const code=d?.application?.applicationCode||"Submitted";setApplySuccess({type:"worker",code});
     }catch(error){setApplyNotice(error.message||"Unable to submit worker application.");}
     finally{setApplySubmitting(false);}
@@ -2053,7 +2099,7 @@ function App() {
   async function submitVendorApplication(e){
     e.preventDefault();if(applySubmitting)return;setApplyNotice("");setApplySubmitting(true);
     try{
-      const d=await apiPostAny(["/api/vendors/applications","/api/vendor/applications","/api/vendors/apply"],vendorApply);
+      const d=await apiPostAny(["/api/onboarding/vendor/submit"],vendorApply);
       const code=d?.application?.applicationCode||"Submitted";
       setApplySuccess({type:"vendor",code});
       setVendorApply({businessName:"",ownerName:"",phone:"",email:"",businessType:"Individual Creator",city:"",state:"",pincode:"",category:"Crochet & Handmade",productSummary:"",gstin:"",consent:false});
@@ -9740,7 +9786,7 @@ return () => window.clearInterval(timer);
       }else if(view==="discovery"){
         window.setTimeout(()=>document.querySelector("#howdi-buy-products")?.scrollIntoView({behavior:"smooth",block:"start"}),60);
       }else if(view==="vendor"){
-        setApplyNotice("");setApplySuccess(null);setApplyStep(1);setHowdiApplyType("vendor");
+        openHowdiApplication("vendor");
       }else if(view==="home"){
         window.setTimeout(()=>window.scrollTo({top:0,behavior:"smooth"}),40);
       }
@@ -10677,7 +10723,7 @@ return () => window.clearInterval(timer);
     if (role === "CREATOR") return openNavigationOSArea("connect", "vibe");
     if (role === "LEARNER") return openNavigationOSArea("learn", "my-learning");
     if (role === "WORKER") {
-      setApplyNotice(""); setApplySuccess(null); setApplyStep(1); setHowdiApplyType("worker");
+      openHowdiApplication("worker");
       return openNavigationOSArea("works", "become");
     }
     if (role === "VENDOR") return openNavigationOSArea("shop", "vendor");
@@ -12435,7 +12481,7 @@ const removeNotification = async (notificationId) => {
     })),
     works: [["find", "Find Worker"], ["bookings", "My Bookings"], ["saved", "Saved Workers"], ["safety", "Safety"], ["become", "Become a Worker"]].map(([id, label]) => ({
       id, label, active: worksExperienceTab === id,
-      onClick: () => { openNavigationOSArea("works", id); if (id === "become") { setApplyNotice(""); setApplySuccess(null); setApplyStep(1); setHowdiApplyType("worker"); } },
+      onClick: () => { openNavigationOSArea("works", id); if (id === "become") openHowdiApplication("worker"); },
     })),
     learn: [["home", "For You"], ["discover", "Discover"], ["my-learning", "My Learning"], ["live", "Live Classes"], ["journey", "Skill Journey"], ["passport", "Skill Passport"], ["access", "Learning Access"], ["market", "Market Signals"], ["community", "Community Programs"], ["opportunities", "Opportunities"], ["hpay", "HPay Rewards"], ["earn", "Earn"]].map(([id, label]) => ({
       id, label, active: learningPortalView === id, onClick: () => openNavigationOSArea("learn", id),
@@ -18334,7 +18380,7 @@ const removeNotification = async (notificationId) => {
                 key={id}
                 type="button"
                 className={worksExperienceTab===id?"active":""}
-                onClick={()=>{if(id==="become"){setApplyNotice("");setApplySuccess(null);setApplyStep(1);setHowdiApplyType("worker");}else setWorksExperienceTab(id)}}
+                onClick={()=>{if(id==="become")openHowdiApplication("worker");else setWorksExperienceTab(id)}}
               ><span>{icon}</span>{label}{id==="saved"&&worksSavedWorkers.length>0&&<em>{worksSavedWorkers.length}</em>}</button>)}
             </nav>
 
@@ -19076,7 +19122,7 @@ const removeNotification = async (notificationId) => {
                 <span>HOWDI CREATORS</span>
                 <h2>Small Creations<br/>Big Impact</h2>
                 <p>Handmade. Sustainable.<br/>Community driven.</p>
-                <button type="button" onClick={()=>{setShopOSView("vendor");setApplyNotice("");setApplySuccess(null);setApplyStep(1);setHowdiApplyType("vendor");}}>Explore creators →</button>
+                <button type="button" onClick={()=>{setShopOSView("vendor");openHowdiApplication("vendor");}}>Explore creators →</button>
               </article>
 
               <article className="hs2-festive">
@@ -22434,23 +22480,25 @@ const removeNotification = async (notificationId) => {
                 <button type="button" onClick={()=>setHowdiApplyType("")}>Done</button>
               </div>
             ) : howdiApplyType==="worker" ? (
-              <form className="worker-rich-form" onSubmit={submitWorkerApplication}>
-                <div className="worker-section-title premium"><i>01</i><div><b>About you</b><span>Identity and where you work</span></div></div>
-                <div className="worker-grid">
+              <form className={`worker-rich-form stage-step-${applyStep}`} onSubmit={submitWorkerApplication}>
+                <div className="worker-section-title premium worker-step worker-step-1"><i>01</i><div><b>About you</b><span>One answer at a time. Your progress is saved after this step.</span></div></div>
+                <div className="worker-grid worker-step worker-step-1">
                   <label><span>Full name *</span><input required value={workerApply.fullName} onChange={e=>setWorkerApply({...workerApply,fullName:e.target.value})}/></label>
                   <label><span>Phone *</span><input required value={workerApply.phone} onChange={e=>setWorkerApply({...workerApply,phone:e.target.value})}/></label>
                   <label><span>Email</span><input type="email" value={workerApply.email} onChange={e=>setWorkerApply({...workerApply,email:e.target.value})}/></label>
                   <label><span>Gender *</span><select required value={workerApply.gender} onChange={e=>setWorkerApply({...workerApply,gender:e.target.value})}><option value="">Select</option><option value="male">Male</option><option value="female">Female</option><option value="non_binary">Non-binary</option><option value="prefer_not_to_say">Prefer not to say</option></select></label>
                   <label><span>Age *</span><input required type="number" min="18" max="80" value={workerApply.age} onChange={e=>setWorkerApply({...workerApply,age:e.target.value})}/></label>
-                  <label><span>How do you want to join HOWDI? *</span><select value={workerApply.engagementIntent} onChange={e=>{const value=e.target.value;setWorkerApply({...workerApply,engagementIntent:value});if(value==="partner"){setApplySuccess(null);setApplyNotice("");setHowdiApplyType("vendor");}}}><option value="individual_worker">Individual worker</option><option value="partner">Business / Partner with HOWDI</option></select></label>
+                  <label><span>How do you want to join HOWDI? *</span><select value={workerApply.engagementIntent} onChange={e=>{const value=e.target.value;setWorkerApply({...workerApply,engagementIntent:value});if(value==="partner")openHowdiApplication("vendor");}}><option value="individual_worker">Individual worker</option><option value="partner">Business / Partner with HOWDI</option></select></label>
                   <label><span>City *</span><input required value={workerApply.city} onChange={e=>setWorkerApply({...workerApply,city:e.target.value})}/></label>
                   <label><span>State</span><input value={workerApply.state} onChange={e=>setWorkerApply({...workerApply,state:e.target.value})}/></label>
                   <label><span>Pincode</span><input maxLength="6" value={workerApply.pincode} onChange={e=>setWorkerApply({...workerApply,pincode:e.target.value.replace(/\D/g,"")})}/></label>
                   <label className="wide"><span>Current address</span><input value={workerApply.addressLine} onChange={e=>setWorkerApply({...workerApply,addressLine:e.target.value})}/></label>
                 </div>
 
-                <div className="worker-section-title premium"><i>02</i><div><b>Your work</b><span>Skills, experience, schedule and service area</span></div></div>
-                <div className="worker-grid">
+                <div className="apply-step-actions worker-step worker-step-1"><span>Step 1 of 5</span><button type="button" onClick={continueWorkerStep} disabled={applyDraftSaving}>{applyDraftSaving?"Saving…":"Continue →"}</button></div>
+
+                <div className="worker-section-title premium worker-step worker-step-2"><i>02</i><div><b>Your work</b><span>Skills, experience, schedule and service area</span></div></div>
+                <div className="worker-grid worker-step worker-step-2">
                   <label><span>Primary claimed skill *</span><select required value={workerApply.claimedSkill} onChange={e=>setWorkerApply({...workerApply,claimedSkill:e.target.value})}><option value="">Select</option>{liveWorkCategories.map(s=><option key={s.name}>{s.name}</option>)}</select></label>
                   <label><span>Experience years</span><input type="number" min="0" value={workerApply.experienceYears} onChange={e=>setWorkerApply({...workerApply,experienceYears:e.target.value})}/></label>
                   <label><span>Work type *</span><select value={workerApply.employmentType} onChange={e=>setWorkerApply({...workerApply,employmentType:e.target.value})}><option value="full_time">Full time</option><option value="part_time">Part time</option><option value="both">Full / Part time</option><option value="weekends">Weekends only</option><option value="on_demand">On demand</option></select></label>
@@ -22459,29 +22507,33 @@ const removeNotification = async (notificationId) => {
                   <label><span>Languages</span><input placeholder="English, Hindi, Kannada…" value={workerApply.languages.join(", ")} onChange={e=>setWorkerApply({...workerApply,languages:e.target.value.split(",").map(x=>x.trim()).filter(Boolean)})}/></label>
                 </div>
 
-                <div className="worker-days"><span>Working days</span><div>{["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map(d=><button type="button" key={d} className={workerApply.workingDays.includes(d)?"on":""} onClick={()=>toggleWorkingDay(d)}>{d}</button>)}</div></div>
-                <div className="worker-grid compact">
+                <div className="worker-days worker-step worker-step-2"><span>Working days</span><div>{["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map(d=><button type="button" key={d} className={workerApply.workingDays.includes(d)?"on":""} onClick={()=>toggleWorkingDay(d)}>{d}</button>)}</div></div>
+                <div className="worker-grid compact worker-step worker-step-2">
                   <label><span>Available from</span><input type="time" value={workerApply.availableFrom} onChange={e=>setWorkerApply({...workerApply,availableFrom:e.target.value})}/></label>
                   <label><span>Available to</span><input type="time" value={workerApply.availableTo} onChange={e=>setWorkerApply({...workerApply,availableTo:e.target.value})}/></label>
                   <label className="switch-line"><input type="checkbox" checked={workerApply.emergencyJobs} onChange={e=>setWorkerApply({...workerApply,emergencyJobs:e.target.checked})}/><span>Available for emergency jobs</span></label>
                   <label className="switch-line"><input type="checkbox" checked={workerApply.ownVehicle} onChange={e=>setWorkerApply({...workerApply,ownVehicle:e.target.checked})}/><span>I have my own vehicle</span></label>
                 </div>
 
-                <div className="worker-section-title premium"><i>03</i><div><b>Your preferred earnings</b><span>Set a range. HOWDI confirms customer-facing pricing after verification.</span></div></div>
-                <div className="worker-grid four">
+                <div className="apply-step-actions worker-step worker-step-2"><button type="button" className="secondary" onClick={()=>setApplyStep(1)}>← Back</button><span>Step 2 of 5</span><button type="button" onClick={continueWorkerStep} disabled={applyDraftSaving}>{applyDraftSaving?"Saving…":"Continue →"}</button></div>
+
+                <div className="worker-section-title premium worker-step worker-step-3"><i>03</i><div><b>Your preferred earnings</b><span>Set a range. HOWDI confirms customer-facing pricing after verification.</span></div></div>
+                <div className="worker-grid four worker-step worker-step-3">
                   <label><span>Hourly min ₹</span><input type="number" min="0" value={workerApply.hourlyRateMin} onChange={e=>setWorkerApply({...workerApply,hourlyRateMin:e.target.value})}/></label>
                   <label><span>Hourly max ₹</span><input type="number" min="0" value={workerApply.hourlyRateMax} onChange={e=>setWorkerApply({...workerApply,hourlyRateMax:e.target.value})}/></label>
                   <label><span>Daily min ₹</span><input type="number" min="0" value={workerApply.dailyRateMin} onChange={e=>setWorkerApply({...workerApply,dailyRateMin:e.target.value})}/></label>
                   <label><span>Daily max ₹</span><input type="number" min="0" value={workerApply.dailyRateMax} onChange={e=>setWorkerApply({...workerApply,dailyRateMax:e.target.value})}/></label>
                 </div>
 
-                <div className="worker-section-title premium"><i>04</i><div><b>Build trust</b><span>Verify identity and add proof of your skills</span></div></div>
-                <div className="worker-grid">
+                <div className="apply-step-actions worker-step worker-step-3"><button type="button" className="secondary" onClick={()=>setApplyStep(2)}>← Back</button><span>Step 3 of 5</span><button type="button" onClick={continueWorkerStep} disabled={applyDraftSaving}>{applyDraftSaving?"Saving…":"Continue →"}</button></div>
+
+                <div className="worker-section-title premium worker-step worker-step-4"><i>04</i><div><b>Build trust</b><span>Verify identity and add proof of your skills</span></div></div>
+                <div className="worker-grid worker-step worker-step-4">
                   <label><span>KYC document type *</span><select required value={workerApply.kycDocumentType} onChange={e=>setWorkerApply({...workerApply,kycDocumentType:e.target.value})}><option value="">Select</option><option>Driving Licence</option><option>Voter ID</option><option>Passport</option><option>PAN</option><option>Other Government ID</option></select></label>
                   <label><span>ID last 4 digits *</span><input required maxLength="4" value={workerApply.kycIdLast4} onChange={e=>setWorkerApply({...workerApply,kycIdLast4:e.target.value.replace(/\W/g,"").slice(0,4)})}/></label>
                 </div>
 
-                <div className="worker-upload-grid">
+                <div className="worker-upload-grid worker-step worker-step-4">
                   <label className={workerApply.profilePhoto?"received":""}><span>Profile photo *</span><b>{workerApply.profilePhoto?"✓ Added":"Upload photo"}</b><input type="file" accept="image/*" onChange={e=>pickWorkerFile("profilePhoto",e.target.files?.[0])}/></label>
                   <button type="button" className={workerApply.liveSelfie?"upload-card received":"upload-card"} onClick={openWorkerCamera}><span>Live selfie *</span><b>{workerApply.liveSelfie?"✓ Captured":"Open camera"}</b></button>
                   <label className={workerApply.kycDocument?"received":""}><span>KYC document *</span><b>{workerApply.kycDocument?"✓ Added":"Upload document"}</b><input type="file" accept="image/*,application/pdf" onChange={e=>pickWorkerFile("kycDocument",e.target.files?.[0])}/></label>
@@ -22489,44 +22541,41 @@ const removeNotification = async (notificationId) => {
                   <label className={workerApply.experienceAttachment?"received":""}><span>Experience proof</span><b>{workerApply.experienceAttachment?"✓ Added":"Optional attach"}</b><input type="file" accept="image/*,application/pdf" onChange={e=>pickWorkerFile("experienceAttachment",e.target.files?.[0])}/></label>
                 </div>
 
-                <div className="worker-section-title premium"><i>05</i><div><b>Safety & finish</b><span>Emergency contact and final consent</span></div></div>
-                <div className="worker-grid">
+                <div className="apply-step-actions worker-step worker-step-4"><button type="button" className="secondary" onClick={()=>setApplyStep(3)}>← Back</button><span>Step 4 of 5</span><button type="button" onClick={continueWorkerStep} disabled={applyDraftSaving}>{applyDraftSaving?"Saving…":"Continue →"}</button></div>
+
+                <div className="worker-section-title premium worker-step worker-step-5"><i>05</i><div><b>Safety & finish</b><span>Emergency contact and final consent</span></div></div>
+                <div className="worker-grid worker-step worker-step-5">
                   <label><span>Emergency contact name</span><input value={workerApply.emergencyContactName} onChange={e=>setWorkerApply({...workerApply,emergencyContactName:e.target.value})}/></label>
                   <label><span>Emergency contact phone</span><input value={workerApply.emergencyContactPhone} onChange={e=>setWorkerApply({...workerApply,emergencyContactPhone:e.target.value})}/></label>
                   <label className="wide"><span>Anything HOWDI should know?</span><textarea rows="2" value={workerApply.notes} onChange={e=>setWorkerApply({...workerApply,notes:e.target.value})}/></label>
                 </div>
-                <label className="apply-check"><input type="checkbox" checked={workerApply.consent} onChange={e=>setWorkerApply({...workerApply,consent:e.target.checked})}/><span>I consent to HOWDI reviewing my application and KYC documents.</span></label>
-                <label className="apply-check"><input type="checkbox" checked={workerApply.declaration} onChange={e=>setWorkerApply({...workerApply,declaration:e.target.checked})}/><span>I declare that the information provided is correct and understand approval is subject to verification.</span></label>
-                <div className="worker-whatsapp-assist">
+                <label className="apply-check worker-step worker-step-5"><input type="checkbox" checked={workerApply.consent} onChange={e=>setWorkerApply({...workerApply,consent:e.target.checked})}/><span>I consent to HOWDI reviewing my application and KYC documents.</span></label>
+                <label className="apply-check worker-step worker-step-5"><input type="checkbox" checked={workerApply.declaration} onChange={e=>setWorkerApply({...workerApply,declaration:e.target.checked})}/><span>I declare that the information provided is correct and understand approval is subject to verification.</span></label>
+                <div className="worker-whatsapp-assist worker-step worker-step-5">
                   <div><b>Prefer WhatsApp? 💬</b><span>Share your number and HOWDI can help you complete the application. Your assistance request also reaches Main Tower.</span></div>
                   <button type="button" onClick={requestWhatsAppAssist} disabled={whatsappAssistBusy}>{whatsappAssistBusy?"Sending…":"Get WhatsApp help →"}</button>
                 </div>
-                <div className="worker-submit-bar"><div><b>Ready to join HOWDI?</b><span>Your profile stays private until verification is completed.</span></div><button disabled={applySubmitting}>{applySubmitting?"Submitting…":"Submit worker application →"}</button></div>
+                <div className="worker-submit-bar worker-step worker-step-5"><button type="button" className="secondary" onClick={()=>setApplyStep(4)}>← Back</button><div><b>Ready to join HOWDI?</b><span>Your profile stays private until verification is completed.</span></div><button disabled={applySubmitting}>{applySubmitting?"Submitting…":"Submit worker application →"}</button></div>
               </form>
                         ) : (
               <form className="apply-mini-form" onSubmit={submitVendorApplication}>
-                {applyStep===1 ? <>
-                  <div className="apply-grid two">
-                    <label><span>Business name *</span><input autoFocus required value={vendorApply.businessName} onChange={e=>setVendorApply({...vendorApply,businessName:e.target.value})}/></label>
-                    <label><span>Owner name *</span><input required value={vendorApply.ownerName} onChange={e=>setVendorApply({...vendorApply,ownerName:e.target.value})}/></label>
-                    <label><span>Phone *</span><input required inputMode="tel" value={vendorApply.phone} onChange={e=>setVendorApply({...vendorApply,phone:e.target.value})}/></label>
-                    <label><span>Category *</span><select required value={vendorApply.category} onChange={e=>setVendorApply({...vendorApply,category:e.target.value})}><option>Crochet & Handmade</option><option>Textiles & Craft</option><option>Home & Living</option><option>Food & Local Products</option><option>Services</option><option>Other</option></select></label>
-                  </div>
-                  <div className="apply-row slim">
-                    <label><span>Email</span><input type="email" value={vendorApply.email} onChange={e=>setVendorApply({...vendorApply,email:e.target.value})}/></label>
-                    <label><span>Business type</span><select value={vendorApply.businessType} onChange={e=>setVendorApply({...vendorApply,businessType:e.target.value})}><option>Individual Creator</option><option>Proprietorship</option><option>Partnership</option><option>Private Limited</option><option>SHG / Collective</option></select></label>
-                  </div>
-                  <footer className="apply-actions"><em>Step 1 of 2</em><button type="button" className="primary" onClick={()=>{if(vendorApply.businessName&&vendorApply.ownerName&&vendorApply.phone&&vendorApply.category){setApplyNotice("");setApplyStep(2)}else setApplyNotice("Complete the required fields.")}}>Continue →</button></footer>
-                </> : <>
-                  <div className="apply-grid two">
-                    <label><span>City *</span><input required value={vendorApply.city} onChange={e=>setVendorApply({...vendorApply,city:e.target.value})}/></label>
-                    <label><span>State</span><input value={vendorApply.state} onChange={e=>setVendorApply({...vendorApply,state:e.target.value})}/></label>
-                    <label><span>Pincode</span><input inputMode="numeric" maxLength="6" value={vendorApply.pincode} onChange={e=>setVendorApply({...vendorApply,pincode:e.target.value.replace(/\D/g,"").slice(0,6)})}/></label>
-                    <label><span>GSTIN</span><input placeholder="Optional" value={vendorApply.gstin} onChange={e=>setVendorApply({...vendorApply,gstin:e.target.value.toUpperCase()})}/></label>
-                  </div>
+                {applyStep===1&&<>
+                  <div className="apply-grid two"><label><span>Business name *</span><input autoFocus required value={vendorApply.businessName} onChange={e=>setVendorApply({...vendorApply,businessName:e.target.value})}/></label><label><span>Owner name *</span><input required value={vendorApply.ownerName} onChange={e=>setVendorApply({...vendorApply,ownerName:e.target.value})}/></label></div>
+                  <footer className="apply-actions"><em>Step 1 of 4</em><button type="button" className="primary" onClick={continueVendorStep} disabled={applyDraftSaving}>{applyDraftSaving?"Saving…":"Continue →"}</button></footer>
+                </>}
+                {applyStep===2&&<>
+                  <div className="apply-grid two"><label><span>Phone *</span><input autoFocus required inputMode="tel" value={vendorApply.phone} onChange={e=>setVendorApply({...vendorApply,phone:e.target.value})}/></label><label><span>Category *</span><select required value={vendorApply.category} onChange={e=>setVendorApply({...vendorApply,category:e.target.value})}><option>Crochet & Handmade</option><option>Textiles & Craft</option><option>Home & Living</option><option>Food & Local Products</option><option>Services</option><option>Other</option></select></label></div>
+                  <div className="apply-row slim"><label><span>Email</span><input type="email" value={vendorApply.email} onChange={e=>setVendorApply({...vendorApply,email:e.target.value})}/></label><label><span>Business type</span><select value={vendorApply.businessType} onChange={e=>setVendorApply({...vendorApply,businessType:e.target.value})}><option>Individual Creator</option><option>Proprietorship</option><option>Partnership</option><option>Private Limited</option><option>SHG / Collective</option></select></label></div>
+                  <footer className="apply-actions"><button type="button" className="ghost" onClick={()=>setApplyStep(1)}>← Back</button><em>Step 2 of 4</em><button type="button" className="primary" onClick={continueVendorStep} disabled={applyDraftSaving}>{applyDraftSaving?"Saving…":"Continue →"}</button></footer>
+                </>}
+                {applyStep===3&&<>
+                  <div className="apply-grid two"><label><span>City *</span><input autoFocus required value={vendorApply.city} onChange={e=>setVendorApply({...vendorApply,city:e.target.value})}/></label><label><span>State</span><input value={vendorApply.state} onChange={e=>setVendorApply({...vendorApply,state:e.target.value})}/></label><label><span>Pincode</span><input inputMode="numeric" maxLength="6" value={vendorApply.pincode} onChange={e=>setVendorApply({...vendorApply,pincode:e.target.value.replace(/\D/g,"").slice(0,6)})}/></label><label><span>GSTIN</span><input placeholder="Optional" value={vendorApply.gstin} onChange={e=>setVendorApply({...vendorApply,gstin:e.target.value.toUpperCase()})}/></label></div>
                   <label className="apply-note"><span>What do you want to sell? *</span><textarea required rows="2" placeholder="Example: handmade crochet bags…" value={vendorApply.productSummary} onChange={e=>setVendorApply({...vendorApply,productSummary:e.target.value})}/></label>
+                  <footer className="apply-actions"><button type="button" className="ghost" onClick={()=>setApplyStep(2)}>← Back</button><em>Step 3 of 4</em><button type="button" className="primary" onClick={continueVendorStep} disabled={applyDraftSaving}>{applyDraftSaving?"Saving…":"Continue →"}</button></footer>
+                </>}
+                {applyStep===4&&<>
                   <label className="apply-check"><input type="checkbox" checked={vendorApply.consent} onChange={e=>setVendorApply({...vendorApply,consent:e.target.checked})}/><span>I agree to HOWDI review before vendor and catalogue activation.</span></label>
-                  <footer className="apply-actions"><button type="button" className="ghost" onClick={()=>setApplyStep(1)}>← Back</button><button className="primary" disabled={!vendorApply.consent||applySubmitting}>{applySubmitting?"Submitting…":"Submit →"}</button></footer>
+                  <footer className="apply-actions"><button type="button" className="ghost" onClick={()=>setApplyStep(3)}>← Back</button><em>Step 4 of 4</em><button className="primary" disabled={!vendorApply.consent||applySubmitting}>{applySubmitting?"Submitting…":"Submit application →"}</button></footer>
                 </>}
               </form>
             )}
