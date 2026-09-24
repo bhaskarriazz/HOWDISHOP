@@ -1964,6 +1964,9 @@ function App() {
   const [applySubmitting,setApplySubmitting]=useState(false);
   const [applyDraftSaving,setApplyDraftSaving]=useState(false);
   const [applySuccess,setApplySuccess]=useState(null);
+  const [applyAuthRequired,setApplyAuthRequired]=useState(false);
+  const [applyDirty,setApplyDirty]=useState(false);
+  const applySheetRef=useRef(null);
   const [workerApply,setWorkerApply]=useState({
     fullName:"",phone:"",email:"",gender:"",age:"",engagementIntent:"individual_worker",city:"",state:"",pincode:"",addressLine:"",claimedSkill:"",
     experienceYears:"",serviceRadiusKm:"5",expectedStartingPrice:"",employmentType:"part_time",
@@ -1981,19 +1984,39 @@ function App() {
   const HOWDI_WHATSAPP_NUMBER=(import.meta.env.VITE_HOWDI_WHATSAPP_NUMBER||"").replace(/\D/g,"");
   const [vendorApply,setVendorApply]=useState({businessName:"",ownerName:"",phone:"",email:"",businessType:"Individual Creator",city:"",state:"",pincode:"",category:"Crochet & Handmade",productSummary:"",gstin:"",consent:false});
   async function openHowdiApplication(type){
-    setApplyNotice("");setApplySuccess(null);setApplyStep(1);setHowdiApplyType(type);
+    setApplyNotice("");setApplySuccess(null);setApplyStep(1);setApplyDirty(false);setApplyAuthRequired(false);setHowdiApplyType(type);
     try{
       const token=localStorage.getItem("howdiSessionToken")||"";
-      if(!token){setApplyNotice("Sign in to save your progress and return whenever you are ready.");return;}
+      if(!token){setApplyAuthRequired(true);setApplyNotice("Sign in or create an account to save your application securely.");return;}
       const r=await fetch(`${WORKS_API_BASE}/api/onboarding/${type}/draft`,{headers:{Authorization:`Bearer ${token}`}});
       const d=await r.json().catch(()=>({}));
       if(!r.ok)throw new Error(d.message||"Unable to restore your saved progress.");
       const draft=d.draft||{};
-      setApplyStep(Number(draft.step)||1);
+      const savedStep=Number(draft.step)||1;
       if(type==="worker")setWorkerApply(prev=>({...prev,...(draft.fields||{})}));
       else setVendorApply(prev=>({...prev,...(draft.fields||{})}));
+      if(type==="worker"&&savedStep>=5){setApplyStep(4);setApplyNotice("Your details are restored. For privacy, please add your verification uploads again before the final step.");}
+      else {setApplyStep(savedStep);if(savedStep>1)setApplyNotice(`Welcome back. You can continue from step ${savedStep}.`);}
     }catch(error){setApplyNotice(error.message||"Your saved progress could not be restored.");}
   }
+  function closeHowdiApplication(force=false){
+    if(!force&&applyDirty&&!applySubmitting&&!window.confirm("Leave this application? Details not yet saved on this step will be lost."))return;
+    setHowdiApplyType("");setApplyNotice("");setApplyDirty(false);setApplyAuthRequired(false);
+  }
+  useEffect(()=>{
+    if(!howdiApplyType)return;
+    const onKeyDown=(event)=>{
+      if(event.key==='Escape'){event.preventDefault();closeHowdiApplication();return;}
+      if(event.key!=='Tab'||!applySheetRef.current)return;
+      const focusable=[...applySheetRef.current.querySelectorAll('button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[href]')].filter(node=>node.offsetParent!==null);
+      if(!focusable.length)return;
+      const first=focusable[0],last=focusable[focusable.length-1];
+      if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}
+      else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}
+    };
+    document.addEventListener('keydown',onKeyDown);
+    return()=>document.removeEventListener('keydown',onKeyDown);
+  },[howdiApplyType,applyDirty,applySubmitting]);
   async function saveHowdiDraft(type,step,fields){
     const token=localStorage.getItem("howdiSessionToken")||"";
     if(!token)return false;
@@ -2002,19 +2025,24 @@ function App() {
       const r=await fetch(`${WORKS_API_BASE}/api/onboarding/${type}/draft`,{method:"PUT",headers:{"Content-Type":"application/json",Authorization:`Bearer ${token}`},body:JSON.stringify({step,fields})});
       const d=await r.json().catch(()=>({}));
       if(!r.ok)throw new Error(d.message||"Unable to save this step.");
-      return true;
+      setApplyDirty(false);return true;
     }catch(error){setApplyNotice(error.message||"Unable to save this step.");return false;}
     finally{setApplyDraftSaving(false);}
   }
+  function workerStepError(step){
+    if(step===1&&(!workerApply.fullName||!workerApply.phone||!workerApply.gender||Number(workerApply.age)<18||Number(workerApply.age)>80||!workerApply.city))return "Enter your name, phone, gender, an age from 18 to 80, and city to continue.";
+    if(step===2&&(!workerApply.claimedSkill||!workerApply.workingDays.length))return "Choose your primary skill and at least one working day to continue.";
+    if(step===3&&((workerApply.hourlyRateMin&&workerApply.hourlyRateMax&&Number(workerApply.hourlyRateMin)>Number(workerApply.hourlyRateMax))||(workerApply.dailyRateMin&&workerApply.dailyRateMax&&Number(workerApply.dailyRateMin)>Number(workerApply.dailyRateMax))))return "Your minimum rate cannot be higher than your maximum rate.";
+    if(step===4&&(!workerApply.kycDocumentType||workerApply.kycIdLast4.length!==4||!workerApply.profilePhoto||!workerApply.liveSelfie||!workerApply.kycDocument))return "Choose your KYC type and last 4 digits, then add your profile photo, live selfie and KYC document.";
+    return "";
+  }
+  async function moveWorkerStep(next,{validate=false}={}){
+    const problem=validate?workerStepError(applyStep):"";
+    if(problem){setApplyNotice(problem);return;}
+    if(await saveHowdiDraft("worker",next,workerApply)){setApplyNotice(`Saved. Step ${next} of 5.`);setApplyStep(next);}
+  }
   async function continueWorkerStep(){
-    const validators={
-      1:()=>workerApply.fullName&&workerApply.phone&&workerApply.gender&&Number(workerApply.age)>=18&&workerApply.city,
-      2:()=>workerApply.claimedSkill&&workerApply.workingDays.length>0,
-      3:()=>true,
-      4:()=>workerApply.kycDocumentType&&workerApply.kycIdLast4.length===4
-    };
-    if(!validators[applyStep]()){setApplyNotice("Please complete the required fields before continuing.");return;}
-    if(await saveHowdiDraft("worker",applyStep+1,workerApply)){setApplyNotice("");setApplyStep(applyStep+1);}
+    await moveWorkerStep(Math.min(5,applyStep+1),{validate:true});
   }
   async function continueVendorStep(){
     const validators={
@@ -2023,7 +2051,10 @@ function App() {
       3:()=>vendorApply.city&&vendorApply.productSummary
     };
     if(!validators[applyStep]()){setApplyNotice("Please complete the required fields before continuing.");return;}
-    if(await saveHowdiDraft("vendor",applyStep+1,vendorApply)){setApplyNotice("");setApplyStep(applyStep+1);}
+    if(await saveHowdiDraft("vendor",applyStep+1,vendorApply)){setApplyNotice(`Saved. Step ${applyStep+1} of 4.`);setApplyStep(applyStep+1);}
+  }
+  async function moveVendorStep(next){
+    if(await saveHowdiDraft("vendor",next,vendorApply)){setApplyNotice(`Saved. Step ${next} of 4.`);setApplyStep(next);}
   }
   async function apiPostAny(paths,payload){
     let lastMessage="Application endpoint unavailable";
@@ -2045,7 +2076,7 @@ function App() {
     return await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve({name:file.name,type:file.type,dataUrl:reader.result});reader.onerror=reject;reader.readAsDataURL(file);});
   }
   async function pickWorkerFile(field,file){
-    try{const value=await fileToData(file);setWorkerApply(prev=>({...prev,[field]:value}));setApplyNotice("");}
+    try{const value=await fileToData(file);setWorkerApply(prev=>({...prev,[field]:value}));setApplyDirty(true);setApplyNotice("");}
     catch(error){setApplyNotice(error.message);}
   }
   async function openWorkerCamera(){
@@ -2064,9 +2095,9 @@ function App() {
     const canvas=document.createElement("canvas");canvas.width=640;canvas.height=Math.max(480,Math.round(640*(video.videoHeight||480)/(video.videoWidth||640)));
     const ctx=canvas.getContext("2d");ctx.drawImage(video,0,0,canvas.width,canvas.height);
     const dataUrl=canvas.toDataURL("image/jpeg",0.82);
-    setWorkerApply(prev=>({...prev,liveSelfie:{name:"live-selfie.jpg",type:"image/jpeg",dataUrl}}));closeWorkerCamera();
+    setWorkerApply(prev=>({...prev,liveSelfie:{name:"live-selfie.jpg",type:"image/jpeg",dataUrl}}));setApplyDirty(true);closeWorkerCamera();
   }
-  function toggleWorkingDay(day){setWorkerApply(prev=>({...prev,workingDays:prev.workingDays.includes(day)?prev.workingDays.filter(d=>d!==day):[...prev.workingDays,day]}));}
+  function toggleWorkingDay(day){setWorkerApply(prev=>({...prev,workingDays:prev.workingDays.includes(day)?prev.workingDays.filter(d=>d!==day):[...prev.workingDays,day]}));setApplyDirty(true);}
   async function requestWhatsAppAssist(){
     if(whatsappAssistBusy)return;
     if(!workerApply.phone){setApplyNotice("Enter your phone number first so HOWDI can assist you on WhatsApp.");return;}
@@ -2087,7 +2118,8 @@ function App() {
   }
   async function submitWorkerApplication(e){
     e.preventDefault();if(applySubmitting)return;setApplyNotice("");
-    if(!workerApply.profilePhoto||!workerApply.liveSelfie||!workerApply.kycDocument){setApplyNotice("Profile photo, live selfie and KYC document are required.");return;}
+    const validationProblem=workerStepError(1)||workerStepError(2)||workerStepError(3)||workerStepError(4);
+    if(validationProblem){setApplyNotice(validationProblem);return;}
     if(!workerApply.consent||!workerApply.declaration){setApplyNotice("Please accept consent and declaration.");return;}
     setApplySubmitting(true);
     try{
@@ -22453,35 +22485,37 @@ const removeNotification = async (notificationId) => {
 )}
 
       {howdiApplyType&&(
-        <div className="apply-sheet-backdrop" onClick={e=>{if(e.target===e.currentTarget&&!applySubmitting)setHowdiApplyType("")}}>
-          <section className="apply-sheet" role="dialog" aria-modal="true">
+        <div className="apply-sheet-backdrop" onClick={e=>{if(e.target===e.currentTarget&&!applySubmitting)closeHowdiApplication()}}>
+          <section className="apply-sheet" role="dialog" aria-modal="true" aria-labelledby="howdi-application-title" ref={applySheetRef}>
             <header className={howdiApplyType==="worker"?"apply-sheet-head worker-premium-head":"apply-sheet-head"}>
               <div>
                 <span>{howdiApplyType==="worker"?"HOWDI WORKS • EARN WITH YOUR SKILLS":"SELL WITH HOWDI"}</span>
-                <h2>{howdiApplyType==="worker"?<>Work on your terms. <em>Grow with HOWDI.</em></>:"Vendor application"}</h2>
-                <p>{howdiApplyType==="worker"?"One verified profile. Flexible work. Transparent earning opportunities.":(applyStep===1?"Basic details":"Final details & consent")}</p>
+                <h2 id="howdi-application-title">{howdiApplyType==="worker"?<>Work on your terms. <em>Grow with HOWDI.</em></>:"Vendor application"}</h2>
+                <p>{howdiApplyType==="worker"?"One verified profile. Flexible work. Transparent earning opportunities.":(["Basic details","Contact and category","Location and catalogue","Review and consent"][applyStep-1])}</p>
                 {howdiApplyType==="worker"&&<div className="worker-head-trust"><b>✓ Verified opportunities</b><b>✓ Flexible schedule</b><b>✓ Secure KYC review</b></div>}
               </div>
-              <button type="button" className="apply-close" onClick={()=>setHowdiApplyType("")} disabled={applySubmitting}>×</button>
+              <button type="button" className="apply-close" aria-label="Close application" onClick={()=>closeHowdiApplication()} disabled={applySubmitting}>×</button>
             </header>
 
-            {!applySuccess&&<div className="apply-progress">
-              <b className={applyStep===1?"on":"done"}>1</b><i></i><b className={applyStep===2?"on":""}>2</b>
+            {!applySuccess&&<div className="apply-progress" aria-label={`Step ${applyStep} of ${howdiApplyType==="worker"?5:4}`}>
+              {Array.from({length:howdiApplyType==="worker"?5:4},(_,index)=><Fragment key={index}><b className={applyStep===index+1?"on":applyStep>index+1?"done":""}>{index+1}</b>{index<(howdiApplyType==="worker"?4:3)&&<i/>}</Fragment>)}
             </div>}
 
-            {applyNotice&&<div className="apply-alert">{applyNotice}</div>}
+            {applyNotice&&<div className="apply-alert" role="alert" aria-live="assertive">{applyNotice}</div>}
 
             {applySuccess ? (
               <div className="apply-success">
                 <div>✓</div>
                 <h3>Application received</h3>
-                <p>We’ve sent it to HOWDI Main Tower for review.</p>
+                <p>Our team will review your application and update you in HOWDI.</p>
                 <strong>{applySuccess.code}</strong>
-                <button type="button" onClick={()=>setHowdiApplyType("")}>Done</button>
+                <button type="button" onClick={()=>closeHowdiApplication(true)}>Done</button>
               </div>
+            ) : applyAuthRequired ? (
+              <div className="apply-auth-gate"><h3>Sign in to start your application</h3><p>Your steps are saved securely, so you can return whenever you are ready.</p><div><button type="button" className="primary" onClick={()=>{closeHowdiApplication(true);openLogin();}}>Sign in</button><button type="button" onClick={()=>{closeHowdiApplication(true);openSignup();}}>Create account</button></div></div>
             ) : howdiApplyType==="worker" ? (
-              <form className={`worker-rich-form stage-step-${applyStep}`} onSubmit={submitWorkerApplication}>
-                <div className="worker-section-title premium worker-step worker-step-1"><i>01</i><div><b>About you</b><span>One answer at a time. Your progress is saved after this step.</span></div></div>
+              <form className={`worker-rich-form stage-step-${applyStep}`} onChange={()=>setApplyDirty(true)} onSubmit={submitWorkerApplication}>
+                <div className="worker-section-title premium worker-step worker-step-1"><i>01</i><div><b>About you</b><span>Your basics. We save your progress when you continue.</span></div></div>
                 <div className="worker-grid worker-step worker-step-1">
                   <label><span>Full name *</span><input required value={workerApply.fullName} onChange={e=>setWorkerApply({...workerApply,fullName:e.target.value})}/></label>
                   <label><span>Phone *</span><input required value={workerApply.phone} onChange={e=>setWorkerApply({...workerApply,phone:e.target.value})}/></label>
@@ -22515,7 +22549,7 @@ const removeNotification = async (notificationId) => {
                   <label className="switch-line"><input type="checkbox" checked={workerApply.ownVehicle} onChange={e=>setWorkerApply({...workerApply,ownVehicle:e.target.checked})}/><span>I have my own vehicle</span></label>
                 </div>
 
-                <div className="apply-step-actions worker-step worker-step-2"><button type="button" className="secondary" onClick={()=>setApplyStep(1)}>← Back</button><span>Step 2 of 5</span><button type="button" onClick={continueWorkerStep} disabled={applyDraftSaving}>{applyDraftSaving?"Saving…":"Continue →"}</button></div>
+                <div className="apply-step-actions worker-step worker-step-2"><button type="button" className="secondary" onClick={()=>moveWorkerStep(1)} disabled={applyDraftSaving}>← Back</button><span>Step 2 of 5</span><button type="button" onClick={continueWorkerStep} disabled={applyDraftSaving}>{applyDraftSaving?"Saving…":"Continue →"}</button></div>
 
                 <div className="worker-section-title premium worker-step worker-step-3"><i>03</i><div><b>Your preferred earnings</b><span>Set a range. HOWDI confirms customer-facing pricing after verification.</span></div></div>
                 <div className="worker-grid four worker-step worker-step-3">
@@ -22525,7 +22559,7 @@ const removeNotification = async (notificationId) => {
                   <label><span>Daily max ₹</span><input type="number" min="0" value={workerApply.dailyRateMax} onChange={e=>setWorkerApply({...workerApply,dailyRateMax:e.target.value})}/></label>
                 </div>
 
-                <div className="apply-step-actions worker-step worker-step-3"><button type="button" className="secondary" onClick={()=>setApplyStep(2)}>← Back</button><span>Step 3 of 5</span><button type="button" onClick={continueWorkerStep} disabled={applyDraftSaving}>{applyDraftSaving?"Saving…":"Continue →"}</button></div>
+                <div className="apply-step-actions worker-step worker-step-3"><button type="button" className="secondary" onClick={()=>moveWorkerStep(2)} disabled={applyDraftSaving}>← Back</button><span>Step 3 of 5</span><button type="button" onClick={continueWorkerStep} disabled={applyDraftSaving}>{applyDraftSaving?"Saving…":"Continue →"}</button></div>
 
                 <div className="worker-section-title premium worker-step worker-step-4"><i>04</i><div><b>Build trust</b><span>Verify identity and add proof of your skills</span></div></div>
                 <div className="worker-grid worker-step worker-step-4">
@@ -22541,7 +22575,7 @@ const removeNotification = async (notificationId) => {
                   <label className={workerApply.experienceAttachment?"received":""}><span>Experience proof</span><b>{workerApply.experienceAttachment?"✓ Added":"Optional attach"}</b><input type="file" accept="image/*,application/pdf" onChange={e=>pickWorkerFile("experienceAttachment",e.target.files?.[0])}/></label>
                 </div>
 
-                <div className="apply-step-actions worker-step worker-step-4"><button type="button" className="secondary" onClick={()=>setApplyStep(3)}>← Back</button><span>Step 4 of 5</span><button type="button" onClick={continueWorkerStep} disabled={applyDraftSaving}>{applyDraftSaving?"Saving…":"Continue →"}</button></div>
+                <div className="apply-step-actions worker-step worker-step-4"><button type="button" className="secondary" onClick={()=>moveWorkerStep(3)} disabled={applyDraftSaving}>← Back</button><span>Step 4 of 5</span><button type="button" onClick={continueWorkerStep} disabled={applyDraftSaving}>{applyDraftSaving?"Saving…":"Continue →"}</button></div>
 
                 <div className="worker-section-title premium worker-step worker-step-5"><i>05</i><div><b>Safety & finish</b><span>Emergency contact and final consent</span></div></div>
                 <div className="worker-grid worker-step worker-step-5">
@@ -22551,31 +22585,31 @@ const removeNotification = async (notificationId) => {
                 </div>
                 <label className="apply-check worker-step worker-step-5"><input type="checkbox" checked={workerApply.consent} onChange={e=>setWorkerApply({...workerApply,consent:e.target.checked})}/><span>I consent to HOWDI reviewing my application and KYC documents.</span></label>
                 <label className="apply-check worker-step worker-step-5"><input type="checkbox" checked={workerApply.declaration} onChange={e=>setWorkerApply({...workerApply,declaration:e.target.checked})}/><span>I declare that the information provided is correct and understand approval is subject to verification.</span></label>
-                <div className="worker-whatsapp-assist worker-step worker-step-5">
+                <div className="worker-whatsapp-assist worker-step worker-step-4">
                   <div><b>Prefer WhatsApp? 💬</b><span>Share your number and HOWDI can help you complete the application. Your assistance request also reaches Main Tower.</span></div>
                   <button type="button" onClick={requestWhatsAppAssist} disabled={whatsappAssistBusy}>{whatsappAssistBusy?"Sending…":"Get WhatsApp help →"}</button>
                 </div>
-                <div className="worker-submit-bar worker-step worker-step-5"><button type="button" className="secondary" onClick={()=>setApplyStep(4)}>← Back</button><div><b>Ready to join HOWDI?</b><span>Your profile stays private until verification is completed.</span></div><button disabled={applySubmitting}>{applySubmitting?"Submitting…":"Submit worker application →"}</button></div>
+                <div className="worker-submit-bar worker-step worker-step-5"><button type="button" className="secondary" onClick={()=>moveWorkerStep(4)} disabled={applyDraftSaving}>← Back</button><div><b>Ready to join HOWDI?</b><span>Your profile stays private until verification is completed.</span></div><button disabled={applySubmitting}>{applySubmitting?"Submitting…":"Submit worker application →"}</button></div>
               </form>
                         ) : (
-              <form className="apply-mini-form" onSubmit={submitVendorApplication}>
+              <form className="apply-mini-form" onChange={()=>setApplyDirty(true)} onSubmit={submitVendorApplication}>
                 {applyStep===1&&<>
-                  <div className="apply-grid two"><label><span>Business name *</span><input autoFocus required value={vendorApply.businessName} onChange={e=>setVendorApply({...vendorApply,businessName:e.target.value})}/></label><label><span>Owner name *</span><input required value={vendorApply.ownerName} onChange={e=>setVendorApply({...vendorApply,ownerName:e.target.value})}/></label></div>
+                  <div className="apply-grid two"><label><span>Business name *</span><input required value={vendorApply.businessName} onChange={e=>setVendorApply({...vendorApply,businessName:e.target.value})}/></label><label><span>Owner name *</span><input required value={vendorApply.ownerName} onChange={e=>setVendorApply({...vendorApply,ownerName:e.target.value})}/></label></div>
                   <footer className="apply-actions"><em>Step 1 of 4</em><button type="button" className="primary" onClick={continueVendorStep} disabled={applyDraftSaving}>{applyDraftSaving?"Saving…":"Continue →"}</button></footer>
                 </>}
                 {applyStep===2&&<>
-                  <div className="apply-grid two"><label><span>Phone *</span><input autoFocus required inputMode="tel" value={vendorApply.phone} onChange={e=>setVendorApply({...vendorApply,phone:e.target.value})}/></label><label><span>Category *</span><select required value={vendorApply.category} onChange={e=>setVendorApply({...vendorApply,category:e.target.value})}><option>Crochet & Handmade</option><option>Textiles & Craft</option><option>Home & Living</option><option>Food & Local Products</option><option>Services</option><option>Other</option></select></label></div>
+                  <div className="apply-grid two"><label><span>Phone *</span><input required inputMode="tel" value={vendorApply.phone} onChange={e=>setVendorApply({...vendorApply,phone:e.target.value})}/></label><label><span>Category *</span><select required value={vendorApply.category} onChange={e=>setVendorApply({...vendorApply,category:e.target.value})}><option>Crochet & Handmade</option><option>Textiles & Craft</option><option>Home & Living</option><option>Food & Local Products</option><option>Services</option><option>Other</option></select></label></div>
                   <div className="apply-row slim"><label><span>Email</span><input type="email" value={vendorApply.email} onChange={e=>setVendorApply({...vendorApply,email:e.target.value})}/></label><label><span>Business type</span><select value={vendorApply.businessType} onChange={e=>setVendorApply({...vendorApply,businessType:e.target.value})}><option>Individual Creator</option><option>Proprietorship</option><option>Partnership</option><option>Private Limited</option><option>SHG / Collective</option></select></label></div>
-                  <footer className="apply-actions"><button type="button" className="ghost" onClick={()=>setApplyStep(1)}>← Back</button><em>Step 2 of 4</em><button type="button" className="primary" onClick={continueVendorStep} disabled={applyDraftSaving}>{applyDraftSaving?"Saving…":"Continue →"}</button></footer>
+                  <footer className="apply-actions"><button type="button" className="ghost" onClick={()=>moveVendorStep(1)} disabled={applyDraftSaving}>← Back</button><em>Step 2 of 4</em><button type="button" className="primary" onClick={continueVendorStep} disabled={applyDraftSaving}>{applyDraftSaving?"Saving…":"Continue →"}</button></footer>
                 </>}
                 {applyStep===3&&<>
-                  <div className="apply-grid two"><label><span>City *</span><input autoFocus required value={vendorApply.city} onChange={e=>setVendorApply({...vendorApply,city:e.target.value})}/></label><label><span>State</span><input value={vendorApply.state} onChange={e=>setVendorApply({...vendorApply,state:e.target.value})}/></label><label><span>Pincode</span><input inputMode="numeric" maxLength="6" value={vendorApply.pincode} onChange={e=>setVendorApply({...vendorApply,pincode:e.target.value.replace(/\D/g,"").slice(0,6)})}/></label><label><span>GSTIN</span><input placeholder="Optional" value={vendorApply.gstin} onChange={e=>setVendorApply({...vendorApply,gstin:e.target.value.toUpperCase()})}/></label></div>
+                  <div className="apply-grid two"><label><span>City *</span><input required value={vendorApply.city} onChange={e=>setVendorApply({...vendorApply,city:e.target.value})}/></label><label><span>State</span><input value={vendorApply.state} onChange={e=>setVendorApply({...vendorApply,state:e.target.value})}/></label><label><span>Pincode</span><input inputMode="numeric" maxLength="6" value={vendorApply.pincode} onChange={e=>setVendorApply({...vendorApply,pincode:e.target.value.replace(/\D/g,"").slice(0,6)})}/></label><label><span>GSTIN</span><input placeholder="Optional" value={vendorApply.gstin} onChange={e=>setVendorApply({...vendorApply,gstin:e.target.value.toUpperCase()})}/></label></div>
                   <label className="apply-note"><span>What do you want to sell? *</span><textarea required rows="2" placeholder="Example: handmade crochet bags…" value={vendorApply.productSummary} onChange={e=>setVendorApply({...vendorApply,productSummary:e.target.value})}/></label>
-                  <footer className="apply-actions"><button type="button" className="ghost" onClick={()=>setApplyStep(2)}>← Back</button><em>Step 3 of 4</em><button type="button" className="primary" onClick={continueVendorStep} disabled={applyDraftSaving}>{applyDraftSaving?"Saving…":"Continue →"}</button></footer>
+                  <footer className="apply-actions"><button type="button" className="ghost" onClick={()=>moveVendorStep(2)} disabled={applyDraftSaving}>← Back</button><em>Step 3 of 4</em><button type="button" className="primary" onClick={continueVendorStep} disabled={applyDraftSaving}>{applyDraftSaving?"Saving…":"Continue →"}</button></footer>
                 </>}
                 {applyStep===4&&<>
                   <label className="apply-check"><input type="checkbox" checked={vendorApply.consent} onChange={e=>setVendorApply({...vendorApply,consent:e.target.checked})}/><span>I agree to HOWDI review before vendor and catalogue activation.</span></label>
-                  <footer className="apply-actions"><button type="button" className="ghost" onClick={()=>setApplyStep(3)}>← Back</button><em>Step 4 of 4</em><button className="primary" disabled={!vendorApply.consent||applySubmitting}>{applySubmitting?"Submitting…":"Submit application →"}</button></footer>
+                  <div className="apply-review"><b>Review before sending</b><span>{vendorApply.businessName} · {vendorApply.category} · {vendorApply.city}</span></div><footer className="apply-actions"><button type="button" className="ghost" onClick={()=>moveVendorStep(3)} disabled={applyDraftSaving}>← Back</button><em>Step 4 of 4</em><button className="primary" disabled={!vendorApply.consent||applySubmitting}>{applySubmitting?"Submitting…":"Submit application →"}</button></footer>
                 </>}
               </form>
             )}
