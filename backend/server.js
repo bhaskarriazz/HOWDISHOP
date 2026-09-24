@@ -9562,6 +9562,33 @@
         return true;
       }
     }
+    // STAGE 2B SECURITY FIX: shared helper for every "own account" route family below.
+    // Never trust a client-supplied user id (path/query/body) for the acting user — always
+    // derive it from the authenticated session. Sends the 401 itself so call sites can just
+    // `if (userId === null) return;` on a null result.
+    async function k5eRequireSelf(req, res) {
+      const session = await getSessionUserFromRequest(req);
+      if (!session) {
+        sendJSON(res, 401, { status: "error", message: "Please sign in to continue." });
+        return null;
+      }
+      return Number(session.id);
+    }
+    // STAGE 2B SECURITY FIX: strips the internal numeric user_id foreign key (and lookalikes)
+    // from a row or array of rows before it goes in a response — the caller already knows it's
+    // "their own" data from the session, so echoing the id back serves no purpose and is exactly
+    // the kind of internal identifier the audit flagged. Never touches an unrelated row's own
+    // primary key (order.id, address.id, etc.) — only the *_user_id family.
+    const K5E_STRIP_USER_ID_RE = /^(?:user_id|referrer_user_id|customer_user_id)$/;
+    function k5eOmitUserId(rowOrRows) {
+      if (Array.isArray(rowOrRows)) return rowOrRows.map(k5eOmitUserId);
+      if (rowOrRows && typeof rowOrRows === "object") {
+        const out = { ...rowOrRows };
+        for (const k of Object.keys(out)) if (K5E_STRIP_USER_ID_RE.test(k)) delete out[k];
+        return out;
+      }
+      return rowOrRows;
+    }
     // JSON.stringify replacer for Connect responses (see the block comment above).
     function k5eConnectReplacer(viewerId) {
       const viewer = Number(viewerId || 0);
@@ -13629,7 +13656,10 @@
       workType:r.work_type||'one_time',city:r.city||'',pincode:r.pincode||'',budget:Number(r.budget||0),
       scheduleDate:r.schedule_date?String(r.schedule_date).slice(0,10):'',scheduleTime:r.schedule_time?String(r.schedule_time).slice(0,5):'',
       description:r.description||'',skills:r.skills||'',status:r.status||'open',priority:r.priority||'normal',urgency:r.urgency||'normal',
-      customerUserId:r.customer_user_id?String(r.customer_user_id):'',customerName:r.customer_name||'',customerPhone:r.customer_phone||'',
+      // STAGE 2B SECURITY FIX: customerUserId (customer_user_id) removed from every response that
+      // shares this helper — the frontend only ever SENDS it (booking create / PIN verify), never
+      // reads it back, and the customer's own identity is already established by their session.
+      customerName:r.customer_name||'',customerPhone:r.customer_phone||'',
       customerEmail:r.customer_email||'',addressLine:r.address_line||'',preferredWorkerId:r.preferred_worker_id?String(r.preferred_worker_id):'',
       preferredWorkerName:r.preferred_worker_name||'',bookingSource:r.booking_source||'',
       active:r.active!==false,createdAt:r.created_at,updatedAt:r.updated_at
@@ -13828,12 +13858,13 @@
         pool.query(`SELECT * FROM works_completion_confirmations WHERE work_order_id=$1 LIMIT 1`,[workId]),
         pool.query(`SELECT * FROM works_cases WHERE work_order_id=$1 ORDER BY created_at DESC LIMIT 30`,[workId])
       ]);
+      // STAGE 2B SECURITY FIX: strip customer_user_id FK from every sub-object below (response-leak fix)
       return {
         quote:null,
-        payments:payQ.rows.map(p=>({...p,amount:Number(p.amount||0)})),
-        review:reviewQ.rows[0]||null,
-        completion:confirmQ.rows[0]||null,
-        cases:casesQ.rows,
+        payments:payQ.rows.map(p=>({...k5eOmitUserId(p),amount:Number(p.amount||0)})),
+        review:k5eOmitUserId(reviewQ.rows[0])||null,
+        completion:k5eOmitUserId(confirmQ.rows[0])||null,
+        cases:k5eOmitUserId(casesQ.rows),
         reschedules:[],
         evidence:[]
       };
@@ -26867,11 +26898,12 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 0,
                 number(body.budget, worker.starting_price || 0)
               );
-              const customerUserId =
-                body.customerUserId &&
-                /^\d+$/.test(String(body.customerUserId))
-                  ? String(body.customerUserId)
-                  : null;
+              // STAGE 2B SECURITY FIX: this used to trust body.customerUserId directly, letting
+              // anyone attach a booking to an arbitrary account. Booking stays guest-friendly (no
+              // account required), but when the caller IS signed in, the link is the session's own
+              // id — never a client-supplied one.
+              const worksBookingSession = await getSessionUserFromRequest(req);
+              const customerUserId = worksBookingSession ? String(Number(worksBookingSession.id)) : null;
 
               bookingDbStage = "insert work order";
               const result = await pool.query(
@@ -26978,10 +27010,9 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             // enforcement should replace numeric userId before prod.
             // =====================================================
             if (req.method === "GET" && pathname === "/api/works/customer/bookings") {
-              const userId = clean(url.searchParams.get("userId"));
-              if (!userId || !/^\d+$/.test(String(userId))) {
-                return sendJSON(res, 400, { status:"error", message:"Valid customer user ID is required" });
-              }
+              // STAGE 2B SECURITY FIX: session-derived, ?userId= is no longer trusted (IDOR)
+              const userId = await k5eRequireSelf(req, res);
+              if (userId === null) return;
 
               const q = await pool.query(
                 `SELECT
@@ -27091,8 +27122,9 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
             if (req.method === "GET" && pathname === "/api/works/customer/history") {
               try {
-                const userId=Number(url.searchParams.get("userId")||0);
-                if(!Number.isInteger(userId)||userId<=0) return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
+                // STAGE 2B SECURITY FIX: session-derived, ?userId= is no longer trusted (IDOR)
+                const userId = await k5eRequireSelf(req, res);
+                if (userId === null) return;
                 // Compatibility route: current Customer UI still calls /history.
                 // Read from the same canonical Works booking table used by the live Works system.
                 const result=await pool.query(`
@@ -27102,7 +27134,11 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   ORDER BY created_at DESC
                   LIMIT 100
                 `,[userId]);
-                return sendJSON(res,200,{status:"success",history:result.rows,bookings:result.rows});
+                // STAGE 2B SECURITY FIX: this if-chain block is shadowed by the app.get("/api/works/customer/history", ...)
+                // route registered later in the file (app.* routes dispatch before the if-chain, see howdiDispatchAppRouteR2),
+                // so it is dead in practice — fixed anyway, for defense-in-depth, using the same shared row mapper.
+                const bookings=result.rows.map(worksOrderRow);
+                return sendJSON(res,200,{status:"success",history:bookings,bookings});
               } catch(error) {
                 console.error("HOWDI WORKS HISTORY DB ERROR:",{message:error.message,code:error.code,detail:error.detail,hint:error.hint});
                 return sendJSON(res,200,{status:"success",degraded:true,history:[],bookings:[],diagnostic:error.message||null});
@@ -27111,13 +27147,13 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             if (req.method === "POST" && /^\/api\/works\/bookings\/HOWDI-WORK-\d+\/verify-pin\/?$/.test(pathname)) {
               const parts = pathname.split("/").filter(Boolean);
               const workCode = parts[parts.length - 2];
+              // STAGE 2B SECURITY FIX: session-derived, body.customerUserId is no longer trusted
+              // (it was the ownership check itself — anyone who knew a booking's owner id could
+              // verify that customer's job PIN)
+              const customerUserId = await k5eRequireSelf(req, res);
+              if (customerUserId === null) return;
               const body = await getBody(req);
-              const customerUserId = clean(body.customerUserId);
               const pin = clean(body.pin);
-
-              if (!customerUserId || !/^\d+$/.test(String(customerUserId))) {
-                return sendJSON(res, 400, { status:"error", message:"Customer identity is required" });
-              }
 
               const q = await pool.query(
                 `SELECT
@@ -27179,7 +27215,9 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             // =====================================================
             if(req.method==="GET" && /^\/api\/works\/customer\/bookings\/HOWDI-WORK-\d+\/lifecycle\/?$/.test(pathname)){
               const workCode=pathname.split("/").filter(Boolean).slice(-2,-1)[0];
-              const userId=clean(url.searchParams.get("userId"));
+              // STAGE 2B SECURITY FIX: session-derived, ?userId= is no longer trusted (IDOR)
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
               const wo=await pool.query(`SELECT * FROM works_work_orders WHERE work_code=$1 LIMIT 1`,[workCode]);
               if(!wo.rows[0])return sendJSON(res,404,{status:"error",message:"Work booking not found"});
               if(String(wo.rows[0].customer_user_id||"")!==String(userId||""))return sendJSON(res,403,{status:"error",message:"This booking does not belong to this customer"});
@@ -27187,8 +27225,9 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             }
 
             if(req.method==="GET" && pathname==="/api/works/customer/notifications"){
-              const userId=clean(url.searchParams.get("userId"));
-              if(!userId||!/^\d+$/.test(String(userId)))return sendJSON(res,400,{status:"error",message:"Valid customer user ID is required"});
+              // STAGE 2B SECURITY FIX: session-derived, ?userId= is no longer trusted (IDOR)
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
               const q=await pool.query(
                 `SELECT n.*,wo.work_code
                  FROM works_notifications n
@@ -27202,13 +27241,18 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             }
 
             if(req.method==="PATCH" && /^\/api\/works\/customer\/notifications\/\d+\/read\/?$/.test(pathname)){
-              const id=pathname.split("/").filter(Boolean).slice(-2,-1)[0],userId=clean(url.searchParams.get("userId"));
+              const id=pathname.split("/").filter(Boolean).slice(-2,-1)[0];
+              // STAGE 2B SECURITY FIX: session-derived, ?userId= is no longer trusted (IDOR)
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
               const q=await pool.query(`UPDATE works_notifications SET is_read=TRUE,read_at=COALESCE(read_at,NOW()) WHERE id=$1 AND audience_type='customer' AND customer_user_id=$2 RETURNING id`,[id,userId]);
               return q.rows[0]?sendJSON(res,200,{status:"success"}):sendJSON(res,404,{status:"error",message:"Works notification not found"});
             }
 
             if(req.method==="PATCH" && pathname==="/api/works/customer/notifications/read-all"){
-              const userId=clean(url.searchParams.get("userId"));
+              // STAGE 2B SECURITY FIX: session-derived, ?userId= is no longer trusted (IDOR)
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
               await pool.query(`UPDATE works_notifications SET is_read=TRUE,read_at=NOW() WHERE audience_type='customer' AND customer_user_id=$1 AND is_read=FALSE`,[userId]);
               return sendJSON(res,200,{status:"success"});
             }
@@ -27216,12 +27260,16 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             // Compatibility alias for older customer builds.
             if(req.method==="POST" && /^\/api\/works\/bookings\/HOWDI-WORK-\d+\/completion\/?$/.test(pathname)){
               const workCode=pathname.split("/").filter(Boolean).slice(-2,-1)[0];
+              // STAGE 2B SECURITY FIX: session-derived, body.customerUserId is no longer trusted
+              // (it was the ownership check itself)
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
               const body=await getBody(req);
               req.__howdiCompletionAlias={workCode,body};
               // Normalize to the canonical customer completion path handled below.
               url.pathname=`/api/works/customer/bookings/${workCode}/completion`;
               // pathname is const, so handle the alias directly.
-              const userId=clean(body.customerUserId),decision=clean(body.decision).toLowerCase(),note=clean(body.note);
+              const decision=clean(body.decision).toLowerCase(),note=clean(body.note);
               if(!['confirmed','problem_reported'].includes(decision))return sendJSON(res,400,{status:"error",message:"Completion decision is invalid"});
               const wo=await pool.query(`SELECT * FROM works_work_orders WHERE work_code=$1 LIMIT 1`,[workCode]);
               if(!wo.rows[0])return sendJSON(res,404,{status:"error",message:"Work booking not found"});
@@ -27242,7 +27290,10 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
             if(req.method==="POST" && /^\/api\/works\/customer\/bookings\/HOWDI-WORK-\d+\/completion\/?$/.test(pathname)){
               const workCode=pathname.split("/").filter(Boolean).slice(-2,-1)[0];
-              const b=await getBody(req),userId=clean(b.customerUserId),decision=clean(b.decision).toLowerCase(),note=clean(b.note);
+              // STAGE 2B SECURITY FIX: session-derived, body.customerUserId is no longer trusted
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
+              const b=await getBody(req),decision=clean(b.decision).toLowerCase(),note=clean(b.note);
               if(!['confirmed','problem_reported'].includes(decision))return sendJSON(res,400,{status:"error",message:"Completion decision is invalid"});
               const wo=await pool.query(`SELECT * FROM works_work_orders WHERE work_code=$1 LIMIT 1`,[workCode]);
               if(!wo.rows[0])return sendJSON(res,404,{status:"error",message:"Work booking not found"});
@@ -27276,7 +27327,11 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             }
 
             if(req.method==="POST" && /^\/api\/works\/customer\/bookings\/HOWDI-WORK-\d+\/pay\/?$/.test(pathname)){
-              const workCode=pathname.split("/").filter(Boolean).slice(-2,-1)[0],b=await getBody(req),userId=clean(b.customerUserId),method=(clean(b.method)||"HPAY").toUpperCase();
+              const workCode=pathname.split("/").filter(Boolean).slice(-2,-1)[0];
+              // STAGE 2B SECURITY FIX: session-derived, body.customerUserId is no longer trusted
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
+              const b=await getBody(req),method=(clean(b.method)||"HPAY").toUpperCase();
               const wo=await pool.query(`SELECT * FROM works_work_orders WHERE work_code=$1 LIMIT 1`,[workCode]);
               if(!wo.rows[0]||String(wo.rows[0].customer_user_id||"")!==String(userId||""))return sendJSON(res,403,{status:"error",message:"This booking does not belong to this customer"});
               const conf=await pool.query(`SELECT * FROM works_completion_confirmations WHERE work_order_id=$1 AND status='confirmed'`,[wo.rows[0].id]);
@@ -27290,11 +27345,16 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 p=q.rows[0];
               }
               await addWorksNotification({audienceType:"customer",customerUserId:userId,workerId:wo.rows[0].preferred_worker_id,workId:wo.rows[0].id,eventType:"payment_pending",icon:"💳",title:"Payment request created",message:`₹${Number(p.amount||0).toLocaleString("en-IN")} payment for ${workCode} is pending provider confirmation.`,dedupeKey:`work-${wo.rows[0].id}-customer-payment-${p.id}`});
-              return sendJSON(res,201,{status:"success",message:"Payment request created. Provider/HPay confirmation is required before marking it paid.",payment:{...p,amount:Number(p.amount||0),providerRequired:true},lifecycle:await getWorksCustomerLifecycle(wo.rows[0].id)});
+              // STAGE 2B SECURITY FIX: strip customer_user_id FK from response body (response-leak fix)
+              return sendJSON(res,201,{status:"success",message:"Payment request created. Provider/HPay confirmation is required before marking it paid.",payment:{...k5eOmitUserId(p),amount:Number(p.amount||0),providerRequired:true},lifecycle:await getWorksCustomerLifecycle(wo.rows[0].id)});
             }
 
             if(req.method==="POST" && /^\/api\/works\/customer\/bookings\/HOWDI-WORK-\d+\/review\/?$/.test(pathname)){
-              const workCode=pathname.split("/").filter(Boolean).slice(-2,-1)[0],b=await getBody(req),userId=clean(b.customerUserId),rating=Number(b.rating),review=clean(b.review);
+              const workCode=pathname.split("/").filter(Boolean).slice(-2,-1)[0];
+              // STAGE 2B SECURITY FIX: session-derived, body.customerUserId is no longer trusted
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
+              const b=await getBody(req),rating=Number(b.rating),review=clean(b.review);
               if(!Number.isInteger(rating)||rating<1||rating>5)return sendJSON(res,400,{status:"error",message:"Rating must be from 1 to 5"});
               const wo=await pool.query(`SELECT * FROM works_work_orders WHERE work_code=$1 LIMIT 1`,[workCode]);
               if(!wo.rows[0]||String(wo.rows[0].customer_user_id||"")!==String(userId||""))return sendJSON(res,403,{status:"error",message:"This booking does not belong to this customer"});
@@ -27305,11 +27365,16 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 [wo.rows[0].id,userId,wo.rows[0].preferred_worker_id,rating,review]);
               if(!q.rows[0])return sendJSON(res,409,{status:"error",message:"This job has already been reviewed"});
               await addWorksNotification({audienceType:"customer",customerUserId:userId,workerId:wo.rows[0].preferred_worker_id,workId:wo.rows[0].id,eventType:"review_submitted",icon:"⭐",title:"Review submitted",message:`Your ${rating}-star review for ${workCode} was saved.`,dedupeKey:`work-${wo.rows[0].id}-customer-review`});
-              return sendJSON(res,201,{status:"success",message:"Review submitted successfully.",review:q.rows[0],lifecycle:await getWorksCustomerLifecycle(wo.rows[0].id)});
+              // STAGE 2B SECURITY FIX: strip customer_user_id FK from response body (response-leak fix)
+              return sendJSON(res,201,{status:"success",message:"Review submitted successfully.",review:k5eOmitUserId(q.rows[0]),lifecycle:await getWorksCustomerLifecycle(wo.rows[0].id)});
             }
 
             if(req.method==="POST" && /^\/api\/works\/customer\/bookings\/HOWDI-WORK-\d+\/tip\/?$/.test(pathname)){
-              const workCode=pathname.split("/").filter(Boolean).slice(-2,-1)[0],b=await getBody(req),userId=clean(b.customerUserId),amount=Math.max(0,number(b.amount,0)),method=(clean(b.method)||"HPAY").toUpperCase();
+              const workCode=pathname.split("/").filter(Boolean).slice(-2,-1)[0];
+              // STAGE 2B SECURITY FIX: session-derived, body.customerUserId is no longer trusted
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
+              const b=await getBody(req),amount=Math.max(0,number(b.amount,0)),method=(clean(b.method)||"HPAY").toUpperCase();
               if(amount<=0)return sendJSON(res,400,{status:"error",message:"Tip amount must be greater than zero"});
               const wo=await pool.query(`SELECT * FROM works_work_orders WHERE work_code=$1 LIMIT 1`,[workCode]);
               if(!wo.rows[0]||String(wo.rows[0].customer_user_id||"")!==String(userId||""))return sendJSON(res,403,{status:"error",message:"This booking does not belong to this customer"});
@@ -27320,11 +27385,16 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               const q=await pool.query(`INSERT INTO works_payments(payment_code,work_order_id,customer_user_id,payment_kind,amount,method,status,provider_payload)
                 VALUES($1,$2,$3,'tip',$4,$5,'pending',$6::jsonb) RETURNING *`,
                 [`HOWDI-TIP-${Date.now().toString().slice(-10)}`,wo.rows[0].id,userId,amount,method,JSON.stringify({providerRequired:true,source:"HOWDI_WORKS_TIP"})]);
-              return sendJSON(res,201,{status:"success",message:"Tip payment request created.",payment:{...q.rows[0],amount:Number(q.rows[0].amount||0),providerRequired:true},lifecycle:await getWorksCustomerLifecycle(wo.rows[0].id)});
+              // STAGE 2B SECURITY FIX: strip customer_user_id FK from response body (response-leak fix)
+              return sendJSON(res,201,{status:"success",message:"Tip payment request created.",payment:{...k5eOmitUserId(q.rows[0]),amount:Number(q.rows[0].amount||0),providerRequired:true},lifecycle:await getWorksCustomerLifecycle(wo.rows[0].id)});
             }
 
             if(req.method==="POST" && /^\/api\/works\/customer\/bookings\/HOWDI-WORK-\d+\/case\/?$/.test(pathname)){
-              const workCode=pathname.split("/").filter(Boolean).slice(-2,-1)[0],b=await getBody(req),userId=clean(b.customerUserId),caseType=clean(b.caseType).toLowerCase(),reason=clean(b.reason);
+              const workCode=pathname.split("/").filter(Boolean).slice(-2,-1)[0];
+              // STAGE 2B SECURITY FIX: session-derived, body.customerUserId is no longer trusted
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
+              const b=await getBody(req),caseType=clean(b.caseType).toLowerCase(),reason=clean(b.reason);
               if(!['refund','dispute','safety','support'].includes(caseType))return sendJSON(res,400,{status:"error",message:"Invalid case type"});
               if(!reason)return sendJSON(res,400,{status:"error",message:"Please describe the issue"});
               const wo=await pool.query(`SELECT * FROM works_work_orders WHERE work_code=$1 LIMIT 1`,[workCode]);
@@ -27333,11 +27403,16 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 VALUES($1,$2,$3,'customer',$4,$5,$6,$7) RETURNING *`,
                 [`HOWDI-CASE-${Date.now().toString().slice(-10)}`,wo.rows[0].id,caseType,userId,wo.rows[0].preferred_worker_id,reason,caseType==="safety"?"critical":"high"]);
               await addWorksNotification({audienceType:"customer",customerUserId:userId,workerId:wo.rows[0].preferred_worker_id,workId:wo.rows[0].id,eventType:`case_${caseType}_created`,icon:caseType==="safety"?"🆘":"🎫",title:caseType==="safety"?"Safety alert sent to HOWDI":`${caseType.charAt(0).toUpperCase()+caseType.slice(1)} case created`,message:`${q.rows[0].case_code} was created for ${workCode}.`,dedupeKey:`work-${wo.rows[0].id}-customer-case-${q.rows[0].id}`});
-              return sendJSON(res,201,{status:"success",message:`${caseType.charAt(0).toUpperCase()+caseType.slice(1)} case created successfully.`,case:q.rows[0],lifecycle:await getWorksCustomerLifecycle(wo.rows[0].id)});
+              // STAGE 2B SECURITY FIX: strip customer_user_id FK from response body (response-leak fix)
+              return sendJSON(res,201,{status:"success",message:`${caseType.charAt(0).toUpperCase()+caseType.slice(1)} case created successfully.`,case:k5eOmitUserId(q.rows[0]),lifecycle:await getWorksCustomerLifecycle(wo.rows[0].id)});
             }
 
             if(req.method==="POST" && /^\/api\/works\/customer\/bookings\/HOWDI-WORK-\d+\/cancel\/?$/.test(pathname)){
-              const workCode=pathname.split("/").filter(Boolean).slice(-2,-1)[0],b=await getBody(req),userId=clean(b.customerUserId),reason=clean(b.reason);
+              const workCode=pathname.split("/").filter(Boolean).slice(-2,-1)[0];
+              // STAGE 2B SECURITY FIX: session-derived, body.customerUserId is no longer trusted
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
+              const b=await getBody(req),reason=clean(b.reason);
               if(!reason)return sendJSON(res,400,{status:"error",message:"Cancellation reason is required"});
               const wo=await pool.query(`SELECT * FROM works_work_orders WHERE work_code=$1 LIMIT 1`,[workCode]);
               if(!wo.rows[0]||String(wo.rows[0].customer_user_id||"")!==String(userId||""))return sendJSON(res,403,{status:"error",message:"This booking does not belong to this customer"});
@@ -27357,7 +27432,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               if(j)await pool.query(`UPDATE works_job_journeys SET stage='cancelled',updated_at=NOW() WHERE work_order_id=$1`,[wo.rows[0].id]);
               await addWorksNotification({audienceType:"customer",customerUserId:userId,workerId,workId:wo.rows[0].id,eventType:"booking_cancelled",icon:"✕",title:"Works booking cancelled",message:`${workCode} cancelled. Reason: ${reason}${customerCharge>0?` · Charge ₹${customerCharge}`:""}`,dedupeKey:`work-${wo.rows[0].id}-customer-cancel-${q.rows[0].id}`});
               if(workerId)await addWorksNotification({audienceType:"worker",customerUserId:userId,workerId,workId:wo.rows[0].id,eventType:"customer_cancelled",icon:"✕",title:"Customer cancelled booking",message:`${workCode} cancelled by customer. Reason: ${reason}${workerCompensation>0?` · Compensation ₹${workerCompensation}`:""}`,dedupeKey:`work-${wo.rows[0].id}-worker-cancel-${q.rows[0].id}`});
-              return sendJSON(res,200,{status:"success",message:"Booking cancelled",case:{...q.rows[0],customer_charge:customerCharge,worker_compensation:workerCompensation,platform_fee:platformFee},lifecycle:await getWorksCustomerLifecycle(wo.rows[0].id)});
+              // STAGE 2B SECURITY FIX: strip customer_user_id FK from response body (response-leak fix)
+              return sendJSON(res,200,{status:"success",message:"Booking cancelled",case:{...k5eOmitUserId(q.rows[0]),customer_charge:customerCharge,worker_compensation:workerCompensation,platform_fee:platformFee},lifecycle:await getWorksCustomerLifecycle(wo.rows[0].id)});
             }
 
             // =====================================================
@@ -32522,12 +32598,16 @@ async function ensureVibeReleaseReadinessV140LSchema(){
           status: "success",
           message: "Account created successfully",
           token: registrationSession.token,
+          // STAGE 2B SECURITY FIX: never return the raw internal numeric user
+          // id (or any other internal identifier) in a customer-facing auth
+          // response. The session token is the only thing the client needs —
+          // every subsequent request is identified server-side from it.
           user: {
-            id: user.id,
             name: user.full_name,
             full_name: user.full_name,
             email: user.email,
             phone: user.phone,
+            public_username: null,
             account_type_id: user.account_type_id,
             account_status: user.account_status,
             role: user.role,
@@ -32566,20 +32646,20 @@ async function ensureVibeReleaseReadinessV140LSchema(){
       req.method === "POST" &&
       pathname === "/api/auth/change-password"
     ) {
+      // STAGE 2B SECURITY FIX (found during the sweep, not in the original audit list): this trusted
+      // body.user_id as the account to change, checked only against a client-supplied current-password
+      // guess — no session was required at all, so a single leaked password (from anywhere) could be
+      // credential-stuffed against arbitrary account ids with no rate limit tied to a session. Session
+      // -derived now, like every other own-account route; the current-password check still applies.
+      const changePasswordUserId = await k5eRequireSelf(req, res);
+      if (changePasswordUserId === null) return;
       const client = await pool.connect();
 
       try {
         const body = await getBody(req);
-        const userId = Number(body.user_id ?? body.userId);
+        const userId = changePasswordUserId;
         const currentPassword = String(body.current_password ?? body.currentPassword ?? "");
         const newPassword = String(body.new_password ?? body.newPassword ?? "");
-
-        if (!Number.isInteger(userId) || userId <= 0) {
-          return sendJSON(res, 400, {
-            status: "error",
-            message: "Valid user ID is required",
-          });
-        }
 
         if (!currentPassword || !newPassword) {
           return sendJSON(res, 400, {
@@ -32708,18 +32788,12 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
     if (
       req.method === "GET" &&
-      /^\/api\/auth\/sessions\/[^/]+\/?$/.test(pathname)
+      pathname === "/api/auth/sessions/me"
     ) {
       try {
-        const userId = Number(
-          decodeURIComponent(
-            pathname.match(/^\/api\/auth\/sessions\/([^/]+)\/?$/)?.[1] || ""
-          )
-        );
-
-        if (!Number.isInteger(userId) || userId <= 0) {
-          return sendJSON(res, 400, { status: "error", message: "Valid user ID is required" });
-        }
+        // STAGE 2B SECURITY FIX: session-derived, was /api/auth/sessions/:id (IDOR)
+        const userId = await k5eRequireSelf(req, res);
+        if (userId === null) return;
 
         const result = await pool.query(
           `
@@ -32781,13 +32855,13 @@ async function ensureVibeReleaseReadinessV140LSchema(){
       pathname === "/api/auth/logout-all-devices"
     ) {
       try {
+        // STAGE 2B SECURITY FIX (found during the sweep, not in the original audit list):
+        // this revoked ANY user's other sessions given only their numeric id in the body —
+        // session-derived now, like every other own-account route.
+        const userId = await k5eRequireSelf(req, res);
+        if (userId === null) return;
         const body = await getBody(req);
-        const userId = Number(body.user_id ?? body.userId);
         const keepSessionToken = String(body.session_token ?? body.sessionToken ?? "");
-
-        if (!Number.isInteger(userId) || userId <= 0) {
-          return sendJSON(res, 400, { status: "error", message: "Valid user ID is required" });
-        }
 
         const result = await pool.query(
           `
@@ -32830,18 +32904,12 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
     if (
       req.method === "GET" &&
-      /^\/api\/auth\/security-history\/[^/]+\/?$/.test(pathname)
+      pathname === "/api/auth/security-history/me"
     ) {
       try {
-        const userId = Number(
-          decodeURIComponent(
-            pathname.match(/^\/api\/auth\/security-history\/([^/]+)\/?$/)?.[1] || ""
-          )
-        );
-
-        if (!Number.isInteger(userId) || userId <= 0) {
-          return sendJSON(res, 400, { status: "error", message: "Valid user ID is required" });
-        }
+        // STAGE 2B SECURITY FIX: session-derived, was /api/auth/security-history/:id (IDOR)
+        const userId = await k5eRequireSelf(req, res);
+        if (userId === null) return;
 
         const result = await pool.query(
           `
@@ -33051,11 +33119,11 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             token:
               (await createUserSession(user.id, req)).token,
 
+            // STAGE 2B SECURITY FIX: no raw internal numeric user id in the
+            // response — the session token already identifies the user for
+            // every subsequent request.
             user:
               {
-                id:
-                  user.id,
-
                 name:
                   user.full_name,
 
@@ -33116,23 +33184,31 @@ async function ensureVibeReleaseReadinessV140LSchema(){
           return sendJSON(res, 400, { status: "error", message: "A valid 10-digit mobile number is required" });
         }
 
+        // STAGE 2B SECURITY FIX: the response used to differ (200 vs 404, different message) depending
+        // on whether the phone number had an account — a phone-existence oracle, despite a comment right
+        // here already claiming otherwise. Every branch below now returns the exact same status, message
+        // and shape; only the internal side effect (whether a code is actually generated and stored)
+        // differs, and it never reaches the response.
+        const GENERIC_OTP_PAYLOAD = { status: "success", message: "If this mobile number has a HOWDI account, a 6-digit code was sent to it.", expires_in: 300 };
+
         const userExists = (await pool.query(
           `SELECT id FROM users WHERE phone = $1 AND is_active = TRUE LIMIT 1`,
           [phone]
         )).rows[0];
 
         if (!userExists) {
-          // Do not reveal which phone numbers have accounts; same shape either way.
-          return sendJSON(res, 404, { status: "error", message: "No HOWDI account uses this mobile number yet. Create an account first." });
+          return sendJSON(res, 200, GENERIC_OTP_PAYLOAD);
         }
 
         // Throttle: at most one live code per phone, and no more than 5 requests / 10 min.
+        // A throttled request still gets the generic response — revealing "too many requests"
+        // would itself confirm the phone number is registered.
         const recentCount = (await pool.query(
           `SELECT COUNT(*)::int n FROM auth_otp_codes WHERE phone = $1 AND created_at > NOW() - INTERVAL '10 minutes'`,
           [phone]
         )).rows[0].n;
         if (recentCount >= 5) {
-          return sendJSON(res, 429, { status: "error", message: "Too many OTP requests. Please wait a few minutes and try again." });
+          return sendJSON(res, 200, GENERIC_OTP_PAYLOAD);
         }
 
         const code = String(crypto.randomInt(0, 1000000)).padStart(6, "0");
@@ -33142,7 +33218,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
           [phone, codeHash]
         );
 
-        const payload = { status: "success", message: "A 6-digit code was sent to your mobile number.", expires_in: 300 };
+        const payload = { ...GENERIC_OTP_PAYLOAD };
         // No SMS gateway is wired up in this environment. Surface the code only
         // outside production so the OTP flow is genuinely testable end-to-end;
         // never do this in a live deployment.
@@ -33165,31 +33241,53 @@ async function ensureVibeReleaseReadinessV140LSchema(){
         }
 
         const codeHash = hashPassword(`otp:${phone}:${code}`);
-        const row = (await pool.query(
-          `SELECT id, attempts, max_attempts FROM auth_otp_codes
-           WHERE phone = $1 AND consumed_at IS NULL AND expires_at > NOW()
-           ORDER BY created_at DESC LIMIT 1`,
-          [phone]
+
+        // STAGE 2B SECURITY FIX: the old flow was SELECT (attempts check) -> SELECT (code
+        // match) -> a separate UPDATE (consume) - three round trips with no locking between
+        // them, so two concurrent requests carrying the same correct code could both pass
+        // every check before either one flipped consumed_at, i.e. a double-verify race. This
+        // is now a single atomic UPDATE ... RETURNING: only a request whose code_hash matches
+        // AND finds the row still unconsumed, unexpired and under the attempt limit can ever
+        // set consumed_at, and only one concurrent request can win - Postgres row-level locking
+        // on the UPDATE ensures the second one's WHERE clause is evaluated after the first's
+        // write, so it matches zero rows instead of also succeeding.
+        const consumed = (await pool.query(
+          `UPDATE auth_otp_codes
+           SET consumed_at = NOW()
+           WHERE phone = $1
+             AND code_hash = $2
+             AND consumed_at IS NULL
+             AND expires_at > NOW()
+             AND attempts < max_attempts
+           RETURNING id`,
+          [phone, codeHash]
         )).rows[0];
 
-        if (!row) {
-          return sendJSON(res, 400, { status: "error", message: "That code has expired. Request a new one." });
-        }
-        if (row.attempts >= row.max_attempts) {
-          return sendJSON(res, 429, { status: "error", message: "Too many incorrect attempts. Request a new code." });
-        }
+        if (!consumed) {
+          // The atomic consume above didn't match - figure out which generic message applies.
+          // This lookup is read-only and only shapes the error response; it never re-opens the
+          // consume decision made above.
+          const row = (await pool.query(
+            `SELECT id, attempts, max_attempts FROM auth_otp_codes
+             WHERE phone = $1 AND consumed_at IS NULL AND expires_at > NOW()
+             ORDER BY created_at DESC LIMIT 1`,
+            [phone]
+          )).rows[0];
 
-        const match = (await pool.query(
-          `SELECT id FROM auth_otp_codes WHERE id = $1 AND code_hash = $2 LIMIT 1`,
-          [row.id, codeHash]
-        )).rows[0];
+          if (!row) {
+            return sendJSON(res, 400, { status: "error", message: "That code has expired. Request a new one." });
+          }
+          if (row.attempts >= row.max_attempts) {
+            return sendJSON(res, 429, { status: "error", message: "Too many incorrect attempts. Request a new code." });
+          }
 
-        if (!match) {
-          await pool.query(`UPDATE auth_otp_codes SET attempts = attempts + 1 WHERE id = $1`, [row.id]);
+          // A still-live row exists but the code didn't match it - record the attempt.
+          await pool.query(
+            `UPDATE auth_otp_codes SET attempts = attempts + 1 WHERE id = $1 AND consumed_at IS NULL`,
+            [row.id]
+          );
           return sendJSON(res, 401, { status: "error", message: "That code is incorrect." });
         }
-
-        await pool.query(`UPDATE auth_otp_codes SET consumed_at = NOW() WHERE id = $1`, [row.id]);
 
         const user = (await pool.query(
           `SELECT id, full_name, email, phone, account_type_id, account_status, role, is_active
@@ -33208,11 +33306,13 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
         await logSecurityEvent({ userId: user.id, eventType: "LOGIN_SUCCESS", eventMessage: "Successful OTP login", req });
 
+        // STAGE 2B SECURITY FIX: no raw internal numeric user id in the
+        // response — mirrors the same fix applied to /api/auth/login and
+        // /api/auth/register.
         return sendJSON(res, 200, {
           status: "success",
           token: (await createUserSession(user.id, req)).token,
           user: {
-            id: user.id,
             name: user.full_name,
             full_name: user.full_name,
             email: user.email,
@@ -33235,33 +33335,15 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
     if (
       req.method === "GET" &&
-      /^\/api\/profile\/[^/]+\/?$/.test(pathname)
+      pathname === "/api/profile/me"
     ) {
       try {
+        // STAGE 2B SECURITY FIX: session-derived, was /api/profile/:id. The ownership check was
+        // already correct (403 on mismatch), but the URL itself carried the numeric id and the
+        // response below leaked it — both are removed now.
         const sessionUser = await getSessionUserFromRequest(req);
         if (!sessionUser) return sendJSON(res, 401, { status:"error", message:"Please sign in again to open your profile" });
-        const requestedUserId = clean(
-          decodeURIComponent(
-            pathname.replace(
-              "/api/profile/",
-              ""
-            )
-          )
-        );
         const userId = String(sessionUser.id);
-
-        if (requestedUserId && String(requestedUserId) !== userId) return sendJSON(res, 403, { status:"error", message:"You can only open your own profile" });
-
-        if (!userId) {
-          return sendJSON(
-            res,
-            400,
-            {
-              status: "error",
-              message: "Customer ID is required",
-            }
-          );
-        }
 
         const result =
           await pool.query(
@@ -33306,8 +33388,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             status: "success",
 
             user: {
-              id: user.id,
-
+              // STAGE 2B SECURITY FIX: no internal numeric id in the response.
               name:
                 user.full_name,
 
@@ -33363,35 +33444,18 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
     if (
       req.method === "PUT" &&
-      /^\/api\/profile\/[^/]+\/?$/.test(pathname)
+      pathname === "/api/profile/me"
     ) {
       try {
+        // STAGE 2B SECURITY FIX: session-derived, was /api/profile/:id. The ownership check was
+        // already correct (403 on mismatch), but the URL itself carried the numeric id and the
+        // response below leaked it — both are removed now.
         const sessionUser = await getSessionUserFromRequest(req);
         if (!sessionUser) return sendJSON(res, 401, { status:"error", message:"Please sign in again to update your profile" });
-        const requestedUserId = clean(
-          decodeURIComponent(
-            pathname.replace(
-              "/api/profile/",
-              ""
-            )
-          )
-        );
         const userId = String(sessionUser.id);
-        if (requestedUserId && String(requestedUserId) !== userId) return sendJSON(res, 403, { status:"error", message:"You can only update your own profile" });
 
         const body =
           await getBody(req);
-
-        if (!userId) {
-          return sendJSON(
-            res,
-            400,
-            {
-              status: "error",
-              message: "Customer ID is required",
-            }
-          );
-        }
 
         // -------------------------------
         // CHECK CUSTOMER EXISTS
@@ -33669,8 +33733,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               "Profile updated successfully",
 
             user: {
-              id: user.id,
-
+              // STAGE 2B SECURITY FIX: no internal numeric id in the response.
               name:
                 user.full_name,
 
@@ -33726,18 +33789,20 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             // HOWDI ADDRESS BOOK — POSTGRESQL LIVE API
             // =====================================================
 
-            if (req.method === "GET" && (/^\/api\/addresses\/[^/]+\/?$/.test(pathname) || (pathname === "/api/addresses" && (url.searchParams.get("user_id") || url.searchParams.get("customer_id"))))) {
-              const pathUserId = pathname.match(/^\/api\/addresses\/([^/]+)\/?$/)?.[1];
-              const userId = Number(pathUserId || url.searchParams.get("user_id") || url.searchParams.get("customer_id"));
-              if (!Number.isInteger(userId) || userId <= 0) return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
+            if (req.method === "GET" && pathname === "/api/addresses/me") {
+              // STAGE 2B SECURITY FIX: session-derived, was /api/addresses/:id or ?user_id= (IDOR)
+              const userId = await k5eRequireSelf(req,res);
+              if (userId === null) return;
               const result = await pool.query(`SELECT id,user_id,label,full_name,phone,address_line1,address_line2,landmark,city,state,pincode,country,address_type,is_default,created_at,updated_at FROM user_addresses WHERE user_id=$1 ORDER BY is_default DESC,created_at DESC`,[userId]);
-              return sendJSON(res,200,{status:"success",addresses:result.rows,count:result.rows.length});
+              // STAGE 2B SECURITY FIX: strip user_id FK from response body (response-leak fix, distinct from the IDOR fix above)
+              return sendJSON(res,200,{status:"success",addresses:k5eOmitUserId(result.rows),count:result.rows.length});
             }
 
             if (req.method === "POST" && pathname === "/api/addresses") {
+              // STAGE 2B SECURITY FIX: session-derived actor, body.user_id is no longer trusted
+              const userId = await k5eRequireSelf(req,res);
+              if (userId === null) return;
               const body = await getBody(req);
-              const userId = Number(body.user_id ?? body.userId ?? body.customer_id ?? body.customerId);
-              if (!Number.isInteger(userId) || userId <= 0) return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
               const a = normalizePostgresAddress(body), err = validatePostgresAddress(a);
               if (err) return sendJSON(res,400,{status:"error",message:err});
               const client = await pool.connect();
@@ -33750,14 +33815,17 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 if (isDefault) await client.query(`UPDATE user_addresses SET is_default=FALSE,updated_at=NOW() WHERE user_id=$1`,[userId]);
                 const result = await client.query(`INSERT INTO user_addresses (user_id,label,full_name,phone,address_line1,address_line2,landmark,city,state,pincode,country,address_type,is_default) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,[userId,a.label,a.full_name,a.phone,a.address_line1,a.address_line2||null,a.landmark||null,a.city,a.state,a.pincode,a.country,a.address_type,isDefault]);
                 await client.query("COMMIT");
-                return sendJSON(res,201,{status:"success",message:"Address saved successfully",address:result.rows[0]});
+                // STAGE 2B SECURITY FIX: strip user_id FK from response body (response-leak fix)
+                return sendJSON(res,201,{status:"success",message:"Address saved successfully",address:k5eOmitUserId(result.rows[0])});
               } catch(e) { try { await client.query("ROLLBACK"); } catch {} console.error("❌ Create address error:",e); return sendJSON(res,500,{status:"error",message:"Unable to save address"}); } finally { client.release(); }
             }
 
-            if (req.method === "PUT" && /^\/api\/addresses\/[^/]+\/?$/.test(pathname)) {
+            if (req.method === "PUT" && /^\/api\/addresses\/[^/]+\/?$/.test(pathname) && pathname !== "/api/addresses/me") {
               const addressId = decodeURIComponent(pathname.match(/^\/api\/addresses\/([^/]+)\/?$/)?.[1] || "");
-              const body = await getBody(req), userId = Number(body.user_id ?? body.userId ?? body.customer_id ?? body.customerId);
-              if (!Number.isInteger(userId) || userId <= 0) return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
+              // STAGE 2B SECURITY FIX: session-derived actor, body.user_id is no longer trusted
+              const userId = await k5eRequireSelf(req,res);
+              if (userId === null) return;
+              const body = await getBody(req);
               const old = await pool.query(`SELECT * FROM user_addresses WHERE id=$1 AND user_id=$2`,[addressId,userId]);
               if (!old.rows[0]) return sendJSON(res,404,{status:"error",message:"Address not found for this HOWDI user"});
               const a = normalizePostgresAddress(body,old.rows[0]), err = validatePostgresAddress(a);
@@ -33768,14 +33836,16 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 if (a.is_default) await client.query(`UPDATE user_addresses SET is_default=FALSE,updated_at=NOW() WHERE user_id=$1 AND id<>$2`,[userId,addressId]);
                 const result = await client.query(`UPDATE user_addresses SET label=$1,full_name=$2,phone=$3,address_line1=$4,address_line2=$5,landmark=$6,city=$7,state=$8,pincode=$9,country=$10,address_type=$11,is_default=$12,updated_at=NOW() WHERE id=$13 AND user_id=$14 RETURNING *`,[a.label,a.full_name,a.phone,a.address_line1,a.address_line2||null,a.landmark||null,a.city,a.state,a.pincode,a.country,a.address_type,a.is_default,addressId,userId]);
                 await client.query("COMMIT");
-                return sendJSON(res,200,{status:"success",message:"Address updated successfully",address:result.rows[0]});
+                // STAGE 2B SECURITY FIX: strip user_id FK from response body (response-leak fix)
+                return sendJSON(res,200,{status:"success",message:"Address updated successfully",address:k5eOmitUserId(result.rows[0])});
               } catch(e) { try { await client.query("ROLLBACK"); } catch {} console.error("❌ Update address error:",e); return sendJSON(res,500,{status:"error",message:"Unable to update address"}); } finally { client.release(); }
             }
 
             if (req.method === "DELETE" && /^\/api\/addresses\/[^/]+\/?$/.test(pathname)) {
               const addressId = decodeURIComponent(pathname.match(/^\/api\/addresses\/([^/]+)\/?$/)?.[1] || "");
-              const userId = Number(url.searchParams.get("user_id") || url.searchParams.get("customer_id"));
-              if (!Number.isInteger(userId) || userId <= 0) return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
+              // STAGE 2B SECURITY FIX: session-derived actor, ?user_id= query is no longer trusted
+              const userId = await k5eRequireSelf(req,res);
+              if (userId === null) return;
               const client = await pool.connect();
               try {
                 await client.query("BEGIN");
@@ -33787,14 +33857,16 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   if (next.rows[0]) await client.query(`UPDATE user_addresses SET is_default=TRUE,updated_at=NOW() WHERE id=$1`,[next.rows[0].id]);
                 }
                 await client.query("COMMIT");
-                return sendJSON(res,200,{status:"success",message:"Address deleted successfully",address:target.rows[0]});
+                // STAGE 2B SECURITY FIX: strip user_id FK from response body (response-leak fix)
+                return sendJSON(res,200,{status:"success",message:"Address deleted successfully",address:k5eOmitUserId(target.rows[0])});
               } catch(e) { try { await client.query("ROLLBACK"); } catch {} console.error("❌ Delete address error:",e); return sendJSON(res,500,{status:"error",message:"Unable to delete address"}); } finally { client.release(); }
             }
 
             if ((req.method === "PUT" || req.method === "POST") && /^\/api\/addresses\/[^/]+\/default\/?$/.test(pathname)) {
               const addressId = decodeURIComponent(pathname.match(/^\/api\/addresses\/([^/]+)\/default\/?$/)?.[1] || "");
-              const body = await getBody(req), userId = Number(body.user_id ?? body.userId ?? body.customer_id ?? body.customerId);
-              if (!Number.isInteger(userId) || userId <= 0) return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
+              // STAGE 2B SECURITY FIX: session-derived actor, body.user_id is no longer trusted
+              const userId = await k5eRequireSelf(req,res);
+              if (userId === null) return;
               const client = await pool.connect();
               try {
                 await client.query("BEGIN");
@@ -33803,7 +33875,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 await client.query(`UPDATE user_addresses SET is_default=FALSE,updated_at=NOW() WHERE user_id=$1`,[userId]);
                 const result = await client.query(`UPDATE user_addresses SET is_default=TRUE,updated_at=NOW() WHERE id=$1 AND user_id=$2 RETURNING *`,[addressId,userId]);
                 await client.query("COMMIT");
-                return sendJSON(res,200,{status:"success",message:"Default address updated",address:result.rows[0]});
+                // STAGE 2B SECURITY FIX: strip user_id FK from response body (response-leak fix)
+                return sendJSON(res,200,{status:"success",message:"Default address updated",address:k5eOmitUserId(result.rows[0])});
               } catch(e) { try { await client.query("ROLLBACK"); } catch {} console.error("❌ Set default address error:",e); return sendJSON(res,500,{status:"error",message:"Unable to set default address"}); } finally { client.release(); }
             }
 
@@ -44966,9 +45039,10 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             // =====================================================
             // HOWDI SUBSCRIPTION + MEMBERSHIP — LIVE POSTGRESQL API
             // =====================================================
-            if(req.method==="GET" && /^\/api\/subscription\/user\/[^/]+\/?$/.test(pathname)){
-              const userId=Number(pathname.match(/^\/api\/subscription\/user\/([^/]+)\/?$/)?.[1]);
-              if(!Number.isInteger(userId)||userId<=0) return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
+            if(req.method==="GET" && pathname==="/api/subscription/user/me"){
+              // STAGE 2B SECURITY FIX: session-derived, was /api/subscription/user/:id (IDOR)
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
 
               let subscription=(await pool.query(`
                 SELECT us.*,mp.plan_code,mp.name AS plan_name,mp.price,mp.billing_cycle,mp.benefits
@@ -44999,18 +45073,20 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 }
               }
 
-              return sendJSON(res,200,{status:"success",subscription:subscription||null,history:[]});
+              // STAGE 2B SECURITY FIX: strip user_id FK from response body (response-leak fix, distinct from the IDOR fix above)
+              return sendJSON(res,200,{status:"success",subscription:k5eOmitUserId(subscription)||null,history:[]});
             }
 
-            if(req.method==="PUT" && /^\/api\/subscription\/user\/[^/]+\/?$/.test(pathname)){
-              const userId=Number(pathname.match(/^\/api\/subscription\/user\/([^/]+)\/?$/)?.[1]);
+            if(req.method==="PUT" && pathname==="/api/subscription/user/me"){
+              // STAGE 2B SECURITY FIX: session-derived, was /api/subscription/user/:id (IDOR)
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
               const body=await getBody(req);
               const planCode=String(body.plan_code??body.plan??"free").toLowerCase();
               const billingCycle=String(body.billing_cycle??body.billing??"monthly").toLowerCase();
               const paymentMethodId=body.payment_method_id??body.payment??null;
               const autoRenew=body.auto_renew!==undefined?!!body.auto_renew:true;
               const action=clean(body.action)||"Updated";
-              if(!Number.isInteger(userId)||userId<=0) return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
               if(!["free","plus","pro"].includes(planCode)) return sendJSON(res,400,{status:"error",message:"Invalid membership plan"});
               if(!["monthly","yearly"].includes(billingCycle)) return sendJSON(res,400,{status:"error",message:"Invalid billing cycle"});
               if(planCode!=="free" && !paymentMethodId) return sendJSON(res,400,{status:"error",message:"Select a saved payment method before activating a paid plan"});
@@ -45041,7 +45117,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   [userId,subscription.id,planCode,billingCycle,action,amount,paymentMethodId?String(paymentMethodId):null]
                 );
                 await client.query("COMMIT");
-                return sendJSON(res,200,{status:"success",message:"Membership updated",subscription});
+                // STAGE 2B SECURITY FIX: strip user_id FK from response body (response-leak fix, distinct from the IDOR fix above)
+                return sendJSON(res,200,{status:"success",message:"Membership updated",subscription:k5eOmitUserId(subscription)});
               }catch(error){
                 try{await client.query("ROLLBACK")}catch{}
                 console.error("Subscription update error:",error);
@@ -45058,7 +45135,10 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             // HOWDI OFFERS + PROMOTIONS + PERSONALIZED DEALS — API
             // =====================================================
             if (req.method === "GET" && pathname === "/api/offers") {
-              const userId = Number(url.searchParams.get("userId") || 0);
+              // STAGE 2B SECURITY FIX: session-derived when signed in (personalisation only,
+              // low impact), never a client-supplied ?userId= — guests still see the public list.
+              const offersSession = await getSessionUserFromRequest(req);
+              const userId = offersSession ? Number(offersSession.id) : 0;
               let isNewCustomer = false;
 
               if (Number.isInteger(userId) && userId > 0) {
@@ -45104,8 +45184,12 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
             if (req.method === "POST" && /^\/api\/offers\/\d+\/track\/?$/.test(pathname)) {
               const offerId = Number(pathname.match(/^\/api\/offers\/(\d+)\/track\/?$/)?.[1]);
+              // STAGE 2B SECURITY FIX: session-derived when signed in, never a client-supplied
+              // body.user_id (this only pollutes another user's impression/analytics log, but the
+              // fix is the same everywhere: never trust the client for identity).
+              const trackSession = await getSessionUserFromRequest(req);
+              const userId = trackSession ? Number(trackSession.id) : 0;
               const body = await getBody(req);
-              const userId = Number(body.user_id ?? body.userId);
               const rawEvent = String(body.event_type || body.eventType || "VIEW").toUpperCase();
               const eventType = ["VIEW", "COPY_CODE", "OPEN", "DISMISS"].includes(rawEvent) ? rawEvent : "VIEW";
 
@@ -45216,11 +45300,11 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
             if (
               req.method === "GET" &&
-              /^\/api\/referrals\/user\/\d+\/?$/.test(pathname)
+              pathname === "/api/referrals/user/me"
             ) {
-              const userId = Number(
-                pathname.match(/^\/api\/referrals\/user\/(\d+)\/?$/)?.[1]
-              );
+              // STAGE 2B SECURITY FIX: session-derived, was /api/referrals/user/:id (IDOR)
+              const userId = await k5eRequireSelf(req, res);
+              if (userId === null) return;
 
               const userResult = await pool.query(
                 `SELECT id FROM users WHERE id = $1 LIMIT 1`,
@@ -45302,13 +45386,11 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
             if (
               req.method === "POST" &&
-              /^\/api\/referrals\/user\/\d+\/share\/?$/.test(pathname)
+              pathname === "/api/referrals/user/me/share"
             ) {
-              const userId = Number(
-                pathname.match(
-                  /^\/api\/referrals\/user\/(\d+)\/share\/?$/
-                )?.[1]
-              );
+              // STAGE 2B SECURITY FIX: session-derived, was /api/referrals/user/:id/share (IDOR)
+              const userId = await k5eRequireSelf(req, res);
+              if (userId === null) return;
               const body = await getBody(req);
               const channel = clean(body.channel || "DIRECT")
                 .toUpperCase()
@@ -50437,21 +50519,14 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             // =====================================================
             if (
               req.method === "GET" &&
-              /^\/api\/profile\/[^/]+\/settings\/?$/.test(pathname)
+              pathname === "/api/profile/me/settings"
             ) {
+              // STAGE 2B SECURITY FIX (found during the sweep, not in the original audit list): the
+              // ownership check here was already correct (403 on mismatch), but the URL itself carried
+              // the numeric id and the response leaked it — both are removed now, was /api/profile/:id/settings.
               const sessionUser = await getSessionUserFromRequest(req);
               if (!sessionUser) return sendJSON(res, 401, { status:"error", message:"Please sign in again to open account settings" });
-              const requestedUserId = Number(
-                pathname.match(/^\/api\/profile\/([^/]+)\/settings\/?$/)?.[1]
-              );
               const userId = Number(sessionUser.id);
-
-              if (!Number.isInteger(requestedUserId) || requestedUserId <= 0) {
-                return sendJSON(res, 400, { status:"error", message:"Valid customer account is required" });
-              }
-              if (requestedUserId !== userId) {
-                return sendJSON(res, 403, { status:"error", message:"You can only open your own account settings" });
-              }
 
               const userResult = await pool.query(
                 `SELECT id FROM users WHERE id = $1 LIMIT 1`,
@@ -50488,29 +50563,23 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 [userId]
               );
 
+              // STAGE 2B SECURITY FIX: strip user_id FK from response body (response-leak fix)
               return sendJSON(res, 200, {
                 status: "success",
-                settings: result.rows[0],
+                settings: k5eOmitUserId(result.rows[0]),
               });
             }
 
             if (
               req.method === "PUT" &&
-              /^\/api\/profile\/[^/]+\/settings\/?$/.test(pathname)
+              pathname === "/api/profile/me/settings"
             ) {
+              // STAGE 2B SECURITY FIX (found during the sweep, not in the original audit list): the
+              // ownership check here was already correct (403 on mismatch), but the URL itself carried
+              // the numeric id and the response leaked it — both are removed now, was /api/profile/:id/settings.
               const sessionUser = await getSessionUserFromRequest(req);
               if (!sessionUser) return sendJSON(res, 401, { status:"error", message:"Please sign in again to update account settings" });
-              const requestedUserId = Number(
-                pathname.match(/^\/api\/profile\/([^/]+)\/settings\/?$/)?.[1]
-              );
               const userId = Number(sessionUser.id);
-
-              if (!Number.isInteger(requestedUserId) || requestedUserId <= 0) {
-                return sendJSON(res, 400, { status:"error", message:"Valid customer account is required" });
-              }
-              if (requestedUserId !== userId) {
-                return sendJSON(res, 403, { status:"error", message:"You can only update your own account settings" });
-              }
 
               const body = await getBody(req);
 
@@ -50651,10 +50720,11 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 ]
               );
 
+              // STAGE 2B SECURITY FIX: strip user_id FK from response body (response-leak fix)
               return sendJSON(res, 200, {
                 status: "success",
                 message: "Account settings saved successfully",
-                settings: result.rows[0],
+                settings: k5eOmitUserId(result.rows[0]),
               });
             }
 
@@ -50662,10 +50732,12 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             // HOWDI HELP & SUPPORT — LIVE POSTGRESQL API
             // =====================================================
             if(req.method==="GET" && /^\/api\/support\/tickets\/user\/[^/]+\/?$/.test(pathname)){
-              const userId=Number(pathname.match(/^\/api\/support\/tickets\/user\/([^/]+)\/?$/)?.[1]);
-              if(!Number.isInteger(userId)||userId<=0){
-                return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
-              }
+              // STAGE 2B SECURITY FIX (found during the sweep, not in the original audit list, and not
+              // called by the current frontend): this had NO auth check at all — any anonymous caller
+              // could read any account's support tickets, including private message text, just by
+              // incrementing the URL id. Session-derived now; the URL id is never trusted.
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
               const result=await pool.query(`
                 SELECT id,ticket_code,subject,message,category,status,priority,created_at,updated_at
                 FROM support_tickets
@@ -50677,16 +50749,15 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             }
 
             if(req.method==="POST" && pathname==="/api/support/tickets"){
+              // STAGE 2B SECURITY FIX: session-derived actor, body.user_id is no longer trusted
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
               const body=await getBody(req);
-              const userId=Number(body.user_id??body.userId);
               const subject=clean(body.subject);
               const message=clean(body.message);
               const category=clean(body.category)||"general";
               const priority=String(body.priority||"NORMAL").toUpperCase();
 
-              if(!Number.isInteger(userId)||userId<=0){
-                return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
-              }
               if(!subject||!message){
                 return sendJSON(res,400,{status:"error",message:"Subject and message are required"});
               }
@@ -50710,12 +50781,16 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
             if(req.method==="PUT" && /^\/api\/support\/tickets\/[^/]+\/status\/?$/.test(pathname)){
               const ticketId=decodeURIComponent(pathname.match(/^\/api\/support\/tickets\/([^/]+)\/status\/?$/)?.[1]||"");
+              // STAGE 2B SECURITY FIX (found during the sweep, not in the original audit list, and not
+              // called by the current frontend): body.user_id was the ownership check itself — a
+              // spoofed id could change the status of someone else's ticket. Session-derived now.
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
               const body=await getBody(req);
-              const userId=Number(body.user_id??body.userId);
               const status=String(body.status||"").toUpperCase();
 
-              if(!Number.isInteger(userId)||userId<=0||!ticketId){
-                return sendJSON(res,400,{status:"error",message:"Valid ticket and user are required"});
+              if(!ticketId){
+                return sendJSON(res,400,{status:"error",message:"Valid ticket is required"});
               }
               if(!["OPEN","IN_PROGRESS","RESOLVED","CLOSED"].includes(status)){
                 return sendJSON(res,400,{status:"error",message:"Invalid ticket status"});
@@ -50736,9 +50811,10 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
             // HOWDI MESSAGES + NOTIFICATIONS — LIVE API
             // =====================================================
-            if (req.method==="GET" && /^\/api\/communications\/user\/[^/]+\/?$/.test(pathname)) {
-              const userId=Number(pathname.match(/^\/api\/communications\/user\/([^/]+)\/?$/)?.[1]);
-              if(!Number.isInteger(userId)||userId<=0) return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
+            if (req.method==="GET" && pathname==="/api/communications/user/me") {
+              // STAGE 2B SECURITY FIX: session-derived, was /api/communications/user/:id (IDOR)
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
               const [messages,notifications]=await Promise.all([
                 pool.query(`SELECT id,message_type,icon,title,message,recipient,direction,is_read,created_at FROM user_messages WHERE user_id=$1 ORDER BY created_at DESC LIMIT 100`,[userId]),
                 pool.query(`SELECT id,notification_type,icon,title,message,is_read,created_at FROM user_notifications WHERE user_id=$1 ORDER BY created_at DESC LIMIT 100`,[userId])
@@ -50747,30 +50823,37 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             }
 
             if(req.method==="POST" && pathname==="/api/messages"){
-              const body=await getBody(req); const userId=Number(body.user_id??body.userId);
+              // STAGE 2B SECURITY FIX: session-derived actor, body.user_id is no longer trusted
+              const userId=await k5eRequireSelf(req,res); if(userId===null) return;
+              const body=await getBody(req);
               const recipient=clean(body.recipient); const message=clean(body.message??body.text);
-              if(!Number.isInteger(userId)||userId<=0) return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
               if(!recipient||!message) return sendJSON(res,400,{status:"error",message:"Recipient and message are required"});
               const title=clean(body.title)||`Message to ${recipient}`;
               const result=await pool.query(`INSERT INTO user_messages(user_id,message_type,icon,title,message,recipient,direction,is_read) VALUES($1,'sent','✉️',$2,$3,$4,'SENT',TRUE) RETURNING *`,[userId,title,message,recipient]);
-              return sendJSON(res,201,{status:"success",message:"Message sent",item:result.rows[0]});
+              // STAGE 2B SECURITY FIX: strip user_id FK from response body (response-leak fix)
+              return sendJSON(res,201,{status:"success",message:"Message sent",item:k5eOmitUserId(result.rows[0])});
             }
 
             if(req.method==="PUT" && /^\/api\/messages\/[^/]+\/read\/?$/.test(pathname)){
-              const id=decodeURIComponent(pathname.match(/^\/api\/messages\/([^/]+)\/read\/?$/)?.[1]||""); const body=await getBody(req); const userId=Number(body.user_id??body.userId);
+              // STAGE 2B SECURITY FIX: session-derived actor, body.user_id is no longer trusted
+              const id=decodeURIComponent(pathname.match(/^\/api\/messages\/([^/]+)\/read\/?$/)?.[1]||"");
+              const userId=await k5eRequireSelf(req,res); if(userId===null) return;
               const result=await pool.query(`UPDATE user_messages SET is_read=TRUE WHERE id=$1 AND user_id=$2 RETURNING id`,[id,userId]);
               if(!result.rows.length) return sendJSON(res,404,{status:"error",message:"Message not found"});
               return sendJSON(res,200,{status:"success"});
             }
 
             if(req.method==="PUT" && pathname==="/api/messages/read-all"){
-              const body=await getBody(req); const userId=Number(body.user_id??body.userId);
+              // STAGE 2B SECURITY FIX: session-derived actor, body.user_id is no longer trusted
+              const userId=await k5eRequireSelf(req,res); if(userId===null) return;
               await pool.query(`UPDATE user_messages SET is_read=TRUE WHERE user_id=$1 AND is_read=FALSE`,[userId]);
               return sendJSON(res,200,{status:"success"});
             }
 
             if(req.method==="DELETE" && /^\/api\/messages\/[^/]+\/?$/.test(pathname)){
-              const id=decodeURIComponent(pathname.match(/^\/api\/messages\/([^/]+)\/?$/)?.[1]||""); const userId=Number(url.searchParams.get("user_id"));
+              // STAGE 2B SECURITY FIX: session-derived actor, ?user_id= query is no longer trusted
+              const id=decodeURIComponent(pathname.match(/^\/api\/messages\/([^/]+)\/?$/)?.[1]||"");
+              const userId=await k5eRequireSelf(req,res); if(userId===null) return;
               const result=await pool.query(`DELETE FROM user_messages WHERE id=$1 AND user_id=$2 RETURNING id`,[id,userId]);
               if(!result.rows.length) return sendJSON(res,404,{status:"error",message:"Message not found"});
               return sendJSON(res,200,{status:"success"});
@@ -50886,10 +50969,11 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             // =====================================================
             // HOWDI CUSTOMER WALLET & HOWDI CREDITS — LIVE API
             // =====================================================
-            if(req.method==="GET" && /^\/api\/wallet\/\d+\/?$/.test(pathname)){
+            if(req.method==="GET" && pathname==="/api/wallet/me"){
+              // STAGE 2B SECURITY FIX: session-derived, was /api/wallet/:id (IDOR)
               try {
-              const userId=Number(pathname.match(/^\/api\/wallet\/(\d+)\/?$/)?.[1]);
-              if(!Number.isInteger(userId)||userId<=0) return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
               let wallet=(await pool.query(`SELECT * FROM user_wallets WHERE user_id=$1`,[userId])).rows[0];
               if(!wallet) wallet=(await pool.query(`INSERT INTO user_wallets(user_id) VALUES($1) ON CONFLICT (user_id) DO UPDATE SET user_id=EXCLUDED.user_id RETURNING *`,[userId])).rows[0];
 
@@ -50904,13 +50988,12 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               catch(error){ rows=(await pool.query(`SELECT * FROM wallet_transactions WHERE wallet_id=$1 ORDER BY created_at DESC LIMIT 100`,[wallet.id])).rows; }
               const transactions=rows.map(t=>({...t,description:t.description||t.title||"",source_type:t.source_type||t.reference_type||"WALLET",
                 direction:t.direction||(["DEBIT","REWARD_REDEMPTION"].includes(String(t.transaction_type).toUpperCase())?"DEBIT":"CREDIT"),status:t.status||"COMPLETED"}));
-              return sendJSON(res,200,{status:"success",wallet:normalizedWallet,transactions});
+              return sendJSON(res,200,{status:"success",wallet:k5eOmitUserId(normalizedWallet),transactions:k5eOmitUserId(transactions)});
                           } catch (error) {
                 console.error("HOWDI WALLET GET DB ERROR:", {
                   message:error.message, code:error.code, detail:error.detail, hint:error.hint
                 });
                 return sendJSON(res,200,{status:"success",degraded:true,wallet:{
-                  user_id:Number(pathname.match(/\/api\/wallet\/(\d+)/)?.[1]||0),
                   wallet_balance:0,available_balance:0,balance:0,cashback_balance:0,total_cashback:0,
                   credit_balance:0,total_spent:0,currency:"INR",wallet_status:"ACTIVE"
                 },transactions:[]});
@@ -50918,8 +51001,13 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 }
 
             if(req.method==="POST" && pathname==="/api/wallet/transactions"){
+              // STAGE 2B SECURITY FIX (found during the sweep, not in the original audit list, and not
+              // called by the current frontend): this had NO auth check at all — any anonymous caller
+              // could credit or debit ANY account's wallet by an arbitrary amount just by supplying its
+              // user_id in the body. Session-derived now, like the /api/wallet/debit fix from the audit.
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
               const body=await getBody(req);
-              const userId=Number(body.user_id ?? body.userId);
               const transactionType=clean(String(body.transaction_type||body.transactionType||"WALLET")).toUpperCase().slice(0,40)||"WALLET";
               const sourceType=clean(String(body.source_type||body.sourceType||"MANUAL")).toUpperCase().slice(0,60)||"MANUAL";
               const title=clean(String(body.title||"")).slice(0,220);
@@ -50928,8 +51016,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               const direction=clean(String(body.direction||"CREDIT")).toUpperCase();
               const referenceId=body.reference_id||body.referenceId ? clean(String(body.reference_id||body.referenceId)).slice(0,120) : null;
 
-              if(!Number.isInteger(userId)||userId<=0||!title||!Number.isFinite(amount)||amount<=0||!["CREDIT","DEBIT"].includes(direction)){
-                return sendJSON(res,400,{status:"error",message:"Valid user, title, positive amount and direction are required"});
+              if(!title||!Number.isFinite(amount)||amount<=0||!["CREDIT","DEBIT"].includes(direction)){
+                return sendJSON(res,400,{status:"error",message:"Valid title, positive amount and direction are required"});
               }
 
               let wallet=await pool.query(`SELECT * FROM user_wallets WHERE user_id=$1`,[userId]);
@@ -50961,22 +51049,25 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 RETURNING *
               `,[userId,current.id,transactionType,sourceType,title,description,amount,direction,referenceId]);
 
+              // STAGE 2B SECURITY FIX: strip user_id FK from response body (response-leak fix)
               return sendJSON(res,201,{
                 status:"success",
                 message:"Wallet transaction recorded successfully.",
-                wallet:updated.rows[0],
-                transaction:transaction.rows[0]
+                wallet:k5eOmitUserId(updated.rows[0]),
+                transaction:k5eOmitUserId(transaction.rows[0])
               });
             }
 
             // =====================================================
             // HOWDI HELP CENTER & SUPPORT TICKETS — LIVE API
             // =====================================================
-            if(req.method==="GET" && /^\/api\/support\/tickets\/\d+\/?$/.test(pathname)){
-              const userId=Number(pathname.match(/^\/api\/support\/tickets\/(\d+)\/?$/)?.[1]);
-              if(!Number.isInteger(userId)||userId<=0) return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
+            if(req.method==="GET" && pathname==="/api/support/tickets/me"){
+              // STAGE 2B SECURITY FIX: session-derived, was /api/support/tickets/:id (IDOR)
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
               const result=await pool.query(`SELECT * FROM support_tickets WHERE user_id=$1 ORDER BY created_at DESC`,[userId]);
-              const tickets=result.rows.map(t=>({
+              // STAGE 2B SECURITY FIX: strip user_id FK from response body (response-leak fix, distinct from the IDOR fix above)
+              const tickets=k5eOmitUserId(result.rows).map(t=>({
                 ...t,
                 ticket_number:t.ticket_number||t.ticket_code||String(t.id),
                 ticket_code:t.ticket_code||t.ticket_number||String(t.id),
@@ -51006,27 +51097,29 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
             if(req.method==="POST" && /^\/api\/support\/tickets\/\d+\/close\/?$/.test(pathname)){
               const ticketId=Number(pathname.match(/^\/api\/support\/tickets\/(\d+)\/close\/?$/)?.[1]);
-              const body=await getBody(req);
-              const userId=Number(body.user_id ?? body.userId);
-              if(!Number.isInteger(ticketId)||ticketId<=0||!Number.isInteger(userId)||userId<=0){
-                return sendJSON(res,400,{status:"error",message:"Valid ticket and user are required"});
+              // STAGE 2B SECURITY FIX: session-derived actor, body.user_id is no longer trusted
+              // (it was also used as the ownership check itself — a spoofed id could close someone else's ticket)
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
+              if(!Number.isInteger(ticketId)||ticketId<=0){
+                return sendJSON(res,400,{status:"error",message:"Valid ticket is required"});
               }
               const closed=await pool.query(`
                 UPDATE support_tickets SET status='CLOSED',updated_at=NOW(),resolved_at=NOW()
                 WHERE id=$1 AND user_id=$2 RETURNING *
               `,[ticketId,userId]);
               if(!closed.rows[0]) return sendJSON(res,404,{status:"error",message:"Support ticket not found"});
-              return sendJSON(res,200,{status:"success",message:"Support ticket closed.",ticket:closed.rows[0]});
+              // STAGE 2B SECURITY FIX: strip user_id FK from response body (response-leak fix)
+              return sendJSON(res,200,{status:"success",message:"Support ticket closed.",ticket:k5eOmitUserId(closed.rows[0])});
             }
 
             // =====================================================
             // HOWDI CUSTOMER PREFERENCES CENTER — LIVE API
             // =====================================================
-            if(req.method==="GET" && /^\/api\/preferences\/\d+\/?$/.test(pathname)){
-              const userId=Number(pathname.match(/^\/api\/preferences\/(\d+)\/?$/)?.[1]);
-              if(!Number.isInteger(userId)||userId<=0){
-                return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
-              }
+            if(req.method==="GET" && pathname==="/api/preferences/me"){
+              // STAGE 2B SECURITY FIX: session-derived, was /api/preferences/:id (IDOR — trusted the URL id)
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
 
               let preferences=await pool.query(`
                 SELECT * FROM user_preferences WHERE user_id=$1
@@ -51045,16 +51138,14 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 `,[userId]);
               }
 
-              return sendJSON(res,200,{status:"success",preferences:preferences.rows[0]});
+              return sendJSON(res,200,{status:"success",preferences:k5eOmitUserId(preferences.rows[0])});
             }
 
-            if(req.method==="PUT" && /^\/api\/preferences\/\d+\/?$/.test(pathname)){
-              const userId=Number(pathname.match(/^\/api\/preferences\/(\d+)\/?$/)?.[1]);
+            if(req.method==="PUT" && pathname==="/api/preferences/me"){
+              // STAGE 2B SECURITY FIX: session-derived, was /api/preferences/:id (IDOR — trusted the URL id)
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
               const body=await getBody(req);
-
-              if(!Number.isInteger(userId)||userId<=0){
-                return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
-              }
 
               const currentResult=await pool.query(`
                 SELECT * FROM user_preferences WHERE user_id=$1
@@ -51144,16 +51235,17 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               return sendJSON(res,200,{
                 status:"success",
                 message:"Your preferences have been saved.",
-                preferences:updated.rows[0]
+                preferences:k5eOmitUserId(updated.rows[0])
               });
             }
 
             // =====================================================
             // HOWDI CUSTOMER FEEDBACK & RATINGS CENTER — LIVE API
             // =====================================================
-            if(req.method==="GET" && /^\/api\/feedback\/\d+\/?$/.test(pathname)){
-              const userId=Number(pathname.match(/^\/api\/feedback\/(\d+)\/?$/)?.[1]);
-              if(!Number.isInteger(userId)||userId<=0) return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
+            if(req.method==="GET" && pathname==="/api/feedback/me"){
+              // STAGE 2B SECURITY FIX: session-derived, was /api/feedback/:id (IDOR)
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
 
               const feedback=await pool.query(`
                 SELECT id,feedback_type,subject,rating,message,order_id,product_id,service_area,status,created_at,updated_at
@@ -51174,8 +51266,10 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             }
 
             if(req.method==="POST" && pathname==="/api/feedback"){
+              // STAGE 2B SECURITY FIX: session-derived actor, body.user_id is no longer trusted
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
               const body=await getBody(req);
-              const userId=Number(body.user_id ?? body.userId);
               const feedbackType=clean(String(body.feedback_type||body.feedbackType||"GENERAL")).toUpperCase().slice(0,40)||"GENERAL";
               const subject=clean(String(body.subject||"")).slice(0,220);
               const rating=Number(body.rating);
@@ -51184,8 +51278,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               const orderId=body.order_id ?? body.orderId ? Number(body.order_id ?? body.orderId) : null;
               const productId=body.product_id ?? body.productId ? Number(body.product_id ?? body.productId) : null;
 
-              if(!Number.isInteger(userId)||userId<=0||!subject||!Number.isInteger(rating)||rating<1||rating>5){
-                return sendJSON(res,400,{status:"error",message:"Valid user, subject and rating from 1 to 5 are required"});
+              if(!subject||!Number.isInteger(rating)||rating<1||rating>5){
+                return sendJSON(res,400,{status:"error",message:"Valid subject and rating from 1 to 5 are required"});
               }
 
               const created=await pool.query(`
@@ -51194,15 +51288,18 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 RETURNING *
               `,[userId,feedbackType,subject,rating,message,Number.isInteger(orderId)&&orderId>0?orderId:null,Number.isInteger(productId)&&productId>0?productId:null,serviceArea]);
 
-              return sendJSON(res,201,{status:"success",message:"Thank you! Your feedback has been submitted.",feedback:created.rows[0]});
+              // STAGE 2B SECURITY FIX: strip user_id FK from response body (response-leak fix)
+              return sendJSON(res,201,{status:"success",message:"Thank you! Your feedback has been submitted.",feedback:k5eOmitUserId(created.rows[0])});
             }
 
             if(req.method==="DELETE" && /^\/api\/feedback\/\d+\/?$/.test(pathname)){
               const feedbackId=Number(pathname.match(/^\/api\/feedback\/(\d+)\/?$/)?.[1]);
-              const userId=Number(parsedUrl.searchParams.get("user_id")||parsedUrl.searchParams.get("userId"));
+              // STAGE 2B SECURITY FIX: session-derived actor, ?user_id= query is no longer trusted
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
 
-              if(!Number.isInteger(feedbackId)||feedbackId<=0||!Number.isInteger(userId)||userId<=0){
-                return sendJSON(res,400,{status:"error",message:"Valid feedback and user are required"});
+              if(!Number.isInteger(feedbackId)||feedbackId<=0){
+                return sendJSON(res,400,{status:"error",message:"Valid feedback is required"});
               }
 
               const deleted=await pool.query(`
@@ -51218,9 +51315,10 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             // =====================================================
             // HOWDI REFERRAL & INVITE FRIENDS CENTER — LIVE API
             // =====================================================
-            if(req.method==="GET" && /^\/api\/referrals\/profile\/\d+\/?$/.test(pathname)){
-              const userId=Number(pathname.match(/^\/api\/referrals\/profile\/(\d+)\/?$/)?.[1]);
-              if(!Number.isInteger(userId)||userId<=0) return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
+            if(req.method==="GET" && pathname==="/api/referrals/profile/me"){
+              // STAGE 2B SECURITY FIX: session-derived, was /api/referrals/profile/:id (IDOR)
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
 
               let profile=await pool.query(`SELECT * FROM user_referral_profiles WHERE user_id=$1`,[userId]);
               if(!profile.rows[0]){
@@ -51250,17 +51348,19 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 completed_at:r.completed_at||r.qualified_at||r.rewarded_at||null
               }));
 
-              return sendJSON(res,200,{status:"success",profile:profile.rows[0],referrals:normalizedReferrals});
+              return sendJSON(res,200,{status:"success",profile:k5eOmitUserId(profile.rows[0]),referrals:k5eOmitUserId(normalizedReferrals)});
             }
 
             if(req.method==="POST" && pathname==="/api/referrals/invite"){
+              // STAGE 2B SECURITY FIX: session-derived actor, body.user_id is no longer trusted
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
               const body=await getBody(req);
-              const userId=Number(body.user_id ?? body.userId);
               const referredName=clean(String(body.referred_name||body.referredName||"")).slice(0,180);
               const referredEmail=clean(String(body.referred_email||body.referredEmail||"")).toLowerCase().slice(0,220);
 
-              if(!Number.isInteger(userId)||userId<=0||!referredName||!referredEmail){
-                return sendJSON(res,400,{status:"error",message:"Valid user, friend name and email are required"});
+              if(!referredName||!referredEmail){
+                return sendJSON(res,400,{status:"error",message:"Valid friend name and email are required"});
               }
 
               let profile=await pool.query(`SELECT * FROM user_referral_profiles WHERE user_id=$1`,[userId]);
@@ -51287,7 +51387,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 WHERE user_id=$1
               `,[userId]);
 
-              return sendJSON(res,201,{status:"success",message:"Referral invite created",referral:created.rows[0]});
+              // STAGE 2B SECURITY FIX: strip referrer_user_id FK from response body (response-leak fix)
+              return sendJSON(res,201,{status:"success",message:"Referral invite created",referral:k5eOmitUserId(created.rows[0])});
             }
 
             if(req.method==="POST" && /^\/api\/referrals\/\d+\/complete\/?$/.test(pathname)){
@@ -51327,9 +51428,10 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             // =====================================================
             // HOWDI ACCOUNT ACTIVITY + SECURITY CENTER — LIVE API
             // =====================================================
-            if(req.method==="GET" && /^\/api\/security\/activity\/\d+\/?$/.test(pathname)){
-              const userId=Number(pathname.match(/^\/api\/security\/activity\/(\d+)\/?$/)?.[1]);
-              if(!Number.isInteger(userId)||userId<=0) return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
+            if(req.method==="GET" && pathname==="/api/security/activity/me"){
+              // STAGE 2B SECURITY FIX: session-derived, was /api/security/activity/:id (IDOR)
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
 
               const limit=Math.min(Math.max(Number(parsedUrl.searchParams.get("limit")||50),1),100);
               const activity=await pool.query(`
@@ -51343,9 +51445,10 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               return sendJSON(res,200,{status:"success",activity:activity.rows});
             }
 
-            if(req.method==="GET" && /^\/api\/security\/sessions\/\d+\/?$/.test(pathname)){
-              const userId=Number(pathname.match(/^\/api\/security\/sessions\/(\d+)\/?$/)?.[1]);
-              if(!Number.isInteger(userId)||userId<=0) return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
+            if(req.method==="GET" && pathname==="/api/security/sessions/me"){
+              // STAGE 2B SECURITY FIX: session-derived, was /api/security/sessions/:id (IDOR)
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
 
               const sessions=await pool.query(`
                 SELECT id,device_name,device_type,browser,os,ip_address,location_label,
@@ -51359,8 +51462,12 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             }
 
             if(req.method==="POST" && pathname==="/api/security/activity"){
+              // STAGE 2B SECURITY FIX (found during the sweep, not in the original audit list, and not
+              // called by the current frontend): this had NO auth check at all — any anonymous caller
+              // could inject fake entries into any account's security activity log. Session-derived now.
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
               const body=await getBody(req);
-              const userId=Number(body.user_id ?? body.userId);
               const activityType=clean(String(body.activity_type||body.activityType||"ACCOUNT")).toUpperCase().slice(0,80)||"ACCOUNT";
               const title=clean(String(body.title||"")).slice(0,220);
               const description=body.description ? clean(String(body.description)).slice(0,5000) : null;
@@ -51368,7 +51475,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               const ipAddress=body.ip_address||body.ipAddress ? clean(String(body.ip_address||body.ipAddress)).slice(0,80) : null;
               const metadata=(body.metadata && typeof body.metadata==="object") ? body.metadata : {};
 
-              if(!Number.isInteger(userId)||userId<=0||!title) return sendJSON(res,400,{status:"error",message:"Valid user and title are required"});
+              if(!title) return sendJSON(res,400,{status:"error",message:"Valid title is required"});
 
               const created=await pool.query(`
                 INSERT INTO user_account_activity(user_id,activity_type,title,description,device_name,ip_address,metadata)
@@ -51376,12 +51483,17 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 RETURNING *
               `,[userId,activityType,title,description,deviceName,ipAddress,JSON.stringify(metadata)]);
 
-              return sendJSON(res,201,{status:"success",message:"Security activity created",activity:created.rows[0]});
+              // STAGE 2B SECURITY FIX: strip user_id FK from response body (response-leak fix)
+              return sendJSON(res,201,{status:"success",message:"Security activity created",activity:k5eOmitUserId(created.rows[0])});
             }
 
             if(req.method==="POST" && pathname==="/api/security/sessions"){
+              // STAGE 2B SECURITY FIX (found during the sweep, not in the original audit list, and not
+              // called by the current frontend): this had NO auth check at all — any anonymous caller
+              // could create fake device sessions on any account. Session-derived now.
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
               const body=await getBody(req);
-              const userId=Number(body.user_id ?? body.userId);
               const deviceName=clean(String(body.device_name||body.deviceName||"")).slice(0,180);
               const deviceType=clean(String(body.device_type||body.deviceType||"UNKNOWN")).toUpperCase().slice(0,60)||"UNKNOWN";
               const browser=body.browser ? clean(String(body.browser)).slice(0,120) : null;
@@ -51390,7 +51502,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               const locationLabel=body.location_label||body.locationLabel ? clean(String(body.location_label||body.locationLabel)).slice(0,180) : null;
               const isCurrent=body.is_current===true || body.isCurrent===true;
 
-              if(!Number.isInteger(userId)||userId<=0||!deviceName) return sendJSON(res,400,{status:"error",message:"Valid user and device name are required"});
+              if(!deviceName) return sendJSON(res,400,{status:"error",message:"Valid device name is required"});
 
               if(isCurrent){
                 await pool.query(`UPDATE user_device_sessions SET is_current=FALSE WHERE user_id=$1`,[userId]);
@@ -51407,14 +51519,17 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 VALUES($1,'SESSION','New device session', 'A device session was registered for your HOWDI account.',$2,$3)
               `,[userId,deviceName,ipAddress]);
 
-              return sendJSON(res,201,{status:"success",message:"Device session created",session:created.rows[0]});
+              // STAGE 2B SECURITY FIX: strip user_id FK from response body (response-leak fix)
+              return sendJSON(res,201,{status:"success",message:"Device session created",session:k5eOmitUserId(created.rows[0])});
             }
 
             if(req.method==="POST" && /^\/api\/security\/sessions\/\d+\/end\/?$/.test(pathname)){
               const sessionId=Number(pathname.match(/^\/api\/security\/sessions\/(\d+)\/end\/?$/)?.[1]);
-              const body=await getBody(req);
-              const userId=Number(body.user_id ?? body.userId);
-              if(!Number.isInteger(sessionId)||sessionId<=0||!Number.isInteger(userId)||userId<=0) return sendJSON(res,400,{status:"error",message:"Valid session and user are required"});
+              // STAGE 2B SECURITY FIX: session-derived actor, body.user_id is no longer trusted
+              // (it was also used as the ownership check itself — a spoofed id could end someone else's session)
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
+              if(!Number.isInteger(sessionId)||sessionId<=0) return sendJSON(res,400,{status:"error",message:"Valid session is required"});
 
               const ended=await pool.query(`
                 UPDATE user_device_sessions
@@ -51430,7 +51545,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 VALUES($1,'SESSION','Device session ended','A device session was ended from your HOWDI security center.',$2,$3)
               `,[userId,ended.rows[0].device_name,ended.rows[0].ip_address]);
 
-              return sendJSON(res,200,{status:"success",message:"Device session ended",session:ended.rows[0]});
+              // STAGE 2B SECURITY FIX: strip user_id FK from response body (response-leak fix)
+              return sendJSON(res,200,{status:"success",message:"Device session ended",session:k5eOmitUserId(ended.rows[0])});
             }
 
             // =====================================================
@@ -51570,8 +51686,11 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             }
 
             if(req.method==="GET" && /^\/api\/support\/tickets\/\d+\/?$/.test(pathname)){
-              const userId=Number(pathname.match(/^\/api\/support\/tickets\/(\d+)\/?$/)?.[1]);
-              if(!Number.isInteger(userId)||userId<=0) return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
+              // STAGE 2B SECURITY FIX: this was a second, previously-unreachable copy of the
+              // support tickets list route that a numeric-path fix elsewhere in this file
+              // un-shadowed. Session-derived like every other copy — never the URL id.
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
 
               const tickets=await pool.query(`
                 SELECT t.id,t.ticket_number,t.subject,t.description,t.priority,t.status,t.created_at,t.updated_at,t.resolved_at,
@@ -51620,8 +51739,11 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
             if(req.method==="GET" && /^\/api\/support\/tickets\/\d+\/detail\/?$/.test(pathname)){
               const ticketId=Number(pathname.match(/^\/api\/support\/tickets\/(\d+)\/detail\/?$/)?.[1]);
-              const userId=Number(parsedUrl.searchParams.get("user_id")||parsedUrl.searchParams.get("userId"));
-              if(!Number.isInteger(ticketId)||ticketId<=0||!Number.isInteger(userId)||userId<=0) return sendJSON(res,400,{status:"error",message:"Valid ticket and user are required"});
+              // STAGE 2B SECURITY FIX: session-derived actor, ?user_id= query is no longer trusted
+              // (it was the ownership check itself — a spoofed id could read someone else's ticket)
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
+              if(!Number.isInteger(ticketId)||ticketId<=0) return sendJSON(res,400,{status:"error",message:"Valid ticket is required"});
 
               const ticket=await pool.query(`
                 SELECT t.id,t.ticket_number,t.subject,t.description,t.priority,t.status,t.created_at,t.updated_at,t.resolved_at,
@@ -51645,10 +51767,14 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
             if(req.method==="POST" && /^\/api\/support\/tickets\/\d+\/messages\/?$/.test(pathname)){
               const ticketId=Number(pathname.match(/^\/api\/support\/tickets\/(\d+)\/messages\/?$/)?.[1]);
+              // STAGE 2B SECURITY FIX (found during the sweep, not in the original audit list, and not
+              // called by the current frontend): body.user_id was the ownership check itself — a spoofed
+              // id could post a message onto (and reopen) someone else's support ticket. Session-derived now.
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
               const body=await getBody(req);
-              const userId=Number(body.user_id ?? body.userId);
               const message=clean(String(body.message||"")).slice(0,5000);
-              if(!Number.isInteger(ticketId)||ticketId<=0||!Number.isInteger(userId)||userId<=0||!message) return sendJSON(res,400,{status:"error",message:"Valid ticket, user and message are required"});
+              if(!Number.isInteger(ticketId)||ticketId<=0||!message) return sendJSON(res,400,{status:"error",message:"Valid ticket and message are required"});
 
               const ticket=await pool.query(`SELECT id,status FROM support_tickets WHERE id=$1 AND user_id=$2`,[ticketId,userId]);
               if(!ticket.rows[0]) return sendJSON(res,404,{status:"error",message:"Support ticket not found"});
@@ -51666,15 +51792,19 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 WHERE id=$1
               `,[ticketId]);
 
-              return sendJSON(res,201,{status:"success",message:"Message added successfully",support_message:inserted.rows[0]});
+              // STAGE 2B SECURITY FIX: strip user_id FK from response body (response-leak fix)
+              return sendJSON(res,201,{status:"success",message:"Message added successfully",support_message:k5eOmitUserId(inserted.rows[0])});
             }
 
             // =====================================================
             // HOWDI ACCOUNT PREFERENCES CENTER — LIVE API
             // =====================================================
             if(req.method==="GET" && /^\/api\/preferences\/\d+\/?$/.test(pathname)){
-              const userId=Number(pathname.match(/^\/api\/preferences\/(\d+)\/?$/)?.[1]);
-              if(!Number.isInteger(userId)||userId<=0) return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
+              // STAGE 2B SECURITY FIX: this was a second, previously-unreachable copy of the
+              // preferences route (different backing table) that a numeric-path fix elsewhere in
+              // this file un-shadowed. Session-derived like every other copy — never the URL id.
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
 
               const result=await pool.query(`
                 INSERT INTO user_account_preferences(user_id)
@@ -51691,13 +51821,16 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 WHERE user_id=$1
               `,[userId]);
 
-              return sendJSON(res,200,{status:"success",preferences:preferences.rows[0]||null});
+              // STAGE 2B SECURITY FIX: strip user_id FK from response body (response-leak fix — this
+              // route IS reachable directly by URL, confirmed live during the curl verification sweep)
+              return sendJSON(res,200,{status:"success",preferences:k5eOmitUserId(preferences.rows[0])||null});
             }
 
             if(req.method==="PUT" && /^\/api\/preferences\/\d+\/?$/.test(pathname)){
-              const userId=Number(pathname.match(/^\/api\/preferences\/(\d+)\/?$/)?.[1]);
+              // STAGE 2B SECURITY FIX: same un-shadowed second copy as the GET above — session-derived.
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
               const body=await getBody(req);
-              if(!Number.isInteger(userId)||userId<=0) return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
 
               const allowedBoolean=[
                 "email_orders","email_offers","email_news",
@@ -51742,9 +51875,11 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 ON CONFLICT(user_id) DO NOTHING
               `,[userId]);
 
+              // STAGE 2B SECURITY FIX: strip user_id FK from response body (response-leak fix — this
+              // route IS reachable directly by URL, confirmed live during the curl verification sweep)
               if(!updates.length){
                 const current=await pool.query(`SELECT * FROM user_account_preferences WHERE user_id=$1`,[userId]);
-                return sendJSON(res,200,{status:"success",message:"No preference changes supplied",preferences:current.rows[0]});
+                return sendJSON(res,200,{status:"success",message:"No preference changes supplied",preferences:k5eOmitUserId(current.rows[0])});
               }
 
               updates.push(`updated_at=NOW()`);
@@ -51756,7 +51891,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 RETURNING *
               `,values);
 
-              return sendJSON(res,200,{status:"success",message:"Account preferences updated successfully",preferences:updated.rows[0]});
+              return sendJSON(res,200,{status:"success",message:"Account preferences updated successfully",preferences:k5eOmitUserId(updated.rows[0])});
             }
 
             // =====================================================
@@ -51875,11 +52010,14 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             }
 
             if(req.method==="POST" && pathname==="/api/membership/subscribe"){
+              // STAGE 2B SECURITY FIX (found during the sweep, not in the original audit list): this
+              // had NO auth check at all — any anonymous caller could activate/cancel a membership on
+              // ANY account by supplying its user_id in the body. Session-derived now.
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
               const body=await getBody(req);
-              const userId=Number(body.user_id ?? body.userId);
               const planCode=clean(body.plan_code ?? body.planCode ?? "").trim().toUpperCase();
 
-              if(!Number.isInteger(userId)||userId<=0) return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
               if(!planCode) return sendJSON(res,400,{status:"error",message:"Membership plan is required"});
 
               const client=await pool.connect();
@@ -51911,10 +52049,11 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 `,[userId,plan.rows[0].id]);
 
                 await client.query("COMMIT");
+                // STAGE 2B SECURITY FIX: strip user_id FK from response body (response-leak fix)
                 return sendJSON(res,201,{
                   status:"success",
                   message:"Membership activated successfully",
-                  subscription:{...subscription.rows[0],plan:plan.rows[0]}
+                  subscription:{...k5eOmitUserId(subscription.rows[0]),plan:plan.rows[0]}
                 });
               }catch(error){
                 await client.query("ROLLBACK");
@@ -51923,11 +52062,14 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             }
 
             if(req.method==="POST" && pathname==="/api/membership/auto-renew"){
+              // STAGE 2B SECURITY FIX (found during the sweep, not in the original audit list): this
+              // had NO auth check at all — any anonymous caller could change ANY account's membership
+              // renewal setting by supplying its user_id in the body. Session-derived now.
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
               const body=await getBody(req);
-              const userId=Number(body.user_id ?? body.userId);
               const autoRenew=body.auto_renew ?? body.autoRenew;
 
-              if(!Number.isInteger(userId)||userId<=0) return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
               if(typeof autoRenew!=="boolean") return sendJSON(res,400,{status:"error",message:"auto_renew must be true or false"});
 
               const updated=await pool.query(`
@@ -51938,14 +52080,16 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               `,[userId,autoRenew]);
 
               if(!updated.rows[0]) return sendJSON(res,404,{status:"error",message:"No active membership found"});
-              return sendJSON(res,200,{status:"success",message:"Membership renewal preference updated",subscription:updated.rows[0]});
+              // STAGE 2B SECURITY FIX: strip user_id FK from response body (response-leak fix)
+              return sendJSON(res,200,{status:"success",message:"Membership renewal preference updated",subscription:k5eOmitUserId(updated.rows[0])});
             }
 
             if(req.method==="POST" && pathname==="/api/membership/cancel"){
-              const body=await getBody(req);
-              const userId=Number(body.user_id ?? body.userId);
-
-              if(!Number.isInteger(userId)||userId<=0) return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
+              // STAGE 2B SECURITY FIX (found during the sweep, not in the original audit list): this
+              // had NO auth check at all — any anonymous caller could cancel ANY account's membership
+              // by supplying its user_id in the body. Session-derived now.
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
 
               const updated=await pool.query(`
                 UPDATE user_subscriptions
@@ -51955,15 +52099,19 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               `,[userId]);
 
               if(!updated.rows[0]) return sendJSON(res,404,{status:"error",message:"No active membership found"});
-              return sendJSON(res,200,{status:"success",message:"Membership cancelled successfully",subscription:updated.rows[0]});
+              // STAGE 2B SECURITY FIX: strip user_id FK from response body (response-leak fix)
+              return sendJSON(res,200,{status:"success",message:"Membership cancelled successfully",subscription:k5eOmitUserId(updated.rows[0])});
             }
 
             // =====================================================
             // HOWDI WALLET + CASHBACK CENTER — LIVE API
             // =====================================================
             if(req.method==="GET" && /^\/api\/wallet\/\d+\/?$/.test(pathname)){
-              const userId=Number(pathname.match(/^\/api\/wallet\/(\d+)\/?$/)?.[1]);
-              if(!Number.isInteger(userId)||userId<=0) return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
+              // STAGE 2B SECURITY FIX: this was a second, previously-unreachable copy of the
+              // wallet route that a numeric-path fix elsewhere in this file un-shadowed.
+              // Session-derived like every other copy — never the URL id.
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
 
               await pool.query(`
                 INSERT INTO user_wallets(user_id,available_balance,total_cashback,total_spent)
@@ -51984,23 +52132,29 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 LIMIT 200
               `,[userId]);
 
+              // STAGE 2B SECURITY FIX: strip user_id FK from response body (response-leak fix — this
+              // route IS reachable directly by URL, confirmed live during the curl verification sweep)
               return sendJSON(res,200,{
                 status:"success",
-                wallet:wallet.rows[0],
+                wallet:k5eOmitUserId(wallet.rows[0]),
                 transactions:transactions.rows
               });
             }
 
             if(req.method==="POST" && pathname==="/api/wallet/credit"){
+              // STAGE 2B SECURITY FIX (found during the sweep, not in the original audit list, and not
+              // called by the current frontend): this had NO auth check at all — any anonymous caller
+              // could credit ANY account's wallet by an arbitrary amount just by supplying its user_id
+              // in the body. Session-derived now, like /api/wallet/debit and /api/wallet/transactions.
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
               const body=await getBody(req);
-              const userId=Number(body.user_id ?? body.userId);
               const amount=Number(body.amount);
               const description=clean(body.description||"").trim();
               const referenceType=clean(body.reference_type ?? body.referenceType ?? "").trim()||null;
               const referenceId=clean(body.reference_id ?? body.referenceId ?? "").trim()||null;
               const transactionType=clean(body.transaction_type ?? body.transactionType ?? "CREDIT").trim().toUpperCase();
 
-              if(!Number.isInteger(userId)||userId<=0) return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
               if(!Number.isFinite(amount)||amount<=0) return sendJSON(res,400,{status:"error",message:"Amount must be greater than zero"});
               if(!description) return sendJSON(res,400,{status:"error",message:"Wallet transaction description is required"});
               if(!["CREDIT","CASHBACK","REFUND","ADJUSTMENT"].includes(transactionType)) return sendJSON(res,400,{status:"error",message:"Invalid credit transaction type"});
@@ -52028,7 +52182,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 `,[userId,amount,transactionType]);
 
                 await client.query("COMMIT");
-                return sendJSON(res,201,{status:"success",message:"Wallet credited successfully",wallet:wallet.rows[0],transaction:transaction.rows[0]});
+                // STAGE 2B SECURITY FIX: strip user_id FK from response body (response-leak fix)
+                return sendJSON(res,201,{status:"success",message:"Wallet credited successfully",wallet:k5eOmitUserId(wallet.rows[0]),transaction:k5eOmitUserId(transaction.rows[0])});
               }catch(error){
                 await client.query("ROLLBACK");
                 throw error;
@@ -52036,12 +52191,16 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             }
 
             if(req.method==="POST" && pathname==="/api/wallet/debit"){
+              // STAGE 2B SECURITY FIX (highest severity finding in the audit): this endpoint
+              // previously trusted body.user_id for BOTH the balance check and the debit —
+              // any signed-in caller could drain another user's real wallet balance by
+              // supplying their id. The actor is now always the session user.
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
               const body=await getBody(req);
-              const userId=Number(body.user_id ?? body.userId);
               const amount=Number(body.amount);
               const description=clean(body.description||"").trim() || "HOWDI wallet payment";
 
-              if(!Number.isInteger(userId)||userId<=0) return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
               if(!Number.isFinite(amount)||amount<=0) return sendJSON(res,400,{status:"error",message:"Amount must be greater than zero"});
 
               const client=await pool.connect();
@@ -52095,9 +52254,10 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               return sendJSON(res,200,{status:"success",tiers:tiers.rows});
             }
 
-            if(req.method==="GET" && /^\/api\/rewards\/wallet\/\d+\/?$/.test(pathname)){
-              const userId=Number(pathname.match(/^\/api\/rewards\/wallet\/(\d+)\/?$/)?.[1]);
-              if(!Number.isInteger(userId)||userId<=0) return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
+            if(req.method==="GET" && pathname==="/api/rewards/wallet/me"){
+              // STAGE 2B SECURITY FIX: session-derived, was /api/rewards/wallet/:id (IDOR)
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
 
               await pool.query(`
                 INSERT INTO user_rewards_wallet(user_id,available_points,lifetime_points)
@@ -52133,7 +52293,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
               return sendJSON(res,200,{
                 status:"success",
-                wallet:wallet.rows[0],
+                wallet:k5eOmitUserId(wallet.rows[0]),
                 tier:tier.rows[0]||null,
                 next_tier:nextTier.rows[0]||null,
                 activity:activity.rows
@@ -52141,14 +52301,18 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             }
 
             if(req.method==="POST" && pathname==="/api/rewards/earn"){
+              // STAGE 2B SECURITY FIX (found during the sweep, not in the original audit list, and not
+              // called by the current frontend or any internal caller): this had NO auth check at all —
+              // any anonymous caller could mint free reward points into ANY account (which redeem into
+              // wallet credit). Session-derived now, like every other own-account route.
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
               const body=await getBody(req);
-              const userId=Number(body.user_id ?? body.userId);
               const points=Math.floor(Number(body.points));
               const description=clean(body.description||"").trim();
               const referenceType=clean(body.reference_type ?? body.referenceType ?? "").trim()||null;
               const referenceId=clean(body.reference_id ?? body.referenceId ?? "").trim()||null;
 
-              if(!Number.isInteger(userId)||userId<=0) return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
               if(!Number.isInteger(points)||points<=0) return sendJSON(res,400,{status:"error",message:"Points must be a positive whole number"});
               if(!description) return sendJSON(res,400,{status:"error",message:"Reward description is required"});
 
@@ -52172,7 +52336,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 `,[userId,points]);
 
                 await client.query("COMMIT");
-                return sendJSON(res,201,{status:"success",message:"Reward points added",wallet:wallet.rows[0],transaction:transaction.rows[0]});
+                // STAGE 2B SECURITY FIX: strip user_id FK from response body (response-leak fix)
+                return sendJSON(res,201,{status:"success",message:"Reward points added",wallet:k5eOmitUserId(wallet.rows[0]),transaction:k5eOmitUserId(transaction.rows[0])});
               }catch(error){
                 await client.query("ROLLBACK");
                 throw error;
@@ -52180,12 +52345,13 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             }
 
             if(req.method==="POST" && pathname==="/api/rewards/redeem"){
+              // STAGE 2B SECURITY FIX: session-derived actor, body.user_id is no longer trusted
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
               const body=await getBody(req);
-              const userId=Number(body.user_id ?? body.userId);
               const points=Math.floor(Number(body.points));
               const description=clean(body.description||"").trim() || "HOWDI reward redemption";
 
-              if(!Number.isInteger(userId)||userId<=0) return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
               if(!Number.isInteger(points)||points<=0) return sendJSON(res,400,{status:"error",message:"Points must be a positive whole number"});
 
               const client=await pool.connect();
@@ -52217,7 +52383,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 `,[userId,points]);
 
                 await client.query("COMMIT");
-                return sendJSON(res,200,{status:"success",message:"Reward points redeemed",wallet:wallet.rows[0],transaction:transaction.rows[0]});
+                // STAGE 2B SECURITY FIX: strip user_id FK from response body (response-leak fix)
+                return sendJSON(res,200,{status:"success",message:"Reward points redeemed",wallet:k5eOmitUserId(wallet.rows[0]),transaction:k5eOmitUserId(transaction.rows[0])});
               }catch(error){
                 try{await client.query("ROLLBACK");}catch(_){}
                 throw error;
@@ -52287,9 +52454,11 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               return sendJSON(res,200,{status:"success",message:"All notifications marked as read"});
             }
 
-            if(req.method==="GET" && /^\/api\/messages\/\d+\/?$/.test(pathname)){
-              const userId=Number(pathname.match(/^\/api\/messages\/(\d+)\/?$/)?.[1]);
-              if(!Number.isInteger(userId)||userId<=0) return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
+            if(req.method==="GET" && pathname==="/api/messages/me"){
+              // STAGE 2B SECURITY FIX: session-derived, was /api/messages/:id (IDOR — the path
+              // digit was actually the *user* id here, not a message id)
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
 
               const messages=await pool.query(`
                 SELECT id,subject,message,message_type,status,customer_last_read_at,created_at,updated_at
@@ -52442,9 +52611,10 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               return sendJSON(res,200,{status:"success",plans:plans.rows});
             }
 
-            if(req.method==="GET" && /^\/api\/memberships\/user\/\d+\/?$/.test(pathname)){
-              const userId=Number(pathname.match(/^\/api\/memberships\/user\/(\d+)\/?$/)?.[1]);
-              if(!Number.isInteger(userId)||userId<=0) return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
+            if(req.method==="GET" && pathname==="/api/memberships/user/me"){
+              // STAGE 2B SECURITY FIX: session-derived, was /api/memberships/user/:id (IDOR)
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
 
               const membership=await pool.query(`
                 SELECT um.id,um.status,um.started_at,um.expires_at,um.auto_renew,um.cancelled_at,um.created_at,
@@ -52472,10 +52642,11 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             }
 
             if(req.method==="POST" && pathname==="/api/memberships/subscribe"){
+              // STAGE 2B SECURITY FIX: session-derived actor, body.user_id is no longer trusted
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
               const body=await getBody(req);
-              const userId=Number(body.user_id ?? body.userId);
               const planCode=clean(body.plan_code ?? body.planCode ?? "").trim().toUpperCase();
-              if(!Number.isInteger(userId)||userId<=0) return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
               if(!planCode) return sendJSON(res,400,{status:"error",message:"Membership plan is required"});
 
               const plan=await pool.query(`SELECT * FROM membership_plans WHERE plan_code=$1 AND is_active=TRUE LIMIT 1`,[planCode]);
@@ -52498,14 +52669,16 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 VALUES($1,'SUBSCRIBED',$2)
               `,[created.rows[0].id,`Joined ${plan.rows[0].name}`]);
 
-              return sendJSON(res,201,{status:"success",message:"Membership activated successfully",membership:created.rows[0]});
+              // STAGE 2B SECURITY FIX: strip user_id FK from response body (response-leak fix)
+              return sendJSON(res,201,{status:"success",message:"Membership activated successfully",membership:k5eOmitUserId(created.rows[0])});
             }
 
             if(req.method==="POST" && pathname==="/api/memberships/renewal"){
+              // STAGE 2B SECURITY FIX: session-derived actor, body.user_id is no longer trusted
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
               const body=await getBody(req);
-              const userId=Number(body.user_id ?? body.userId);
               const autoRenew=body.auto_renew === true || body.autoRenew === true || body.auto_renew === "true";
-              if(!Number.isInteger(userId)||userId<=0) return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
 
               const membership=await pool.query(`
                 SELECT id FROM user_memberships WHERE user_id=$1 AND status='ACTIVE' ORDER BY created_at DESC LIMIT 1
@@ -52522,9 +52695,9 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             }
 
             if(req.method==="POST" && pathname==="/api/memberships/cancel"){
-              const body=await getBody(req);
-              const userId=Number(body.user_id ?? body.userId);
-              if(!Number.isInteger(userId)||userId<=0) return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
+              // STAGE 2B SECURITY FIX: session-derived actor, body.user_id is no longer trusted
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
 
               const membership=await pool.query(`
                 SELECT id FROM user_memberships WHERE user_id=$1 AND status='ACTIVE' ORDER BY created_at DESC LIMIT 1
@@ -52554,9 +52727,10 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               return `HOWDI-GIFT-${a}-${b}`;
             };
 
-            if(req.method==="GET" && /^\/api\/gifts\/wallet\/\d+\/?$/.test(pathname)){
-              const userId = Number(pathname.match(/^\/api\/gifts\/wallet\/(\d+)\/?$/)?.[1]);
-              if(!Number.isInteger(userId)||userId<=0) return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
+            if(req.method==="GET" && pathname==="/api/gifts/wallet/me"){
+              // STAGE 2B SECURITY FIX: session-derived, was /api/gifts/wallet/:id (IDOR)
+              const userId = await k5eRequireSelf(req,res);
+              if(userId===null) return;
 
               await pool.query(`INSERT INTO user_store_credit(user_id) VALUES($1) ON CONFLICT(user_id) DO NOTHING`,[userId]);
 
@@ -52574,18 +52748,19 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
               return sendJSON(res,200,{
                 status:"success",
-                store_credit:credit.rows[0],
+                store_credit:k5eOmitUserId(credit.rows[0]),
                 gift_cards:giftCards.rows,
                 transactions:transactions.rows
               });
             }
 
             if(req.method==="POST" && pathname==="/api/gifts/redeem"){
+              // STAGE 2B SECURITY FIX: session-derived actor, body.user_id is no longer trusted
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
               const body=await getBody(req);
-              const userId=Number(body.user_id ?? body.userId);
               const giftCode=clean(body.gift_code ?? body.giftCode ?? "").trim().toUpperCase();
 
-              if(!Number.isInteger(userId)||userId<=0) return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
               if(!giftCode) return sendJSON(res,400,{status:"error",message:"Gift card code is required"});
 
               await pool.query(`INSERT INTO user_store_credit(user_id) VALUES($1) ON CONFLICT(user_id) DO NOTHING`,[userId]);
@@ -52618,11 +52793,14 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             }
 
             if(req.method==="POST" && pathname==="/api/gifts/issue"){
+              // STAGE 2B SECURITY FIX (found during the sweep, not in the original audit list, and not
+              // called by the current frontend or any internal caller): this had NO auth check at all —
+              // any anonymous caller could mint a free gift card into ANY account. Session-derived now.
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
               const body=await getBody(req);
-              const userId=Number(body.user_id ?? body.userId);
               const amount=Number(body.amount);
               const expiresAt=body.expires_at ?? body.expiresAt ?? null;
-              if(!Number.isInteger(userId)||userId<=0) return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
               if(!Number.isFinite(amount)||amount<=0) return sendJSON(res,400,{status:"error",message:"Valid gift amount is required"});
 
               let created;
@@ -52635,7 +52813,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   created=result.rows[0]; break;
                 }catch(error){ if(error.code!=="23505"||i===4) throw error; }
               }
-              return sendJSON(res,201,{status:"success",message:"Gift card issued",gift_card:created});
+              // STAGE 2B SECURITY FIX: strip user_id FK from response body (response-leak fix)
+              return sendJSON(res,201,{status:"success",message:"Gift card issued",gift_card:k5eOmitUserId(created)});
             }
 
             // =====================================================
@@ -52648,8 +52827,11 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             };
 
             if(req.method==="GET" && /^\/api\/referrals\/profile\/\d+\/?$/.test(pathname)){
-              const userId = Number(pathname.match(/^\/api\/referrals\/profile\/(\d+)\/?$/)?.[1]);
-              if(!Number.isInteger(userId)||userId<=0) return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
+              // STAGE 2B SECURITY FIX: this was a second, previously-unreachable copy of the
+              // referrals/profile route that a numeric-path fix elsewhere in this file un-shadowed.
+              // Session-derived like every other copy — never the URL id.
+              const userId = await k5eRequireSelf(req,res);
+              if(userId===null) return;
               let profile = await pool.query(`SELECT * FROM user_referral_profiles WHERE user_id=$1`,[userId]);
               if(!profile.rows.length){
                 let created;
@@ -52672,15 +52854,20 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                        COALESCE(SUM(reward_amount) FILTER (WHERE status='REWARDED'),0)::numeric AS earned
                 FROM user_referrals WHERE referrer_user_id=$1
               `,[userId]);
-              return sendJSON(res,200,{status:"success",profile:profile.rows[0],referrals:referrals.rows,stats:stats.rows[0]});
+              // STAGE 2B SECURITY FIX: strip user_id FK from response body (response-leak fix — this
+              // route IS reachable directly by URL, confirmed live during the curl verification sweep)
+              return sendJSON(res,200,{status:"success",profile:k5eOmitUserId(profile.rows[0]),referrals:referrals.rows,stats:stats.rows[0]});
             }
 
             if(req.method==="POST" && pathname==="/api/referrals/invites"){
+              // STAGE 2B SECURITY FIX (found during the sweep, not in the original audit list, and not
+              // called by the current frontend): this had NO auth check at all — any anonymous caller
+              // could create referral invites (and inflate invite counts) on ANY account. Session-derived now.
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
               const body=await getBody(req);
-              const userId=Number(body.user_id ?? body.userId);
               const referredName=clean(body.referred_name ?? body.referredName ?? "").trim().slice(0,180);
               const referredEmail=clean(body.referred_email ?? body.referredEmail ?? "").trim().toLowerCase().slice(0,255);
-              if(!Number.isInteger(userId)||userId<=0) return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
               if(!referredName&&!referredEmail) return sendJSON(res,400,{status:"error",message:"Enter at least a name or email for the invite"});
               let profile=await pool.query(`SELECT referral_code FROM user_referral_profiles WHERE user_id=$1`,[userId]);
               if(!profile.rows.length){
@@ -52696,23 +52883,27 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 VALUES($1,$2,$3,$4,'INVITED') RETURNING *
               `,[userId,profile.rows[0].referral_code,referredName||null,referredEmail||null]);
               await pool.query(`UPDATE user_referral_profiles SET total_invites=total_invites+1,updated_at=NOW() WHERE user_id=$1`,[userId]);
-              return sendJSON(res,201,{status:"success",message:"Referral invitation created successfully",referral:result.rows[0],referral_code:profile.rows[0].referral_code});
+              // STAGE 2B SECURITY FIX: strip referrer_user_id FK from response body (response-leak fix)
+              return sendJSON(res,201,{status:"success",message:"Referral invitation created successfully",referral:k5eOmitUserId(result.rows[0]),referral_code:profile.rows[0].referral_code});
             }
 
             // =====================================================
             // HOWDI PRIVACY CONTROLS — LIVE POSTGRESQL API
             // =====================================================
-            if(req.method==="GET" && /^\/api\/privacy\/preferences\/\d+\/?$/.test(pathname)){
-              const userId = Number(pathname.match(/^\/api\/privacy\/preferences\/(\d+)\/?$/)?.[1]);
-              if(!Number.isInteger(userId) || userId<=0) return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
+            if(req.method==="GET" && pathname==="/api/privacy/preferences/me"){
+              // STAGE 2B SECURITY FIX: session-derived, was /api/privacy/preferences/:id (IDOR)
+              const userId = await k5eRequireSelf(req,res);
+              if(userId===null) return;
               await pool.query(`INSERT INTO user_privacy_preferences(user_id) VALUES($1) ON CONFLICT(user_id) DO NOTHING`,[userId]);
               const result = await pool.query(`SELECT * FROM user_privacy_preferences WHERE user_id=$1`,[userId]);
-              return sendJSON(res,200,{status:"success",preferences:result.rows[0]});
+              // STAGE 2B SECURITY FIX: strip user_id FK from response body (response-leak fix)
+              return sendJSON(res,200,{status:"success",preferences:k5eOmitUserId(result.rows[0])});
             }
 
-            if(req.method==="PUT" && /^\/api\/privacy\/preferences\/\d+\/?$/.test(pathname)){
-              const userId = Number(pathname.match(/^\/api\/privacy\/preferences\/(\d+)\/?$/)?.[1]);
-              if(!Number.isInteger(userId) || userId<=0) return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
+            if(req.method==="PUT" && pathname==="/api/privacy/preferences/me"){
+              // STAGE 2B SECURITY FIX: session-derived, was /api/privacy/preferences/:id (IDOR)
+              const userId = await k5eRequireSelf(req,res);
+              if(userId===null) return;
               const body = await getBody(req);
               await pool.query(`INSERT INTO user_privacy_preferences(user_id) VALUES($1) ON CONFLICT(user_id) DO NOTHING`,[userId]);
               const current = (await pool.query(`SELECT * FROM user_privacy_preferences WHERE user_id=$1`,[userId])).rows[0];
@@ -52740,7 +52931,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 bool(body.marketing_sms ?? body.marketingSms,current.marketing_sms),
                 bool(body.activity_history_visible ?? body.activityHistoryVisible,current.activity_history_visible)
               ]);
-              return sendJSON(res,200,{status:"success",message:"Privacy preferences saved",preferences:result.rows[0]});
+              // STAGE 2B SECURITY FIX: strip user_id FK from response body (response-leak fix)
+              return sendJSON(res,200,{status:"success",message:"Privacy preferences saved",preferences:k5eOmitUserId(result.rows[0])});
             }
 
             // =====================================================
@@ -52917,9 +53109,10 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
             // HOWDI WALLET + CASHBACK + REWARDS — LIVE API
             // =====================================================
-            if (req.method === "GET" && /^\/api\/wallet\/user\/[^/]+\/?$/.test(pathname)) {
-              const userId=Number(pathname.match(/^\/api\/wallet\/user\/([^/]+)\/?$/)?.[1]);
-              if(!Number.isInteger(userId)||userId<=0) return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
+            if (req.method === "GET" && pathname === "/api/wallet/user/me") {
+              // STAGE 2B SECURITY FIX: session-derived, was /api/wallet/user/:id (IDOR)
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
               const client=await pool.connect();
               try{
                 await client.query("BEGIN");
@@ -52932,22 +53125,27 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 const cashback=(await client.query(`SELECT COALESCE(SUM(amount) FILTER (WHERE status='AVAILABLE'),0) AS available, COALESCE(SUM(amount) FILTER (WHERE status='PENDING'),0) AS pending, COALESCE(SUM(amount),0) AS total FROM user_cashback WHERE user_id=$1`,[userId])).rows[0];
                 const cashbackHistory=(await client.query(`SELECT * FROM user_cashback WHERE user_id=$1 ORDER BY created_at DESC LIMIT 50`,[userId])).rows;
                 await client.query("COMMIT");
-                return sendJSON(res,200,{status:"success",wallet:{...wallet,transactions:tx},cashback:{total:Number(cashback.total),pending:Number(cashback.pending),available:Number(cashback.available),history:cashbackHistory},rewards:{points:rewards?.points||0,history:rewardHistory}});
+                // STAGE 2B SECURITY FIX: strip user_id FK from response body (response-leak fix, distinct from the IDOR fix above)
+                return sendJSON(res,200,{status:"success",wallet:k5eOmitUserId({...wallet,transactions:k5eOmitUserId(tx)}),cashback:{total:Number(cashback.total),pending:Number(cashback.pending),available:Number(cashback.available),history:k5eOmitUserId(cashbackHistory)},rewards:{points:rewards?.points||0,history:k5eOmitUserId(rewardHistory)}});
               }catch(e){try{await client.query("ROLLBACK")}catch{};console.error("Wallet load error:",e);return sendJSON(res,500,{status:"error",message:"Unable to load wallet"})}finally{client.release()}
             }
 
             if(req.method==="POST" && pathname==="/api/wallet/add-money"){
-              const body=await getBody(req); const userId=Number(body.user_id??body.userId); const amount=Number(body.amount);
-              if(!Number.isInteger(userId)||userId<=0||!Number.isFinite(amount)||amount<=0) return sendJSON(res,400,{status:"error",message:"Valid user ID and amount are required"});
+              // STAGE 2B SECURITY FIX: session-derived actor, body.user_id is no longer trusted
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
+              const body=await getBody(req); const amount=Number(body.amount);
+              if(!Number.isFinite(amount)||amount<=0) return sendJSON(res,400,{status:"error",message:"Valid amount is required"});
               const client=await pool.connect();
-              try{await client.query("BEGIN");await client.query(`INSERT INTO user_wallets(user_id) VALUES($1) ON CONFLICT(user_id) DO NOTHING`,[userId]);const wallet=(await client.query(`UPDATE user_wallets SET balance=balance+$1,updated_at=NOW() WHERE user_id=$2 RETURNING *`,[amount,userId])).rows[0];await client.query(`INSERT INTO wallet_transactions(wallet_id,transaction_type,amount,title,reference_type) VALUES($1,'CREDIT',$2,$3,'ADD_MONEY')`,[wallet.id,amount,"Money added to wallet"]);await client.query("COMMIT");return sendJSON(res,200,{status:"success",message:"Money added to wallet",wallet})}catch(e){try{await client.query("ROLLBACK")}catch{};return sendJSON(res,500,{status:"error",message:"Unable to add money"})}finally{client.release()}
+              try{await client.query("BEGIN");await client.query(`INSERT INTO user_wallets(user_id) VALUES($1) ON CONFLICT(user_id) DO NOTHING`,[userId]);const wallet=(await client.query(`UPDATE user_wallets SET balance=balance+$1,updated_at=NOW() WHERE user_id=$2 RETURNING *`,[amount,userId])).rows[0];await client.query(`INSERT INTO wallet_transactions(wallet_id,transaction_type,amount,title,reference_type) VALUES($1,'CREDIT',$2,$3,'ADD_MONEY')`,[wallet.id,amount,"Money added to wallet"]);await client.query("COMMIT");return sendJSON(res,200,{status:"success",message:"Money added to wallet",wallet:k5eOmitUserId(wallet)})}catch(e){try{await client.query("ROLLBACK")}catch{};return sendJSON(res,500,{status:"error",message:"Unable to add money"})}finally{client.release()}
             }
 
             if(req.method==="POST" && pathname==="/api/wallet/transfer-cashback"){
-              const body=await getBody(req); const userId=Number(body.user_id??body.userId);
-              if(!Number.isInteger(userId)||userId<=0) return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
+              // STAGE 2B SECURITY FIX: session-derived actor, body.user_id is no longer trusted
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
               const client=await pool.connect();
-              try{await client.query("BEGIN");await client.query(`INSERT INTO user_wallets(user_id) VALUES($1) ON CONFLICT(user_id) DO NOTHING`,[userId]);const sum=(await client.query(`SELECT COALESCE(SUM(amount),0) AS amount FROM user_cashback WHERE user_id=$1 AND status='AVAILABLE' FOR UPDATE`,[userId])).rows[0];const amount=Number(sum.amount);if(!amount){await client.query("ROLLBACK");return sendJSON(res,400,{status:"error",message:"No available cashback to transfer"})};const wallet=(await client.query(`UPDATE user_wallets SET balance=balance+$1,updated_at=NOW() WHERE user_id=$2 RETURNING *`,[amount,userId])).rows[0];await client.query(`UPDATE user_cashback SET status='TRANSFERRED',updated_at=NOW() WHERE user_id=$1 AND status='AVAILABLE'`,[userId]);await client.query(`INSERT INTO wallet_transactions(wallet_id,transaction_type,amount,title,reference_type) VALUES($1,'CASHBACK',$2,'Cashback transferred to wallet','CASHBACK')`,[wallet.id,amount]);await client.query("COMMIT");return sendJSON(res,200,{status:"success",message:"Cashback transferred to wallet",amount,wallet})}catch(e){try{await client.query("ROLLBACK")}catch{};return sendJSON(res,500,{status:"error",message:"Unable to transfer cashback"})}finally{client.release()}
+              try{await client.query("BEGIN");await client.query(`INSERT INTO user_wallets(user_id) VALUES($1) ON CONFLICT(user_id) DO NOTHING`,[userId]);const sum=(await client.query(`SELECT COALESCE(SUM(amount),0) AS amount FROM user_cashback WHERE user_id=$1 AND status='AVAILABLE' FOR UPDATE`,[userId])).rows[0];const amount=Number(sum.amount);if(!amount){await client.query("ROLLBACK");return sendJSON(res,400,{status:"error",message:"No available cashback to transfer"})};const wallet=(await client.query(`UPDATE user_wallets SET balance=balance+$1,updated_at=NOW() WHERE user_id=$2 RETURNING *`,[amount,userId])).rows[0];await client.query(`UPDATE user_cashback SET status='TRANSFERRED',updated_at=NOW() WHERE user_id=$1 AND status='AVAILABLE'`,[userId]);await client.query(`INSERT INTO wallet_transactions(wallet_id,transaction_type,amount,title,reference_type) VALUES($1,'CASHBACK',$2,'Cashback transferred to wallet','CASHBACK')`,[wallet.id,amount]);await client.query("COMMIT");return sendJSON(res,200,{status:"success",message:"Cashback transferred to wallet",amount,wallet:k5eOmitUserId(wallet)})}catch(e){try{await client.query("ROLLBACK")}catch{};return sendJSON(res,500,{status:"error",message:"Unable to transfer cashback"})}finally{client.release()}
             }
 
             if(req.method==="POST" && pathname==="/api/rewards/redeem"){
@@ -52960,20 +53158,22 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             // HOWDI SAVED PAYMENTS — SAFE POSTGRESQL API
             // Card/bank raw numbers are NEVER stored.
             // =====================================================
-            if (req.method === "GET" && /^\/api\/payments\/user\/[^/]+\/?$/.test(pathname)) {
-              const userId=Number(pathname.match(/^\/api\/payments\/user\/([^/]+)\/?$/)?.[1]);
-              if(!Number.isInteger(userId)||userId<=0) return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
+            if (req.method === "GET" && pathname === "/api/payments/user/me") {
+              // STAGE 2B SECURITY FIX: session-derived, was /api/payments/user/:id (IDOR)
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
               const result=await pool.query(`SELECT id,payment_type,provider,display_name,last4,is_default,is_active,created_at FROM user_payment_methods WHERE user_id=$1 AND is_active=TRUE ORDER BY is_default DESC,created_at DESC`,[userId]);
               return sendJSON(res,200,{status:"success",payments:result.rows});
             }
 
             if (req.method === "POST" && pathname === "/api/payments") {
+              // STAGE 2B SECURITY FIX: session-derived actor, body.user_id is no longer trusted
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
               const body=await getBody(req);
-              const userId=Number(body.user_id??body.userId);
               const type=clean(body.payment_type??body.paymentType).toUpperCase();
               const value=clean(body.payment_value??body.paymentValue);
               const provider=clean(body.provider);
-              if(!Number.isInteger(userId)||userId<=0) return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
               if(!["UPI","CARD","BANK"].includes(type)) return sendJSON(res,400,{status:"error",message:"Payment type must be UPI, CARD or BANK"});
               if(!value) return sendJSON(res,400,{status:"error",message:"Payment details are required"});
               if(type==="CARD" && !/^\d{12,19}$/.test(value.replace(/\s|-/g,""))) return sendJSON(res,400,{status:"error",message:"Enter a valid card number"});
@@ -52998,8 +53198,9 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
             if(req.method==="DELETE" && /^\/api\/payments\/[^/]+\/?$/.test(pathname)){
               const paymentId=decodeURIComponent(pathname.match(/^\/api\/payments\/([^/]+)\/?$/)?.[1]||"");
-              const userId=Number(url.searchParams.get("user_id"));
-              if(!Number.isInteger(userId)||userId<=0) return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
+              // STAGE 2B SECURITY FIX: session-derived actor, ?user_id= query is no longer trusted
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
               const result=await pool.query(`UPDATE user_payment_methods SET is_active=FALSE,is_default=FALSE,updated_at=NOW() WHERE id=$1 AND user_id=$2 AND is_active=TRUE RETURNING id`,[paymentId,userId]);
               if(!result.rows.length) return sendJSON(res,404,{status:"error",message:"Payment method not found"});
               const fallback=await pool.query(`SELECT id FROM user_payment_methods WHERE user_id=$1 AND is_active=TRUE ORDER BY created_at DESC LIMIT 1`,[userId]);
@@ -53009,8 +53210,11 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
             if(req.method==="PUT" && /^\/api\/payments\/[^/]+\/default\/?$/.test(pathname)){
               const paymentId=decodeURIComponent(pathname.match(/^\/api\/payments\/([^/]+)\/default\/?$/)?.[1]||"");
-              const body=await getBody(req); const userId=Number(body.user_id??body.userId);
-              if(!Number.isInteger(userId)||userId<=0) return sendJSON(res,400,{status:"error",message:"Valid user ID is required"});
+              // STAGE 2B SECURITY FIX (found during the response-leak sweep, not in the original audit list):
+              // session-derived actor, body.user_id is no longer trusted (it was the ownership check itself —
+              // a spoofed id could set another user's payment method as their own default).
+              const userId=await k5eRequireSelf(req,res);
+              if(userId===null) return;
               const client=await pool.connect();
               try{await client.query("BEGIN"); const exists=await client.query(`SELECT id FROM user_payment_methods WHERE id=$1 AND user_id=$2 AND is_active=TRUE`,[paymentId,userId]); if(!exists.rows.length){await client.query("ROLLBACK");return sendJSON(res,404,{status:"error",message:"Payment method not found"})}; await client.query(`UPDATE user_payment_methods SET is_default=FALSE,updated_at=NOW() WHERE user_id=$1 AND is_active=TRUE`,[userId]); const result=await client.query(`UPDATE user_payment_methods SET is_default=TRUE,updated_at=NOW() WHERE id=$1 AND user_id=$2 RETURNING id,payment_type,display_name,last4,is_default`,[paymentId,userId]); await client.query("COMMIT"); return sendJSON(res,200,{status:"success",message:"Default payment updated",payment:result.rows[0]})}catch(e){try{await client.query("ROLLBACK")}catch{};return sendJSON(res,500,{status:"error",message:"Unable to update default payment"})}finally{client.release()}
             }
@@ -57207,8 +57411,10 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
     app.get('/api/works/customer/bookings/:workCode/lifecycle-v161c', async (req,res)=>{
       try{
-        const userId=String(req.query.userId||'').trim(), workCode=String(req.params.workCode||'').trim();
-        if(!/^\d+$/.test(userId)) return res.status(400).json({status:'error',message:'Valid customer user ID is required'});
+        // STAGE 2B SECURITY FIX: session-derived, ?userId= is no longer trusted (IDOR)
+        const lifecycleSession=await getSessionUserFromRequest(req);
+        if(!lifecycleSession) return res.status(401).json({status:'error',message:'Please sign in to continue.'});
+        const userId=String(Number(lifecycleSession.id)), workCode=String(req.params.workCode||'').trim();
         const wo=(await pool.query(`SELECT * FROM works_work_orders WHERE work_code=$1 AND customer_user_id=$2 LIMIT 1`,[workCode,userId])).rows[0];
         if(!wo) return res.status(404).json({status:'error',message:'Works booking not found'});
         const [journey,payment,completion,review,cases,reschedules]=await Promise.all([
@@ -57227,9 +57433,12 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
     app.post('/api/works/customer/bookings/:workCode/reschedule-v161c', async (req,res)=>{
       try{
-        const b=req.body||{}, userId=String(b.customerUserId||'').trim(), workCode=String(req.params.workCode||'').trim();
+        // STAGE 2B SECURITY FIX: session-derived, body.customerUserId is no longer trusted (IDOR)
+        const rescheduleSession=await getSessionUserFromRequest(req);
+        if(!rescheduleSession) return res.status(401).json({status:'error',message:'Please sign in to continue.'});
+        const b=req.body||{}, userId=String(Number(rescheduleSession.id)), workCode=String(req.params.workCode||'').trim();
         const requestedDate=String(b.scheduleDate||'').trim(), requestedTime=String(b.scheduleTime||'').trim(), reason=String(b.reason||'').trim();
-        if(!/^\d+$/.test(userId)||!/^\d{4}-\d{2}-\d{2}$/.test(requestedDate)||!/^\d{2}:\d{2}/.test(requestedTime)) return res.status(400).json({status:'error',message:'Customer, date and time are required'});
+        if(!/^\d{4}-\d{2}-\d{2}$/.test(requestedDate)||!/^\d{2}:\d{2}/.test(requestedTime)) return res.status(400).json({status:'error',message:'Date and time are required'});
         const wo=(await pool.query(`SELECT * FROM works_work_orders WHERE work_code=$1 AND customer_user_id=$2 LIMIT 1`,[workCode,userId])).rows[0];
         if(!wo) return res.status(404).json({status:'error',message:'Works booking not found'});
         const j=(await pool.query(`SELECT * FROM works_job_journeys WHERE work_order_id=$1 LIMIT 1`,[wo.id])).rows[0];
@@ -57239,14 +57448,17 @@ async function ensureVibeReleaseReadinessV140LSchema(){
         if(pending) return res.status(409).json({status:'error',message:'A reschedule request is already pending'});
         const code=`HOWDI-RSCH-${Date.now().toString().slice(-10)}`;
         const row=(await pool.query(`INSERT INTO works_reschedule_requests(request_code,work_order_id,customer_user_id,worker_id,requested_date,requested_time,reason) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *`,[code,wo.id,userId,j?.worker_id||wo.preferred_worker_id||null,requestedDate,requestedTime,reason||null])).rows[0];
-        return res.status(201).json({status:'success',message:'Reschedule request sent to the worker.',request:row});
+        // STAGE 2B SECURITY FIX: strip customer_user_id FK from response body (response-leak fix)
+        return res.status(201).json({status:'success',message:'Reschedule request sent to the worker.',request:k5eOmitUserId(row)});
       }catch(e){return res.status(500).json({status:'error',message:'Unable to request reschedule',detail:e.message||null});}
     });
 
     app.get('/api/works/customer/bookings/:workCode/invoice-v161c', async (req,res)=>{
       try{
-        const userId=String(req.query.userId||'').trim(), workCode=String(req.params.workCode||'').trim();
-        if(!/^\d+$/.test(userId)) return res.status(400).json({status:'error',message:'Valid customer user ID is required'});
+        // STAGE 2B SECURITY FIX: session-derived, ?userId= is no longer trusted (IDOR)
+        const invoiceSession=await getSessionUserFromRequest(req);
+        if(!invoiceSession) return res.status(401).json({status:'error',message:'Please sign in to continue.'});
+        const userId=String(Number(invoiceSession.id)), workCode=String(req.params.workCode||'').trim();
         const wo=(await pool.query(`SELECT wo.*,w.worker_code,w.full_name worker_name FROM works_work_orders wo LEFT JOIN works_job_journeys j ON j.work_order_id=wo.id LEFT JOIN works_workers w ON w.id=j.worker_id WHERE wo.work_code=$1 AND wo.customer_user_id=$2 LIMIT 1`,[workCode,userId])).rows[0];
         if(!wo) return res.status(404).json({status:'error',message:'Works booking not found'});
         const pays=(await pool.query(`SELECT payment_code,payment_kind,amount,method,status,provider_reference,created_at FROM works_payments WHERE work_order_id=$1 ORDER BY created_at`,[wo.id])).rows;
@@ -57550,11 +57762,18 @@ app.get("/api/public/daily-quote", async(req,res)=>{
 
 app.get("/api/works/customer/history", async(req,res)=>{
   try{
-    const uid=String(req.query.userId||req.user?.id||"").trim();
-    if(!uid) return res.status(400).json({ok:false,error:"Valid userId is required",history:[]});
+    // STAGE 2B SECURITY FIX: session-derived, ?userId= is no longer trusted (IDOR) — this
+    // "app.*" route is checked BEFORE the main route chain, so it was the one actually serving
+    // this path despite an already-fixed lookalike further down in the file.
+    const historySession=await getSessionUserFromRequest(req);
+    if(!historySession) return res.status(401).json({ok:false,error:"Please sign in to continue.",history:[]});
+    const uid=String(Number(historySession.id));
     const r=await pool.query(`SELECT * FROM works_work_orders WHERE customer_user_id=$1
       ORDER BY created_at DESC LIMIT 200`,[uid]);
-    res.json({ok:true,history:r.rows,bookings:r.rows,orders:r.rows});
+    // STAGE 2B SECURITY FIX: strip customer_user_id FK from response body (response-leak fix) —
+    // this is the LIVE route for this path (app.* routes dispatch before the main if-chain).
+    const rows=r.rows.map(worksOrderRow);
+    res.json({ok:true,history:rows,bookings:rows,orders:rows});
   }catch(e){
     console.error("HOWDI Works customer history error:",e);
     res.status(500).json({ok:false,error:e.message,history:[]});

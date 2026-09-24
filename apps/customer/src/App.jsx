@@ -3927,10 +3927,13 @@ function App() {
   };
 
   const loadWalletData = async () => {
-    if (!currentUser?.id) return;
+    // STAGE 2B SECURITY FIX: currentUser.id no longer exists (see AGENTS.md — auth responses never
+    // return the internal numeric id); identity for gating own-account features is now the presence
+    // of a signed-in currentUser object itself, which is what /me routes are keyed off server-side.
+    if (!currentUser) return;
     setWalletLoading(true);
     try {
-      const response = await fetch(`http://localhost:5000/api/wallet/user/${encodeURIComponent(currentUser.id)}`, { cache: "no-store" });
+      const response = await fetch(`${SHOP_API_BASE}/api/wallet/user/me`, { cache: "no-store", headers: customerSessionHeaders() });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.status !== "success") throw new Error(data.message || "Unable to load wallet.");
       setWalletBalance(Number(data.wallet?.balance || 0));
@@ -3948,7 +3951,7 @@ function App() {
     } finally { setWalletLoading(false); }
   };
 
-  useEffect(() => { loadWalletData(); }, [currentUser?.id]);
+  useEffect(() => { loadWalletData(); }, [currentUser]);
 
   useEffect(() => {
     localStorage.setItem("howdiWalletBalance", String(walletBalance));
@@ -3965,10 +3968,11 @@ function App() {
   };
 
   const loadCommunications = async () => {
-    if (!currentUser?.id) return;
+    // STAGE 2B SECURITY FIX: see loadWalletData above — gate on the signed-in object, not .id.
+    if (!currentUser) return;
     setCommunicationsLoading(true);
     try {
-      const response = await fetch(`http://localhost:5000/api/communications/user/${encodeURIComponent(currentUser.id)}`, { cache: "no-store" });
+      const response = await fetch(`${SHOP_API_BASE}/api/communications/user/me`, { cache: "no-store", headers: customerSessionHeaders() });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.status !== "success") throw new Error(data.message || "Unable to load messages.");
       setMessages((data.messages || []).map((x) => ({
@@ -3985,7 +3989,7 @@ function App() {
     } finally { setCommunicationsLoading(false); }
   };
 
-  useEffect(() => { loadCommunications(); }, [currentUser?.id]);
+  useEffect(() => { loadCommunications(); }, [currentUser]);
 
   useEffect(() => { localStorage.setItem("howdiMessages", JSON.stringify(messages)); }, [messages]);
   useEffect(() => { localStorage.setItem("howdiNotifications", JSON.stringify(notifications)); }, [notifications]);
@@ -6051,7 +6055,8 @@ function App() {
   };
 
   const loadAccountSettings = async () => {
-    if (!currentUser?.id) {
+    // STAGE 2B SECURITY FIX: see loadWalletData above — gate on the signed-in object, not .id.
+    if (!currentUser) {
       setAccountSettingsLoaded(false);
       return;
     }
@@ -6060,7 +6065,7 @@ function App() {
 
     try {
       const response = await fetch(
-        `http://localhost:5000/api/profile/${encodeURIComponent(currentUser.id)}/settings`,
+        `${SHOP_API_BASE}/api/profile/me/settings`,
         { cache: "no-store", headers: customerSessionHeaders() }
       );
       const data = await response.json().catch(() => ({}));
@@ -6088,7 +6093,7 @@ function App() {
       });
 
       localStorage.setItem(
-        `howdiProfileMedia_${currentUser.id}`,
+        "howdiProfileMedia",
         JSON.stringify({
           avatar: settings.profile_image || "",
           status: settings.profile_status || "Available",
@@ -6103,17 +6108,18 @@ function App() {
 
   useEffect(() => {
     loadAccountSettings();
-  }, [currentUser?.id]);
+  }, [currentUser]);
 
   useEffect(() => {
-    if (!currentUser?.id || !accountSettingsLoaded) return;
+    // STAGE 2B SECURITY FIX: see loadWalletData above — gate on the signed-in object, not .id.
+    if (!currentUser || !accountSettingsLoaded) return;
 
     const timer = window.setTimeout(async () => {
       setAccountSettingsSyncing(true);
 
       try {
         await fetch(
-          `http://localhost:5000/api/profile/${encodeURIComponent(currentUser.id)}/settings`,
+          `${SHOP_API_BASE}/api/profile/me/settings`,
           {
             method: "PUT",
             headers: { "Content-Type": "application/json", ...customerSessionHeaders() },
@@ -6139,7 +6145,7 @@ function App() {
 
     return () => window.clearTimeout(timer);
   }, [
-    currentUser?.id,
+    currentUser,
     accountSettingsLoaded,
     profileAvatar,
     profileStatus,
@@ -6148,13 +6154,16 @@ function App() {
   ]);
 
   useEffect(() => {
-    if (!currentUser?.id) {
+    // STAGE 2B SECURITY FIX: gate on the signed-in object, not .id (see loadWalletData above), and
+    // the cached-media localStorage key no longer embeds the numeric id — it never carried per-account
+    // isolation once currentUser.id stopped existing, so it is now a single plain key.
+    if (!currentUser) {
       setProfileAvatar(currentUser?.profile_image || currentUser?.avatar || "");
       setProfileStatus(currentUser?.profile_status || currentUser?.status || "Available");
       return;
     }
     try {
-      const saved = JSON.parse(localStorage.getItem(`howdiProfileMedia_${currentUser.id}`) || "null");
+      const saved = JSON.parse(localStorage.getItem("howdiProfileMedia") || "null");
       setProfileAvatar(saved?.avatar || currentUser?.profile_image || currentUser?.avatar || "");
       setProfileStatus(saved?.status || currentUser?.profile_status || currentUser?.status || "Available");
     } catch {
@@ -6166,8 +6175,9 @@ function App() {
   const saveProfileMedia = (avatar, status) => {
     setProfileAvatar(avatar || "");
     setProfileStatus(status || "Available");
-    if (currentUser?.id) {
-      localStorage.setItem(`howdiProfileMedia_${currentUser.id}`, JSON.stringify({ avatar: avatar || "", status: status || "Available" }));
+    // STAGE 2B SECURITY FIX: see the loader above — plain key, gated on the signed-in object.
+    if (currentUser) {
+      localStorage.setItem("howdiProfileMedia", JSON.stringify({ avatar: avatar || "", status: status || "Available" }));
     }
   };
 
@@ -7301,7 +7311,7 @@ function App() {
     if (!currentUser?.id) return;
     setSubscriptionLoading(true);
     try {
-      const response = await fetch(`http://localhost:5000/api/subscription/user/${encodeURIComponent(currentUser.id)}`, { cache: "no-store" });
+      const response = await fetch(`${SHOP_API_BASE}/api/subscription/user/me`, { cache: "no-store", headers: customerSessionHeaders() });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.status !== "success") throw new Error(data.message || "Unable to load subscription.");
       const subscription = data.subscription || {};
@@ -7325,9 +7335,9 @@ function App() {
 
   const saveSubscription = async ({ plan = subscriptionPlan, billing = subscriptionBilling, payment = subscriptionPayment, autoRenew = subscriptionAutoRenew, action } = {}) => {
     if (!currentUser?.id) throw new Error("Please login again.");
-    const response = await fetch(`http://localhost:5000/api/subscription/user/${encodeURIComponent(currentUser.id)}`, {
+    const response = await fetch(`${SHOP_API_BASE}/api/subscription/user/me`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...customerSessionHeaders() },
       body: JSON.stringify({
         plan_code: plan,
         billing_cycle: billing,
@@ -7595,7 +7605,7 @@ const deleteNotification = async (id) => {
     if (!currentUser?.id) { setPaymentMethods([]); return; }
     setPaymentsLoading(true);
     try {
-      const response=await fetch(`http://localhost:5000/api/payments/user/${encodeURIComponent(currentUser.id)}`,{cache:"no-store"});
+      const response=await fetch(`${SHOP_API_BASE}/api/payments/user/me`,{cache:"no-store",headers:customerSessionHeaders()});
       const data=await response.json().catch(()=>({}));
       if(!response.ok||data.status!=="success") throw new Error(data.message||"Unable to load saved payments.");
       const methods=(data.payments||[]).map((p)=>({
@@ -7603,7 +7613,9 @@ const deleteNotification = async (id) => {
         holder:"",expiry:"",label:p.display_name,is_default:Boolean(p.is_default),provider:p.provider||""
       }));
       setPaymentMethods(methods);
-      localStorage.setItem(`howdiPaymentMethods_${currentUser.id}`,JSON.stringify(methods));
+      // STAGE 2B SECURITY FIX: this localStorage key used to embed the raw numeric account id
+      // (never read back anywhere in this file) — fixed to a plain, non-identity key name.
+      localStorage.setItem("howdiPaymentMethods",JSON.stringify(methods));
     } catch(e) {
       console.error("Payment load error:",e);
       setPaymentMessage("");
@@ -7633,7 +7645,7 @@ const deleteNotification = async (id) => {
     }
     setPaymentsLoading(true);
     try{
-      const response=await fetch("http://localhost:5000/api/payments",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({user_id:currentUser.id,payment_type:paymentType,payment_value:value,provider:holder||"",is_default:paymentMethods.length===0})});
+      const response=await fetch(`${SHOP_API_BASE}/api/payments`,{method:"POST",headers:{"Content-Type":"application/json",...customerSessionHeaders()},body:JSON.stringify({payment_type:paymentType,payment_value:value,provider:holder||"",is_default:paymentMethods.length===0})});
       const data=await response.json().catch(()=>({}));
       if(!response.ok||data.status!=="success") throw new Error(data.message||"Unable to save payment method.");
       setPaymentMessage(data.message||"Payment method saved safely.");
@@ -7646,7 +7658,7 @@ const deleteNotification = async (id) => {
     if(!window.confirm("Remove this saved payment method?")) return;
     setPaymentsLoading(true);
     try{
-      const response=await fetch(`http://localhost:5000/api/payments/${encodeURIComponent(id)}?user_id=${encodeURIComponent(currentUser.id)}`,{method:"DELETE"});
+      const response=await fetch(`${SHOP_API_BASE}/api/payments/${encodeURIComponent(id)}`,{method:"DELETE",headers:customerSessionHeaders()});
       const data=await response.json().catch(()=>({}));
       if(!response.ok||data.status!=="success") throw new Error(data.message||"Unable to remove payment method.");
       setPaymentMessage(data.message||"Payment method removed."); await loadPaymentMethods();
@@ -9202,7 +9214,7 @@ return () => window.clearInterval(timer);
         return;
       }
       try {
-        const response = await fetch(`http://localhost:5000/api/profile/${encodeURIComponent(storedUserId)}`, {
+        const response = await fetch(`${SHOP_API_BASE}/api/profile/me`, {
           cache: "no-store",
           headers: { Authorization: `Bearer ${token}` },
         });
@@ -9212,7 +9224,10 @@ return () => window.clearInterval(timer);
           return;
         }
         if (cancelled) return;
-        const hydrated = { ...currentUser, ...data.user, id:data.user.id };
+        // STAGE 2B SECURITY FIX: /api/profile/me no longer returns an internal numeric id (by design —
+        // see AGENTS.md). Do not overwrite currentUser.id from this response; keep whatever identity
+        // value the app already holds (from login/register/OTP), which never carried a raw id either.
+        const hydrated = { ...currentUser, ...data.user };
         setCurrentUser(hydrated);
         localStorage.setItem("howdiUser", JSON.stringify(hydrated));
         setNotificationPreferencesNotice("");
@@ -9276,7 +9291,7 @@ return () => window.clearInterval(timer);
       setLoginMessage("");
 
       const response = await fetch(
-        "http://localhost:5000/api/auth/login",
+        `${SHOP_API_BASE}/api/auth/login`,
         {
           method: "POST",
 
@@ -9384,7 +9399,7 @@ return () => window.clearInterval(timer);
       setLoginMessage("");
 
       const response = await fetch(
-        "http://localhost:5000/api/auth/register",
+        `${SHOP_API_BASE}/api/auth/register`,
         {
           method: "POST",
 
@@ -11165,10 +11180,11 @@ const saveProfileDetails = async (event) => {
 
 
   const loadSupportTickets = async () => {
-    if (!currentUser?.id) return;
+    // STAGE 2B SECURITY FIX: see loadWalletData above — gate on the signed-in object, not .id.
+    if (!currentUser) return;
     setSupportLoading(true);
     try {
-      const response = await fetch(`http://localhost:5000/api/support/tickets/${encodeURIComponent(currentUser.id)}`, { cache: "no-store" });
+      const response = await fetch(`${SHOP_API_BASE}/api/support/tickets/me`, { cache: "no-store", headers: customerSessionHeaders() });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.status !== "success") throw new Error(data.message || "Unable to load support tickets.");
       setSupportTickets(Array.isArray(data.tickets) ? data.tickets : []);
@@ -11179,20 +11195,20 @@ const saveProfileDetails = async (event) => {
     }
   };
 
-  useEffect(() => { loadSupportTickets(); }, [currentUser?.id]);
+  useEffect(() => { loadSupportTickets(); }, [currentUser]);
 
   const createSupportTicket = async (event) => {
     event?.preventDefault?.();
-    if (!currentUser?.id || !supportSubject.trim() || !supportMessage.trim()) {
+    // STAGE 2B SECURITY FIX: see loadWalletData above — gate on the signed-in object, not .id.
+    if (!currentUser || !supportSubject.trim() || !supportMessage.trim()) {
       setSupportNotice("Please enter a subject and describe your issue.");
       return;
     }
     try {
-      const response = await fetch("http://localhost:5000/api/support/tickets", {
+      const response = await fetch(`${SHOP_API_BASE}/api/support/tickets`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...customerSessionHeaders() },
         body: JSON.stringify({
-          user_id: currentUser.id,
           category: supportCategory === "all" ? "GENERAL" : supportCategory,
           subject: supportSubject.trim(),
           message: supportMessage.trim(),
@@ -11212,12 +11228,13 @@ const saveProfileDetails = async (event) => {
   };
 
   const closeSupportTicket = async (ticketId) => {
-    if (!currentUser?.id) return;
+    // STAGE 2B SECURITY FIX: see loadWalletData above — gate on the signed-in object, not .id.
+    if (!currentUser) return;
     try {
-      const response = await fetch(`http://localhost:5000/api/support/tickets/${ticketId}/close`, {
+      const response = await fetch(`${SHOP_API_BASE}/api/support/tickets/${ticketId}/close`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: currentUser.id }),
+        headers: { "Content-Type": "application/json", ...customerSessionHeaders() },
+        body: JSON.stringify({}),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.status !== "success") throw new Error(data.message || "Unable to close ticket.");
@@ -11399,12 +11416,13 @@ const saveProfileDetails = async (event) => {
   };
 
   const loadSecurityCenter = async () => {
-    if (!currentUser?.id) return;
+    // STAGE 2B SECURITY FIX: see loadWalletData above — gate on the signed-in object, not .id.
+    if (!currentUser) return;
     setSecurityLoading(true);
     try {
       const [activityResponse, sessionsResponse] = await Promise.all([
-        fetch(`http://localhost:5000/api/security/activity/${encodeURIComponent(currentUser.id)}?limit=100`, { cache: "no-store" }),
-        fetch(`http://localhost:5000/api/security/sessions/${encodeURIComponent(currentUser.id)}`, { cache: "no-store" }),
+        fetch(`${SHOP_API_BASE}/api/security/activity/me?limit=100`, { cache: "no-store", headers: customerSessionHeaders() }),
+        fetch(`${SHOP_API_BASE}/api/security/sessions/me`, { cache: "no-store", headers: customerSessionHeaders() }),
       ]);
       const activityData = await activityResponse.json().catch(() => ({}));
       const sessionsData = await sessionsResponse.json().catch(() => ({}));
@@ -11419,15 +11437,16 @@ const saveProfileDetails = async (event) => {
     }
   };
 
-  useEffect(() => { loadSecurityCenter(); }, [currentUser?.id]);
+  useEffect(() => { loadSecurityCenter(); }, [currentUser]);
 
   const endDeviceSession = async (sessionId) => {
-    if (!currentUser?.id) return;
+    // STAGE 2B SECURITY FIX: see loadWalletData above — gate on the signed-in object, not .id.
+    if (!currentUser) return;
     try {
-      const response = await fetch(`http://localhost:5000/api/security/sessions/${sessionId}/end`, {
+      const response = await fetch(`${SHOP_API_BASE}/api/security/sessions/${sessionId}/end`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: currentUser.id }),
+        headers: { "Content-Type": "application/json", ...customerSessionHeaders() },
+        body: JSON.stringify({}),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.status !== "success") throw new Error(data.message || "Unable to end device session.");
@@ -11486,12 +11505,13 @@ const removeNotification = async (notificationId) => {
   };
 
   const loadSupportCenter = async () => {
-    if (!currentUser?.id) return;
+    // STAGE 2B SECURITY FIX: see loadWalletData above — gate on the signed-in object, not .id.
+    if (!currentUser) return;
     setSupportLoading(true);
     try {
       const [categoriesResponse, ticketsResponse] = await Promise.all([
-        fetch("http://localhost:5000/api/support/categories", { cache: "no-store" }),
-        fetch(`http://localhost:5000/api/support/tickets/${encodeURIComponent(currentUser.id)}`, { cache: "no-store" }),
+        fetch(`${SHOP_API_BASE}/api/support/categories`, { cache: "no-store" }),
+        fetch(`${SHOP_API_BASE}/api/support/tickets/me`, { cache: "no-store", headers: customerSessionHeaders() }),
       ]);
       const categoriesData = await categoriesResponse.json().catch(() => ({}));
       const ticketsData = await ticketsResponse.json().catch(() => ({}));
@@ -11506,17 +11526,18 @@ const removeNotification = async (notificationId) => {
     }
   };
 
-  useEffect(() => { loadSupportCenter(); }, [currentUser?.id]);
+  useEffect(() => { loadSupportCenter(); }, [currentUser]);
 
   const submitSupportTicket = async (event) => {
     event.preventDefault();
-    if (!currentUser?.id) return;
+    // STAGE 2B SECURITY FIX: see loadWalletData above — gate on the signed-in object, not .id.
+    if (!currentUser) return;
     setSupportSubmitting(true);
     try {
-      const response = await fetch("http://localhost:5000/api/support/tickets", {
+      const response = await fetch(`${SHOP_API_BASE}/api/support/tickets`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...supportForm, user_id: currentUser.id, category_id: Number(supportForm.category_id) }),
+        headers: { "Content-Type": "application/json", ...customerSessionHeaders() },
+        body: JSON.stringify({ ...supportForm, category_id: Number(supportForm.category_id) }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.status !== "success") throw new Error(data.message || "Unable to create support request.");
@@ -11531,13 +11552,16 @@ const removeNotification = async (notificationId) => {
   };
 
   const openSupportTicketDetail = async (ticket) => {
-  if (!currentUser?.id || !ticket?.id) return;
+  // STAGE 2B SECURITY FIX: see loadWalletData above — gate on the signed-in object, not .id; the
+  // ?user_id= query param is gone too, the backend derives the caller from the session now.
+  if (!currentUser || !ticket?.id) return;
 
   setSupportLoading(true);
 
   try {
     const response = await fetch(
-      `http://localhost:5000/api/support/tickets/${ticket.id}/detail?user_id=${encodeURIComponent(currentUser.id)}`
+      `${SHOP_API_BASE}/api/support/tickets/${ticket.id}/detail`,
+      { headers: customerSessionHeaders() }
     );
 
     const data = await response.json().catch(() => ({}));
@@ -11645,16 +11669,16 @@ const removeNotification = async (notificationId) => {
     }
   };
 
-  useEffect(() => { loadMembershipCenter(); }, [currentUser?.id]);
+  useEffect(() => { loadMembershipCenter(); }, [currentUser]);
 
   const activateMembership = async (planCode) => {
     if (!planCode) return;
     setMembershipActionLoading(planCode);
     try {
-      const response = await fetch("http://localhost:5000/api/membership/subscribe", {
+      const response = await fetch(`${SHOP_API_BASE}/api/membership/subscribe`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: currentUser.id, plan_code: planCode }),
+        headers: { "Content-Type": "application/json", ...customerSessionHeaders() },
+        body: JSON.stringify({ plan_code: planCode }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.status !== "success") throw new Error(data.message || "Unable to activate membership.");
@@ -11670,10 +11694,10 @@ const removeNotification = async (notificationId) => {
   const updateMembershipAutoRenew = async (autoRenew) => {
     setMembershipActionLoading("renew");
     try {
-      const response = await fetch("http://localhost:5000/api/membership/auto-renew", {
+      const response = await fetch(`${SHOP_API_BASE}/api/membership/auto-renew`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: currentUser.id, auto_renew: autoRenew }),
+        headers: { "Content-Type": "application/json", ...customerSessionHeaders() },
+        body: JSON.stringify({ auto_renew: autoRenew }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.status !== "success") throw new Error(data.message || "Unable to update renewal preference.");
@@ -11734,12 +11758,13 @@ const removeNotification = async (notificationId) => {
   };
 
   const loadRewardsCenter = async () => {
-    if (!currentUser?.id) return;
+    // STAGE 2B SECURITY FIX: see loadWalletData above — gate on the signed-in object, not .id.
+    if (!currentUser) return;
     setRewardsLoading(true);
     try {
       const [walletResponse, tiersResponse] = await Promise.all([
-        fetch(`http://localhost:5000/api/rewards/wallet/${encodeURIComponent(currentUser.id)}`, { cache: "no-store" }),
-        fetch("http://localhost:5000/api/rewards/tiers", { cache: "no-store" }),
+        fetch(`${SHOP_API_BASE}/api/rewards/wallet/me`, { cache: "no-store", headers: customerSessionHeaders() }),
+        fetch(`${SHOP_API_BASE}/api/rewards/tiers`, { cache: "no-store" }),
       ]);
       const walletData = await walletResponse.json().catch(() => ({}));
       const tiersData = await tiersResponse.json().catch(() => ({}));
@@ -11757,7 +11782,7 @@ const removeNotification = async (notificationId) => {
     }
   };
 
-  useEffect(() => { loadRewardsCenter(); }, [currentUser?.id]);
+  useEffect(() => { loadRewardsCenter(); }, [currentUser]);
 
   const redeemRewardPoints = async () => {
     const points = Number(rewardRedeemPoints);
@@ -11937,12 +11962,13 @@ const removeNotification = async (notificationId) => {
   };
 
   const loadMembershipCenter = async () => {
-    if (!currentUser?.id) return;
+    // STAGE 2B SECURITY FIX: see loadWalletData above — gate on the signed-in object, not .id.
+    if (!currentUser) return;
     setMembershipLoading(true);
     try {
       const [plansResponse, membershipResponse] = await Promise.all([
-        fetch("http://localhost:5000/api/memberships/plans", { cache: "no-store" }),
-        fetch(`http://localhost:5000/api/memberships/user/${encodeURIComponent(currentUser.id)}`, { cache: "no-store" }),
+        fetch(`${SHOP_API_BASE}/api/memberships/plans`, { cache: "no-store" }),
+        fetch(`${SHOP_API_BASE}/api/memberships/user/me`, { cache: "no-store", headers: customerSessionHeaders() }),
       ]);
       const plansData = await plansResponse.json().catch(() => ({}));
       const membershipResult = await membershipResponse.json().catch(() => ({}));
@@ -11957,7 +11983,7 @@ const removeNotification = async (notificationId) => {
     }
   };
 
-  useEffect(() => { loadMembershipCenter(); }, [currentUser?.id]);
+  useEffect(() => { loadMembershipCenter(); }, [currentUser]);
 
   const subscribeMembership = async (planCode) => {
     if (!currentUser?.id) return;
@@ -12274,11 +12300,10 @@ const removeNotification = async (notificationId) => {
 
     setPasswordChanging(true);
     try {
-      const response = await fetch("http://localhost:5000/api/auth/change-password", {
+      const response = await fetch(`${SHOP_API_BASE}/api/auth/change-password`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...customerSessionHeaders() },
         body: JSON.stringify({
-          user_id: currentUser?.id,
           current_password: passwordForm.currentPassword,
           new_password: passwordForm.newPassword,
         }),
