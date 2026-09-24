@@ -46750,6 +46750,17 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               const profileSession=await getSessionUserFromRequest(req);
               if(!profileSession)return sendJSON(res,401,{status:"error",message:"Login required"});
               const userId=Number(profileSession.id);
+              // CONNECT SECURITY FIX: a numeric path id was silently IGNORED above (the write was
+              // always session-derived, so a foreign id could never corrupt another account's row) —
+              // but that also meant a request naming a foreign :id got treated as a silent self-edit
+              // and answered 200, instead of being rejected as the mismatched request it actually is.
+              // k5eConnectGuard has already rewritten this segment for us: a raw id equal to the
+              // caller is left as-is, and anything else (a foreign raw id, or a decoded reference to a
+              // different real account) becomes 0 — so any numeric path id that is NOT the caller's
+              // own id is now rejected outright, before any query runs, rather than silently redirected.
+              const pathProfileId=pathname.match(/^\/api\/connect\/profile\/(\d+)\/?$/)?.[1];
+              if(pathProfileId!==undefined&&Number(pathProfileId)!==userId)
+                return sendJSON(res,403,{status:"error",message:"You can only edit your own profile"});
               const body=await getBody(req);
               const story=["Everyone","Friends","Close friends","Only me"].includes(String(body.storyAudience??body.story_audience))?String(body.storyAudience??body.story_audience):"Everyone";
               const mode=["Keep","After viewing","24 hours"].includes(String(body.messageMode??body.message_mode))?String(body.messageMode??body.message_mode):"Keep";
