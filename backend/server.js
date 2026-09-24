@@ -13833,6 +13833,7 @@
       source:r.source||'customer_site',status:r.status||'new',message:r.message||'',
       convertedApplicationId:r.converted_application_id?String(r.converted_application_id):'',createdAt:r.created_at,updatedAt:r.updated_at
     }}
+    function whatsappAssistAckRow(r){return{leadCode:r.lead_code,status:r.status||'new',createdAt:r.created_at}}
     function vendorRow(r){return{id:String(r.id),vendorCode:r.vendor_code,businessName:r.business_name,ownerName:r.owner_name,phone:r.phone,email:r.email||'',businessType:r.business_type||'Individual Creator',city:r.city||'',state:r.state||'',pincode:r.pincode||'',gstin:r.gstin||'',pan:r.pan||'',category:r.category||'',kycStatus:r.kyc_status||'pending',payoutStatus:r.payout_status||'not_connected',status:r.status||'pending',catalogueAccess:r.catalogue_access===true,active:r.active!==false}}
     function vendorApplicationRow(r){return{id:String(r.id),applicationCode:r.application_code,businessName:r.business_name,ownerName:r.owner_name,phone:r.phone,email:r.email||'',businessType:r.business_type||'Individual Creator',city:r.city||'',state:r.state||'',pincode:r.pincode||'',category:r.category||'',productSummary:r.product_summary||'',gstin:r.gstin||'',status:r.status||'new',convertedVendorId:r.converted_vendor_id?String(r.converted_vendor_id):'',createdAt:r.created_at}}
     const ONBOARDING_DRAFT_FIELDS={
@@ -56111,7 +56112,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               const q=await pool.query(`INSERT INTO works_whatsapp_assist_leads(lead_code,full_name,phone,city,claimed_skill,source,status,message)
                 VALUES($1,$2,$3,$4,$5,'customer_site','new',$6) RETURNING *`,
                 [code,clean(b.fullName),clean(b.phone),clean(b.city),clean(b.claimedSkill),clean(b.message)]);
-              return sendJSON(res,201,{status:"success",lead:whatsappLeadRow(q.rows[0])});
+              return sendJSON(res,201,{status:"success",lead:whatsappAssistAckRow(q.rows[0])});
             }
             if(req.method==="GET"&&pathname==="/api/admin/works/whatsapp-assist"){
               const q=await pool.query(`SELECT * FROM works_whatsapp_assist_leads ORDER BY created_at DESC`);
@@ -56136,7 +56137,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               const q=await pool.query(`INSERT INTO works_whatsapp_assist_leads(lead_code,full_name,phone,city,claimed_skill,source,status,message)
                 VALUES($1,$2,$3,$4,$5,'whatsapp_webhook','new',$6) RETURNING *`,
                 [code,clean(b.fullName),clean(b.phone),clean(b.city),clean(b.claimedSkill),clean(b.message)]);
-              return sendJSON(res,201,{status:"success",lead:whatsappLeadRow(q.rows[0])});
+              return sendJSON(res,201,{status:"success",lead:whatsappAssistAckRow(q.rows[0])});
             }
 
             if(req.method==="GET"&&pathname==="/api/admin/works/applications"){const q=await pool.query(`SELECT * FROM works_worker_applications ORDER BY created_at DESC`);return sendJSON(res,200,{status:"success",applications:q.rows.map(workerApplicationRow)});}

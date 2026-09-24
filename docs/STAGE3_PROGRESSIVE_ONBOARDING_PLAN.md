@@ -1,7 +1,7 @@
 # Stage 3 — Progressive Worker and Vendor Onboarding
 
-**Baseline:** `c93a5cf` (Stage 2B verified)  
-**Branch:** `stage3-progressive-onboarding`  
+**Baseline:** `c93a5cf` (Stage 2B verified)
+**Branch:** `stage3-progressive-onboarding`
 **Scope:** Worker and Vendor applicant journeys only. No Admin/Teacher/Worker Portal activation, merge, push or deployment.
 
 ## What exists
@@ -18,6 +18,7 @@
 | Save current step | Signed-in applicant | `PUT /api/onboarding/{worker|vendor}/draft` | same draft projection |
 | Submit Worker | Signed-in applicant | `POST /api/onboarding/worker/submit` | `applicationCode`, `status`, `submittedAt` |
 | Submit Vendor | Signed-in applicant | `POST /api/onboarding/vendor/submit` | `applicationCode`, `status`, `submittedAt` |
+| Request application help | Applicant | `POST /api/works/whatsapp-assist` | `leadCode`, `status`, `createdAt` |
 
 Rules:
 

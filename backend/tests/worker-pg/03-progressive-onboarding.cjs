@@ -28,6 +28,9 @@ const png='data:image/png;base64,iVBORw0KGgo=';
   r=await api('GET','/api/onboarding/worker/draft?userId='+a.id,{token:b.token});
   check('body/query user id cannot select another worker draft',r.status===200&&JSON.stringify(r.json.draft.fields)==='{}'&&noInternal(r.json),r.json);
 
+  r=await api('POST','/api/works/whatsapp-assist',{body:{fullName:'Asha Applicant',phone:'9000000001',city:'Warangal',claimedSkill:'Plumber',message:'Need help'}});
+  check('WhatsApp assistance returns a public reference without an internal lead id',r.status===201&&/^HOWDI-WAHELP-/.test(r.json?.lead?.leadCode||'')&&Object.keys(r.json?.lead||{}).sort().join(',')==='createdAt,leadCode,status'&&noInternal(r.json),r.json);
+
   const worker={fullName:'Asha Applicant',phone:'9000000001',email:'asha@example.test',gender:'female',age:24,city:'Warangal',claimedSkill:'Plumber',consent:true,declaration:true,kycDocumentType:'PAN',kycIdLast4:'1234',profilePhoto:{dataUrl:png},liveSelfie:{dataUrl:png},kycDocument:{dataUrl:png},userId:b.id,workerId:123};
   r=await api('POST','/api/onboarding/worker/submit',{token:a.token,body:worker});
   check('worker progressive submit succeeds with a public acknowledgement only',r.status===201&&r.json?.status==='success'&&Object.keys(r.json.application||{}).sort().join(',')==='applicationCode,status,submittedAt'&&/^HOWDI-WA-/.test(r.json.application.applicationCode||'')&&noInternal(r.json),r.json);
