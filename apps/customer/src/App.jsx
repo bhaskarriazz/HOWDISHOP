@@ -1960,6 +1960,7 @@ function App() {
 
   const [howdiApplyType,setHowdiApplyType]=useState("");
   const [applyNotice,setApplyNotice]=useState("");
+  const [applyNoticeTone,setApplyNoticeTone]=useState('error');
   const [applyStep,setApplyStep]=useState(1);
   const [applySubmitting,setApplySubmitting]=useState(false);
   const [applyDraftSaving,setApplyDraftSaving]=useState(false);
@@ -1967,6 +1968,7 @@ function App() {
   const [applyAuthRequired,setApplyAuthRequired]=useState(false);
   const [applyDirty,setApplyDirty]=useState(false);
   const applySheetRef=useRef(null);
+  const applyReturnFocusRef=useRef(null);
   const [workerApply,setWorkerApply]=useState({
     fullName:"",phone:"",email:"",gender:"",age:"",engagementIntent:"individual_worker",city:"",state:"",pincode:"",addressLine:"",claimedSkill:"",
     experienceYears:"",serviceRadiusKm:"5",expectedStartingPrice:"",employmentType:"part_time",
@@ -1986,10 +1988,11 @@ function App() {
   const HOWDI_WHATSAPP_NUMBER=(import.meta.env.VITE_HOWDI_WHATSAPP_NUMBER||"").replace(/\D/g,"");
   const [vendorApply,setVendorApply]=useState({businessName:"",ownerName:"",phone:"",email:"",businessType:"Individual Creator",city:"",state:"",pincode:"",category:"Crochet & Handmade",productSummary:"",gstin:"",consent:false});
   async function openHowdiApplication(type){
-    setApplyNotice("");setApplySuccess(null);setApplyStep(1);setApplyDirty(false);setApplyAuthRequired(false);setWorkerShowOptionalIdentity(false);setWorkerShowOptionalWork(false);setHowdiApplyType(type);
+    applyReturnFocusRef.current=document.activeElement;
+    setApplyNotice("");setApplyNoticeTone('error');setApplySuccess(null);setApplyStep(1);setApplyDirty(false);setApplyAuthRequired(false);setWorkerShowOptionalIdentity(false);setWorkerShowOptionalWork(false);setHowdiApplyType(type);
     try{
       const token=localStorage.getItem("howdiSessionToken")||"";
-      if(!token){setApplyAuthRequired(true);setApplyNotice("Sign in or create an account to save your application securely.");return;}
+      if(!token){setApplyAuthRequired(true);setApplyNoticeTone('status');setApplyNotice("Sign in or create an account to save your application securely.");return;}
       const r=await fetch(`${WORKS_API_BASE}/api/onboarding/${type}/draft`,{headers:{Authorization:`Bearer ${token}`}});
       const d=await r.json().catch(()=>({}));
       if(!r.ok)throw new Error(d.message||"Unable to restore your saved progress.");
@@ -2002,16 +2005,18 @@ function App() {
         setWorkerShowOptionalWork(Boolean(fields.education||(Array.isArray(fields.languages)&&fields.languages.length)));
       }
       else setVendorApply(prev=>({...prev,...(draft.fields||{})}));
-      if(type==="worker"&&savedStep>=5){setApplyStep(4);setApplyNotice("Your details are restored. For privacy, please add your verification uploads again before the final step.");}
-      else {setApplyStep(savedStep);if(savedStep>1)setApplyNotice(`Welcome back. You can continue from step ${savedStep}.`);}
-    }catch(error){setApplyNotice(error.message||"Your saved progress could not be restored.");}
+      if(type==="worker"&&savedStep>=5){setApplyStep(4);setApplyNoticeTone('status');setApplyNotice("Your details are restored. For privacy, please add your verification uploads again before the final step.");}
+      else {setApplyStep(savedStep);if(savedStep>1){setApplyNoticeTone('status');setApplyNotice(`Welcome back. You can continue from step ${savedStep}.`);}}
+    }catch(error){setApplyNoticeTone('error');setApplyNotice(error.message||"Your saved progress could not be restored.");}
   }
   function closeHowdiApplication(force=false){
     if(!force&&applyDirty&&!applySubmitting&&!window.confirm("Leave this application? Details not yet saved on this step will be lost."))return;
     setHowdiApplyType("");setApplyNotice("");setApplyDirty(false);setApplyAuthRequired(false);
+    const opener=applyReturnFocusRef.current;setTimeout(()=>{if(opener&&typeof opener.focus==='function')opener.focus();},0);
   }
   useEffect(()=>{
     if(!howdiApplyType)return;
+    const focusTimer=setTimeout(()=>applySheetRef.current?.querySelector('.apply-close')?.focus(),0);
     const onKeyDown=(event)=>{
       if(event.key==='Escape'){event.preventDefault();closeHowdiApplication();return;}
       if(event.key!=='Tab'||!applySheetRef.current)return;
@@ -2022,8 +2027,8 @@ function App() {
       else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}
     };
     document.addEventListener('keydown',onKeyDown);
-    return()=>document.removeEventListener('keydown',onKeyDown);
-  },[howdiApplyType,applyDirty,applySubmitting]);
+    return()=>{clearTimeout(focusTimer);document.removeEventListener('keydown',onKeyDown);};
+  },[howdiApplyType,applyStep,applyDirty,applySubmitting]);
   async function saveHowdiDraft(type,step,fields){
     const token=localStorage.getItem("howdiSessionToken")||"";
     if(!token)return false;
@@ -2033,7 +2038,7 @@ function App() {
       const d=await r.json().catch(()=>({}));
       if(!r.ok)throw new Error(d.message||"Unable to save this step.");
       setApplyDirty(false);return true;
-    }catch(error){setApplyNotice(error.message||"Unable to save this step.");return false;}
+    }catch(error){setApplyNoticeTone('error');setApplyNotice(error.message||"Unable to save this step.");return false;}
     finally{setApplyDraftSaving(false);}
   }
   function workerStepError(step){
@@ -2046,8 +2051,8 @@ function App() {
   }
   async function moveWorkerStep(next,{validate=false}={}){
     const problem=validate?workerStepError(applyStep):"";
-    if(problem){setApplyNotice(problem);return;}
-    if(await saveHowdiDraft("worker",next,workerApply)){setApplyNotice(`Saved. Step ${next} of 5.`);setApplyStep(next);}
+    if(problem){setApplyNoticeTone('error');setApplyNotice(problem);return;}
+    if(await saveHowdiDraft("worker",next,workerApply)){setApplyNoticeTone('status');setApplyNotice(`Saved. Step ${next} of 5.`);setApplyStep(next);}
   }
   async function continueWorkerStep(){
     await moveWorkerStep(Math.min(5,applyStep+1),{validate:true});
@@ -2058,11 +2063,11 @@ function App() {
       2:()=>vendorApply.phone&&vendorApply.category,
       3:()=>vendorApply.city&&vendorApply.productSummary
     };
-    if(!validators[applyStep]()){setApplyNotice("Please complete the required fields before continuing.");return;}
-    if(await saveHowdiDraft("vendor",applyStep+1,vendorApply)){setApplyNotice(`Saved. Step ${applyStep+1} of 4.`);setApplyStep(applyStep+1);}
+    if(!validators[applyStep]()){setApplyNoticeTone('error');setApplyNotice("Please complete the required fields before continuing.");return;}
+    if(await saveHowdiDraft("vendor",applyStep+1,vendorApply)){setApplyNoticeTone('status');setApplyNotice(`Saved. Step ${applyStep+1} of 4.`);setApplyStep(applyStep+1);}
   }
   async function moveVendorStep(next){
-    if(await saveHowdiDraft("vendor",next,vendorApply)){setApplyNotice(`Saved. Step ${next} of 4.`);setApplyStep(next);}
+    if(await saveHowdiDraft("vendor",next,vendorApply)){setApplyNoticeTone('status');setApplyNotice(`Saved. Step ${next} of 4.`);setApplyStep(next);}
   }
   async function apiPostAny(paths,payload){
     let lastMessage="Application endpoint unavailable";
@@ -2085,14 +2090,14 @@ function App() {
   }
   async function pickWorkerFile(field,file){
     try{const value=await fileToData(file);setWorkerApply(prev=>({...prev,[field]:value}));setApplyDirty(true);setApplyNotice("");}
-    catch(error){setApplyNotice(error.message);}
+    catch(error){setApplyNoticeTone('error');setApplyNotice(error.message);}
   }
   async function openWorkerCamera(){
     try{
       const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"user"},audio:false});
       cameraStreamRef.current=stream;setCameraOpen(true);
       setTimeout(()=>{if(cameraVideoRef.current){cameraVideoRef.current.srcObject=stream;cameraVideoRef.current.play().catch(()=>{});}},60);
-    }catch(error){setApplyNotice("Camera permission is required for live selfie capture.");}
+    }catch(error){setApplyNoticeTone('error');setApplyNotice("Camera permission is required for live selfie capture.");}
   }
   function closeWorkerCamera(){
     if(cameraStreamRef.current){cameraStreamRef.current.getTracks().forEach(t=>t.stop());cameraStreamRef.current=null;}
@@ -2108,7 +2113,7 @@ function App() {
   function toggleWorkingDay(day){setWorkerApply(prev=>({...prev,workingDays:prev.workingDays.includes(day)?prev.workingDays.filter(d=>d!==day):[...prev.workingDays,day]}));setApplyDirty(true);}
   async function requestWhatsAppAssist(){
     if(whatsappAssistBusy)return;
-    if(!workerApply.phone){setApplyNotice("Enter your phone number first so HOWDI can assist you on WhatsApp.");return;}
+    if(!workerApply.phone){setApplyNoticeTone('error');setApplyNotice("Enter your phone number first so HOWDI can assist you on WhatsApp.");return;}
     setWhatsappAssistBusy(true);setApplyNotice("");
     try{
       const payload={fullName:workerApply.fullName,phone:workerApply.phone,city:workerApply.city,claimedSkill:workerApply.claimedSkill,message:"Customer requested WhatsApp assistance for HOWDI Worker application."};
@@ -2119,21 +2124,21 @@ function App() {
         const msg=encodeURIComponent(`Hi HOWDI, I need help completing my worker application.%0AName: ${workerApply.fullName||"-"}%0APhone: ${workerApply.phone}%0ACity: ${workerApply.city||"-"}%0ASkill: ${workerApply.claimedSkill||"-"}%0AReference: ${d.lead?.leadCode||""}`);
         window.open(`https://wa.me/${HOWDI_WHATSAPP_NUMBER}?text=${msg}`,"_blank","noopener,noreferrer");
       }else{
-        setApplyNotice(`WhatsApp assistance request sent to HOWDI Admin. Reference: ${d.lead?.leadCode||""}. Configure VITE_HOWDI_WHATSAPP_NUMBER to open WhatsApp directly.`);
+        setApplyNoticeTone('status');setApplyNotice(`WhatsApp assistance request sent. Reference: ${d.lead?.leadCode||""}.`);
       }
-    }catch(error){setApplyNotice(error.message||"WhatsApp assistance request failed.");}
+    }catch(error){setApplyNoticeTone('error');setApplyNotice(error.message||"WhatsApp assistance request failed.");}
     finally{setWhatsappAssistBusy(false);}
   }
   async function submitWorkerApplication(e){
     e.preventDefault();if(applySubmitting)return;setApplyNotice("");
     const validationProblem=workerStepError(1)||workerStepError(2)||workerStepError(3)||workerStepError(4);
-    if(validationProblem){setApplyNotice(validationProblem);return;}
-    if(!workerApply.consent||!workerApply.declaration){setApplyNotice("Please accept consent and declaration.");return;}
+    if(validationProblem){setApplyNoticeTone('error');setApplyNotice(validationProblem);return;}
+    if(!workerApply.consent||!workerApply.declaration){setApplyNoticeTone('error');setApplyNotice("Please accept consent and declaration.");return;}
     setApplySubmitting(true);
     try{
       const d=await apiPostAny(["/api/onboarding/worker/submit"],workerApply);
       const code=d?.application?.applicationCode||"Submitted";setApplySuccess({type:"worker",code});
-    }catch(error){setApplyNotice(error.message||"Unable to submit worker application.");}
+    }catch(error){setApplyNoticeTone('error');setApplyNotice(error.message||"Unable to submit worker application.");}
     finally{setApplySubmitting(false);}
   }
   async function submitVendorApplication(e){
@@ -2143,9 +2148,8 @@ function App() {
       const code=d?.application?.applicationCode||"Submitted";
       setApplySuccess({type:"vendor",code});
       setVendorApply({businessName:"",ownerName:"",phone:"",email:"",businessType:"Individual Creator",city:"",state:"",pincode:"",category:"Crochet & Handmade",productSummary:"",gstin:"",consent:false});
-      setApplyStep(1);
     }catch(error){
-      setApplyNotice(error.message==="API endpoint not found"?"Vendor application API is not active on the running backend. Restart with the latest backend V5.":(error.message||"Unable to submit application."));
+      setApplyNoticeTone('error');setApplyNotice(error.message==="API endpoint not found"?"Vendor application API is not active on the running backend. Restart with the latest backend V5.":(error.message||"Unable to submit application."));
     }finally{setApplySubmitting(false);}
   }
 
@@ -22509,7 +22513,7 @@ const removeNotification = async (notificationId) => {
               {Array.from({length:howdiApplyType==="worker"?5:4},(_,index)=><Fragment key={index}><b className={applyStep===index+1?"on":applyStep>index+1?"done":""}>{index+1}</b>{index<(howdiApplyType==="worker"?4:3)&&<i/>}</Fragment>)}
             </div>}
 
-            {applyNotice&&<div className="apply-alert" role="alert" aria-live="assertive">{applyNotice}</div>}
+            {applyNotice&&<div className={`apply-alert ${applyNoticeTone==='status'?'status':''}`} role={applyNoticeTone==='status'?'status':'alert'} aria-live={applyNoticeTone==='status'?'polite':'assertive'}>{applyNotice}</div>}
 
             {applySuccess ? (
               <div className="apply-success">
@@ -22559,7 +22563,7 @@ const removeNotification = async (notificationId) => {
 
                 <div className="apply-step-actions worker-step worker-step-2"><button type="button" className="secondary" onClick={()=>moveWorkerStep(1)} disabled={applyDraftSaving}>← Back</button><span>Step 2 of 5</span><button type="button" onClick={continueWorkerStep} disabled={applyDraftSaving}>{applyDraftSaving?"Saving…":"Continue →"}</button></div>
 
-                <div className="worker-section-title premium worker-step worker-step-3"><i>03</i><div><b>Your preferred earnings</b><span>Set a range. HOWDI confirms customer-facing pricing after verification.</span></div></div>
+                <div className="worker-section-title premium worker-step worker-step-3"><i>03</i><div><b>Earnings & ID details</b><span>Set your preferred range, then provide the last four ID characters for verification.</span></div></div>
                 <div className="worker-grid four worker-step worker-step-3">
                   <label><span>Hourly min ₹</span><input type="number" min="0" value={workerApply.hourlyRateMin} onChange={e=>setWorkerApply({...workerApply,hourlyRateMin:e.target.value})}/></label>
                   <label><span>Hourly max ₹</span><input type="number" min="0" value={workerApply.hourlyRateMax} onChange={e=>setWorkerApply({...workerApply,hourlyRateMax:e.target.value})}/></label>
@@ -22615,7 +22619,7 @@ const removeNotification = async (notificationId) => {
                 </>}
                 {applyStep===4&&<>
                   <label className="apply-check"><input type="checkbox" checked={vendorApply.consent} onChange={e=>setVendorApply({...vendorApply,consent:e.target.checked})}/><span>I agree to HOWDI review before vendor and catalogue activation.</span></label>
-                  <div className="apply-review"><b>Review before sending</b><span>{vendorApply.businessName} · {vendorApply.category} · {vendorApply.city}</span></div><footer className="apply-actions"><button type="button" className="ghost" onClick={()=>moveVendorStep(3)} disabled={applyDraftSaving}>← Back</button><em>Step 4 of 4</em><button className="primary" disabled={!vendorApply.consent||applySubmitting}>{applySubmitting?"Submitting…":"Submit application →"}</button></footer>
+                  <div className="apply-review"><b>Review before sending</b><span>{vendorApply.businessName} · {vendorApply.ownerName} · {vendorApply.phone}</span><span>{vendorApply.category} · {vendorApply.city} · {vendorApply.productSummary||"Product details pending"}</span></div><footer className="apply-actions"><button type="button" className="ghost" onClick={()=>moveVendorStep(3)} disabled={applyDraftSaving}>← Back</button><em>Step 4 of 4</em><button className="primary" disabled={!vendorApply.consent||applySubmitting}>{applySubmitting?"Submitting…":"Submit application →"}</button></footer>
                 </>}
               </form>
             )}
