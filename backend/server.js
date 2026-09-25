@@ -13856,6 +13856,26 @@
       }
       return out;
     }
+    function onboardingStep(role,value){
+      const max=role==='WORKER'?5:4;
+      const step=typeof value==='number'?value:Number(String(value||'').trim());
+      return Number.isInteger(step)&&step>=1&&step<=max?step:null;
+    }
+    function onboardingTextTooLong(value,max){return clean(value).length>max}
+    function onboardingSubmissionError(role,b){
+      const limits=role==='WORKER'
+        ? [['fullName',160],['phone',30],['email',255],['gender',30],['city',120],['state',120],['pincode',12],['claimedSkill',120],['employmentType',30],['kycDocumentType',40],['kycIdLast4',4],['education',160],['emergencyContactName',160],['emergencyContactPhone',30],['addressLine',1000],['notes',10000]]
+        : [['businessName',180],['ownerName',160],['phone',30],['email',255],['businessType',80],['city',120],['state',120],['pincode',12],['category',120],['gstin',30],['productSummary',10000]];
+      if(limits.some(([key,max])=>onboardingTextTooLong(b[key],max)))return 'One or more fields are too long.';
+      return '';
+    }
+    function removePrivateApplicationFiles(names){
+      for(const name of names){
+        if(!name)continue;
+        const full=path.join(WORKER_UPLOAD_DIR,safeUploadName(name));
+        try{if(path.resolve(full).startsWith(path.resolve(WORKER_UPLOAD_DIR))&&fs.existsSync(full))fs.unlinkSync(full);}catch(error){console.warn('Unable to remove staged worker upload:',error&&error.message);}
+      }
+    }
     function onboardingApplicationAckRow(row){return{applicationCode:row.application_code,status:row.status||'new',submittedAt:row.created_at||null}}
     function worksJourneyRow(r){return{
       id:String(r.id),workId:String(r.work_order_id),workCode:r.work_code||'',workerId:String(r.worker_id),
@@ -56041,7 +56061,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 return sendJSON(res,200,{status:'success',draft:q.rows[0]?onboardingDraftRow(q.rows[0]):{role:role.toLowerCase(),step:1,fields:{},updatedAt:null}});
               }
               if(req.method==='PUT'){
-                const b=await getBody(req),step=Math.max(1,Math.min(role==='WORKER'?5:4,number(b.step,1)));
+                const b=await getBody(req),step=onboardingStep(role,b.step);
+                if(step===null)return sendJSON(res,400,{status:'error',code:'INVALID_ONBOARDING_STEP',message:'Choose a whole application step within the available range.'});
                 const patch=safeOnboardingDraftPatch(role,b.fields);
                 const q=await pool.query(`INSERT INTO howdi_onboarding_drafts(user_id,role_code,step,fields) VALUES($1,$2,$3,$4::jsonb)
                   ON CONFLICT(user_id,role_code) DO UPDATE SET step=EXCLUDED.step,fields=howdi_onboarding_drafts.fields||EXCLUDED.fields,updated_at=NOW()
@@ -56060,6 +56081,10 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 return sendJSON(res,400,{status:"error",message:"Name, phone, city and claimed skill are required"});
               if(!clean(b.gender)||number(b.age,0)<18)
                 return sendJSON(res,400,{status:"error",message:"Gender and age 18+ are required"});
+              if(!Number.isInteger(Number(b.age))||Number(b.age)>120)
+                return sendJSON(res,400,{status:"error",message:"Enter a valid age to continue."});
+              const workerSubmissionError=onboardingSubmissionError('WORKER',b);
+              if(workerSubmissionError)return sendJSON(res,400,{status:'error',code:'INVALID_ONBOARDING_DETAILS',message:workerSubmissionError});
               if((clean(b.engagementIntent)||'individual_worker')==='partner')
                 return sendJSON(res,409,{status:"partner_redirect",message:"Partnership applications should continue through Become a Vendor"});
               if(b.consent!==true||b.declaration!==true)
@@ -56079,11 +56104,17 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               }catch(error){
                 // upload validation / file-system failures: log the detail server-side, return a fixed message (never error.message)
                 console.warn("Worker application upload rejected:",error&&error.message);
+                removePrivateApplicationFiles([profilePhotoFile,liveSelfieFile,kycDocumentFile,certificateFile,experienceFile]);
                 return sendJSON(res,400,{status:"error",code:"APPLICATION_FILE_REJECTED",message:"One of the uploaded files could not be accepted. Files must be JPG, PNG, WEBP or PDF and under 3 MB."});
               }
               const workingDays=Array.isArray(b.workingDays)?b.workingDays:[];
               const languages=Array.isArray(b.languages)?b.languages:[];
-              const q=await pool.query(`INSERT INTO works_worker_applications(
+              let db=pool;
+              let ownsDbClient=false;
+              let transactionOpen=false;
+              try{
+                if(progressiveSubmit){db=await pool.connect();ownsDbClient=true;await db.query('BEGIN');transactionOpen=true;}
+                const q=await db.query(`INSERT INTO works_worker_applications(
                 user_id,application_code,full_name,phone,email,gender,age,engagement_intent,city,state,pincode,address_line,claimed_skill,experience_years,service_radius_km,
                 expected_starting_price,employment_type,working_days,available_from,available_to,hourly_rate_min,hourly_rate_max,
                 daily_rate_min,daily_rate_max,emergency_jobs,own_vehicle,kyc_document_type,kyc_id_last4,profile_photo_file,live_selfie_file,
@@ -56098,12 +56129,18 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                  number(b.hourlyRateMax,0),number(b.dailyRateMin,0),number(b.dailyRateMax,0),b.emergencyJobs===true,b.ownVehicle===true,
                  clean(b.kycDocumentType),clean(b.kycIdLast4).slice(-4),profilePhotoFile,liveSelfieFile,kycDocumentFile,certificateFile,
                  experienceFile,JSON.stringify(languages),clean(b.education),clean(b.emergencyContactName),clean(b.emergencyContactPhone),clean(b.notes)]);
-              if(sessionUser?.id){await pool.query(`INSERT INTO user_roles(user_id,role_id,is_primary,role_status,requested_at,onboarding_state,rejection_reason) SELECT $1,id,FALSE,'PENDING',NOW(),'SUBMITTED',NULL FROM roles WHERE code='WORKER' ON CONFLICT(user_id,role_id) DO UPDATE SET role_status=CASE WHEN user_roles.role_status='ACTIVE' THEN 'ACTIVE' ELSE 'PENDING' END,requested_at=NOW(),onboarding_state=CASE WHEN user_roles.role_status='ACTIVE' THEN 'COMPLETE' ELSE 'SUBMITTED' END,rejection_reason=NULL,updated_at=NOW()`,[sessionUser.id]);}
-              if(progressiveSubmit){
-                await pool.query(`DELETE FROM howdi_onboarding_drafts WHERE user_id=$1 AND role_code='WORKER'`,[sessionUser.id]);
-                return sendJSON(res,201,{status:"success",application:onboardingApplicationAckRow(q.rows[0])});
-              }
-              return sendJSON(res,201,{status:"success",application:workerApplicationRow(q.rows[0])});
+                if(sessionUser?.id){await db.query(`INSERT INTO user_roles(user_id,role_id,is_primary,role_status,requested_at,onboarding_state,rejection_reason) SELECT $1,id,FALSE,'PENDING',NOW(),'SUBMITTED',NULL FROM roles WHERE code='WORKER' ON CONFLICT(user_id,role_id) DO UPDATE SET role_status=CASE WHEN user_roles.role_status='ACTIVE' THEN 'ACTIVE' ELSE 'PENDING' END,requested_at=NOW(),onboarding_state=CASE WHEN user_roles.role_status='ACTIVE' THEN 'COMPLETE' ELSE 'SUBMITTED' END,rejection_reason=NULL,updated_at=NOW()`,[sessionUser.id]);}
+                if(progressiveSubmit){
+                  await db.query(`DELETE FROM howdi_onboarding_drafts WHERE user_id=$1 AND role_code='WORKER'`,[sessionUser.id]);
+                  await db.query('COMMIT');transactionOpen=false;
+                  return sendJSON(res,201,{status:"success",application:onboardingApplicationAckRow(q.rows[0])});
+                }
+                return sendJSON(res,201,{status:"success",application:workerApplicationRow(q.rows[0])});
+              }catch(error){
+                if(transactionOpen)try{await db.query('ROLLBACK')}catch(rollbackError){console.error('Worker onboarding rollback failed:',rollbackError);}
+                removePrivateApplicationFiles([profilePhotoFile,liveSelfieFile,kycDocumentFile,certificateFile,experienceFile]);
+                throw error;
+              }finally{if(ownsDbClient)db.release();}
             }
             if(req.method==="POST"&&pathname==="/api/works/whatsapp-assist"){
               const b=await getBody(req);
@@ -56154,17 +56191,31 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             }
 
             if(req.method==="POST"&&(pathname==="/api/vendors/applications"||pathname==="/api/vendor/applications"||pathname==="/api/vendors/apply"||pathname==="/api/onboarding/vendor/submit")){
-              const b=await getBody(req),sessionUser=await getSessionUserFromRequest(req);if(!clean(b.businessName)||!clean(b.ownerName)||!clean(b.phone)||!clean(b.city)||!clean(b.category))return sendJSON(res,400,{status:"error",message:"Business, owner, phone, city and category are required"});if(b.consent!==true)return sendJSON(res,400,{status:"error",message:"Consent is required"});
+              const b=await getBody(req),sessionUser=await getSessionUserFromRequest(req);
               const progressiveSubmit=pathname==="/api/onboarding/vendor/submit";
               if(progressiveSubmit&&!sessionUser)return sendJSON(res,401,{status:'error',message:'Please sign in to submit your application.'});
-              const q=await pool.query(`INSERT INTO howdi_vendor_applications(user_id,application_code,business_name,owner_name,phone,email,business_type,city,state,pincode,category,product_summary,gstin,consent,status) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,TRUE,'new') RETURNING *`,
-              [sessionUser?.id||null,`HOWDI-VA-${Date.now().toString().slice(-10)}`,clean(b.businessName),clean(b.ownerName),clean(b.phone),clean(b.email),clean(b.businessType)||'Individual Creator',clean(b.city),clean(b.state),clean(b.pincode),clean(b.category),clean(b.productSummary),clean(b.gstin)]);
-              if(sessionUser?.id){await pool.query(`INSERT INTO user_roles(user_id,role_id,is_primary,role_status,requested_at,onboarding_state,rejection_reason) SELECT $1,id,FALSE,'PENDING',NOW(),'SUBMITTED',NULL FROM roles WHERE code='VENDOR' ON CONFLICT(user_id,role_id) DO UPDATE SET role_status=CASE WHEN user_roles.role_status='ACTIVE' THEN 'ACTIVE' ELSE 'PENDING' END,requested_at=NOW(),onboarding_state=CASE WHEN user_roles.role_status='ACTIVE' THEN 'COMPLETE' ELSE 'SUBMITTED' END,rejection_reason=NULL,updated_at=NOW()`,[sessionUser.id]);}
-              if(progressiveSubmit){
-                await pool.query(`DELETE FROM howdi_onboarding_drafts WHERE user_id=$1 AND role_code='VENDOR'`,[sessionUser.id]);
-                return sendJSON(res,201,{status:"success",application:onboardingApplicationAckRow(q.rows[0])});
-              }
-              return sendJSON(res,201,{status:"success",application:vendorApplicationRow(q.rows[0])});
+              if(!clean(b.businessName)||!clean(b.ownerName)||!clean(b.phone)||!clean(b.city)||!clean(b.category))return sendJSON(res,400,{status:"error",message:"Business, owner, phone, city and category are required"});
+              if(b.consent!==true)return sendJSON(res,400,{status:"error",message:"Consent is required"});
+              const vendorSubmissionError=onboardingSubmissionError('VENDOR',b);
+              if(vendorSubmissionError)return sendJSON(res,400,{status:'error',code:'INVALID_ONBOARDING_DETAILS',message:vendorSubmissionError});
+              let db=pool;
+              let ownsDbClient=false;
+              let transactionOpen=false;
+              try{
+                if(progressiveSubmit){db=await pool.connect();ownsDbClient=true;await db.query('BEGIN');transactionOpen=true;}
+                const q=await db.query(`INSERT INTO howdi_vendor_applications(user_id,application_code,business_name,owner_name,phone,email,business_type,city,state,pincode,category,product_summary,gstin,consent,status) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,TRUE,'new') RETURNING *`,
+                [sessionUser?.id||null,`HOWDI-VA-${Date.now().toString().slice(-10)}`,clean(b.businessName),clean(b.ownerName),clean(b.phone),clean(b.email),clean(b.businessType)||'Individual Creator',clean(b.city),clean(b.state),clean(b.pincode),clean(b.category),clean(b.productSummary),clean(b.gstin)]);
+                if(sessionUser?.id){await db.query(`INSERT INTO user_roles(user_id,role_id,is_primary,role_status,requested_at,onboarding_state,rejection_reason) SELECT $1,id,FALSE,'PENDING',NOW(),'SUBMITTED',NULL FROM roles WHERE code='VENDOR' ON CONFLICT(user_id,role_id) DO UPDATE SET role_status=CASE WHEN user_roles.role_status='ACTIVE' THEN 'ACTIVE' ELSE 'PENDING' END,requested_at=NOW(),onboarding_state=CASE WHEN user_roles.role_status='ACTIVE' THEN 'COMPLETE' ELSE 'SUBMITTED' END,rejection_reason=NULL,updated_at=NOW()`,[sessionUser.id]);}
+                if(progressiveSubmit){
+                  await db.query(`DELETE FROM howdi_onboarding_drafts WHERE user_id=$1 AND role_code='VENDOR'`,[sessionUser.id]);
+                  await db.query('COMMIT');transactionOpen=false;
+                  return sendJSON(res,201,{status:"success",application:onboardingApplicationAckRow(q.rows[0])});
+                }
+                return sendJSON(res,201,{status:"success",application:vendorApplicationRow(q.rows[0])});
+              }catch(error){
+                if(transactionOpen)try{await db.query('ROLLBACK')}catch(rollbackError){console.error('Vendor onboarding rollback failed:',rollbackError);}
+                throw error;
+              }finally{if(ownsDbClient)db.release();}
             }
             if(req.method==="GET"&&pathname==="/api/admin/vendors/applications"){const q=await pool.query(`SELECT * FROM howdi_vendor_applications ORDER BY created_at DESC`);return sendJSON(res,200,{status:"success",applications:q.rows.map(vendorApplicationRow)});}
             if(req.method==="PUT"&&/^\/api\/admin\/vendors\/applications\/\d+\/status\/?$/.test(pathname)){
@@ -56312,6 +56363,15 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               if (failure === "Invalid JSON") return sendJSON(res, 400, { status: "error", code: "INVALID_REQUEST_BODY", message: "The request body is not valid JSON" });
               if (failure === "Request too large") return sendJSON(res, 413, { status: "error", code: "REQUEST_TOO_LARGE", message: "The request is too large" });
               return sendJSON(res, 500, { status: "error", code: "WORKER_REQUEST_FAILED", message: "Unable to complete the request right now" });
+            }
+
+            // Stage 3 onboarding never returns database, filesystem or validation implementation details.
+            // Validation failures are returned above as explicit safe 4xx responses; unexpected failures stay server-side.
+            if (/^\/api\/onboarding\/(?:worker|vendor)(?:\/|$)/.test(String(pathname || ""))) {
+              const failure=String((error&&error.message)||"");
+              if(failure==='Invalid JSON')return sendJSON(res,400,{status:'error',code:'INVALID_REQUEST_BODY',message:'The request body is not valid JSON.'});
+              if(failure==='Request too large')return sendJSON(res,413,{status:'error',code:'REQUEST_TOO_LARGE',message:'The request is too large.'});
+              return sendJSON(res,500,{status:'error',code:'ONBOARDING_REQUEST_FAILED',message:'Unable to complete the application request right now.'});
             }
 
             // K5E: Connect / notification routes never return raw database errors (table, column and constraint names,
