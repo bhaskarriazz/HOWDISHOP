@@ -327,8 +327,11 @@ test('GET /api/connect/bootstrap derives the viewer only from the session (K5E: 
 test('K3/K5A–K5C anchors are preserved and unrelated notification consumers are untouched',()=>{
   assert.ok(source.includes('            if(req.method==="GET"&&pathname==="/api/connect/notifications"){'),'K3 slice anchor line unchanged');
   // K5A Home recentActivity stays session-authoritative and username-based.
-  const recent=between("await run('recentActivity'",'await run(\'dailyQuote\'');
-  assert.match(recent,/actor_public_username/);assert.match(recent,/authedUid/);assert.doesNotMatch(recent,/howdi_id/);
+  // (K5A Phase 1 moved the Home route to connect-home-k5a.cjs; the same guarantees are pinned there.)
+  const homeSrc=require('node:fs').readFileSync(require('node:path').join(__dirname,'../connect-home-k5a.cjs'),'utf8');
+  const recent=homeSrc.slice(homeSrc.indexOf('recentActivity: `SELECT n.notification_type'),homeSrc.indexOf('dailyQuoteCount:'));
+  assert.ok(recent.length>100,'K5A recentActivity query present');
+  assert.match(recent,/actor_public_username/);assert.match(recent,/n\.user_id=\$1::bigint/);assert.doesNotMatch(recent,/howdi_id/);
   // Every notification INSERT site still writes user_id from a session-derived value (writers were not modified).
   assert.equal((source.match(/INSERT INTO howdi_connect_notifications/g)||[]).length,24,'writer sites unchanged from K5C');
   // Route order: exact list route, then unread-count, read-all, read-one.

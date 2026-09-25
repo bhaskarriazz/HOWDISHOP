@@ -131,9 +131,12 @@ test('K5E closure 9: blocks and private profiles reach the plan, resource, skill
   assert.match(at('if(req.method==="GET"&&/^\\/api\\/connect\\/creator-plans\\/\\d+\\/?$/'),/k5eBlockedPair\(viewer,creator\)/);
   assert.match(at('if(req.method==="GET"&&/^\\/api\\/connect\\/creator-resources\\/\\d+\\/?$/'),/k5eBlockedPair\(viewer,creator\)/);
   assert.match(at('if(req.method==="POST"&&/^\\/api\\/connect\\/profile-skills\\/\\d+\\/endorse\\/?$/'),/k5eBlockedPair\(uid,skill\.user_id\)/);
-  const home=between('const BLOCK_FILTER_ON_AUTHOR=(col)=>','const encodeForYouCursor');
-  assert.match(home,/subscribers_only/);assert.match(home,/k5ePrivateProfileOkSql\(col/);
-  assert.match(between('await run(\'stories\'','await run(\'forYou\''),/k5ePrivateProfileOkSql\("s\.user_id"/);
+  // Home moved to connect-home-k5a.cjs in K5A Phase 1: the shared author floor / post-visibility fragments carry the
+  // subscribers-only and private-profile rules, and Stories use the same author floor.
+  const homeSrc=require('node:fs').readFileSync(require('node:path').join(__dirname,'../connect-home-k5a.cjs'),'utf8');
+  const floor=homeSrc.slice(homeSrc.indexOf('const AUTHOR_FLOOR ='),homeSrc.indexOf('const AVATAR ='));
+  assert.match(floor,/subscribers_only/);assert.match(floor,/k5ePrivateProfileOkSql\(owner/);
+  assert.match(homeSrc.slice(homeSrc.indexOf('stories: `SELECT s.id'),homeSrc.indexOf('storyByKey: null')),/AUTHOR_FLOOR\('u', 'cp', 's\.user_id'\)/);
   assert.match(between('const articles=(await pool.query(`','let communities=[]'),/connectPostVisibleSql\("p","\$2::bigint"\)/,'public-profile articles');
   for(const [needle,fn] of [['profiles\\/\\d+\\/skill-passport','passportViewer'],['profiles\\/\\d+\\/trust-trail','trailViewer'],['profiles\\/\\d+\\/public-knowledge-dna','dnaViewer']])
     assert.match(at(`if(req.method==="GET"&&/^\\/api\\/connect\\/${needle}`),new RegExp(`k5eProfileHiddenFrom\\(${fn},target\\)`),needle);

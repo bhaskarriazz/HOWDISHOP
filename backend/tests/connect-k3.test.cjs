@@ -17,7 +17,7 @@ const follow=[
  block('            if(req.method==="GET"&&pathname==="/api/connect/follow-requests"){'),
  block('            if(req.method==="PATCH"&&/^\\/api\\/connect\\/follow-requests\\/\\d+\\/respond\\/?$/.test(pathname)){')
 ].join('\n');
-const helpers=between('    const HOWDI_ATTACHMENT_RULES =','    function number(')+between('    function getBody(req)','    // =====================================================\n    // URL HELPER')+between('    async function getSessionUserFromRequest(req)','    function adminTokenHash(')+between('            async function performConnectFollowResponse(res,userId,target){','            if (req.method === "GET" && pathname === "/api/connect/home") {');
+const helpers=between('    const HOWDI_ATTACHMENT_RULES =','    function number(')+between('    function getBody(req)','    // =====================================================\n    // URL HELPER')+between('    async function getSessionUserFromRequest(req)','    function adminTokenHash(')+between('            async function performConnectFollowResponse(res,userId,target){','            // K5A PHASE 1: GET /api/connect/home, /api/connect/home/feed');
 const image='data:image/png;base64,iVBORw0KGgo=';
 async function run(method,path,body={},options={}){
  const calls=[]; const db={article:options.article,spaceType:options.spaceType||'GROUP'};
@@ -135,143 +135,14 @@ test('Non-owner cannot accept another user\'s follow request',async()=>{
 // =====================================================
 // K5A — CONNECT HOME SHELL + FEED COMPOSITION
 // =====================================================
-const homeRoute=block('            if (req.method === "GET" && pathname === "/api/connect/home") {');
 const vibeCursorDecodeSrc=between('    function vibeCursorDecode(value){','    async function getVibeViewer(req){');
 const getVibeFeedRowsSrc=between('    async function getVibeFeedRows({','    // ============================================================\n    // HOWDI V14.0F');
 const getSessionUserFromRequestSrc=between('    async function getSessionUserFromRequest(req)','    function adminTokenHash(');
 const vibeRateLimitSrc=between('    const vibeV151BRateBuckets=new Map();','    function vibeSafePublicUsernameV151B(v){');
 const getRequestIpSrc=between('    function getRequestIp(req) {','    function getBrowserName(');
-const HOME_SECTION_KEYS=['special','hero','stories','forYou','vibes','continueWatching','recommendedCreators','suggestedPeople','communities','trendingArticles','shopRecommendations','worksRecommendations','learnRecommendations','recentActivity','dailyQuote','continueYourJourney'];
-async function runHome(path,options={}){
- const calls=[];
- const query=async(sql,params=[])=>{
-  sql=sql.replace(/\s+/g,' ').trim();calls.push({sql,params});
-  if(sql.includes('FROM user_sessions s'))return {rows:params[0]==='session-A'?[{id:101}]:[],rowCount:params[0]==='session-A'?1:0};
-  if(sql.startsWith('UPDATE user_sessions'))return {rows:[],rowCount:0};
-  if(sql.includes('SELECT COUNT(*)::int n FROM howdi_connect_daily_quotes'))return {rows:[{n:options.quoteCount??7}],rowCount:1};
-  if(sql.includes('FROM howdi_connect_daily_quotes') && sql.startsWith('SELECT quote_text'))return {rows:[{quote_text:'Test quote',author:'HOWDI'}],rowCount:1};
-  if(options.queryOverride){const over=options.queryOverride(sql,params);if(over!==undefined)return over;}
-  return {rows:[],rowCount:0};
- };
- const pool={query};
- const headers={...(options.headers||{})};
- if(!options.anonymous&&!headers.authorization)headers.authorization='Bearer session-A';
- const req={method:'GET',headers,socket:{remoteAddress:options.ip||'127.0.0.1'}};
- const url=new URL('http://localhost'+path);
- const resHeaders={};
- const res={setHeader:(k,v)=>{resHeaders[k]=v;}};
- const context={
-  pool,req,res,url,pathname:'/api/connect/home',URL,Buffer,
-  clean:x=>String(x??'').trim(),
-  sendJSON:(_res,status,data)=>({status,data}),
-  console:{error:()=>{}},
- };
- const src=`${getRequestIpSrc}\n${vibeRateLimitSrc}\n${getSessionUserFromRequestSrc}\n${vibeCursorDecodeSrc}\n${getVibeFeedRowsSrc}\n(async()=>{${homeRoute}})()`;
- const response=await vm.runInNewContext(src,context);
- assert.ok(response,'Route must respond');
- return {...response,calls,resHeaders};
-}
-test('Connect Home returns all 16 required sections for a guest',async()=>{
- const r=await runHome('/api/connect/home',{anonymous:true});
- assert.equal(r.status,200);
- assert.equal(r.data.meta.guest,true);
- assert.deepEqual(Array.from(r.data.order),HOME_SECTION_KEYS);
- for(const key of HOME_SECTION_KEYS)assert.ok(Object.prototype.hasOwnProperty.call(r.data.sections,key),`missing section ${key}`);
-});
-test('Connect Home returns all 16 required sections for an authenticated user',async()=>{
- const r=await runHome('/api/connect/home');
- assert.equal(r.status,200);
- assert.equal(r.data.meta.guest,false);
- for(const key of HOME_SECTION_KEYS)assert.ok(Object.prototype.hasOwnProperty.call(r.data.sections,key),`missing section ${key}`);
-});
-test('Connect Home honors the ?sections= filter for progressive loading',async()=>{
- const r=await runHome('/api/connect/home?sections=dailyQuote,special,hero');
- assert.equal(r.status,200);
- assert.deepEqual(Object.keys(r.data.sections).sort(),['dailyQuote','hero','special']);
- assert.equal(r.data.sections.dailyQuote.item.quote_text,'Test quote');
-});
-test('Connect Home never leaks internal identity fields to the client',async()=>{
- const r=await runHome('/api/connect/home');
- assert.equal(r.status,200);
- const serialized=JSON.stringify(r.data);
- assert.doesNotMatch(serialized,/howdi_id|master_id|identity_uuid/);
-});
-test('Connect Home is session-authoritative (ignores no client-supplied identity, uses session)',async()=>{
- const r=await runHome('/api/connect/home');
- const sessionCall=r.calls.find(c=>c.sql.includes('FROM user_sessions s'));
- assert.ok(sessionCall);
- assert.equal(sessionCall.params[0],'session-A');
-});
-test('Connect Home sets a private no-store cache header',async()=>{
- const r=await runHome('/api/connect/home');
- assert.equal(r.resHeaders['Cache-Control'],'private, no-store');
-});
-test('Connect Home Recommended Creators / Suggested People cards never carry a raw numeric id',async()=>{
- const r=await runHome('/api/connect/home',{queryOverride:(sql)=>{
-   if(sql.startsWith('SELECT cp.public_username,u.full_name,cp.profession_title,cp.professional_category'))
-     return {rows:[{public_username:'crafty_alice',full_name:'Alice',profession_title:'Potter',professional_category:'ARTS',profile_image:'',following:false}],rowCount:1};
-   return undefined;
- }});
- assert.equal(r.status,200);
- for(const key of ['recommendedCreators','suggestedPeople']){
-  const call=r.calls.find(c=>c.sql.startsWith('SELECT cp.public_username,u.full_name,cp.profession_title,cp.professional_category')&&(key==='recommendedCreators'?c.sql.includes('cp.creator_mode=TRUE'):c.sql.includes('f2.follower_user_id=$1')));
-  assert.ok(call,`${key} query not found`);
-  assert.doesNotMatch(call.sql.split(' FROM ')[0],/\bu\.id\b|\bcp\.user_id\b/,`${key} SELECT list must not project a raw user id`);
-  const items=r.data.sections[key].items;
-  assert.ok(items.length>0,`${key} should have a card in this test`);
-  for(const item of items){
-   assert.equal(Object.prototype.hasOwnProperty.call(item,'id'),false,`${key} card must not expose a raw id`);
-   assert.ok(item.public_username,`${key} card must carry public_username`);
-  }
- }
-});
-test('Connect Home recommendedCreators/suggestedPeople queries require a non-null public_username',async()=>{
- const r=await runHome('/api/connect/home');
- for(const key of ['recommendedCreators','suggestedPeople']){
-  const call=r.calls.find(c=>c.sql.includes('creator_mode=TRUE')||c.sql.startsWith('SELECT cp.public_username,u.full_name'));
- }
- const creatorsCall=r.calls.find(c=>c.sql.includes('cp.creator_mode=TRUE'));
- assert.match(creatorsCall.sql,/public_username IS NOT NULL/);
- const suggestedCall=r.calls.find(c=>c.sql.includes('f2.follower_user_id=$1'));
- assert.match(suggestedCall.sql,/public_username IS NOT NULL/);
-});
-test('Connect Home For You / Hero / Trending Articles / Recent Activity exclude bidirectionally blocked authors',async()=>{
- const r=await runHome('/api/connect/home');
- const forYouCall=r.calls.find(c=>c.sql.includes('WITH scored AS'));
- assert.match(forYouCall.sql,/howdi_connect_profile_blocks/);
- const heroCall=r.calls.find(c=>c.sql.startsWith('SELECT p.id,p.post_type,p.content,p.article_title,p.media_data,p.media_type,p.created_at, u.full_name,cp.public_username FROM howdi_community_posts'));
- assert.match(heroCall.sql,/howdi_connect_profile_blocks/);
- const trendingCall=r.calls.find(c=>c.sql.includes("p.post_type='ARTICLE'"));
- assert.match(trendingCall.sql,/howdi_connect_profile_blocks/);
- const activityCall=r.calls.find(c=>c.sql.includes('FROM howdi_connect_notifications'));
- assert.match(activityCall.sql,/howdi_connect_profile_blocks/);
-});
-test('Connect Home Continue Watching is sourced from Vibe watch progress, not generic post progress',async()=>{
- const r=await runHome('/api/connect/home?sections=continueWatching',{queryOverride:(sql)=>{
-   if(sql.includes('FROM vibe_watch_session_items'))return {rows:[{vibe_id:'11111111-1111-1111-1111-111111111111',vibe_code:'VIBE-000123',vibe_type:'video',caption:'Making a bowl',cover_url:'https://x/y.jpg',creator_user_id:'7',creator_name:'Casey',completion:42.5,last_seen_at:new Date().toISOString()}],rowCount:1};
-   return undefined;
- }});
- assert.equal(r.status,200);
- const call=r.calls.find(c=>c.sql.includes('FROM vibe_watch_session_items'));
- assert.ok(call,'continueWatching must query vibe_watch_session_items');
- assert.doesNotMatch(call.sql,/howdi_connect_post_progress/);
- const item=r.data.sections.continueWatching.items[0];
- assert.equal(item.vibeId,'11111111-1111-1111-1111-111111111111');
- assert.equal(item.completionPercent,43);
- assert.equal(Object.prototype.hasOwnProperty.call(item,'id'),false);
-});
-test('Connect Home For You rejects a malformed forYouCursor with 400',async()=>{
- const r=await runHome('/api/connect/home?sections=forYou&forYouCursor=not-valid-base64!!!');
- assert.equal(r.status,400);
-});
-test('Connect Home For You accepts a well-formed keyset cursor and queries with the tuple comparison',async()=>{
- const cursor=Buffer.from(JSON.stringify({s:12,c:new Date().toISOString(),i:5})).toString('base64url');
- const r=await runHome(`/api/connect/home?sections=forYou&forYouCursor=${cursor}`);
- assert.equal(r.status,200);
- const call=r.calls.find(c=>c.sql.includes('WITH scored AS'));
- assert.equal(Number(call.params[1]),12);
- assert.equal(Number(call.params[3]),5);
-});
+// K5A PHASE 1: GET /api/connect/home moved to backend/connect-home-k5a.cjs (public DTOs, public references,
+// encrypted feed cursors, guest curated Home). Its contract is covered by backend/tests/k5a-home.test.cjs and the
+// real-PostgreSQL suites in backend/tests/k5a-pg/. The in-line handler these vm tests extracted no longer exists.
 test('Connect Home is rate-limited per guest IP / per authenticated user',async()=>{
  const budget=vm.runInNewContext(
    `${getRequestIpSrc}\n${vibeRateLimitSrc}\nvibeRateLimitV151B('connect-home:test-key',3,60000)`,
@@ -431,46 +302,8 @@ test('Admin Hero create succeeds for a valid admin session with a nonnumeric adm
  assert.equal(typeof insert.params[10],'string');
 });
 
-// ---- 3. Continue Watching must only surface currently-available Vibes ----
-test('Continue Watching query requires published/public/non-deleted Vibes',async()=>{
- const r=await runHome('/api/connect/home?sections=continueWatching',{queryOverride:(sql)=>{
-   if(sql.includes('FROM vibe_watch_session_items'))return {rows:[],rowCount:0};
-   return undefined;
- }});
- assert.equal(r.status,200);
- const call=r.calls.find(c=>c.sql.includes('FROM vibe_watch_session_items'));
- assert.ok(call);
- assert.match(call.sql,/v\.status='published'/);
- assert.match(call.sql,/v\.visibility='public'/);
- assert.match(call.sql,/v\.deleted_at IS NULL/);
-});
-test('Continue Watching block predicate casts both sides to text consistently with the $1::text usage (regression: bigint=text type error found in live smoke test)',async()=>{
- const r=await runHome('/api/connect/home?sections=continueWatching',{queryOverride:(sql)=>{
-   if(sql.includes('FROM vibe_watch_session_items'))return {rows:[],rowCount:0};
-   return undefined;
- }});
- const call=r.calls.find(c=>c.sql.includes('FROM vibe_watch_session_items'));
- assert.ok(call);
- // $1 is used both as wsi.user_id=$1::text and in the block predicate; every other
- // reference to $1 against a BIGINT column (blocker_user_id/blocked_user_id) must
- // also be cast to text, or Postgres infers $1 as text and rejects the bare bigint
- // comparison with "operator does not exist: bigint = text".
- assert.match(call.sql,/b\.blocker_user_id::text=\$1/);
- assert.match(call.sql,/b\.blocked_user_id::text=\$1/);
- assert.doesNotMatch(call.sql,/b\.blocker_user_id=\$1(?!::)/);
- assert.doesNotMatch(call.sql,/b\.blocked_user_id=\$1(?!::)/);
-});
-test('Continue Watching excludes a watched Vibe that is draft, private, or deleted (mocked as filtered by the availability predicate)',async()=>{
- // The availability predicate lives in SQL (asserted above); here we confirm the mocked
- // fixture representing an unavailable Vibe never reaches the mapped items when the
- // predicate is honored by the (mock) query layer, i.e. an empty result set is handled cleanly.
- const r=await runHome('/api/connect/home?sections=continueWatching',{queryOverride:(sql)=>{
-   if(sql.includes('FROM vibe_watch_session_items'))return {rows:[],rowCount:0};
-   return undefined;
- }});
- assert.equal(r.status,200);
- assert.deepEqual(r.data.sections.continueWatching.items,[]);
-});
+// ---- 3. Continue Watching availability: moved with the Home route to connect-home-k5a.cjs. Pinned by
+//      backend/tests/k5a-home.test.cjs (static SQL) and exercised live in backend/tests/k5a-pg/03-leak-crawl.cjs. ----
 
 // ---- 4. Home Vibe rail (getVibeFeedRows) must exclude blocked creators ----
 test('getVibeFeedRows excludes blocked creators via SQL predicate when a viewer is present',async()=>{

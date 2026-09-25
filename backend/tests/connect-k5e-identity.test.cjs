@@ -99,12 +99,13 @@ test('K5E 5: guests — actor fields are stripped, writes are 401, private GETs 
     const w=await guard(m,'/api/connect/posts/5/comments');
     assert.equal(w.stopped,true);assert.equal(w.status,401,`guest ${m}`);
   }
-  for(const p of ['/api/connect/home','/api/connect/connections/mine','/api/connect/conversations','/api/connect/conversations/4/messages','/api/connect/notifications','/api/connect/calls/inbox','/api/connect/groups-channels','/api/connect/profile-studio','/api/connect/posts/mine','/api/connect/articles/mine','/api/connect/subscriptions/mine','/api/connect/creator-dashboard','/api/connect/spaces/3/analytics','/api/connect/spaces/bookmarked','/api/connect/realtime/3/state','/api/connect/realtime/3/signals','/api/connect/live/3/creator-dashboard','/api/connect/profiles/5/skill-passport','/api/connect/learning-circles/2/messages','/api/connect/knowledge-dna','/api/connect/reputation','/api/connect/follow-requests','/api/connect/social-summary']){
+  for(const p of ['/api/connect/connections/mine','/api/connect/conversations','/api/connect/conversations/4/messages','/api/connect/notifications','/api/connect/calls/inbox','/api/connect/groups-channels','/api/connect/profile-studio','/api/connect/posts/mine','/api/connect/articles/mine','/api/connect/subscriptions/mine','/api/connect/creator-dashboard','/api/connect/spaces/3/analytics','/api/connect/spaces/bookmarked','/api/connect/realtime/3/state','/api/connect/realtime/3/signals','/api/connect/live/3/creator-dashboard','/api/connect/profiles/5/skill-passport','/api/connect/learning-circles/2/messages','/api/connect/knowledge-dna','/api/connect/reputation','/api/connect/follow-requests','/api/connect/social-summary']){
     const r=await guard('GET',p);
     assert.equal(r.stopped,true,p);assert.equal(r.status,401,p);
   }
   // deliberately public surfaces are NOT blocked for guests
-  for(const p of ['/api/connect/feed','/api/connect/search?q=a','/api/connect/public-profile/username/x','/api/connect/spaces/recommended','/api/connect/live-discovery','/api/connect/posts/5/comments','/api/connect/stories','/api/connect/articles']){
+  // K5A Phase 1: Connect Home is a guest-browsable curated surface (session personalisation happens inside the route).
+  for(const p of ['/api/connect/home','/api/connect/home/feed','/api/connect/feed','/api/connect/search?q=a','/api/connect/public-profile/username/x','/api/connect/spaces/recommended','/api/connect/live-discovery','/api/connect/posts/5/comments','/api/connect/stories','/api/connect/articles']){
     const r=await guard('GET',p);assert.equal(r.stopped,false,p);
   }
   // anonymous view counters are the only guest-callable writes

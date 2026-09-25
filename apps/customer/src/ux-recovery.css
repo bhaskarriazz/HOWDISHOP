@@ -479,3 +479,57 @@
 .hv14b-creator-row > button { font-size: 10px; }
 .hv14d-creator-name > small { font-size: 10px; }
 .hv14b-sound { font-size: 10px; }
+
+/* =====================================================================
+   K5A PHASE 1 — Connect Home above-the-fold: stable skeleton footprints,
+   story viewed state, compact mobile Special/Hero, public-code item viewer.
+   ===================================================================== */
+.howdi-app .hc-home-skel-special .hc-home-skel-row { height: 72px; border-radius: 16px; }
+.howdi-app .hc-home-skel-hero .hc-home-skel-row { height: 200px; border-radius: 20px; }
+.howdi-app .hc-home-skel-stories { flex-direction: row; gap: 14px; overflow: hidden; height: 84px; }
+.howdi-app .hc-home-skel-stories .hc-home-skel-row { flex: 0 0 56px; width: 56px; height: 56px; border-radius: 50%; }
+.howdi-app .hc-home-skel-feed .hc-home-skel-row { height: 112px; border-radius: 14px; }
+.howdi-app .hc-home-skel-viewer .hc-home-skel-row { height: 64px; border-radius: 12px; }
+.howdi-app .hc-home-story .hc-home-story-ring { overflow: hidden; }
+.howdi-app .hc-home-story .hc-home-story-ring img { width: 100%; height: 100%; object-fit: cover; }
+.howdi-app .hc-home-story.viewed .hc-home-story-ring { border-color: #c9d6cf; opacity: .78; }
+.howdi-app .hc-home-avatar.sm { width: 24px; height: 24px; font-size: 11px; margin-right: 6px; flex: 0 0 24px; }
+.howdi-app .hc-home-post-author { display: inline-flex; align-items: center; gap: 2px; }
+.howdi-app .hc-home-post-title { display: block; margin: 6px 0 2px; font: 700 15px/1.35 Georgia, serif; color: #173d31; }
+.howdi-app .hc-home-kind { margin-left: 6px; font-style: normal; font-size: 11px; font-weight: 800; color: #8a6b25; letter-spacing: .04em; }
+.howdi-app .hc-home-post-card:focus-visible, .howdi-app .hc-home-article-card:focus-visible, .howdi-app .hc-home-hero-card:focus-visible { outline: 3px solid rgba(15, 81, 63, .35); outline-offset: 2px; }
+
+@media (max-width: 720px) {
+  .howdi-app .hc-home-special-card { padding: 12px 14px; gap: 10px; }
+  .howdi-app .hc-home-special-copy b { font-size: 14px; }
+  .howdi-app .hc-home-special-card button:not(.hc-home-dismiss) { white-space: nowrap; flex: 0 0 auto; }
+  .howdi-app .hc-home-special-copy span { font-size: 12.5px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .howdi-app .hc-home-hero-card { min-height: 0; padding: 14px 16px; }
+  .howdi-app .hc-home-hero-card h3 { font-size: 17px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .howdi-app .hc-home-hero-media { max-height: 160px; object-fit: cover; }
+  .howdi-app .hc-home-welcome { padding: 14px 16px; gap: 6px; border-radius: 16px; }
+  .howdi-app .hc-home-welcome h3 { font-size: 19px; }
+  .howdi-app .hc-home-welcome > span { font-size: 13px; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .howdi-app .hc-home-welcome-actions { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin-top: 2px; }
+  .howdi-app .hc-home-welcome-actions button { flex: 0 0 auto; min-height: 40px; padding: 0 14px; }
+  .howdi-app .hc-home-skel-hero .hc-home-skel-row { height: 150px; }
+}
+
+.hc-home-viewer-overlay { position: fixed; inset: 0; z-index: 2147483200; display: grid; place-items: center; padding: 16px; background: rgba(10, 30, 22, .55); backdrop-filter: blur(6px); }
+.hc-home-viewer { position: relative; width: min(640px, 100%); max-height: 88vh; overflow: auto; background: #fffdf8; border-radius: 20px; padding: 22px 22px 18px; box-shadow: 0 24px 70px rgba(10, 30, 22, .3); }
+.hc-home-viewer-close { position: absolute; top: 12px; right: 12px; width: 44px; height: 44px; border-radius: 50%; border: 1px solid #dfe7e1; background: #fff; font-size: 22px; line-height: 1; cursor: pointer; color: #1f3d31; }
+.hc-home-viewer-close:focus-visible { outline: 3px solid rgba(15, 81, 63, .35); outline-offset: 2px; }
+.hc-home-viewer-head { display: flex; align-items: center; gap: 10px; padding-right: 48px; }
+.hc-home-viewer-head .hc-home-avatar { width: 40px; height: 40px; }
+.hc-home-viewer-head b { display: block; font-size: 14px; color: #173d31; }
+.hc-home-viewer-head small { font-size: 12px; color: #5c6b63; }
+.hc-home-viewer h2 { margin: 14px 0 10px; font: 700 21px/1.3 Georgia, serif; color: #173d31; }
+.hc-home-viewer-media { display: block; width: 100%; max-height: 420px; object-fit: contain; border-radius: 14px; background: #0f2a20; margin-bottom: 12px; }
+.hc-home-viewer-text p { margin: 0 0 10px; font-size: 15px; line-height: 1.6; color: #24352d; overflow-wrap: anywhere; }
+.hc-home-viewer-note { font-size: 13px; color: #5c6b63; }
+.hc-home-viewer-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; padding-top: 12px; border-top: 1px solid #edf0ed; }
+.hc-home-viewer-foot small { font-size: 12px; color: #6b7a72; }
+.hc-home-viewer-foot button, .hc-home-viewer-missing button { min-height: 44px; padding: 0 16px; border-radius: 12px; border: 1px solid #cddccf; background: #fff; color: #0f513f; font-weight: 800; cursor: pointer; }
+.hc-home-viewer-missing { padding: 20px 4px 4px; text-align: center; }
+.hc-home-viewer-missing p { color: #5c6b63; }
+@media (max-width: 520px) { .hc-home-viewer-overlay { place-items: end center; padding: 8px; } .hc-home-viewer { border-radius: 18px 18px 12px 12px; max-height: 92vh; padding: 18px 16px 14px; } }

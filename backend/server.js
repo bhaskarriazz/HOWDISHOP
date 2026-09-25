@@ -9389,7 +9389,7 @@
     // GET surfaces that are private to the signed-in member (401 for guests). Everything not
     // listed here is public browsing, where the guest viewer is 0.
     const K5E_PRIVATE_GET_RE = [
-      /^\/api\/connect\/(?:home|connections\/mine|connect-suggestions|follow-requests|social-summary|profile-recommendations|reminders\/due|conversations|notifications|calls|groups-channels)(?:\/|$)/,
+      /^\/api\/connect\/(?:connections\/mine|connect-suggestions|follow-requests|social-summary|profile-recommendations|reminders\/due|conversations|notifications|calls|groups-channels)(?:\/|$)/,
       /^\/api\/connect\/(?:profile-studio|profile-safety|profile-content|posts\/mine|post-collections|articles\/mine|articles\/analytics|subscriptions\/mine|subscriptions\/discover)\/?$/,
       /^\/api\/connect\/creator-(?:dashboard|membership-analytics|revenue-history|payouts|resources\/\d+|plans\/\d+)\/?$/,
       /^\/api\/connect\/(?:knowledge-dna|knowledge-economy\/dashboard|reputation|reputation-os|network-graph|relationship-intelligence|opportunities\/matches|multilingual-bridge|growth-loop-dashboard|mentor-match|office-hours|series-calendar|ask-feed|community-intelligence)\/?$/,
@@ -21310,6 +21310,16 @@ async function ensureVibeReleaseReadinessV140LSchema(){
     }
 
     // =====================================================
+    // HOWDI K5A — CONNECT HOME PHASE 1 (see ./connect-home-k5a.cjs)
+    // Session-only viewer, public DTOs, public references issued after visibility checks,
+    // encrypted viewer-bound feed cursors (HOWDI_HOME_CURSOR_KEY required outside development).
+    // =====================================================
+    const connectHomeK5A = require("./connect-home-k5a.cjs").createConnectHomeK5A({
+      pool, getSessionUserFromRequest, sendJSON, connectPostVisibleSql, k5ePrivateProfileOkSql,
+      rateLimit: vibeRateLimitV151B, getRequestIp,
+    });
+
+    // =====================================================
     // SERVER
     // =====================================================
 
@@ -21357,6 +21367,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
           // K5E: session-derived actor + private/guest gating for every /api/connect request.
           if (await k5eConnectGuard(req, res, url)) return;
           if (await k5eLegacyNotificationGuard(req, res, url)) return;
+          // K5A Phase 1: Connect Home manifest, For You feed and by-code reads (guest-safe, session-authoritative).
+          if (await connectHomeK5A.handle(req, res, url)) return;
 
           const pathname =
             url.pathname;
@@ -46256,335 +46268,9 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               return row?Number(row.user_id):null;
             }
 
-            if (req.method === "GET" && pathname === "/api/connect/home") {
-              const sessionUser=await getSessionUserFromRequest(req);
-              const authedUid=Number(sessionUser?.id||0)||0;
-              res.setHeader("Cache-Control","private, no-store");
-              const homeRate=vibeRateLimitV151B(
-                authedUid?`connect-home:user:${authedUid}`:`connect-home:ip:${getRequestIp(req)}`,
-                authedUid?120:30,
-                60000
-              );
-              if(!homeRate.allowed){
-                res.setHeader("Retry-After",String(Math.ceil((homeRate.retryAfterMs||60000)/1000)));
-                return sendJSON(res,429,{status:"error",message:"Too many requests. Please slow down and try again shortly."});
-              }
-              const requested=String(url.searchParams.get("sections")||"").split(",").map(s=>s.trim()).filter(Boolean);
-              const want=(key)=>requested.length===0||requested.includes(key);
-              const BLOCK_FILTER_ON_AUTHOR=(col)=>`AND ($1::bigint=0 OR NOT EXISTS(
-                    SELECT 1 FROM howdi_connect_profile_blocks b
-                    WHERE (b.blocker_user_id=$1 AND b.blocked_user_id=${col})
-                       OR (b.blocker_user_id=${col} AND b.blocked_user_id=$1)
-                  ))
-                  AND COALESCE(p.subscribers_only,FALSE)=FALSE
-                  AND ${k5ePrivateProfileOkSql(col,"$1::bigint")}`;
-              const encodeForYouCursor=(row)=>Buffer.from(JSON.stringify({s:Number(row.score),c:new Date(row.created_at).toISOString(),i:Number(row.id)})).toString('base64url');
-              const decodeForYouCursor=(value)=>{
-                if(!value)return null;
-                let parsed;
-                try{ parsed=JSON.parse(Buffer.from(String(value),'base64url').toString('utf8')); }catch{ return undefined; }
-                if(!parsed||typeof parsed!=='object')return undefined;
-                const s=Number(parsed.s),c=parsed.c?new Date(parsed.c):null,i=Number(parsed.i);
-                if(!Number.isFinite(s)||!c||Number.isNaN(c.getTime())||!Number.isInteger(i))return undefined;
-                return {score:s,createdAt:c.toISOString(),id:i};
-              };
-              const rawForYouCursor=url.searchParams.get("forYouCursor");
-              const forYouCursor=decodeForYouCursor(rawForYouCursor);
-              if(rawForYouCursor&&forYouCursor===undefined){
-                return sendJSON(res,400,{status:"error",message:"Malformed forYouCursor."});
-              }
-              const sections={};
-              const run=async(key,fn,fallback)=>{
-                if(!want(key))return;
-                try{ sections[key]=await fn(); }
-                catch(e){ console.error(`[connect/home] section "${key}" failed:`,e.message); sections[key]={...fallback,error:true}; }
-              };
-
-              await run('special',async()=>{
-                const item=(await pool.query(`
-                  SELECT id,title,subtitle,cta_label,cta_url,media_url,media_type
-                  FROM howdi_connect_home_specials
-                  WHERE status='ACTIVE' AND (starts_at IS NULL OR starts_at<=NOW()) AND (ends_at IS NULL OR ends_at>NOW())
-                    AND audience IN ('ALL','CONNECT')
-                  ORDER BY sort_order ASC,created_at DESC LIMIT 1
-                `)).rows[0]||null;
-                return {item};
-              },{item:null});
-
-              await run('hero',async()=>{
-                const admin=(await pool.query(`
-                  SELECT id,title,body_text,media_url,media_type,cta_label,cta_url
-                  FROM howdi_connect_home_hero
-                  WHERE status='ACTIVE' AND (starts_at IS NULL OR starts_at<=NOW()) AND (ends_at IS NULL OR ends_at>NOW())
-                  ORDER BY sort_order ASC,created_at DESC LIMIT 1
-                `)).rows[0]||null;
-                if(admin)return {item:{...admin,source:'admin'},source:'admin'};
-                const fallback=(await pool.query(`
-                  SELECT p.id,p.post_type,p.content,p.article_title,p.media_data,p.media_type,p.created_at,
-                    u.full_name,cp.public_username
-                  FROM howdi_community_posts p
-                  JOIN users u ON u.id=p.user_id
-                  LEFT JOIN howdi_connect_profiles cp ON cp.user_id=p.user_id
-                  WHERE p.post_status='PUBLISHED' AND p.audience_scope='EVERYONE'
-                    ${BLOCK_FILTER_ON_AUTHOR('p.user_id')}
-                  ORDER BY (
-                    (SELECT COUNT(*) FROM howdi_community_reactions r WHERE r.post_id=p.id)*3
-                    +(SELECT COUNT(*) FROM howdi_connect_post_views v WHERE v.post_id=p.id)
-                    +CASE WHEN p.created_at>NOW()-INTERVAL '48 hours' THEN 25 ELSE 0 END
-                  ) DESC, p.created_at DESC LIMIT 1
-                `,[authedUid])).rows[0]||null;
-                return {item:fallback?{...fallback,source:'fallback'}:null,source:fallback?'fallback':null};
-              },{item:null,source:null});
-
-              await run('stories',async()=>{
-                const items=(await pool.query(`
-                  SELECT s.id,s.media_type,s.created_at,s.expires_at,
-                    u.full_name,cp.public_username,COALESCE(cp.avatar_data,ps.profile_image,'') profile_image,
-                    CASE WHEN $1::bigint>0 AND s.user_id=$1 THEN TRUE ELSE FALSE END mine
-                  FROM howdi_connect_stories s
-                  JOIN users u ON u.id=s.user_id
-                  LEFT JOIN howdi_connect_profiles cp ON cp.user_id=s.user_id
-                  LEFT JOIN user_profile_settings ps ON ps.user_id=s.user_id
-                  WHERE s.expires_at>NOW()
-                    AND (
-                      s.audience='Everyone'
-                      OR ($1::bigint>0 AND s.user_id=$1)
-                      OR ($1::bigint>0 AND s.audience='Friends'
-                          AND EXISTS(SELECT 1 FROM howdi_connect_follows f1 WHERE f1.follower_user_id=$1 AND f1.following_user_id=s.user_id)
-                          AND EXISTS(SELECT 1 FROM howdi_connect_follows f2 WHERE f2.follower_user_id=s.user_id AND f2.following_user_id=$1))
-                      OR ($1::bigint>0 AND s.audience='Close friends'
-                          AND EXISTS(SELECT 1 FROM howdi_connect_close_friends cf WHERE cf.user_id=s.user_id AND cf.friend_user_id=$1))
-                    )
-                    AND ($1::bigint=0 OR NOT EXISTS(
-                      SELECT 1 FROM howdi_connect_profile_blocks b
-                      WHERE (b.blocker_user_id=$1 AND b.blocked_user_id=s.user_id)
-                         OR (b.blocker_user_id=s.user_id AND b.blocked_user_id=$1)
-                    ))
-                    AND ${k5ePrivateProfileOkSql("s.user_id","$1::bigint")}
-                  ORDER BY s.created_at DESC LIMIT 20
-                `,[authedUid])).rows;
-                return {items};
-              },{items:[]});
-
-              await run('forYou',async()=>{
-                const cursorTuple=forYouCursor?[forYouCursor.score,forYouCursor.createdAt,forYouCursor.id]:[null,null,null];
-                const rows=(await pool.query(`
-                  WITH scored AS (
-                    SELECT p.id,p.post_type,p.content,p.article_title,p.media_data,p.media_type,p.created_at,
-                      u.full_name,cp.public_username,
-                      (SELECT COUNT(*)::int FROM howdi_community_reactions r WHERE r.post_id=p.id) reaction_count,
-                      (SELECT COUNT(*)::int FROM howdi_community_comments c WHERE c.post_id=p.id) comment_count,
-                      CASE WHEN $1::bigint>0 AND EXISTS(SELECT 1 FROM howdi_connect_follows f WHERE f.follower_user_id=$1 AND f.following_user_id=p.user_id) THEN TRUE ELSE FALSE END from_followed,
-                      (
-                        CASE WHEN $1::bigint>0 AND EXISTS(SELECT 1 FROM howdi_connect_follows f WHERE f.follower_user_id=$1 AND f.following_user_id=p.user_id) THEN 20 ELSE 0 END
-                        +(SELECT COUNT(*) FROM howdi_community_reactions r WHERE r.post_id=p.id)*2
-                        +(SELECT COUNT(*) FROM howdi_community_comments c WHERE c.post_id=p.id)*3
-                        +CASE WHEN p.created_at>NOW()-INTERVAL '72 hours' THEN 10 ELSE 0 END
-                      )::int AS score
-                    FROM howdi_community_posts p
-                    JOIN users u ON u.id=p.user_id
-                    LEFT JOIN howdi_connect_profiles cp ON cp.user_id=p.user_id
-                    WHERE p.post_status='PUBLISHED' AND p.audience_scope='EVERYONE'
-                      ${BLOCK_FILTER_ON_AUTHOR('p.user_id')}
-                  )
-                  SELECT * FROM scored
-                  WHERE $2::int IS NULL OR (score,created_at,id) < ($2::int,$3::timestamptz,$4::bigint)
-                  ORDER BY score DESC, created_at DESC, id DESC
-                  LIMIT 11
-                `,[authedUid,...cursorTuple])).rows;
-                const page=rows.slice(0,10);
-                const hasMore=rows.length>10;
-                const nextCursor=hasMore&&page.length?encodeForYouCursor(page[page.length-1]):null;
-                const items=page.map(({score,...rest})=>rest);
-                return {items,nextCursor};
-              },{items:[],nextCursor:null});
-
-              await run('vibes',async()=>{
-                const {rows}=await getVibeFeedRows({mode:'for-you',viewerId:authedUid||null,limit:10});
-                const creatorIds=[...new Set(rows.map(v=>Number(v.creator_user_id)).filter(n=>Number.isInteger(n)&&n>0))];
-                let usernames={};
-                if(creatorIds.length){
-                  const u=(await pool.query(`SELECT user_id,public_username FROM howdi_connect_profiles WHERE user_id=ANY($1::bigint[])`,[creatorIds])).rows;
-                  usernames=Object.fromEntries(u.map(x=>[String(x.user_id),x.public_username]));
-                }
-                const items=rows.map(v=>({
-                  id:v.id,vibeCode:v.vibe_code,type:v.vibe_type,caption:v.caption,coverUrl:v.cover_url||null,
-                  creatorName:v.creator_name||'HOWDI Creator',
-                  creatorPublicUsername:usernames[String(v.creator_user_id)]||null,
-                  likes:Number(v.likes||0),comments:Number(v.comments||0)
-                }));
-                return {items};
-              },{items:[]});
-
-              await run('continueWatching',async()=>{
-                if(!authedUid)return {items:[]};
-                const rows=(await pool.query(`
-                  SELECT v.id AS vibe_id,v.vibe_code,v.vibe_type,v.caption,v.cover_url,v.creator_user_id,v.creator_name,
-                    MAX(wsi.max_completion_percent) completion,
-                    MAX(wsi.last_seen_at) last_seen_at
-                  FROM vibe_watch_session_items wsi
-                  JOIN vibes v ON v.id=wsi.vibe_id
-                  WHERE wsi.user_id=$1::text
-                    AND v.status='published' AND v.visibility='public' AND v.deleted_at IS NULL
-                    AND NOT EXISTS(SELECT 1 FROM howdi_connect_profile_blocks b WHERE (b.blocker_user_id::text=$1 AND b.blocked_user_id::text=v.creator_user_id) OR (b.blocker_user_id::text=v.creator_user_id AND b.blocked_user_id::text=$1))
-                  GROUP BY v.id,v.vibe_code,v.vibe_type,v.caption,v.cover_url,v.creator_user_id,v.creator_name
-                  HAVING BOOL_OR(wsi.completed)=FALSE AND MAX(wsi.max_completion_percent)>0
-                  ORDER BY MAX(wsi.last_seen_at) DESC LIMIT 8
-                `,[authedUid])).rows;
-                const creatorIds=[...new Set(rows.map(r=>Number(r.creator_user_id)).filter(n=>Number.isInteger(n)&&n>0))];
-                let usernames={};
-                if(creatorIds.length){
-                  const u=(await pool.query(`SELECT user_id,public_username FROM howdi_connect_profiles WHERE user_id=ANY($1::bigint[])`,[creatorIds])).rows;
-                  usernames=Object.fromEntries(u.map(x=>[String(x.user_id),x.public_username]));
-                }
-                const items=rows.map(r=>({
-                  vibeId:r.vibe_id,vibeCode:r.vibe_code,type:r.vibe_type,caption:r.caption,coverUrl:r.cover_url||null,
-                  creatorName:r.creator_name||'HOWDI Creator',
-                  creatorPublicUsername:usernames[String(r.creator_user_id)]||null,
-                  completionPercent:Math.round(Number(r.completion||0))
-                }));
-                return {items};
-              },{items:[]});
-
-              await run('recommendedCreators',async()=>{
-                const items=(await pool.query(`
-                  SELECT cp.public_username,u.full_name,cp.profession_title,cp.professional_category,
-                    COALESCE(cp.avatar_data,ps.profile_image,'') profile_image,
-                    EXISTS(SELECT 1 FROM howdi_connect_follows f WHERE f.follower_user_id=$1 AND f.following_user_id=u.id) following
-                  FROM users u
-                  JOIN howdi_connect_profiles cp ON cp.user_id=u.id
-                  LEFT JOIN user_profile_settings ps ON ps.user_id=u.id
-                  WHERE cp.creator_mode=TRUE AND COALESCE(cp.discoverable,TRUE)=TRUE AND u.id<>$1
-                    AND cp.public_username IS NOT NULL AND cp.public_username<>''
-                    AND NOT EXISTS(SELECT 1 FROM howdi_connect_profile_blocks b WHERE (b.blocker_user_id=$1 AND b.blocked_user_id=u.id) OR (b.blocker_user_id=u.id AND b.blocked_user_id=$1))
-                  ORDER BY u.id DESC LIMIT 10
-                `,[authedUid])).rows;
-                return {items};
-              },{items:[]});
-
-              await run('suggestedPeople',async()=>{
-                const items=(await pool.query(`
-                  SELECT cp.public_username,u.full_name,cp.profession_title,cp.professional_category,
-                    COALESCE(cp.avatar_data,ps.profile_image,'') profile_image,
-                    EXISTS(SELECT 1 FROM howdi_connect_follows f WHERE f.follower_user_id=$1 AND f.following_user_id=u.id) following
-                  FROM users u
-                  JOIN howdi_connect_profiles cp ON cp.user_id=u.id
-                  LEFT JOIN user_profile_settings ps ON ps.user_id=u.id
-                  WHERE u.id<>$1 AND COALESCE(cp.discoverable,TRUE)=TRUE
-                    AND cp.public_username IS NOT NULL AND cp.public_username<>''
-                    AND NOT EXISTS(SELECT 1 FROM howdi_connect_follows f2 WHERE f2.follower_user_id=$1 AND f2.following_user_id=u.id)
-                    AND NOT EXISTS(SELECT 1 FROM howdi_connect_profile_blocks b WHERE (b.blocker_user_id=$1 AND b.blocked_user_id=u.id) OR (b.blocker_user_id=u.id AND b.blocked_user_id=$1))
-                  ORDER BY u.id DESC LIMIT 10
-                `,[authedUid])).rows;
-                return {items};
-              },{items:[]});
-
-              await run('communities',async()=>{
-                const items=(await pool.query(`
-                  SELECT s.id,s.space_type,s.name,s.slug,s.category,s.privacy,s.member_count,
-                    EXISTS(SELECT 1 FROM howdi_connect_social_space_members mm WHERE mm.space_id=s.id AND mm.user_id=$1 AND mm.status='ACTIVE') joined
-                  FROM howdi_connect_social_spaces s
-                  WHERE s.is_archived=FALSE AND s.privacy='PUBLIC'
-                  ORDER BY s.member_count DESC, s.created_at DESC LIMIT 8
-                `,[authedUid])).rows;
-                return {items};
-              },{items:[]});
-
-              await run('trendingArticles',async()=>{
-                const items=(await pool.query(`
-                  SELECT p.id,p.article_title,p.article_excerpt,p.article_cover_url,p.created_at,
-                    u.full_name,cp.public_username,
-                    (SELECT COUNT(*)::int FROM howdi_connect_post_views v WHERE v.post_id=p.id) view_count,
-                    (SELECT COUNT(*)::int FROM howdi_community_reactions r WHERE r.post_id=p.id) like_count
-                  FROM howdi_community_posts p
-                  JOIN users u ON u.id=p.user_id
-                  LEFT JOIN howdi_connect_profiles cp ON cp.user_id=p.user_id
-                  WHERE p.post_type='ARTICLE' AND p.post_status='PUBLISHED' AND p.audience_scope='EVERYONE'
-                    ${BLOCK_FILTER_ON_AUTHOR('p.user_id')}
-                  ORDER BY (
-                    (SELECT COUNT(*) FROM howdi_connect_post_views v WHERE v.post_id=p.id)
-                    +(SELECT COUNT(*) FROM howdi_community_reactions r WHERE r.post_id=p.id)*3
-                  ) DESC, p.created_at DESC LIMIT 8
-                `,[authedUid])).rows;
-                return {items};
-              },{items:[]});
-
-              await run('shopRecommendations',async()=>{
-                const items=(await pool.query(`
-                  SELECT p.id,p.name,p.category,p.price,p.mrp,p.image_urls
-                  FROM vendor_products p
-                  WHERE p.status IN ('published','active') AND p.stock>0
-                  ORDER BY p.updated_at DESC LIMIT 8
-                `)).rows;
-                return {items};
-              },{items:[]});
-
-              await run('worksRecommendations',async()=>{
-                const items=(await pool.query(`
-                  SELECT w.id,w.full_name,w.requested_skill,w.city,w.rating,w.completed_jobs
-                  FROM works_workers w
-                  WHERE w.active=TRUE
-                  ORDER BY w.rating DESC, w.completed_jobs DESC LIMIT 8
-                `)).rows;
-                return {items};
-              },{items:[]});
-
-              await run('learnRecommendations',async()=>{
-                const items=(await pool.query(`
-                  SELECT id,title,category,level,duration_minutes
-                  FROM learning_courses
-                  WHERE is_active=TRUE
-                  ORDER BY updated_at DESC LIMIT 8
-                `)).rows;
-                return {items};
-              },{items:[]});
-
-              await run('recentActivity',async()=>{
-                if(!authedUid)return {items:[]};
-                const items=(await pool.query(`
-                  SELECT n.id,n.notification_type,n.message,n.is_read,n.created_at,
-                    u.full_name actor_name,cp.public_username actor_public_username
-                  FROM howdi_connect_notifications n
-                  LEFT JOIN users u ON u.id=n.actor_user_id
-                  LEFT JOIN howdi_connect_profiles cp ON cp.user_id=n.actor_user_id
-                  WHERE n.user_id=$1
-                    AND (n.actor_user_id IS NULL OR NOT EXISTS(
-                      SELECT 1 FROM howdi_connect_profile_blocks b
-                      WHERE (b.blocker_user_id=$1 AND b.blocked_user_id=n.actor_user_id)
-                         OR (b.blocker_user_id=n.actor_user_id AND b.blocked_user_id=$1)
-                    ))
-                  ORDER BY n.created_at DESC LIMIT 10
-                `,[authedUid])).rows;
-                return {items};
-              },{items:[]});
-
-              await run('dailyQuote',async()=>{
-                const n=Number((await pool.query(`SELECT COUNT(*)::int n FROM howdi_connect_daily_quotes`)).rows[0]?.n||0);
-                if(!n)return {item:null};
-                const dayOfYear=Math.floor((Date.now()-new Date(new Date().getFullYear(),0,0))/86400000);
-                const item=(await pool.query(`SELECT quote_text,author FROM howdi_connect_daily_quotes ORDER BY id ASC OFFSET $1 LIMIT 1`,[dayOfYear%n])).rows[0]||null;
-                return {item};
-              },{item:null});
-
-              await run('continueYourJourney',async()=>{
-                if(!authedUid)return {items:[]};
-                const items=(await pool.query(`
-                  SELECT e.course_id,e.progress,e.status,e.updated_at,c.title,c.category
-                  FROM user_course_enrollments e
-                  JOIN learning_courses c ON c.id=e.course_id
-                  WHERE e.user_id=$1 AND e.status='IN_PROGRESS'
-                  ORDER BY e.updated_at DESC LIMIT 6
-                `,[authedUid])).rows;
-                return {items};
-              },{items:[]});
-
-              return sendJSON(res,200,{
-                status:"success",
-                order:["special","hero","stories","forYou","vibes","continueWatching","recommendedCreators","suggestedPeople","communities","trendingArticles","shopRecommendations","worksRecommendations","learnRecommendations","recentActivity","dailyQuote","continueYourJourney"],
-                sections,
-                meta:{guest:!authedUid,requested:requested.length?requested:null}
-              });
-            }
+            // K5A PHASE 1: GET /api/connect/home, /api/connect/home/feed and the by-code post/story reads are served by
+            // ./connect-home-k5a.cjs (dispatched right after the K5E session guard). The previous in-line handler here returned
+            // internal ids and a readable cursor and has been replaced; the admin Home content routes below are unchanged.
 
             // ---- K5A REVIEW FIX: admin-managed Home content (Special / Hero / Daily Quote) ----
             if(req.method==="GET"&&pathname==="/api/admin/connect/home/config"){
@@ -57401,6 +57087,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
         await ensureVibeCommerceV153XSchema();
         await ensureVibeCommerceV153YSchema();
         await ensureConnectHomeV166K5ASchema();
+        await connectHomeK5A.ensureSchema();
         await backfillMissingOrderShipments();
         console.log("✅ HOWDI database initialization completed before accepting requests");
       console.log("✅ HOWDI Works Customer + Admin Separation V31 loaded");
