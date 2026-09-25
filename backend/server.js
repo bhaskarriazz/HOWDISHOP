@@ -21310,13 +21310,20 @@ async function ensureVibeReleaseReadinessV140LSchema(){
     }
 
     // =====================================================
+    // Rate-limit client identity for K5A Home and K5B Search (see ./client-ip.cjs).
+    // Forwarded headers are ignored unless the direct peer is listed in HOWDI_TRUSTED_PROXIES; the legacy
+    // getRequestIp() above is left unchanged for its existing audit/session logging callers.
+    // =====================================================
+    const howdiRateLimitClientIp = require("./client-ip.cjs").createClientIpResolver({ trustedProxies: process.env.HOWDI_TRUSTED_PROXIES }).clientIp;
+
+    // =====================================================
     // HOWDI K5A — CONNECT HOME PHASE 1 (see ./connect-home-k5a.cjs)
     // Session-only viewer, public DTOs, public references issued after visibility checks,
     // encrypted viewer-bound feed cursors (HOWDI_HOME_CURSOR_KEY required outside development).
     // =====================================================
     const connectHomeK5A = require("./connect-home-k5a.cjs").createConnectHomeK5A({
       pool, getSessionUserFromRequest, sendJSON, connectPostVisibleSql, k5ePrivateProfileOkSql,
-      rateLimit: vibeRateLimitV151B, getRequestIp,
+      rateLimit: vibeRateLimitV151B, getRequestIp: howdiRateLimitClientIp,
     });
 
     // =====================================================
@@ -21327,7 +21334,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
     const searchK5B = require("./search-k5b.cjs").createSearchK5B({
       pool, getSessionUserFromRequest, sendJSON, k5ePrivateProfileOkSql,
       issuePublicRefs: connectHomeK5A._internal.issueRefs,
-      rateLimit: vibeRateLimitV151B, getRequestIp,
+      rateLimit: vibeRateLimitV151B, getRequestIp: howdiRateLimitClientIp,
     });
 
     // =====================================================

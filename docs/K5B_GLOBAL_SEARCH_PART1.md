@@ -37,7 +37,7 @@ DTO = { type, pillar, title, subtitle, image, badges, route }   ← nothing else
 - **Headers.** `Cache-Control: no-store`, `Pragma: no-cache`, `nosniff`, `Vary: Authorization`.
 - **Errors.** A generic 500 (`SEARCH_UNAVAILABLE`). The log gets only the driver code, never the search term.
 - **Logging.** The handler runs before the server's request logger, so query strings are never logged.
-- **Rate limits.** 60/min per guest IP and 120/min per session user (in-memory, per process). The response is 429 with `Retry-After`.
+- **Rate limits.** 60/min per guest IP and 120/min per session user (in-memory, per process). The response is 429 with `Retry-After`. The guest IP is the direct connection address; forwarded headers are ignored unless the peer is listed in `HOWDI_TRUSTED_PROXIES` (see `backend/client-ip.cjs`).
 - **Reserved paths.** `/api/search/*` sub-paths return 404 and are held for later parts. Methods other than GET return 405.
 
 ## Files
