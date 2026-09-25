@@ -21320,6 +21320,17 @@ async function ensureVibeReleaseReadinessV140LSchema(){
     });
 
     // =====================================================
+    // HOWDI K5B — GLOBAL SEARCH PART 1 (see ./search-k5b.cjs)
+    // GET /api/search only: session-only viewer, strict parameters, four public result types,
+    // allow-listed DTOs, PRD-/CRS- codes from the K5A howdi_public_refs registry. Does not use /api/users/search.
+    // =====================================================
+    const searchK5B = require("./search-k5b.cjs").createSearchK5B({
+      pool, getSessionUserFromRequest, sendJSON, k5ePrivateProfileOkSql,
+      issuePublicRefs: connectHomeK5A._internal.issueRefs,
+      rateLimit: vibeRateLimitV151B, getRequestIp,
+    });
+
+    // =====================================================
     // SERVER
     // =====================================================
 
@@ -21369,6 +21380,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
           if (await k5eLegacyNotificationGuard(req, res, url)) return;
           // K5A Phase 1: Connect Home manifest, For You feed and by-code reads (guest-safe, session-authoritative).
           if (await connectHomeK5A.handle(req, res, url)) return;
+          // K5B Part 1: Global Search foundation. Dispatched before the request logger so search terms are never logged.
+          if (await searchK5B.handle(req, res, url)) return;
 
           const pathname =
             url.pathname;
