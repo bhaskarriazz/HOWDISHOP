@@ -2014,9 +2014,15 @@ function App() {
     setHowdiApplyType("");setApplyNotice("");setApplyDirty(false);setApplyAuthRequired(false);
     const opener=applyReturnFocusRef.current;setTimeout(()=>{if(opener&&typeof opener.focus==='function')opener.focus();},0);
   }
+  // Focus only when the dialog opens or its visible step changes. Do not couple this to
+  // draft/submit state: field edits change those states while the user is typing.
   useEffect(()=>{
     if(!howdiApplyType)return;
     const focusTimer=setTimeout(()=>applySheetRef.current?.querySelector('.apply-close')?.focus(),0);
+    return()=>clearTimeout(focusTimer);
+  },[howdiApplyType,applyStep]);
+  useEffect(()=>{
+    if(!howdiApplyType)return;
     const onKeyDown=(event)=>{
       if(event.key==='Escape'){event.preventDefault();closeHowdiApplication();return;}
       if(event.key!=='Tab'||!applySheetRef.current)return;
@@ -2027,8 +2033,8 @@ function App() {
       else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}
     };
     document.addEventListener('keydown',onKeyDown);
-    return()=>{clearTimeout(focusTimer);document.removeEventListener('keydown',onKeyDown);};
-  },[howdiApplyType,applyStep,applyDirty,applySubmitting]);
+    return()=>document.removeEventListener('keydown',onKeyDown);
+  },[howdiApplyType,applyDirty,applySubmitting]);
   async function saveHowdiDraft(type,step,fields){
     const token=localStorage.getItem("howdiSessionToken")||"";
     if(!token)return false;
