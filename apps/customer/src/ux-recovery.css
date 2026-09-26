@@ -6,13 +6,13 @@
    Tokens follow the approved palette already used by the master UI: ivory / deep HOWDI green / restrained gold.
    ===================================================================================================================== */
 :root {
-  --ux-green: #073f35;
-  --ux-green-2: #0c5949;
-  --ux-gold: #d79b22;
+  --ux-green: #1749d6;
+  --ux-green-2: #1749d6;
+  --ux-gold: #134be6;
   --ux-gold-ink: #7a5410;
-  --ux-ink: #173a32;
-  --ux-muted: #55665e;          /* >= 5.7:1 on ivory */
-  --ux-ivory: #fbfaf5;
+  --ux-ink: #1749d6;
+  --ux-muted: #3e517d;          /* >= 5.7:1 on ivory */
+  --ux-ivory: #f3f6fd;
   --ux-line: #e2ded1;
   --ux-card: #ffffff;
   --ux-radius: 16px;
@@ -22,7 +22,7 @@
 
 /* ---------- shared: visible keyboard focus everywhere in the shell ---------- */
 .howdi-app :where(button, a, input, select, textarea, [role="button"]):focus-visible {
-  outline: 3px solid rgba(215, 155, 34, .75);
+  outline: 3px solid rgba(19,75,230, .75);
   outline-offset: 2px;
 }
 
@@ -51,9 +51,9 @@
   .howdi-app .header {
     left: 0 !important; right: 0 !important; width: 100% !important;
     height: auto !important; min-height: 0 !important;
-    background: rgba(255, 255, 252, .98) !important;
+    background: rgba(253,253,254, .98) !important;
     border-bottom: 1px solid var(--ux-line) !important;
-    box-shadow: 0 6px 18px rgba(23, 58, 50, .05) !important;
+    box-shadow: 0 6px 18px rgba(39,64,134, .05) !important;
   }
   .howdi-app .header-inner {
     display: grid !important;
@@ -81,12 +81,12 @@
   .howdi-app .header .brand-mark {
     display: grid !important; place-items: center; flex: 0 0 auto;
     width: 38px !important; height: 38px !important; border-radius: 12px !important;
-    background: var(--ux-green) !important; color: #f3bd46 !important; font: 700 21px Georgia, serif !important;
+    background: var(--ux-green) !important; color: #1f5af6 !important; font: 700 21px Georgia, serif !important;
   }
   .howdi-app .header .brand-name { font: 700 17px/1 Georgia, serif !important; letter-spacing: .14em !important; color: var(--ux-green) !important; }
   .howdi-app .header .brand-tagline {
     display: block !important; margin-top: 3px !important; font: 500 10.5px/1.18 Georgia, serif !important; letter-spacing: 0 !important;
-    color: #6f5c33 !important; white-space: normal !important; text-wrap: balance;
+    color: #1f5af6 !important; white-space: normal !important; text-wrap: balance;
   }
   .howdi-app .header .howdi-global-icon { grid-row: 1 !important; grid-column: 2 !important; }
   .howdi-app .header .howdi-global-cart-context { grid-row: 1 !important; grid-column: 3 !important; }
@@ -141,7 +141,7 @@
   .howdi-app .howdi-mobile-subnav::-webkit-scrollbar { display: none; }
   .howdi-app .howdi-mobile-subnav button {
     flex: 0 0 auto; min-height: 40px; padding: 0 15px; border-radius: 20px; border: 1px solid var(--ux-line);
-    background: #fff; color: #33483f; font: 650 13px/1 system-ui, -apple-system, "Segoe UI", sans-serif; white-space: nowrap;
+    background: #fff; color: #22304f; font: 650 13px/1 system-ui, -apple-system, "Segoe UI", sans-serif; white-space: nowrap;
   }
   .howdi-app .howdi-mobile-subnav button.active { background: var(--ux-green); border-color: var(--ux-green); color: #fff; }
 
@@ -149,7 +149,7 @@
     display: inline-grid; place-items: center; min-width: 18px; height: 18px; margin-left: 6px; padding: 0 5px; border-radius: 9px;
     background: #c2410c; color: #fff; font: 700 10.5px/1 system-ui, sans-serif; font-style: normal; vertical-align: middle;
   }
-  .howdi-app .howdi-mobile-subnav button.active .howdi-mobile-badge { background: #f3bd46; color: #1f2a1a; }
+  .howdi-app .howdi-mobile-subnav button.active .howdi-mobile-badge { background: #4975f0; color: #0d1a3a; }
   .howdi-app .howdi-mobile-nav button { position: relative; }
   .howdi-app .howdi-mobile-nav .howdi-mobile-badge { position: absolute; top: 2px; left: calc(50% + 6px); margin: 0; }
 
@@ -157,14 +157,14 @@
   .howdi-app .howdi-mobile-nav {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 9150; display: grid !important; grid-template-columns: repeat(5, 1fr);
     height: calc(var(--ux-bnav-h) + var(--ux-safe-b)); padding: 0 4px var(--ux-safe-b); box-sizing: border-box;
-    background: rgba(255, 255, 252, .98); border-top: 1px solid var(--ux-line); box-shadow: 0 -8px 22px rgba(23, 58, 50, .07);
+    background: rgba(253,253,254, .98); border-top: 1px solid var(--ux-line); box-shadow: 0 -8px 22px rgba(39,64,134, .07);
   }
   .howdi-app .howdi-mobile-nav button {
     display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; min-height: 48px; margin: 6px 2px;
-    border: 0; border-radius: 12px; background: transparent; color: #4b5f56; font: 650 11px/1 system-ui, -apple-system, "Segoe UI", sans-serif;
+    border: 0; border-radius: 12px; background: transparent; color: #515767; font: 650 11px/1 system-ui, -apple-system, "Segoe UI", sans-serif;
   }
-  .howdi-app .howdi-mobile-nav button .howdi-nav-icon { width: 22px; height: 22px; color: #8a6a1f; }
-  .howdi-app .howdi-mobile-nav button.active { background: #f3f1e6; color: var(--ux-green); }
+  .howdi-app .howdi-mobile-nav button .howdi-nav-icon { width: 22px; height: 22px; color: #1f5af6; }
+  .howdi-app .howdi-mobile-nav button.active { background: #ecf1fb; color: var(--ux-green); }
   .howdi-app .howdi-mobile-nav button.active .howdi-nav-icon { color: var(--ux-green); }
 
   /* ----- workspaces: start under the (measured) header, end above the bottom bar ----- */
@@ -203,64 +203,64 @@
    WORKS: My Bookings + Safety + Saved Workers (markup existed, styles did not)
    ===================================================================================================================== */
 .howdi-os-works .howdi-works-subpage-hero {
-  position: relative; margin: 0 0 16px; padding: 26px 28px; border-radius: 22px; color: #eef6ef;
-  background: radial-gradient(120% 140% at 100% 0, #14705b 0, #0a4a3c 46%, #073f35 100%);
-  box-shadow: 0 14px 34px rgba(7, 63, 53, .16);
+  position: relative; margin: 0 0 16px; padding: 26px 28px; border-radius: 22px; color: #ecf0f8;
+  background: radial-gradient(120% 140% at 100% 0, #1f5af6 0, #1749d6 46%, #1749d6 100%);
+  box-shadow: 0 14px 34px rgba(39,64,134, .16);
 }
 .howdi-os-works .howdi-works-subpage-hero > span {
   display: inline-block; font: 800 11px/1 system-ui, sans-serif; letter-spacing: .14em; color: #f3c85e; margin-bottom: 8px;
 }
 .howdi-os-works .howdi-works-subpage-hero h3 { margin: 0 0 6px; font: 700 clamp(22px, 2.6vw, 30px)/1.15 Georgia, serif; color: #fff; }
-.howdi-os-works .howdi-works-subpage-hero p { margin: 0; max-width: 62ch; font: 400 14.5px/1.55 system-ui, sans-serif; color: #d4e6dc; }
+.howdi-os-works .howdi-works-subpage-hero p { margin: 0; max-width: 62ch; font: 400 14.5px/1.55 system-ui, sans-serif; color: #d1d8e9; }
 .howdi-os-works .howdi-works-booking-kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 18px; max-width: 520px; }
 .howdi-os-works .howdi-works-booking-kpis article {
   padding: 12px 14px; border-radius: 14px; background: rgba(255, 255, 255, .11); border: 1px solid rgba(255, 255, 255, .16);
 }
 .howdi-os-works .howdi-works-booking-kpis b { display: block; font: 700 26px/1 Georgia, serif; color: #fff; }
-.howdi-os-works .howdi-works-booking-kpis small { display: block; margin-top: 4px; font: 600 12px/1.2 system-ui, sans-serif; color: #cfe3d8; }
+.howdi-os-works .howdi-works-booking-kpis small { display: block; margin-top: 4px; font: 600 12px/1.2 system-ui, sans-serif; color: #ccd4e6; }
 
 .howdi-os-works .howdi-works-lifecycle-mini {
   display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 16px; padding: 0;
 }
 .howdi-os-works .howdi-works-lifecycle-mini span {
   display: inline-flex; align-items: center; gap: 7px; min-height: 32px; padding: 0 12px 0 6px; border-radius: 999px;
-  background: #fff; border: 1px solid var(--ux-line); color: #33483f; font: 650 12.5px/1 system-ui, sans-serif;
+  background: #fff; border: 1px solid var(--ux-line); color: #22304f; font: 650 12.5px/1 system-ui, sans-serif;
 }
 .howdi-os-works .howdi-works-lifecycle-mini b {
-  display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: #e9f1ea; color: var(--ux-green); font: 800 11px/1 system-ui, sans-serif;
+  display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: #e6eaf4; color: var(--ux-green); font: 800 11px/1 system-ui, sans-serif;
 }
 
 .howdi-os-works .howdi-works-safety-hero {
-  display: flex; align-items: center; justify-content: space-between; gap: 18px; margin: 0 0 16px; padding: 26px 28px; border-radius: 22px; color: #eef6ef;
-  background: radial-gradient(120% 140% at 100% 0, #14705b 0, #0a4a3c 46%, #073f35 100%);
-  box-shadow: 0 14px 34px rgba(7, 63, 53, .16);
+  display: flex; align-items: center; justify-content: space-between; gap: 18px; margin: 0 0 16px; padding: 26px 28px; border-radius: 22px; color: #ecf0f8;
+  background: radial-gradient(120% 140% at 100% 0, #1f5af6 0, #1749d6 46%, #1749d6 100%);
+  box-shadow: 0 14px 34px rgba(39,64,134, .16);
 }
 .howdi-os-works .howdi-works-safety-hero > div:first-child > span { display: block; font: 800 11px/1 system-ui, sans-serif; letter-spacing: .14em; color: #f3c85e; margin-bottom: 8px; }
 .howdi-os-works .howdi-works-safety-hero h3 { margin: 0 0 6px; font: 700 clamp(22px, 2.6vw, 30px)/1.15 Georgia, serif; color: #fff; }
-.howdi-os-works .howdi-works-safety-hero p { margin: 0; max-width: 60ch; font: 400 14.5px/1.55 system-ui, sans-serif; color: #d4e6dc; }
+.howdi-os-works .howdi-works-safety-hero p { margin: 0; max-width: 60ch; font: 400 14.5px/1.55 system-ui, sans-serif; color: #d1d8e9; }
 .howdi-os-works .howdi-works-safety-shield { flex: 0 0 auto; display: grid; place-items: center; width: 76px; height: 76px; border-radius: 22px; background: rgba(255, 255, 255, .12); font-size: 38px; }
 .howdi-os-works .howdi-works-safety-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; margin: 0 0 16px; }
 .howdi-os-works .howdi-works-safety-grid article {
-  padding: 18px; border-radius: 18px; background: #fff; border: 1px solid var(--ux-line); box-shadow: 0 6px 18px rgba(23, 58, 50, .04);
+  padding: 18px; border-radius: 18px; background: #fff; border: 1px solid var(--ux-line); box-shadow: 0 6px 18px rgba(39,64,134, .04);
 }
 .howdi-os-works .howdi-works-safety-grid article > span {
-  display: grid; place-items: center; width: 40px; height: 40px; margin-bottom: 10px; border-radius: 12px; background: #eef4ee; color: var(--ux-green); font: 700 18px/1 system-ui, sans-serif;
+  display: grid; place-items: center; width: 40px; height: 40px; margin-bottom: 10px; border-radius: 12px; background: #eceff6; color: var(--ux-green); font: 700 18px/1 system-ui, sans-serif;
 }
 .howdi-os-works .howdi-works-safety-grid h4 { margin: 0 0 5px; font: 700 16px/1.25 Georgia, serif; color: var(--ux-ink); }
 .howdi-os-works .howdi-works-safety-grid p { margin: 0; font: 400 13.5px/1.55 system-ui, sans-serif; color: var(--ux-muted); }
 .howdi-os-works .howdi-works-safety-note {
-  display: flex; gap: 10px; align-items: baseline; padding: 14px 16px; border-radius: 14px; background: #fff7e6; border: 1px solid #efd9a2; color: #5f4310; font: 400 13.5px/1.55 system-ui, sans-serif;
+  display: flex; gap: 10px; align-items: baseline; padding: 14px 16px; border-radius: 14px; background: #ecf1fb; border: 1px solid #efd9a2; color: #5f4310; font: 400 13.5px/1.55 system-ui, sans-serif;
 }
-.howdi-os-works .howdi-works-safety-note b { flex: 0 0 auto; color: #8a3b0c; }
+.howdi-os-works .howdi-works-safety-note b { flex: 0 0 auto; color: #1f5af6; }
 
 .howdi-os-works .howdi-works-saved-row {
   display: grid; grid-template-columns: 48px minmax(0, 1fr) auto auto auto; align-items: center; gap: 10px; padding: 12px 14px; border-radius: 16px; background: #fff; border: 1px solid var(--ux-line);
 }
 .howdi-os-works .howdi-works-saved-row h4 { margin: 0; font: 700 15px/1.25 Georgia, serif; color: var(--ux-ink); }
 .howdi-os-works .howdi-works-saved-row p { margin: 3px 0 0; font: 400 13px/1.4 system-ui, sans-serif; color: var(--ux-muted); }
-.howdi-os-works .howdi-works-saved-row button { min-height: 40px; min-width: 40px; padding: 0 14px; border-radius: 12px; border: 1px solid #cfdccf; background: #fff; color: var(--ux-green); font: 700 13px/1 system-ui, sans-serif; cursor: pointer; }
+.howdi-os-works .howdi-works-saved-row button { min-height: 40px; min-width: 40px; padding: 0 14px; border-radius: 12px; border: 1px solid #cbd1e0; background: #fff; color: var(--ux-green); font: 700 13px/1 system-ui, sans-serif; cursor: pointer; }
 .howdi-os-works .howdi-works-saved-row button.primary { background: var(--ux-green); border-color: var(--ux-green); color: #fff; }
-.howdi-os-works .howdi-works-saved-row button.remove { padding: 0; font-size: 20px; color: #8a3b0c; }
+.howdi-os-works .howdi-works-saved-row button.remove { padding: 0; font-size: 20px; color: #1f5af6; }
 .howdi-os-works .howdi-works-worker-list { display: grid; gap: 10px; }
 
 /* Works empty states: keep the icon (the old rule hid it) so the panel reads as intentional */
@@ -306,8 +306,8 @@
    SHOP shares the same canvas as Connect / Works / Learn (the legacy tan band behind Shop is gone)
    ===================================================================================================================== */
 .howdi-app .shop-section[data-navigation-os="active"]::before { display: none !important; }
-.howdi-app .shop-section[data-navigation-os="active"] { background: var(--ux-canvas, #f7f8f3) !important; }
-:root { --ux-canvas: #f7f8f3; }
+.howdi-app .shop-section[data-navigation-os="active"] { background: var(--ux-canvas, #f2f4f9) !important; }
+:root { --ux-canvas: #f2f4f9; }
 @media (min-width: 901px) {
   .howdi-app .shop-section[data-navigation-os="active"] { padding: 22px 28px 70px !important; }
   .howdi-app .shop-section[data-navigation-os="active"] .sc-root { padding-left: 0; padding-right: 0; }
@@ -330,31 +330,31 @@
    ===================================================================================================================== */
 .howdi-app .hc-home-empty {
   display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 16px 18px; border: 1px solid var(--ux-line); border-radius: 16px;
-  background: linear-gradient(180deg, #fffefb, #f8faf5); color: var(--ux-muted); font: 400 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: linear-gradient(180deg, #fcfcfe, #f4f6fb); color: var(--ux-muted); font: 400 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 .howdi-app .hc-home-empty-icon {
-  flex: 0 0 auto; display: grid; place-items: center; width: 44px; height: 44px; border-radius: 14px; background: #eef4ee; color: var(--ux-green); font: 700 20px/1 system-ui, sans-serif; font-style: normal;
+  flex: 0 0 auto; display: grid; place-items: center; width: 44px; height: 44px; border-radius: 14px; background: #eceff6; color: var(--ux-green); font: 700 20px/1 system-ui, sans-serif; font-style: normal;
 }
 .howdi-app .hc-home-empty-copy { flex: 1 1 220px; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .howdi-app .hc-home-empty-copy b { font: 700 15.5px/1.3 Georgia, serif; color: var(--ux-ink); }
 .howdi-app .hc-home-empty-copy span { color: var(--ux-muted); }
 .howdi-app .hc-home-empty-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .howdi-app .hc-home-empty-actions button, .howdi-app .hc-home-welcome-actions button {
-  min-height: 44px; padding: 0 18px; border-radius: 22px; border: 1px solid #cddccf; background: #fff; color: var(--ux-green); font: 700 13.5px/1 system-ui, sans-serif; cursor: pointer;
+  min-height: 44px; padding: 0 18px; border-radius: 22px; border: 1px solid #c9d0e0; background: #fff; color: var(--ux-green); font: 700 13.5px/1 system-ui, sans-serif; cursor: pointer;
 }
 .howdi-app .hc-home-empty-actions button.primary { background: var(--ux-green); border-color: var(--ux-green); color: #fff; }
 .howdi-app .hc-home-empty-actions button:hover, .howdi-app .hc-home-welcome-actions button:hover { border-color: var(--ux-green); }
 
 .howdi-app .hc-home-welcome {
-  display: flex; flex-direction: column; gap: 8px; padding: 22px 24px; border-radius: 20px; color: #eef6ef;
-  background: radial-gradient(120% 140% at 100% 0, #17795c 0, #0f513f 55%, #0a3d30 100%); box-shadow: 0 12px 30px rgba(7, 63, 53, .14);
+  display: flex; flex-direction: column; gap: 8px; padding: 22px 24px; border-radius: 20px; color: #ecf0f8;
+  background: radial-gradient(120% 140% at 100% 0, #1f5af6 0, #1749d6 55%, #1749d6 100%); box-shadow: 0 12px 30px rgba(39,64,134, .14);
 }
 .howdi-app .hc-home-welcome small { font: 800 11px/1 system-ui, sans-serif; letter-spacing: .14em; text-transform: uppercase; color: #f3c85e; }
 .howdi-app .hc-home-welcome h3 { margin: 0; font: 700 clamp(22px, 3vw, 28px)/1.2 Georgia, serif; color: #fff; }
-.howdi-app .hc-home-welcome > span { max-width: 58ch; font: 400 14.5px/1.55 system-ui, sans-serif; color: #d4e6dc; }
+.howdi-app .hc-home-welcome > span { max-width: 58ch; font: 400 14.5px/1.55 system-ui, sans-serif; color: #d1d8e9; }
 .howdi-app .hc-home-welcome-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
 .howdi-app .hc-home-welcome-actions button { background: rgba(255, 255, 255, .12); border-color: rgba(255, 255, 255, .28); color: #fff; }
-.howdi-app .hc-home-welcome-actions button.primary { background: #f3c85e; border-color: #f3c85e; color: #1f2a1a; }
+.howdi-app .hc-home-welcome-actions button.primary { background: #f3c85e; border-color: #f3c85e; color: #0d1a3a; }
 .howdi-app .hc-home-hero-card, .howdi-app .hc-home-special-card { color: #fff; }
 
 /* section headings read as headings */
@@ -375,7 +375,7 @@
 /* =====================================================================================================================
    CHECKOUT (modal): steps stay in one row on phones, disabled buttons stay readable
    ===================================================================================================================== */
-.howdi-checkout-shell .howdi-primary:disabled { background: #dfe6e1 !important; color: #3d4d45 !important; border: 1px solid #c3cfc7 !important; cursor: not-allowed; }
+.howdi-checkout-shell .howdi-primary:disabled { background: #dce0e9 !important; color: #22304f !important; border: 1px solid #bec4d4 !important; cursor: not-allowed; }
 @media (max-width: 700px) {
   .howdi-checkout-shell :has(> .howdi-step-active, > .howdi-step) { display: grid !important; grid-template-columns: repeat(3, minmax(0, 1fr)) !important; gap: 6px !important; }
   .howdi-checkout-shell .howdi-step-active, .howdi-checkout-shell .howdi-step { padding: 10px 4px !important; font-size: 12px !important; min-height: 44px; display: flex; align-items: center; justify-content: center; }
@@ -417,13 +417,13 @@
 .hf-app-overlay { background: var(--ux-ivory); }
 .hf-app-overlay-head {
   position: sticky; top: 0; z-index: 2; max-width: none !important; margin: 0 !important; padding: 8px 20px !important; display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  background: rgba(255, 255, 252, .98); border-bottom: 1px solid var(--ux-line); box-shadow: 0 6px 18px rgba(23, 58, 50, .05);
+  background: rgba(253,253,254, .98); border-bottom: 1px solid var(--ux-line); box-shadow: 0 6px 18px rgba(39,64,134, .05);
 }
 .hf-brand { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
-.hf-brand-mark { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 12px; background: var(--ux-green); color: #f3bd46; font: 700 21px Georgia, serif; flex: 0 0 auto; }
+.hf-brand-mark { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 12px; background: var(--ux-green); color: #1f5af6; font: 700 21px Georgia, serif; flex: 0 0 auto; }
 .hf-brand-copy { display: flex; flex-direction: column; min-width: 0; }
 .hf-brand-copy b { font: 700 17px/1 Georgia, serif; letter-spacing: .14em; color: var(--ux-green); }
-.hf-brand-copy small { margin-top: 3px; font: 500 11px/1.2 Georgia, serif; color: #6f5c33; }
+.hf-brand-copy small { margin-top: 3px; font: 500 11px/1.2 Georgia, serif; color: #1f5af6; }
 .hf-app-overlay-head > button { flex: 0 0 auto; min-height: 44px; padding: 0 14px; border: 1px solid var(--ux-line) !important; border-radius: 22px; background: #fff !important; color: var(--ux-green) !important; font: 700 14px system-ui, sans-serif; }
 .hf-page { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
 .hf-title, .hf-h2 { font-family: Georgia, serif; color: var(--ux-ink); }
@@ -431,7 +431,7 @@
 .hf-tagline { color: var(--ux-gold-ink); font-family: Georgia, serif; }
 .hf-step { background: #fff; }
 .hf-step::before { color: var(--ux-gold-ink); }
-.hf-action { background: #fff; box-shadow: 0 6px 18px rgba(23, 58, 50, .04); }
+.hf-action { background: #fff; box-shadow: 0 6px 18px rgba(39,64,134, .04); }
 .hf-action:hover { border-color: var(--ux-green); }
 .hf-chip { background: #fff; border-color: var(--ux-green); color: var(--ux-green); }
 .hf-crumbs a { color: var(--ux-green); }
@@ -492,12 +492,12 @@
 .howdi-app .hc-home-skel-viewer .hc-home-skel-row { height: 64px; border-radius: 12px; }
 .howdi-app .hc-home-story .hc-home-story-ring { overflow: hidden; }
 .howdi-app .hc-home-story .hc-home-story-ring img { width: 100%; height: 100%; object-fit: cover; }
-.howdi-app .hc-home-story.viewed .hc-home-story-ring { border-color: #c9d6cf; opacity: .78; }
+.howdi-app .hc-home-story.viewed .hc-home-story-ring { border-color: #c4cbdb; opacity: .78; }
 .howdi-app .hc-home-avatar.sm { width: 24px; height: 24px; font-size: 11px; margin-right: 6px; flex: 0 0 24px; }
 .howdi-app .hc-home-post-author { display: inline-flex; align-items: center; gap: 2px; }
-.howdi-app .hc-home-post-title { display: block; margin: 6px 0 2px; font: 700 15px/1.35 Georgia, serif; color: #173d31; }
-.howdi-app .hc-home-kind { margin-left: 6px; font-style: normal; font-size: 11px; font-weight: 800; color: #8a6b25; letter-spacing: .04em; }
-.howdi-app .hc-home-post-card:focus-visible, .howdi-app .hc-home-article-card:focus-visible, .howdi-app .hc-home-hero-card:focus-visible { outline: 3px solid rgba(15, 81, 63, .35); outline-offset: 2px; }
+.howdi-app .hc-home-post-title { display: block; margin: 6px 0 2px; font: 700 15px/1.35 Georgia, serif; color: #0d1a3a; }
+.howdi-app .hc-home-kind { margin-left: 6px; font-style: normal; font-size: 11px; font-weight: 800; color: #1f5af6; letter-spacing: .04em; }
+.howdi-app .hc-home-post-card:focus-visible, .howdi-app .hc-home-article-card:focus-visible, .howdi-app .hc-home-hero-card:focus-visible { outline: 3px solid rgba(23,73,214, .35); outline-offset: 2px; }
 
 @media (max-width: 720px) {
   .howdi-app .hc-home-special-card { padding: 12px 14px; gap: 10px; }
@@ -515,21 +515,21 @@
   .howdi-app .hc-home-skel-hero .hc-home-skel-row { height: 150px; }
 }
 
-.hc-home-viewer-overlay { position: fixed; inset: 0; z-index: 2147483200; display: grid; place-items: center; padding: 16px; background: rgba(10, 30, 22, .55); backdrop-filter: blur(6px); }
-.hc-home-viewer { position: relative; width: min(640px, 100%); max-height: 88vh; overflow: auto; background: #fffdf8; border-radius: 20px; padding: 22px 22px 18px; box-shadow: 0 24px 70px rgba(10, 30, 22, .3); }
-.hc-home-viewer-close { position: absolute; top: 12px; right: 12px; width: 44px; height: 44px; border-radius: 50%; border: 1px solid #dfe7e1; background: #fff; font-size: 22px; line-height: 1; cursor: pointer; color: #1f3d31; }
-.hc-home-viewer-close:focus-visible { outline: 3px solid rgba(15, 81, 63, .35); outline-offset: 2px; }
+.hc-home-viewer-overlay { position: fixed; inset: 0; z-index: 2147483200; display: grid; place-items: center; padding: 16px; background: rgba(15,30,80, .55); backdrop-filter: blur(6px); }
+.hc-home-viewer { position: relative; width: min(640px, 100%); max-height: 88vh; overflow: auto; background: #f9fbfe; border-radius: 20px; padding: 22px 22px 18px; box-shadow: 0 24px 70px rgba(39,64,134, .3); }
+.hc-home-viewer-close { position: absolute; top: 12px; right: 12px; width: 44px; height: 44px; border-radius: 50%; border: 1px solid #dce0ea; background: #fff; font-size: 22px; line-height: 1; cursor: pointer; color: #0d1a3a; }
+.hc-home-viewer-close:focus-visible { outline: 3px solid rgba(23,73,214, .35); outline-offset: 2px; }
 .hc-home-viewer-head { display: flex; align-items: center; gap: 10px; padding-right: 48px; }
 .hc-home-viewer-head .hc-home-avatar { width: 40px; height: 40px; }
-.hc-home-viewer-head b { display: block; font-size: 14px; color: #173d31; }
-.hc-home-viewer-head small { font-size: 12px; color: #5c6b63; }
-.hc-home-viewer h2 { margin: 14px 0 10px; font: 700 21px/1.3 Georgia, serif; color: #173d31; }
-.hc-home-viewer-media { display: block; width: 100%; max-height: 420px; object-fit: contain; border-radius: 14px; background: #0f2a20; margin-bottom: 12px; }
-.hc-home-viewer-text p { margin: 0 0 10px; font-size: 15px; line-height: 1.6; color: #24352d; overflow-wrap: anywhere; }
-.hc-home-viewer-note { font-size: 13px; color: #5c6b63; }
-.hc-home-viewer-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; padding-top: 12px; border-top: 1px solid #edf0ed; }
-.hc-home-viewer-foot small { font-size: 12px; color: #6b7a72; }
-.hc-home-viewer-foot button, .hc-home-viewer-missing button { min-height: 44px; padding: 0 16px; border-radius: 12px; border: 1px solid #cddccf; background: #fff; color: #0f513f; font-weight: 800; cursor: pointer; }
+.hc-home-viewer-head b { display: block; font-size: 14px; color: #0d1a3a; }
+.hc-home-viewer-head small { font-size: 12px; color: #5c606b; }
+.hc-home-viewer h2 { margin: 14px 0 10px; font: 700 21px/1.3 Georgia, serif; color: #0d1a3a; }
+.hc-home-viewer-media { display: block; width: 100%; max-height: 420px; object-fit: contain; border-radius: 14px; background: #0f1e50; margin-bottom: 12px; }
+.hc-home-viewer-text p { margin: 0 0 10px; font-size: 15px; line-height: 1.6; color: #0d1a3a; overflow-wrap: anywhere; }
+.hc-home-viewer-note { font-size: 13px; color: #5c606b; }
+.hc-home-viewer-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; padding-top: 12px; border-top: 1px solid #ebedf2; }
+.hc-home-viewer-foot small { font-size: 12px; color: #6b707a; }
+.hc-home-viewer-foot button, .hc-home-viewer-missing button { min-height: 44px; padding: 0 16px; border-radius: 12px; border: 1px solid #c9d0e0; background: #fff; color: #0d1a3a; font-weight: 800; cursor: pointer; }
 .hc-home-viewer-missing { padding: 20px 4px 4px; text-align: center; }
-.hc-home-viewer-missing p { color: #5c6b63; }
+.hc-home-viewer-missing p { color: #5c606b; }
 @media (max-width: 520px) { .hc-home-viewer-overlay { place-items: end center; padding: 8px; } .hc-home-viewer { border-radius: 18px 18px 12px 12px; max-height: 92vh; padding: 18px 16px 14px; } }

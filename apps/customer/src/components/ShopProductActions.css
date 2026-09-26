@@ -16,7 +16,7 @@
 .sc-action-row{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
 .sc-action-row .sc-btn{flex:1 1 140px}
 .sc-action-notice{margin:0;padding:10px 12px;border-radius:10px;display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:14px}
-.sc-action-ok{background:#eef7ee;color:#1d5a2b}
+.sc-action-ok{background:#ecf0f9;color:#22304f}
 .sc-action-info{background:var(--sc-soft);color:var(--sc-ink)}
 .sc-action-error{background:#fdeeee;color:#a32d2d}
 

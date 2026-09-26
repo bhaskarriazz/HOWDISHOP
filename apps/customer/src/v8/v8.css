@@ -412,3 +412,28 @@ body:has(.howdi-app.v8) { background: var(--v8-bg); color: var(--v8-ink); font-f
   .v8-pcard-body b { font-size: 14px; }
   .v8-collection-card, .v8-cart-empty { display: none; }
 }
+
+/* ---------- V8 typography everywhere (legacy screens used Georgia / Playfair serif headings) ---------- */
+body:has(.howdi-app.v8),
+body:has(.howdi-app.v8) :where(h1, h2, h3, h4, h5, h6, p, span, b, strong, small, em, i, a, li, label, button, input, select, textarea, div, section, article, header, footer, aside, nav, td, th) {
+  font-family: var(--v8-font) !important;
+}
+body:has(.howdi-app.v8) .v8-build { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace !important; }
+
+/* ---------- V8 colour contract for legacy pillar screens (until each pillar's own slice) ----------
+   Soft blue-white surfaces, navy ink, cobalt actions; Learn = violet accent, HPay = teal accent.
+   Large saturated blocks are softened so only small accents carry colour. */
+.howdi-app.v8 .hc-home-special-card,
+.howdi-app.v8 .hc-home-hero-card {
+  background: var(--v8-primary-soft) !important; color: var(--v8-ink) !important; border: 1px solid var(--v8-primary-soft-2);
+}
+.howdi-app.v8 .hc-home-special-card button,
+.howdi-app.v8 .hc-home-hero-card button { background: var(--v8-primary) !important; color: #fff !important; }
+.howdi-app.v8 .hc-home-special-card :where(small, span, b, h3, p),
+.howdi-app.v8 .hc-home-hero-card :where(small, span, b, h3, p) { color: inherit !important; }
+.howdi-app.v8 .hc-home-special-card .hc-home-dismiss { background: rgba(13, 26, 58, .08) !important; color: var(--v8-ink) !important; }
+/* HPay: teal accent (board 11) */
+.howdi-app.v8 .hp-approved-balance { background: linear-gradient(135deg, #0fa3a0, #0b6f86) !important; border-radius: 16px !important; }
+.howdi-app.v8 .hp-approved-balance button { border-radius: 10px !important; }
+/* Learn & Earn: violet accent on kickers / eyebrow labels (board 10) */
+.howdi-app.v8 .howdi-os-learn :where(.hle-kicker, .hle-eyebrow, [class*="kicker"], [class*="eyebrow"]) { color: var(--v8-learn) !important; }

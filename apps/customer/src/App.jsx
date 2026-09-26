@@ -2475,7 +2475,7 @@ function App() {
       const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.message||"Invoice unavailable");
       const x=d.invoice||{};
       const esc=v=>String(v??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-      const html=`<!doctype html><html><head><meta charset="utf-8"><title>${esc(x.invoiceNumber||booking.workCode)}</title><style>body{font-family:Arial,sans-serif;color:#173c2c;padding:36px;max-width:820px;margin:auto}header{display:flex;justify-content:space-between;border-bottom:2px solid #285f43;padding-bottom:16px}h1{margin:0}.pill{background:#dcfce7;color:#166534;padding:7px 11px;border-radius:999px;font-weight:700}.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:24px 0}.card{border:1px solid #dfe8e2;border-radius:12px;padding:14px}.total{font-size:24px;font-weight:800;text-align:right;margin-top:24px}small{color:#64748b}</style></head><body><header><div><small>HOWDI WORKS</small><h1>Paid Service Invoice</h1><p>${esc(x.invoiceNumber||"")}</p></div><span class="pill">${esc(x.status||"PAID")}</span></header><div class="grid"><div class="card"><small>WORK CODE</small><b><br>${esc(x.workCode||booking.workCode)}</b></div><div class="card"><small>ISSUED</small><b><br>${esc(x.issuedAt?new Date(x.issuedAt).toLocaleString("en-IN"):"")}</b></div><div class="card"><small>CUSTOMER</small><b><br>${esc(x.customer?.name||"")}</b><br>${esc([x.customer?.city,x.customer?.pincode].filter(Boolean).join(" · "))}</div><div class="card"><small>WORKER</small><b><br>${esc(x.worker?.name||"")}</b><br>${esc(x.worker?.workerCode||"")}</div></div><div class="card"><small>SERVICE</small><h3>${esc(x.service||booking.title||"HOWDI Works service")}</h3><p>Service amount: ₹${Number(x.serviceAmount||0).toLocaleString("en-IN")}</p><p>Tip: ₹${Number(x.tipAmount||0).toLocaleString("en-IN")}</p><p>Payment: ${esc(x.paymentMethod||"")} · ${esc(x.paymentReference||"")}</p></div><div class="total">Total paid: ₹${Number(x.totalPaid||0).toLocaleString("en-IN")}</div><p><small>${esc(x.note||"")}</small></p></body></html>`;
+      const html=`<!doctype html><html><head><meta charset="utf-8"><title>${esc(x.invoiceNumber||booking.workCode)}</title><style>body{font-family:Arial,sans-serif;color:#0d1a3a;padding:36px;max-width:820px;margin:auto}header{display:flex;justify-content:space-between;border-bottom:2px solid #274086;padding-bottom:16px}h1{margin:0}.pill{background:#dcfce7;color:#166534;padding:7px 11px;border-radius:999px;font-weight:700}.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:24px 0}.card{border:1px solid #dce1eb;border-radius:12px;padding:14px}.total{font-size:24px;font-weight:800;text-align:right;margin-top:24px}small{color:#64748b}</style></head><body><header><div><small>HOWDI WORKS</small><h1>Paid Service Invoice</h1><p>${esc(x.invoiceNumber||"")}</p></div><span class="pill">${esc(x.status||"PAID")}</span></header><div class="grid"><div class="card"><small>WORK CODE</small><b><br>${esc(x.workCode||booking.workCode)}</b></div><div class="card"><small>ISSUED</small><b><br>${esc(x.issuedAt?new Date(x.issuedAt).toLocaleString("en-IN"):"")}</b></div><div class="card"><small>CUSTOMER</small><b><br>${esc(x.customer?.name||"")}</b><br>${esc([x.customer?.city,x.customer?.pincode].filter(Boolean).join(" · "))}</div><div class="card"><small>WORKER</small><b><br>${esc(x.worker?.name||"")}</b><br>${esc(x.worker?.workerCode||"")}</div></div><div class="card"><small>SERVICE</small><h3>${esc(x.service||booking.title||"HOWDI Works service")}</h3><p>Service amount: ₹${Number(x.serviceAmount||0).toLocaleString("en-IN")}</p><p>Tip: ₹${Number(x.tipAmount||0).toLocaleString("en-IN")}</p><p>Payment: ${esc(x.paymentMethod||"")} · ${esc(x.paymentReference||"")}</p></div><div class="total">Total paid: ₹${Number(x.totalPaid||0).toLocaleString("en-IN")}</div><p><small>${esc(x.note||"")}</small></p></body></html>`;
       const blob=new Blob([html],{type:"text/html;charset=utf-8"});const href=URL.createObjectURL(blob);const a=document.createElement("a");a.href=href;a.download=`${x.invoiceNumber||booking.workCode||"HOWDI-WORKS-INVOICE"}.html`;document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(href);
       setWorksCustomerNotice("Paid invoice downloaded. Open it and use Print → Save as PDF if required.");
     }catch(error){setWorksCustomerNotice(error.message||"Invoice unavailable");}
@@ -11304,7 +11304,7 @@ const saveProfileDetails = async (event) => {
   const getVerificationState = (value, localDomain = false) => {
     if (!value) return { label: "Missing", icon: "○", tone: "#64748b", background: "#f1f5f9" };
     if (localDomain && String(value).endsWith("@howdi.local")) {
-      return { label: "Pending verification", icon: "◔", tone: "#92400e", background: "#fff7e6" };
+      return { label: "Pending verification", icon: "◔", tone: "#1145d4", background: "#ecf1fb" };
     }
     return { label: "Foundation ready", icon: "✓", tone: "#166534", background: "#ecfdf3" };
   };
@@ -12607,7 +12607,8 @@ const removeNotification = async (notificationId) => {
 
   // V8: exactly one selected destination — Home, Connect, Shop, Works or Learn & Earn.
   const pillarActive = (area) => navigationOSArea === area;
-  const v8ActivePillar = ["home", "connect", "shop", "works", "learn"].includes(navigationOSArea) ? navigationOSArea : "";
+  // HPay is a global utility (header), not a pillar: no rail item is selected while it is open.
+  const v8ActivePillar = navigationOSArea === "connect" && connectView === "hpay" ? "" : (["home", "connect", "shop", "works", "learn"].includes(navigationOSArea) ? navigationOSArea : "");
   const V8_DEFAULT_VIEW = { home: "home", connect: "home", shop: "catalogue", works: "find", learn: "discover" };
   const v8Navigate = (area) => {
     if (area === "home") v8HomeChosenRef.current = true;
@@ -12971,14 +12972,14 @@ const removeNotification = async (notificationId) => {
       )}
 
       {notificationOpen && currentUser && (
-        <div id="howdi-notification-panel" data-howdi-header-panel role="region" aria-label="Notifications" style={{ position: "fixed", top: "calc(var(--howdi-header-bottom) + 10px)", right: "24px", zIndex: 9001, width: "370px", maxWidth: "calc(100vw - 32px)", maxHeight: "calc(100dvh - var(--howdi-header-bottom) - 24px)", overflowY: "auto", background: "#fff", border: "1px solid #dbe3dc", borderRadius: "18px", boxShadow: "0 20px 50px rgba(15,23,42,.18)" }}>
-          <div style={{ padding: "15px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #eef2f0" }}>
+        <div id="howdi-notification-panel" data-howdi-header-panel role="region" aria-label="Notifications" style={{ position: "fixed", top: "calc(var(--howdi-header-bottom) + 10px)", right: "24px", zIndex: 9001, width: "370px", maxWidth: "calc(100vw - 32px)", maxHeight: "calc(100dvh - var(--howdi-header-bottom) - 24px)", overflowY: "auto", background: "#fff", border: "1px solid #d8dce6", borderRadius: "18px", boxShadow: "0 20px 50px rgba(15,23,42,.18)" }}>
+          <div style={{ padding: "15px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #eceef4" }}>
             <div><strong style={{ fontSize: "16px" }}>Notifications</strong>{(unreadNotificationCount+worksNotificationUnread) > 0 && <span style={{ marginLeft: "7px", fontSize: "11px", color: "#e11d48", fontWeight: 900 }}>{unreadNotificationCount+worksNotificationUnread} new</span>}</div>
-            <button type="button" onClick={async()=>{await Promise.all([markAllNotificationsRead(),markAllWorksNotificationsRead()]);}} disabled={!(unreadNotificationCount+worksNotificationUnread)} style={{ border: 0, background: "transparent", color: (unreadNotificationCount+worksNotificationUnread) ? "#365947" : "#94a3b8", fontWeight: 800, cursor: (unreadNotificationCount+worksNotificationUnread) ? "pointer" : "not-allowed" }}>Mark all read</button>
+            <button type="button" onClick={async()=>{await Promise.all([markAllNotificationsRead(),markAllWorksNotificationsRead()]);}} disabled={!(unreadNotificationCount+worksNotificationUnread)} style={{ border: 0, background: "transparent", color: (unreadNotificationCount+worksNotificationUnread) ? "#22304f" : "#94a3b8", fontWeight: 800, cursor: (unreadNotificationCount+worksNotificationUnread) ? "pointer" : "not-allowed" }}>Mark all read</button>
           </div>
           <div style={{ maxHeight: "420px", overflowY: "auto" }}>
             {worksNotifications.slice(0,5).map((item)=>(
-              <button key={`works-${item.id}`} type="button" onClick={()=>markWorksNotificationRead(item.id)} style={{ width:"100%", display:"flex", gap:"11px", alignItems:"flex-start", textAlign:"left", padding:"14px 16px", border:0, borderBottom:"1px solid #f1f5f9", background:item.isRead?"#fff":"#f1faf4", cursor:"pointer" }}>
+              <button key={`works-${item.id}`} type="button" onClick={()=>markWorksNotificationRead(item.id)} style={{ width:"100%", display:"flex", gap:"11px", alignItems:"flex-start", textAlign:"left", padding:"14px 16px", border:0, borderBottom:"1px solid #f1f5f9", background:item.isRead?"#fff":"#f0f3fb", cursor:"pointer" }}>
                 <span style={{ width:"38px",height:"38px",flex:"0 0 38px",borderRadius:"11px",display:"flex",alignItems:"center",justifyContent:"center",background:item.isRead?"#f1f5f9":"#dcfce7",fontSize:"19px" }}>{item.icon||"🛠️"}</span>
                 <span style={{minWidth:0,flex:1}}><span style={{display:"block",fontWeight:item.isRead?750:900,color:"#1e293b",fontSize:"13px"}}>{item.title}{!item.isRead&&<span style={{display:"inline-block",width:"6px",height:"6px",borderRadius:"50%",background:"#16a34a",marginLeft:"6px",verticalAlign:"middle"}}/>}</span><span style={{display:"block",marginTop:"3px",color:"#64748b",fontSize:"12px",lineHeight:1.4}}>{item.message}</span><span style={{display:"block",marginTop:"5px",color:"#94a3b8",fontSize:"10px"}}>{item.workCode}{item.createdAt?` · ${new Date(item.createdAt).toLocaleString("en-IN")}`:""}</span></span>
               </button>
@@ -12992,40 +12993,40 @@ const removeNotification = async (notificationId) => {
               </button>
             ))}
           </div>
-          <div style={{ padding: "11px 16px", borderTop: "1px solid #eef2f0", textAlign: "center" }}>
-            <button type="button" onClick={() => { setNotificationOpen(false); openHowdiAccount("notifications"); }} style={{ border: 0, background: "transparent", color: "#365947", fontWeight: 900, cursor: "pointer" }}>View all notifications →</button>
+          <div style={{ padding: "11px 16px", borderTop: "1px solid #eceef4", textAlign: "center" }}>
+            <button type="button" onClick={() => { setNotificationOpen(false); openHowdiAccount("notifications"); }} style={{ border: 0, background: "transparent", color: "#22304f", fontWeight: 900, cursor: "pointer" }}>View all notifications →</button>
           </div>
         </div>
       )}
 
 
       {worksToast && (
-        <div role="status" aria-live="polite" style={{position:"fixed",top:"88px",right:"22px",zIndex:10040,width:"min(410px,calc(100vw - 32px))",padding:"14px 16px",borderRadius:"16px",background:"#fff",border:"1px solid #cfe3d5",boxShadow:"0 18px 50px rgba(15,23,42,.22)",display:"flex",gap:"12px",alignItems:"flex-start"}}>
-          <div style={{width:"42px",height:"42px",borderRadius:"12px",background:"#f0f9f3",display:"grid",placeItems:"center",fontSize:"22px",flex:"0 0 auto"}}>{worksToast.icon}</div>
-          <div style={{minWidth:0,flex:1}}><strong style={{display:"block",color:"#173c2c",fontSize:"14px"}}>{worksToast.title}</strong><div style={{marginTop:"3px",color:"#64748b",fontSize:"12px",lineHeight:1.5}}>{worksToast.message}</div>{worksToast.workCode&&<small style={{display:"block",marginTop:"5px",color:"#94a3b8"}}>{worksToast.workCode}</small>}</div>
+        <div role="status" aria-live="polite" style={{position:"fixed",top:"88px",right:"22px",zIndex:10040,width:"min(410px,calc(100vw - 32px))",padding:"14px 16px",borderRadius:"16px",background:"#fff",border:"1px solid #ccd4e6",boxShadow:"0 18px 50px rgba(15,23,42,.22)",display:"flex",gap:"12px",alignItems:"flex-start"}}>
+          <div style={{width:"42px",height:"42px",borderRadius:"12px",background:"#eef2fb",display:"grid",placeItems:"center",fontSize:"22px",flex:"0 0 auto"}}>{worksToast.icon}</div>
+          <div style={{minWidth:0,flex:1}}><strong style={{display:"block",color:"#0d1a3a",fontSize:"14px"}}>{worksToast.title}</strong><div style={{marginTop:"3px",color:"#64748b",fontSize:"12px",lineHeight:1.5}}>{worksToast.message}</div>{worksToast.workCode&&<small style={{display:"block",marginTop:"5px",color:"#94a3b8"}}>{worksToast.workCode}</small>}</div>
           <button type="button" onClick={()=>setWorksToast(null)} style={{border:0,background:"transparent",fontSize:"18px",cursor:"pointer",color:"#64748b"}}>×</button>
         </div>
       )}
 
       {worksCaseModal && (
-        <div role="dialog" aria-modal="true" style={{position:"fixed",inset:0,zIndex:10050,background:"rgba(8,24,17,.58)",display:"grid",placeItems:"center",padding:"18px"}} onMouseDown={e=>{if(e.target===e.currentTarget)setWorksCaseModal(null)}}>
+        <div role="dialog" aria-modal="true" style={{position:"fixed",inset:0,zIndex:10050,background:"rgba(15,30,80,.58)",display:"grid",placeItems:"center",padding:"18px"}} onMouseDown={e=>{if(e.target===e.currentTarget)setWorksCaseModal(null)}}>
           <div style={{width:"min(520px,100%)",background:"#fff",borderRadius:"20px",padding:"20px",boxShadow:"0 28px 80px rgba(0,0,0,.28)"}}>
             <div style={{display:"flex",justifyContent:"space-between",gap:"12px",alignItems:"flex-start"}}>
-              <div><small style={{fontWeight:900,letterSpacing:".12em",color:worksCaseModal.type==="safety"?"#b91c1c":"#8a6b2f"}}>HOWDI WORKS</small><h3 style={{margin:"5px 0 0",color:"#173c2c"}}>{worksCaseModal.title}</h3></div>
+              <div><small style={{fontWeight:900,letterSpacing:".12em",color:worksCaseModal.type==="safety"?"#b91c1c":"#1f5af6"}}>HOWDI WORKS</small><h3 style={{margin:"5px 0 0",color:"#0d1a3a"}}>{worksCaseModal.title}</h3></div>
               <button type="button" onClick={()=>setWorksCaseModal(null)} style={{border:0,background:"transparent",fontSize:"22px",cursor:"pointer"}}>×</button>
             </div>
             <div style={{marginTop:"8px",fontSize:"12px",color:"#64748b"}}>{worksCaseModal.booking?.workCode}</div>
-            <label style={{display:"block",marginTop:"15px",fontSize:"12px",fontWeight:850,color:"#365947"}}>{worksCaseModal.label}</label>
-            <textarea autoFocus value={worksCaseModal.reason||""} onChange={e=>setWorksCaseModal(m=>({...m,reason:e.target.value}))} style={{width:"100%",boxSizing:"border-box",marginTop:"7px",minHeight:"100px",border:"1px solid #d8e2dc",borderRadius:"12px",padding:"11px",font:"inherit"}} placeholder="Enter details here…"/>
+            <label style={{display:"block",marginTop:"15px",fontSize:"12px",fontWeight:850,color:"#22304f"}}>{worksCaseModal.label}</label>
+            <textarea autoFocus value={worksCaseModal.reason||""} onChange={e=>setWorksCaseModal(m=>({...m,reason:e.target.value}))} style={{width:"100%",boxSizing:"border-box",marginTop:"7px",minHeight:"100px",border:"1px solid #d5dae5",borderRadius:"12px",padding:"11px",font:"inherit"}} placeholder="Enter details here…"/>
             {worksCaseModal.type==="safety"&&<div style={{marginTop:"9px",padding:"9px 11px",borderRadius:"10px",background:"#fff1f2",color:"#9f1239",fontSize:"11px"}}>If there is immediate danger, contact local emergency services first. HOWDI will also record this safety case.</div>}
             <div style={{display:"flex",justifyContent:"flex-end",gap:"9px",marginTop:"15px"}}>
-              <button type="button" onClick={()=>setWorksCaseModal(null)} style={{border:"1px solid #d8e2dc",borderRadius:"10px",padding:"9px 13px",background:"#fff",fontWeight:850,cursor:"pointer"}}>Back</button>
+              <button type="button" onClick={()=>setWorksCaseModal(null)} style={{border:"1px solid #d5dae5",borderRadius:"10px",padding:"9px 13px",background:"#fff",fontWeight:850,cursor:"pointer"}}>Back</button>
               <button type="button" disabled={!worksCaseModal.reason?.trim()} onClick={async()=>{
                 const m=worksCaseModal;if(!m?.reason?.trim())return;
                 setWorksCaseModal(null);
                 if(m.type==="cancel")await worksCustomerPost(m.booking,"cancel",{reason:m.reason.trim()});
                 else await worksCustomerPost(m.booking,"case",{caseType:m.type,reason:m.reason.trim()});
-              }} style={{border:0,borderRadius:"10px",padding:"9px 13px",background:worksCaseModal.type==="safety"?"#b91c1c":"#285f43",color:"#fff",fontWeight:900,cursor:worksCaseModal.reason?.trim()?"pointer":"not-allowed",opacity:worksCaseModal.reason?.trim()?1:.5}}>Submit</button>
+              }} style={{border:0,borderRadius:"10px",padding:"9px 13px",background:worksCaseModal.type==="safety"?"#b91c1c":"#1f5af6",color:"#fff",fontWeight:900,cursor:worksCaseModal.reason?.trim()?"pointer":"not-allowed",opacity:worksCaseModal.reason?.trim()?1:.5}}>Submit</button>
             </div>
           </div>
         </div>
@@ -13039,24 +13040,24 @@ const removeNotification = async (notificationId) => {
         <style>{`
           .mh-hub, .mh-drawer { box-sizing:border-box; font-family:inherit; }
           .mh-hub *,.mh-drawer *{box-sizing:border-box}
-          .mh-hub{max-height:calc(100dvh - var(--howdi-header-bottom) - 20px);overflow-y:auto!important;position:fixed;top:calc(var(--howdi-header-bottom) + 8px);right:24px;z-index:10040;width:min(430px,calc(100vw - 28px));background:#fff;border:1px solid #dfe9e3;border-radius:20px;box-shadow:0 24px 70px rgba(19,48,37,.20);overflow:hidden;color:#173c2c}
-          .mh-head{padding:18px 18px 14px;background:linear-gradient(135deg,#fbfdfb,#f2f8f4);border-bottom:1px solid #e7eee9;display:flex;gap:12px;align-items:center}
-          .mh-avatar{width:54px;height:54px;border-radius:50%;display:grid;place-items:center;background:#e2f1e8;color:#174b38;font-size:22px;font-weight:950;border:3px solid #fff;box-shadow:0 3px 12px rgba(25,70,50,.12);overflow:hidden}
+          .mh-hub{max-height:calc(100dvh - var(--howdi-header-bottom) - 20px);overflow-y:auto!important;position:fixed;top:calc(var(--howdi-header-bottom) + 8px);right:24px;z-index:10040;width:min(430px,calc(100vw - 28px));background:#fff;border:1px solid #dce1ec;border-radius:20px;box-shadow:0 24px 70px rgba(39,64,134,.20);overflow:hidden;color:#0d1a3a}
+          .mh-head{padding:18px 18px 14px;background:linear-gradient(135deg,#fbfbfd,#f0f3f9);border-bottom:1px solid #e4e8f1;display:flex;gap:12px;align-items:center}
+          .mh-avatar{width:54px;height:54px;border-radius:50%;display:grid;place-items:center;background:#dfe5f4;color:#0d1a3a;font-size:22px;font-weight:950;border:3px solid #fff;box-shadow:0 3px 12px rgba(39,64,134,.12);overflow:hidden}
           .mh-avatar img{width:100%;height:100%;object-fit:cover}
-          .mh-id{min-width:0;flex:1}.mh-id b{display:block;font-size:16px}.mh-id strong{display:block;margin-top:2px;color:#315f49;font-size:12px}.mh-id small{display:inline-block;margin-top:6px;padding:4px 7px;border-radius:999px;background:#e8f6ee;color:#26714e;font-size:9px;font-weight:900}
-          .mh-edit{border:1px solid #b8d5c5;background:#fff;color:#285f43;border-radius:10px;padding:8px 10px;font-size:11px;font-weight:900;cursor:pointer}
-          .mh-body{padding:14px 16px}.mh-label{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}.mh-label b{font-size:12px}.mh-label span{font-size:10px;color:#7b8a82}
-          .mh-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.mh-grid button{min-width:0;border:1px solid #e7ece9;background:#fbfcfb;border-radius:12px;padding:10px 4px 8px;cursor:pointer;color:#263b32}.mh-grid button:hover{border-color:#bad4c5;background:#f0f7f3}.mh-grid i{display:grid;place-items:center;margin:auto;width:30px;height:30px;border-radius:9px;background:#eef7f1;font-style:normal;font-size:16px}.mh-grid b{display:block;margin-top:6px;font-size:9px;line-height:1.15}
-          .mh-links{padding:3px 16px 12px}.mh-links button{width:100%;border:0;border-top:1px solid #edf1ee;background:#fff;padding:11px 2px;display:flex;align-items:center;gap:10px;text-align:left;color:#263b32;cursor:pointer;font-size:12px;font-weight:800}.mh-links button span:first-child{width:25px;text-align:center;font-size:15px}.mh-links button em{margin-left:auto;font-style:normal;color:#94a39b}
-          .mh-foot{border-top:1px solid #e7ece9;padding:11px 16px;display:flex;justify-content:space-between;align-items:center;background:#fafcfb}.mh-foot small{color:#7a8981;font-size:9px}.mh-signout{border:0;background:transparent;color:#c23d3d;font-weight:900;font-size:11px;cursor:pointer}
-          .mh-drawer-shade{position:fixed;inset:var(--howdi-header-bottom) 0 0 0;z-index:10035;background:rgba(20,38,31,.16)}
-          .mh-drawer{position:fixed;top:var(--howdi-header-bottom);right:0;bottom:0;z-index:10045;width:min(470px,100vw);background:#fff;box-shadow:-22px 0 65px rgba(17,39,30,.20);display:flex;flex-direction:column;color:#173c2c}
-          .mh-drawer-head{height:68px;padding:0 20px;border-bottom:1px solid #e6ece8;display:flex;align-items:center;gap:12px}.mh-drawer-head h3{margin:0;font-size:18px}.mh-drawer-close{margin-left:auto;width:36px;height:36px;border:1px solid #dfe7e2;border-radius:10px;background:#fff;font-size:20px;cursor:pointer}
-          .mh-drawer-body{padding:20px;overflow:auto}.mh-profile-top{text-align:center;padding:4px 0 18px}.mh-profile-top .mh-avatar{width:76px;height:76px;margin:auto;font-size:28px}.mh-profile-top b{display:block;margin-top:10px;font-size:17px}.mh-profile-top small{color:#507161;font-weight:800}
-          .mh-form{display:grid;gap:13px}.mh-form label{display:grid;gap:6px;color:#496257;font-size:11px;font-weight:900}.mh-form input,.mh-form select{height:44px;border:1px solid #d5e1da;border-radius:11px;padding:0 12px;background:#fff;color:#173c2c;font:inherit;outline:none}.mh-form input:focus,.mh-form select:focus{border-color:#3c7b5d;box-shadow:0 0 0 3px rgba(60,123,93,.10)}
-          .mh-username{height:44px;border:1px solid #d5e1da;border-radius:11px;padding:0 12px;display:flex;align-items:center;justify-content:space-between;background:#f8fbf9}.mh-username b{font-size:12px}.mh-username span{font-size:9px;color:#2d8a5d;font-weight:900}
-          .mh-save{margin-top:5px;height:46px;border:0;border-radius:11px;background:#176b50;color:#fff;font-weight:950;cursor:pointer}.mh-notice{padding:9px 11px;border-radius:10px;background:#f1f8f4;color:#315f49;font-size:11px}
-          .mh-stack{display:grid;gap:10px}.mh-card{border:1px solid #e1e9e4;border-radius:14px;padding:13px;background:#fbfdfb}.mh-card-row{display:flex;align-items:flex-start;gap:10px}.mh-card-main{min-width:0;flex:1}.mh-card b{display:block;font-size:12px}.mh-card small{display:block;margin-top:4px;color:#708078;font-size:10px;line-height:1.45}.mh-card-actions{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}.mh-card-actions button,.mh-outline{border:1px solid #cdded4;background:#fff;border-radius:9px;padding:7px 9px;color:#285f43;font-size:10px;font-weight:900;cursor:pointer}.mh-danger{color:#b63c3c!important;border-color:#efd0d0!important}.mh-primary{background:#176b50!important;color:#fff!important;border-color:#176b50!important}.mh-empty{padding:34px 16px;text-align:center;border:1px dashed #ccd9d1;border-radius:14px;color:#738279;font-size:11px}.mh-section-title{display:flex;align-items:center;justify-content:space-between;margin:0 0 12px}.mh-section-title b{font-size:13px}.mh-section-title button{border:0;background:#eaf5ee;color:#256247;border-radius:9px;padding:8px 10px;font-size:10px;font-weight:900;cursor:pointer}.mh-settings-list{display:grid;gap:8px}.mh-settings-list button{height:48px;border:1px solid #e1e9e4;border-radius:12px;background:#fff;padding:0 13px;display:flex;align-items:center;gap:10px;text-align:left;color:#29483a;font-weight:850;cursor:pointer}.mh-settings-list button span:last-child{margin-left:auto;color:#8a9a91}.mh-search{width:100%;height:44px;border:1px solid #d5e1da;border-radius:11px;padding:0 12px;margin-bottom:12px;outline:none}.mh-plan{padding:16px;border-radius:16px;background:linear-gradient(135deg,#f4faf6,#fff8e9);border:1px solid #dfe9e3}.mh-plan h4{margin:0 0 4px;font-size:16px}.mh-plan p{margin:0;color:#65786e;font-size:10px}.mh-kpis{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin:12px 0}.mh-kpis article{padding:13px;border:1px solid #e1e9e4;border-radius:12px;background:#fbfcb}.mh-kpis b{font-size:18px}.mh-kpis small{display:block;color:#74837b;font-size:9px}
+          .mh-id{min-width:0;flex:1}.mh-id b{display:block;font-size:16px}.mh-id strong{display:block;margin-top:2px;color:#22304f;font-size:12px}.mh-id small{display:inline-block;margin-top:6px;padding:4px 7px;border-radius:999px;background:#e6ebf8;color:#22304f;font-size:9px;font-weight:900}
+          .mh-edit{border:1px solid #b3bfda;background:#fff;color:#22304f;border-radius:10px;padding:8px 10px;font-size:11px;font-weight:900;cursor:pointer}
+          .mh-body{padding:14px 16px}.mh-label{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}.mh-label b{font-size:12px}.mh-label span{font-size:10px;color:#7b7f8a}
+          .mh-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.mh-grid button{min-width:0;border:1px solid #e4e7ef;background:#fafbfd;border-radius:12px;padding:10px 4px 8px;cursor:pointer;color:#0d1a3a}.mh-grid button:hover{border-color:#b4c0da;background:#eef1f9}.mh-grid i{display:grid;place-items:center;margin:auto;width:30px;height:30px;border-radius:9px;background:#ecf0f9;font-style:normal;font-size:16px}.mh-grid b{display:block;margin-top:6px;font-size:9px;line-height:1.15}
+          .mh-links{padding:3px 16px 12px}.mh-links button{width:100%;border:0;border-top:1px solid #ebedf3;background:#fff;padding:11px 2px;display:flex;align-items:center;gap:10px;text-align:left;color:#0d1a3a;cursor:pointer;font-size:12px;font-weight:800}.mh-links button span:first-child{width:25px;text-align:center;font-size:15px}.mh-links button em{margin-left:auto;font-style:normal;color:#7b818e}
+          .mh-foot{border-top:1px solid #e4e7ef;padding:11px 16px;display:flex;justify-content:space-between;align-items:center;background:#f9fafd}.mh-foot small{color:#7a7e89;font-size:9px}.mh-signout{border:0;background:transparent;color:#c23d3d;font-weight:900;font-size:11px;cursor:pointer}
+          .mh-drawer-shade{position:fixed;inset:var(--howdi-header-bottom) 0 0 0;z-index:10035;background:rgba(15,30,80,.16)}
+          .mh-drawer{position:fixed;top:var(--howdi-header-bottom);right:0;bottom:0;z-index:10045;width:min(470px,100vw);background:#fff;box-shadow:-22px 0 65px rgba(39,64,134,.20);display:flex;flex-direction:column;color:#0d1a3a}
+          .mh-drawer-head{height:68px;padding:0 20px;border-bottom:1px solid #e3e6ef;display:flex;align-items:center;gap:12px}.mh-drawer-head h3{margin:0;font-size:18px}.mh-drawer-close{margin-left:auto;width:36px;height:36px;border:1px solid #dce0ea;border-radius:10px;background:#fff;font-size:20px;cursor:pointer}
+          .mh-drawer-body{padding:20px;overflow:auto}.mh-profile-top{text-align:center;padding:4px 0 18px}.mh-profile-top .mh-avatar{width:76px;height:76px;margin:auto;font-size:28px}.mh-profile-top b{display:block;margin-top:10px;font-size:17px}.mh-profile-top small{color:#505a71;font-weight:800}
+          .mh-form{display:grid;gap:13px}.mh-form label{display:grid;gap:6px;color:#4e5669;font-size:11px;font-weight:900}.mh-form input,.mh-form select{height:44px;border:1px solid #d1d7e5;border-radius:11px;padding:0 12px;background:#fff;color:#0d1a3a;font:inherit;outline:none}.mh-form input:focus,.mh-form select:focus{border-color:#254692;box-shadow:0 0 0 3px rgba(37,70,146,.10)}
+          .mh-username{height:44px;border:1px solid #d1d7e5;border-radius:11px;padding:0 12px;display:flex;align-items:center;justify-content:space-between;background:#f7f9fc}.mh-username b{font-size:12px}.mh-username span{font-size:9px;color:#2d8a5d;font-weight:900}
+          .mh-save{margin-top:5px;height:46px;border:0;border-radius:11px;background:#1f5af6;color:#fff;font-weight:950;cursor:pointer}.mh-notice{padding:9px 11px;border-radius:10px;background:#eff2fa;color:#22304f;font-size:11px}
+          .mh-stack{display:grid;gap:10px}.mh-card{border:1px solid #dee2ec;border-radius:14px;padding:13px;background:#fbfbfd}.mh-card-row{display:flex;align-items:flex-start;gap:10px}.mh-card-main{min-width:0;flex:1}.mh-card b{display:block;font-size:12px}.mh-card small{display:block;margin-top:4px;color:#707580;font-size:10px;line-height:1.45}.mh-card-actions{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}.mh-card-actions button,.mh-outline{border:1px solid #c9d0e2;background:#fff;border-radius:9px;padding:7px 9px;color:#22304f;font-size:10px;font-weight:900;cursor:pointer}.mh-danger{color:#b63c3c!important;border-color:#efd0d0!important}.mh-primary{background:#1f5af6!important;color:#fff!important;border-color:#274086!important}.mh-empty{padding:34px 16px;text-align:center;border:1px dashed #c8cedd;border-radius:14px;color:#737782;font-size:11px}.mh-section-title{display:flex;align-items:center;justify-content:space-between;margin:0 0 12px}.mh-section-title b{font-size:13px}.mh-section-title button{border:0;background:#e8ecf7;color:#22304f;border-radius:9px;padding:8px 10px;font-size:10px;font-weight:900;cursor:pointer}.mh-settings-list{display:grid;gap:8px}.mh-settings-list button{height:48px;border:1px solid #dee2ec;border-radius:12px;background:#fff;padding:0 13px;display:flex;align-items:center;gap:10px;text-align:left;color:#22304f;font-weight:850;cursor:pointer}.mh-settings-list button span:last-child{margin-left:auto;color:#7c818e}.mh-search{width:100%;height:44px;border:1px solid #d1d7e5;border-radius:11px;padding:0 12px;margin-bottom:12px;outline:none}.mh-plan{padding:16px;border-radius:16px;background:linear-gradient(135deg,#f3f5fb,#edf1fb);border:1px solid #dce1ec}.mh-plan h4{margin:0 0 4px;font-size:16px}.mh-plan p{margin:0;color:#656b78;font-size:10px}.mh-kpis{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin:12px 0}.mh-kpis article{padding:13px;border:1px solid #dee2ec;border-radius:12px;background:#fbfcb}.mh-kpis b{font-size:18px}.mh-kpis small{display:block;color:#747883;font-size:9px}
           @media(max-width:700px){.mh-hub{right:10px}.mh-grid{grid-template-columns:repeat(2,1fr)}}
         `}</style>
       )}
@@ -13108,19 +13109,19 @@ const removeNotification = async (notificationId) => {
       {logoutConfirmOpen && (
         <div
           role="dialog" aria-modal="true" aria-label="Log out of HOWDI"
-          style={{ position: "fixed", inset: 0, zIndex: 2147483650, background: "rgba(17,32,26,.5)", backdropFilter: "blur(4px)", display: "grid", placeItems: "center", padding: 20 }}
+          style={{ position: "fixed", inset: 0, zIndex: 2147483650, background: "rgba(15,30,80,.5)", backdropFilter: "blur(4px)", display: "grid", placeItems: "center", padding: 20 }}
           onClick={() => !logoutBusy && setLogoutConfirmOpen(false)}
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            style={{ width: "min(400px,100%)", borderRadius: 20, background: "#fff", boxShadow: "0 30px 80px rgba(15,30,22,.32)", padding: "28px 26px", textAlign: "center", fontFamily: "inherit" }}
+            style={{ width: "min(400px,100%)", borderRadius: 20, background: "#fff", boxShadow: "0 30px 80px rgba(39,64,134,.32)", padding: "28px 26px", textAlign: "center", fontFamily: "inherit" }}
           >
             <div style={{ width: 52, height: 52, margin: "0 auto 14px", borderRadius: 16, background: "#fbe9e9", display: "grid", placeItems: "center", fontSize: 24 }}>🚪</div>
-            <h3 style={{ margin: "0 0 8px", fontSize: 19, color: "#1b2b25" }}>Log out of HOWDI?</h3>
-            <p style={{ margin: "0 0 20px", fontSize: 13.5, lineHeight: 1.5, color: "#6b7a74" }}>You'll be signed out of this device, but don't worry — none of your data, orders, bookings or profile information will be deleted.</p>
+            <h3 style={{ margin: "0 0 8px", fontSize: 19, color: "#0d1a3a" }}>Log out of HOWDI?</h3>
+            <p style={{ margin: "0 0 20px", fontSize: 13.5, lineHeight: 1.5, color: "#6b707a" }}>You'll be signed out of this device, but don't worry — none of your data, orders, bookings or profile information will be deleted.</p>
             {logoutNotice && <div className="mh-notice" role="alert" style={{ marginBottom: 14 }}>{logoutNotice}</div>}
             <div style={{ display: "flex", gap: 10 }}>
-              <button type="button" onClick={() => setLogoutConfirmOpen(false)} disabled={logoutBusy} style={{ flex: 1, minHeight: 46, border: "1px solid #d5e1da", borderRadius: 12, background: "#fff", color: "#1b2b25", fontWeight: 800, fontSize: 13.5, cursor: "pointer" }}>Cancel</button>
+              <button type="button" onClick={() => setLogoutConfirmOpen(false)} disabled={logoutBusy} style={{ flex: 1, minHeight: 46, border: "1px solid #d1d7e5", borderRadius: 12, background: "#fff", color: "#0d1a3a", fontWeight: 800, fontSize: 13.5, cursor: "pointer" }}>Cancel</button>
               <button type="button" onClick={handleLogout} disabled={logoutBusy} style={{ flex: 1, minHeight: 46, border: 0, borderRadius: 12, background: "#c23d3d", color: "#fff", fontWeight: 800, fontSize: 13.5, cursor: "pointer" }}>{logoutBusy ? "Signing out…" : "Log out"}</button>
             </div>
           </div>
@@ -13289,7 +13290,7 @@ const removeNotification = async (notificationId) => {
       )}
 
       {/* HOWDI restored order lifecycle dialogs */}
-      <style>{`.hv152x-modal button,.hv152x-modal select,.hv152x-modal option,.hv152x-modal input{color:#244d39}.hv152x-modal .hv152x-actions button:last-child{color:#fff}`}</style>
+      <style>{`.hv152x-modal button,.hv152x-modal select,.hv152x-modal option,.hv152x-modal input{color:#22304f}.hv152x-modal .hv152x-actions button:last-child{color:#fff}`}</style>
       {cancelRequestOrder&&<div className="hv152x-overlay" style={{zIndex:10100}} role="dialog" aria-modal="true" aria-label="Cancel order" onMouseDown={e=>{if(e.target===e.currentTarget&&!cancelBusy)setCancelRequestOrder(null)}}><div className="hv152x-modal">
   <div className="hv152x-head"><div><small>MY ORDERS</small><h3>Cancel order</h3><p>We will recheck shipment status before accepting cancellation.</p></div><button disabled={cancelBusy} onClick={()=>setCancelRequestOrder(null)}>×</button></div>
   <label className="hv152x-reason"><span>Cancellation reason</span><select value={cancelReason} onChange={e=>setCancelReason(e.target.value)}><option>Changed my mind</option><option>Ordered by mistake</option><option>Delivery taking too long</option><option>Need to change product</option><option>Other</option></select></label>
@@ -13305,13 +13306,13 @@ const removeNotification = async (notificationId) => {
   </div></div>}
 
       {cartToast && (
-        <div role="status" aria-live="polite" style={{ position: "fixed", top: "88px", right: "22px", zIndex: 10030, width: "min(390px, calc(100vw - 32px))", padding: "14px 16px", borderRadius: "16px", background: "#ffffff", color: "#172033", border: "1px solid #d5e5d9", boxShadow: "0 18px 50px rgba(15,23,42,.20)", display: "flex", alignItems: "center", gap: "12px" }}>
-          <div style={{ width: "42px", height: "42px", borderRadius: "12px", background: "#f1f8f3", display: "grid", placeItems: "center", fontSize: "22px", flex: "0 0 auto" }}>{cartToast.icon}</div>
+        <div role="status" aria-live="polite" style={{ position: "fixed", top: "88px", right: "22px", zIndex: 10030, width: "min(390px, calc(100vw - 32px))", padding: "14px 16px", borderRadius: "16px", background: "#ffffff", color: "#172033", border: "1px solid #d2d8e8", boxShadow: "0 18px 50px rgba(15,23,42,.20)", display: "flex", alignItems: "center", gap: "12px" }}>
+          <div style={{ width: "42px", height: "42px", borderRadius: "12px", background: "#eff2fa", display: "grid", placeItems: "center", fontSize: "22px", flex: "0 0 auto" }}>{cartToast.icon}</div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <strong style={{ display: "block", color: "#172033", fontSize: "14px" }}>✓ Added to cart</strong>
             <div style={{ marginTop: "3px", color: "#64748b", fontSize: "12px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cartToast.name}</div>
           </div>
-          <button type="button" onClick={() => { setCartToast(null); setCartOpen(true); }} style={{ border: 0, borderRadius: "10px", padding: "9px 11px", background: "#365947", color: "#ffffff", fontWeight: 900, cursor: "pointer", whiteSpace: "nowrap" }}>View Cart</button>
+          <button type="button" onClick={() => { setCartToast(null); setCartOpen(true); }} style={{ border: 0, borderRadius: "10px", padding: "9px 11px", background: "#1f5af6", color: "#ffffff", fontWeight: 900, cursor: "pointer", whiteSpace: "nowrap" }}>View Cart</button>
           <button type="button" aria-label="Dismiss" onClick={() => setCartToast(null)} style={{ border: 0, background: "transparent", color: "#64748b", fontSize: "18px", cursor: "pointer", padding: "2px 4px" }}>×</button>
         </div>
       )}
@@ -13337,65 +13338,65 @@ const removeNotification = async (notificationId) => {
           }}
         >
           <style>{`
-            .howdi-cart-shell { --ink:#162033; --muted:#6b778c; --green:#315f49; --green2:#3f765b; --cream:#fbf7ee; --line:#e5e9e6; --soft:#f5f8f6; --danger:#c2413b; width:min(680px,96vw); height:100%; background:#fff; color:var(--ink); display:flex; flex-direction:column; min-height:0; box-shadow:-28px 0 80px rgba(8,18,30,.28); }
+            .howdi-cart-shell { --ink:#162033; --muted:#6b778c; --green:#1f5af6; --green2:#28468d; --cream:#eef2fb; --line:#e1e5ed; --soft:#f4f5f9; --danger:#c2413b; width:min(680px,96vw); height:100%; background:#fff; color:var(--ink); display:flex; flex-direction:column; min-height:0; box-shadow:-28px 0 80px rgba(8,18,30,.28); }
             .howdi-cart-shell * { box-sizing:border-box; }
-            .howdi-cart-head { padding:22px 26px 20px; border-bottom:1px solid var(--line); background:linear-gradient(180deg,#ffffff 0%,#f9fbfa 100%); }
+            .howdi-cart-head { padding:22px 26px 20px; border-bottom:1px solid var(--line); background:linear-gradient(180deg,#ffffff 0%,#f8f9fc 100%); }
             .howdi-cart-headrow { display:flex; align-items:flex-start; justify-content:space-between; gap:18px; }
             .howdi-cart-kicker { color:#718096; font-size:11px; font-weight:900; letter-spacing:1.6px; text-transform:uppercase; }
             .howdi-cart-title { margin:5px 0 0; color:var(--ink)!important; font-size:29px; line-height:1.1; font-weight:900; letter-spacing:-.5px; }
             .howdi-cart-sub { margin:7px 0 0; color:var(--muted)!important; font-size:13px; line-height:1.45; }
-            .howdi-cart-close { width:42px; height:42px; flex:0 0 42px; border:1px solid #dfe5e1; border-radius:14px; background:#fff; color:#263447!important; font-size:22px; line-height:1; cursor:pointer; box-shadow:0 5px 16px rgba(15,23,42,.07); }
-            .howdi-cart-close:hover { background:#f4f7f5; transform:translateY(-1px); }
+            .howdi-cart-close { width:42px; height:42px; flex:0 0 42px; border:1px solid #dce0e8; border-radius:14px; background:#fff; color:#263447!important; font-size:22px; line-height:1; cursor:pointer; box-shadow:0 5px 16px rgba(15,23,42,.07); }
+            .howdi-cart-close:hover { background:#f3f4f8; transform:translateY(-1px); }
             .howdi-cart-progress { margin-top:18px; display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
-            .howdi-cart-progress > div { padding:9px 8px; border-radius:12px; background:#f3f6f4; color:#617083; text-align:center; font-size:10.5px; font-weight:900; }
-            .howdi-cart-progress > div:first-child { background:#e9f3ed; color:var(--green); }
+            .howdi-cart-progress > div { padding:9px 8px; border-radius:12px; background:#f1f3f8; color:#617083; text-align:center; font-size:10.5px; font-weight:900; }
+            .howdi-cart-progress > div:first-child { background:#e6ebf6; color:var(--green); }
             .howdi-cart-scroll { flex:1; min-height:0; overflow-y:auto; padding:18px 24px 24px; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; }
             .howdi-cart-scroll::-webkit-scrollbar { width:8px; }
-            .howdi-cart-scroll::-webkit-scrollbar-thumb { background:#d6ded9; border-radius:20px; }
+            .howdi-cart-scroll::-webkit-scrollbar-thumb { background:#d2d7e2; border-radius:20px; }
             .howdi-cart-section-title { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:0 0 12px; }
             .howdi-cart-section-title strong { color:var(--ink)!important; font-size:14px; }
-            .howdi-cart-count { color:var(--green)!important; background:#edf6f0; border:1px solid #d7e8dc; padding:5px 9px; border-radius:999px; font-size:10px; font-weight:900; }
-            .howdi-cart-item { border:1px solid #dfe6e1; border-radius:20px; padding:14px; background:#fff; box-shadow:0 7px 24px rgba(18,38,28,.055); transition:.18s ease; }
-            .howdi-cart-item:hover { border-color:#c8d8ce; box-shadow:0 12px 30px rgba(18,38,28,.09); transform:translateY(-1px); }
+            .howdi-cart-count { color:var(--green)!important; background:#ebeff8; border:1px solid #d4dbeb; padding:5px 9px; border-radius:999px; font-size:10px; font-weight:900; }
+            .howdi-cart-item { border:1px solid #dce0e9; border-radius:20px; padding:14px; background:#fff; box-shadow:0 7px 24px rgba(39,64,134,.055); transition:.18s ease; }
+            .howdi-cart-item:hover { border-color:#c3cbdd; box-shadow:0 12px 30px rgba(39,64,134,.09); transform:translateY(-1px); }
             .howdi-cart-item-top { display:grid; grid-template-columns:82px minmax(0,1fr) auto; gap:14px; align-items:start; }
-            .howdi-cart-thumb { width:82px; height:82px; border-radius:16px; background:linear-gradient(145deg,#f3eee3,#eaf4ee); border:1px solid #e3e8e2; display:flex; align-items:center; justify-content:center; overflow:hidden; font-size:40px; }
+            .howdi-cart-thumb { width:82px; height:82px; border-radius:16px; background:linear-gradient(145deg,#ecf1fb,#e8ecf6); border:1px solid #dfe3eb; display:flex; align-items:center; justify-content:center; overflow:hidden; font-size:40px; }
             .howdi-cart-thumb img { width:100%; height:100%; object-fit:cover; display:block; }
-            .howdi-cart-shop { color:#a06e25!important; font-size:9.5px; letter-spacing:1.2px; text-transform:uppercase; font-weight:900; }
+            .howdi-cart-shop { color:#1f5af6!important; font-size:9.5px; letter-spacing:1.2px; text-transform:uppercase; font-weight:900; }
             .howdi-cart-name { margin-top:3px; color:var(--ink)!important; font-size:16px; line-height:1.25; font-weight:900; }
             .howdi-cart-price { margin-top:7px; color:var(--ink)!important; font-size:15px; font-weight:900; }
             .howdi-cart-remove { border:0; background:transparent; color:#9a3d38!important; font-size:11px; font-weight:800; cursor:pointer; padding:5px; }
-            .howdi-cart-meta { margin-top:12px; padding:10px 11px; border-radius:13px; background:#f0f7f2; border:1px solid #d7e8dc; color:#315f49!important; font-size:11px; line-height:1.55; }
-            .howdi-cart-meta strong, .howdi-cart-meta div { color:#315f49!important; }
-            .howdi-cart-item-bottom { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:13px; padding-top:12px; border-top:1px solid #edf0ee; }
-            .howdi-cart-qty { display:flex; align-items:center; gap:5px; padding:4px; border:1px solid #dce4df; border-radius:12px; background:#f8faf9; }
+            .howdi-cart-meta { margin-top:12px; padding:10px 11px; border-radius:13px; background:#eef1f9; border:1px solid #d4dbeb; color:#22304f!important; font-size:11px; line-height:1.55; }
+            .howdi-cart-meta strong, .howdi-cart-meta div { color:#22304f!important; }
+            .howdi-cart-item-bottom { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:13px; padding-top:12px; border-top:1px solid #ebedf2; }
+            .howdi-cart-qty { display:flex; align-items:center; gap:5px; padding:4px; border:1px solid #d9dde7; border-radius:12px; background:#f7f8fb; }
             .howdi-cart-qty button { width:29px; height:29px; border:0; border-radius:8px; background:#fff; color:#1d2939!important; font-size:17px; font-weight:900; cursor:pointer; }
-            .howdi-cart-qty button:hover { background:#eaf3ed; }
+            .howdi-cart-qty button:hover { background:#e8ecf5; }
             .howdi-cart-qty strong { min-width:25px; text-align:center; color:#162033!important; font-size:13px; }
-            .howdi-cart-save { border:0; background:transparent; color:#315f49!important; font-size:11px; font-weight:900; cursor:pointer; }
+            .howdi-cart-save { border:0; background:transparent; color:#22304f!important; font-size:11px; font-weight:900; cursor:pointer; }
             .howdi-cart-benefits { display:grid; grid-template-columns:repeat(3,1fr); gap:9px; margin-top:18px; }
-            .howdi-cart-benefit { min-height:78px; padding:11px; border:1px solid #dfe7e2; border-radius:15px; background:#f8faf9; }
+            .howdi-cart-benefit { min-height:78px; padding:11px; border:1px solid #dce0ea; border-radius:15px; background:#f7f8fb; }
             .howdi-cart-benefit b { display:block; color:#243344!important; font-size:10.5px; }
             .howdi-cart-benefit span { display:block; margin-top:5px; color:#718096!important; font-size:9.5px; line-height:1.35; }
-            .howdi-cart-panel { margin-top:12px; padding:14px; border:1px solid #e1e7e3; border-radius:17px; background:#fff; }
+            .howdi-cart-panel { margin-top:12px; padding:14px; border:1px solid #dee2ea; border-radius:17px; background:#fff; }
             .howdi-cart-panel-title { color:#263447!important; font-size:11px; font-weight:900; }
             .howdi-cart-inputrow { display:flex; gap:8px; margin-top:9px; }
-            .howdi-cart-input { min-width:0; flex:1; width:100%; padding:11px 12px; border:1px solid #ccd7d0; border-radius:11px; background:#fff!important; color:#162033!important; font-size:12px; outline:none; }
-            .howdi-cart-input:focus { border-color:#315f49; box-shadow:0 0 0 3px rgba(49,95,73,.10); }
+            .howdi-cart-input { min-width:0; flex:1; width:100%; padding:11px 12px; border:1px solid #c7cddc; border-radius:11px; background:#fff!important; color:#162033!important; font-size:12px; outline:none; }
+            .howdi-cart-input:focus { border-color:#274086; box-shadow:0 0 0 3px rgba(39,64,134,.10); }
             .howdi-cart-input::placeholder { color:#8a96a5!important; opacity:1; }
-            .howdi-cart-action { padding:10px 14px; border:0; border-radius:11px; background:#315f49; color:#fff!important; font-size:11px; font-weight:900; cursor:pointer; white-space:nowrap; }
-            .howdi-cart-action:hover { background:#274d3b; }
-            .howdi-cart-check { padding:10px 14px; border:1px solid #cfdad3; border-radius:11px; background:#fff; color:#315f49!important; font-size:11px; font-weight:900; cursor:pointer; white-space:nowrap; }
-            .howdi-cart-notice { margin-top:7px; color:#47705a!important; font-size:10px; font-weight:800; }
-            .howdi-cart-note { margin-top:13px; padding:12px 13px; border:1px solid #eadfca; border-radius:15px; background:#fffaf0; color:#74582a!important; font-size:10.5px; line-height:1.5; }
+            .howdi-cart-action { padding:10px 14px; border:0; border-radius:11px; background:#1f5af6; color:#fff!important; font-size:11px; font-weight:900; cursor:pointer; white-space:nowrap; }
+            .howdi-cart-action:hover { background:#1f5af6; }
+            .howdi-cart-check { padding:10px 14px; border:1px solid #cbd1de; border-radius:11px; background:#fff; color:#22304f!important; font-size:11px; font-weight:900; cursor:pointer; white-space:nowrap; }
+            .howdi-cart-notice { margin-top:7px; color:#485470!important; font-size:10px; font-weight:800; }
+            .howdi-cart-note { margin-top:13px; padding:12px 13px; border:1px solid #eadfca; border-radius:15px; background:#f3f6fc; color:#1f5af6!important; font-size:10.5px; line-height:1.5; }
             .howdi-cart-note strong { color:#60471f!important; }
-            .howdi-cart-gift { display:flex; align-items:center; gap:9px; margin-top:12px; padding:12px 13px; border:1px solid #dfe6e1; border-radius:14px; color:#334155!important; font-size:11px; font-weight:800; cursor:pointer; }
-            .howdi-cart-gift input { accent-color:#315f49; }
+            .howdi-cart-gift { display:flex; align-items:center; gap:9px; margin-top:12px; padding:12px 13px; border:1px solid #dce0e9; border-radius:14px; color:#334155!important; font-size:11px; font-weight:800; cursor:pointer; }
+            .howdi-cart-gift input { accent-color:#1f5af6; }
             .howdi-cart-empty { min-height:470px; display:flex; align-items:center; justify-content:center; text-align:center; padding:40px 20px; }
-            .howdi-cart-empty-card { max-width:390px; padding:35px 28px; border:1px solid #dfe7e2; border-radius:24px; background:linear-gradient(145deg,#f9fbfa,#fffaf0); }
+            .howdi-cart-empty-card { max-width:390px; padding:35px 28px; border:1px solid #dce0ea; border-radius:24px; background:linear-gradient(145deg,#f8f9fc,#f3f6fc); }
             .howdi-cart-empty-icon { font-size:58px; }
             .howdi-cart-empty h3 { margin:13px 0 7px; color:#162033!important; font-size:23px; }
             .howdi-cart-empty p { margin:0 0 20px; color:#6b778c!important; font-size:13px; line-height:1.55; }
-            .howdi-cart-footer { flex:0 0 auto; padding:14px 24px 18px; border-top:1px solid #dfe6e1; background:rgba(250,252,251,.98); box-shadow:0 -12px 30px rgba(15,23,42,.08); }
+            .howdi-cart-footer { flex:0 0 auto; padding:14px 24px 18px; border-top:1px solid #dce0e9; background:rgba(249,250,253,.98); box-shadow:0 -12px 30px rgba(15,23,42,.08); }
             .howdi-cart-totalrow { display:flex; align-items:center; justify-content:space-between; gap:12px; color:#162033!important; }
             .howdi-cart-totalrow span { color:#657286!important; font-size:12px; font-weight:800; }
             .howdi-cart-totalrow strong { color:#162033!important; font-size:22px; }
@@ -13580,7 +13581,7 @@ const removeNotification = async (notificationId) => {
                       <div className="howdi-cart-panel-title">💌 Gift message</div>
                       <textarea value={giftMessage} onChange={(e) => { setGiftMessage(e.target.value); setGiftMessageSaved(false); }} rows={2} placeholder="Write a short optional message" className="howdi-cart-input" style={{ marginTop: "9px", resize: "vertical" }} />
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", marginTop: "8px" }}>
-                        <span style={{ color: giftMessageSaved ? "#47705a" : "#778397", fontSize: "10px", fontWeight: 700 }}>{giftMessageSaved ? "✓ Gift message saved." : "Save your message before checkout."}</span>
+                        <span style={{ color: giftMessageSaved ? "#485470" : "#778397", fontSize: "10px", fontWeight: 700 }}>{giftMessageSaved ? "✓ Gift message saved." : "Save your message before checkout."}</span>
                         <button type="button" onClick={() => { setGiftMessageSaved(true); setCartNotice("🎁 Gift message saved."); }} disabled={!giftMessage.trim()} className="howdi-cart-action" style={{ opacity: giftMessage.trim() ? 1 : .5, cursor: giftMessage.trim() ? "pointer" : "not-allowed" }}>Save message</button>
                       </div>
                     </div>
@@ -13677,7 +13678,7 @@ const removeNotification = async (notificationId) => {
               </button>
             </div>
 
-            {addressNotice && <p role="alert" style={{ margin: "14px 0 0", padding: "10px 12px", borderRadius: "10px", background: "#fff4e5", color: "#7a3d00", fontWeight: 700, fontSize: "13px" }}>{addressNotice}</p>}
+            {addressNotice && <p role="alert" style={{ margin: "14px 0 0", padding: "10px 12px", borderRadius: "10px", background: "#ecf1fb", color: "#7a3d00", fontWeight: 700, fontSize: "13px" }}>{addressNotice}</p>}
 
             <div
               style={{
@@ -13835,7 +13836,7 @@ const removeNotification = async (notificationId) => {
               <div>
                 <div style={{ fontSize: "12px", letterSpacing: "1.2px", fontWeight: 900, color: "#64748b" }}>HOWDI CHECKOUT</div>
                 <h2 style={{ margin: "5px 0 0", fontSize: "28px" }}>🛍️ Complete your order</h2>
-                <div style={{ marginTop: "6px", color: "#365947", fontSize: "12px", fontWeight: 800 }}>{cartPromotion.label} · {cartCount} item{cartCount === 1 ? "" : "s"}</div>
+                <div style={{ marginTop: "6px", color: "#22304f", fontSize: "12px", fontWeight: 800 }}>{cartPromotion.label} · {cartCount} item{cartCount === 1 ? "" : "s"}</div>
               </div>
               <button type="button" onClick={() => setCheckoutOpen(false)} style={{ width: "42px", height: "42px", borderRadius: "50%", border: "1px solid #e2e8f0", background: "#f8fafc", cursor: "pointer", fontSize: "20px" }}>×</button>
             </div>
@@ -13843,7 +13844,7 @@ const removeNotification = async (notificationId) => {
             <div style={{ padding: "18px 26px", background: "#f8fafc", display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: "10px" }}>
               {["Delivery", "Payment", "Review"].map((label, index) => {
                 const step = index + 1;
-                return <div key={label} className={checkoutStep === step ? "howdi-step-active" : "howdi-step"} style={{ padding: "11px 12px", borderRadius: "12px", background: checkoutStep === step ? "#365947" : "#fff", color: checkoutStep === step ? "#fff" : "#64748b", textAlign: "center", fontWeight: 900, fontSize: "13px" }}>{step}. {label}</div>;
+                return <div key={label} className={checkoutStep === step ? "howdi-step-active" : "howdi-step"} style={{ padding: "11px 12px", borderRadius: "12px", background: checkoutStep === step ? "#1f5af6" : "#fff", color: checkoutStep === step ? "#fff" : "#64748b", textAlign: "center", fontWeight: 900, fontSize: "13px" }}>{step}. {label}</div>;
               })}
             </div>
 
@@ -13855,13 +13856,13 @@ const removeNotification = async (notificationId) => {
                     <p style={{ margin: "0 0 18px", color: "#64748b" }}>Select a saved address or add a new one before placing your handmade order.</p>
                     <div style={{ display: "grid", gap: "12px" }}>
                       {addresses.map((address) => (
-                        <button key={address.id} type="button" onClick={() => setSelectedCheckoutAddress(address)} style={{ textAlign: "left", padding: "16px", borderRadius: "16px", border: selectedCheckoutAddress?.id === address.id ? "2px solid #365947" : "1px solid #dbe3dc", background: selectedCheckoutAddress?.id === address.id ? "#f1f8f3" : "#fff", cursor: "pointer" }}>
+                        <button key={address.id} type="button" onClick={() => setSelectedCheckoutAddress(address)} style={{ textAlign: "left", padding: "16px", borderRadius: "16px", border: selectedCheckoutAddress?.id === address.id ? "2px solid #274086" : "1px solid #d8dce6", background: selectedCheckoutAddress?.id === address.id ? "#eff2fa" : "#fff", cursor: "pointer" }}>
                           <strong>{address.label || "Address"} {address.is_default ? "· Default" : ""}</strong>
                           <div style={{ marginTop: "5px", color: "#475569", lineHeight: 1.5 }}>{address.full_name} · {address.phone}<br />{address.address_line1}{address.address_line2 ? `, ${address.address_line2}` : ""}, {address.city}, {address.state} - {address.pincode}</div>
                         </button>
                       ))}
                     </div>
-                    <button type="button" onClick={openNewAddress} style={{ marginTop: "14px", width: "100%", padding: "13px", borderRadius: "13px", border: "1px dashed #365947", background: "#fff", color: "#365947", fontWeight: 900, cursor: "pointer" }}>＋ Add new address</button>
+                    <button type="button" onClick={openNewAddress} style={{ marginTop: "14px", width: "100%", padding: "13px", borderRadius: "13px", border: "1px dashed #274086", background: "#fff", color: "#22304f", fontWeight: 900, cursor: "pointer" }}>＋ Add new address</button>
                     <button className="howdi-primary" type="button" disabled={!selectedCheckoutAddress} onClick={() => setCheckoutStep(2)} style={{ marginTop: "18px", width: "100%", padding: "15px", borderRadius: "13px", border: 0, background: selectedCheckoutAddress ? "#0f172a" : "#cbd5e1", color: "#fff", fontWeight: 900, cursor: selectedCheckoutAddress ? "pointer" : "not-allowed" }}>Continue to Payment →</button>
                   </div>
                 )}
@@ -13877,7 +13878,7 @@ const removeNotification = async (notificationId) => {
                         ["CARD", "💳 Card", "Debit or credit card"],
                         ...(paymentMethods.length ? [["SAVED", "🔐 Saved payment method", "Use a payment method from your HOWDI profile"]] : []),
                       ].map(([value, title, text]) => (
-                        <button key={value} type="button" onClick={() => setCheckoutPayment(value)} style={{ textAlign: "left", padding: "15px", borderRadius: "15px", border: checkoutPayment === value ? "2px solid #365947" : "1px solid #dbe3dc", background: checkoutPayment === value ? "#f1f8f3" : "#fff", cursor: "pointer" }}>
+                        <button key={value} type="button" onClick={() => setCheckoutPayment(value)} style={{ textAlign: "left", padding: "15px", borderRadius: "15px", border: checkoutPayment === value ? "2px solid #274086" : "1px solid #d8dce6", background: checkoutPayment === value ? "#eff2fa" : "#fff", cursor: "pointer" }}>
                           <strong>{title}</strong><div style={{ color: "#64748b", fontSize: "13px", marginTop: "4px" }}>{text}</div>
                         </button>
                       ))}
@@ -13894,14 +13895,14 @@ const removeNotification = async (notificationId) => {
                     <h3 style={{ margin: "0 0 8px", fontSize: "22px" }}>✅ Review & place order</h3>
                     <div style={{ padding: "15px", borderRadius: "16px", background: "#f8fafc", marginBottom: "12px" }}><strong>Deliver to</strong><div style={{ color: "#475569", marginTop: "5px", lineHeight: 1.5 }}>{selectedCheckoutAddress?.full_name}<br />{selectedCheckoutAddress?.address_line1}, {selectedCheckoutAddress?.city}, {selectedCheckoutAddress?.state} - {selectedCheckoutAddress?.pincode}</div></div>
                     <div style={{ padding: "15px", borderRadius: "16px", background: "#f8fafc", marginBottom: "12px" }}><strong>Payment</strong><div style={{ color: "#475569", marginTop: "5px" }}>{checkoutPayment === "COD" ? "Cash on Delivery" : checkoutPayment === "UPI" ? "UPI" : checkoutPayment === "CARD" ? "Debit / Credit Card" : "Saved payment method"}</div></div>
-                    {giftWrap && <div style={{ padding: "15px", borderRadius: "16px", background: "#fffaf0", border: "1px solid #eadfca", marginBottom: "12px" }}><strong>🎁 Gift wrapping</strong><div style={{ color: "#74582a", marginTop: "5px" }}>{giftMessageSaved && giftMessage.trim() ? `Message: ${giftMessage.trim()}` : "Handmade gift wrapping selected"}</div></div>}
+                    {giftWrap && <div style={{ padding: "15px", borderRadius: "16px", background: "#f3f6fc", border: "1px solid #eadfca", marginBottom: "12px" }}><strong>🎁 Gift wrapping</strong><div style={{ color: "#1f5af6", marginTop: "5px" }}>{giftMessageSaved && giftMessage.trim() ? `Message: ${giftMessage.trim()}` : "Handmade gift wrapping selected"}</div></div>}
                     <div style={{
                       marginTop: "14px",
                       padding: "12px 14px",
                       borderRadius: "13px",
-                      background: "#fff7ed",
+                      background: "#f0f4fc",
                       border: "1px solid #fed7aa",
-                      color: "#7c4a13",
+                      color: "#1f5af6",
                       fontSize: "11.5px",
                       lineHeight: 1.5
                     }}>
@@ -13910,21 +13911,21 @@ const removeNotification = async (notificationId) => {
 
                     <div style={{ display: "flex", gap: "10px", marginTop: "18px" }}>
                       <button type="button" onClick={() => setCheckoutStep(2)} style={{ flex: 1, padding: "14px", borderRadius: "13px", border: "1px solid #cbd5e1", background: "#fff", fontWeight: 900, cursor: "pointer" }}>← Back</button>
-                      <button className="howdi-primary" type="button" disabled={placingOrder} onClick={(event) => { event.preventDefault(); event.stopPropagation(); placeCheckoutOrder(); }} style={{ flex: 2, padding: "14px", borderRadius: "13px", border: 0, background: placingOrder ? "#94a3b8" : "#365947", color: "#fff", fontWeight: 900, cursor: placingOrder ? "wait" : "pointer" }}>{placingOrder ? "⏳ Placing order…" : `🎉 Place Order · ₹${checkoutServerTotal.toLocaleString("en-IN")}`}</button>
+                      <button className="howdi-primary" type="button" disabled={placingOrder} onClick={(event) => { event.preventDefault(); event.stopPropagation(); placeCheckoutOrder(); }} style={{ flex: 2, padding: "14px", borderRadius: "13px", border: 0, background: placingOrder ? "#94a3b8" : "#1f5af6", color: "#fff", fontWeight: 900, cursor: placingOrder ? "wait" : "pointer" }}>{placingOrder ? "⏳ Placing order…" : `🎉 Place Order · ₹${checkoutServerTotal.toLocaleString("en-IN")}`}</button>
                     </div>
                   </div>
                 )}
-                {checkoutMessage && <div style={{ marginTop: "14px", padding: "12px 14px", borderRadius: "12px", background: "#fff8e8", color: "#7a531d", fontWeight: 800, fontSize: "13px" }}>{checkoutMessage}</div>}
+                {checkoutMessage && <div style={{ marginTop: "14px", padding: "12px 14px", borderRadius: "12px", background: "#ecf1fb", color: "#1f5af6", fontWeight: 800, fontSize: "13px" }}>{checkoutMessage}</div>}
               </div>
 
-              <aside style={{ alignSelf: "start", border: "1px solid #dbe3dc", borderRadius: "20px", padding: "18px", background: "#fbfdfb", position: "sticky", top: "10px" }}>
+              <aside style={{ alignSelf: "start", border: "1px solid #d8dce6", borderRadius: "20px", padding: "18px", background: "#fbfbfd", position: "sticky", top: "10px" }}>
                 <h3 style={{ margin: "0 0 14px", fontSize: "20px" }}>🛒 Order summary</h3>
 
                 <div style={{
                   marginBottom: "13px",
                   padding: "13px",
                   borderRadius: "15px",
-                  background: "#fffaf0",
+                  background: "#f3f6fc",
                   border: "1px solid #eadfca",
                   color: "#684c20",
                   fontSize: "12px",
@@ -13942,7 +13943,7 @@ const removeNotification = async (notificationId) => {
                   gap: "8px",
                   marginBottom: "13px"
                 }}>
-                  <div style={{ padding: "10px", borderRadius: "12px", background: "#f1f8f3", color: "#365947", fontSize: "11px", fontWeight: 800 }}>
+                  <div style={{ padding: "10px", borderRadius: "12px", background: "#eff2fa", color: "#22304f", fontSize: "11px", fontWeight: 800 }}>
                     🔒 Privacy<br /><span style={{ fontWeight: 600, color: "#64748b" }}>Fit image stays protected</span>
                   </div>
                   <div style={{ padding: "10px", borderRadius: "12px", background: "#f8fafc", color: "#334155", fontSize: "11px", fontWeight: 800 }}>
@@ -13971,7 +13972,7 @@ const removeNotification = async (notificationId) => {
                 </div>
                 <div style={{ display: "flex", gap: "8px", marginTop: "16px" }}>
                   <input value={checkoutCoupon} onChange={(e) => setCheckoutCoupon(e.target.value)} placeholder="Coupon code" style={{ flex: 1, minWidth: 0, height: "42px", border: "1px solid #cbd5e1", borderRadius: "10px", padding: "0 11px" }} />
-                  <button type="button" disabled={checkoutQuoteBusy} onClick={applyCheckoutCoupon} style={{ height: "42px", padding: "0 12px", borderRadius: "10px", border: "1px solid #365947", background: "#fff", color: "#365947", fontWeight: 900, cursor: "pointer" }}>Apply</button>
+                  <button type="button" disabled={checkoutQuoteBusy} onClick={applyCheckoutCoupon} style={{ height: "42px", padding: "0 12px", borderRadius: "10px", border: "1px solid #274086", background: "#fff", color: "#22304f", fontWeight: 900, cursor: "pointer" }}>Apply</button>
                 </div>
                 <div style={{ marginTop: "12px", fontSize: "12px", color: "#64748b", lineHeight: 1.5 }}>🔒 Secure checkout · 🎁 Gift message available · ↩ Easy returns</div>
               </aside>
@@ -13991,13 +13992,13 @@ const removeNotification = async (notificationId) => {
             {checkoutPaymentState?.kind==="ONLINE"&&checkoutPaymentState?.confirmation_state==="AWAITING_PAYMENT"&&<div className="hv153f-payment-wait">💳 Order created securely · awaiting verified online payment before confirmation.</div>}
             {checkoutPaymentState?.kind==="COD"&&<div className="hv153f-payment-ok">📦 COD order confirmed · payment remains unpaid until collection.</div>}
             <div style={{ fontSize: "64px" }}>🎉</div>
-            <div style={{ fontSize: "12px", letterSpacing: "1.2px", fontWeight: 900, color: "#365947" }}>ORDER CONFIRMED</div>
+            <div style={{ fontSize: "12px", letterSpacing: "1.2px", fontWeight: 900, color: "#22304f" }}>ORDER CONFIRMED</div>
             <h2 style={{ margin: "8px 0", fontSize: "30px" }}>Thank you for supporting handmade. ❤️</h2>
             <p style={{ color: "#64748b", lineHeight: 1.6 }}>Your HOWDI order <strong>#{orderSuccess.order_number}</strong> has been placed. The maker's hands are now part of your story.</p>
-            <div style={{ padding: "14px", borderRadius: "15px", background: "#f1f8f3", color: "#365947", fontWeight: 900, margin: "18px 0" }}>Total paid / payable: {orderSuccess.total}</div>
+            <div style={{ padding: "14px", borderRadius: "15px", background: "#eff2fa", color: "#22304f", fontWeight: 900, margin: "18px 0" }}>Total paid / payable: {orderSuccess.total}</div>
             <div style={{ display: "flex", gap: "10px" }}>
               <button className="howdi-orders-button" type="button" onClick={() => { setOrderSuccess(null); openOrders(); }} style={{ flex: 1, padding: "13px", borderRadius: "12px", border: "1px solid #cbd5e1", background: "#fff", fontWeight: 900, cursor: "pointer" }}>View Orders</button>
-              <button className="howdi-success-button" type="button" onClick={() => { setOrderSuccess(null); navigate("shop"); }} style={{ flex: 1, padding: "13px", borderRadius: "12px", border: 0, background: "#365947", color: "#fff", fontWeight: 900, cursor: "pointer" }}>Continue Shopping</button>
+              <button className="howdi-success-button" type="button" onClick={() => { setOrderSuccess(null); navigate("shop"); }} style={{ flex: 1, padding: "13px", borderRadius: "12px", border: 0, background: "#1f5af6", color: "#fff", fontWeight: 900, cursor: "pointer" }}>Continue Shopping</button>
             </div>
           </div>
         </div>
@@ -14085,7 +14086,7 @@ const removeNotification = async (notificationId) => {
             width: "auto",
             maxWidth: "none",
             zIndex: 120,
-            background: "#f5f8f6",
+            background: "#f4f5f9",
             padding: 0,
             overflow: "hidden",
           }}
@@ -14097,7 +14098,7 @@ const removeNotification = async (notificationId) => {
               maxWidth: "none",
               height: "100%",
               margin: 0,
-              background: "#f5f8f6",
+              background: "#f4f5f9",
               borderRadius: 0,
               overflow: "hidden",
               boxShadow: "none",
@@ -14189,7 +14190,7 @@ const removeNotification = async (notificationId) => {
                   maxWidth: "none",
                   boxSizing: "border-box",
                   padding: "28px 32px 40px",
-                  background: "#f5f8f6",
+                  background: "#f4f5f9",
                   overflowY: "auto",
                   overflowX: "hidden",
                   minHeight: 0,
@@ -14199,7 +14200,7 @@ const removeNotification = async (notificationId) => {
                 <details className="howdi-account-sections" style={{background:"#fff",padding:14,borderRadius:12,marginBottom:16}}>
                   <summary style={{cursor:"pointer",fontWeight:800}}>My HOWDI — All sections</summary>
                   <nav aria-label="My HOWDI sections" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:12,marginTop:12}}>
-                    {Object.entries(howdiWorkspaceNav).map(([group, items]) => <div key={group}><strong>{howdiWorkspaceTitles[group][0]}</strong>{items.map(([tab, icon, label]) => <button key={tab} type="button" aria-current={profileTab === tab ? "page" : undefined} onClick={() => openHowdiAccount(tab)} style={{display:"block",width:"100%",textAlign:"left",marginTop:6,padding:8,border:"1px solid #dbe7df",borderRadius:8,background:profileTab === tab ? "#e4f2e9" : "#fff"}}>{icon} {label}</button>)}</div>)}
+                    {Object.entries(howdiWorkspaceNav).map(([group, items]) => <div key={group}><strong>{howdiWorkspaceTitles[group][0]}</strong>{items.map(([tab, icon, label]) => <button key={tab} type="button" aria-current={profileTab === tab ? "page" : undefined} onClick={() => openHowdiAccount(tab)} style={{display:"block",width:"100%",textAlign:"left",marginTop:6,padding:8,border:"1px solid #d8ddea",borderRadius:8,background:profileTab === tab ? "#e1e7f5" : "#fff"}}>{icon} {label}</button>)}</div>)}
                   </nav>
                 </details>
                 {walletMessage && ["overview", "wallet", "cashback"].includes(profileTab) && <p role="status">{walletMessage}</p>}
@@ -14311,7 +14312,7 @@ const removeNotification = async (notificationId) => {
                 {profileTab === "roles" && (
                   <div className="howdi-role-center">
                     <style>{`
-                      .howdi-role-center{display:flex;flex-direction:column;gap:18px}.howdi-role-hero{padding:22px;border:1px solid #dfe9e3;border-radius:20px;background:linear-gradient(135deg,#f5faf7,#fffaf0);display:flex;justify-content:space-between;gap:18px;align-items:flex-start}.howdi-role-hero small{font-size:10px;font-weight:900;letter-spacing:1.4px;color:#678173}.howdi-role-hero h3{margin:6px 0;font-size:24px;color:#183427}.howdi-role-hero p{margin:0;color:#66786f;max-width:760px}.howdi-role-hero button{border:1px solid #cddbd3;background:#fff;color:#315f49;border-radius:11px;padding:10px 13px;font-weight:900;cursor:pointer}.howdi-role-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.howdi-role-card{border:1px solid #dfe7e2;border-radius:18px;background:#fff;padding:18px;display:flex;flex-direction:column;gap:11px;min-height:205px}.howdi-role-card.active{border-color:#a9c8b6;background:#fbfefc}.howdi-role-card.pending{background:#fffaf1}.howdi-role-card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}.howdi-role-card-head h4{margin:0;font-size:18px;color:#1b3428}.howdi-role-status{border-radius:999px;padding:5px 8px;font-size:9px;font-weight:950;letter-spacing:.6px;background:#edf2ef;color:#63726a}.howdi-role-status.active{background:#e7f5eb;color:#24623e}.howdi-role-status.pending{background:#fff0ce;color:#8a5a00}.howdi-role-status.rejected{background:#fde9e7;color:#a33b31}.howdi-role-card p{margin:0;color:#6d7c74;font-size:12px;line-height:1.55}.howdi-role-card footer{margin-top:auto;display:flex;align-items:center;justify-content:space-between;gap:10px}.howdi-role-card footer small{color:#89968f}.howdi-role-card button{border:0;border-radius:11px;padding:10px 12px;background:#315f49;color:#fff;font-weight:900;cursor:pointer}.howdi-role-card button.secondary{background:#eef5f1;color:#315f49}.howdi-role-card button:disabled{opacity:.55;cursor:not-allowed}.howdi-role-note{padding:12px 14px;border-radius:12px;background:#f4f8f5;border:1px solid #dde8e1;color:#365947;font-size:12px}.howdi-role-privacy{padding:16px;border-radius:16px;background:#172c23;color:#fff}.howdi-role-privacy b{display:block;margin-bottom:5px}.howdi-role-privacy p{margin:0;color:#c9d8d0;font-size:11px;line-height:1.55}@media(max-width:760px){.howdi-role-grid{grid-template-columns:1fr}.howdi-role-hero{flex-direction:column}}
+                      .howdi-role-center{display:flex;flex-direction:column;gap:18px}.howdi-role-hero{padding:22px;border:1px solid #dce1ec;border-radius:20px;background:linear-gradient(135deg,#f4f6fb,#f3f6fc);display:flex;justify-content:space-between;gap:18px;align-items:flex-start}.howdi-role-hero small{font-size:10px;font-weight:900;letter-spacing:1.4px;color:#676f81}.howdi-role-hero h3{margin:6px 0;font-size:24px;color:#0d1a3a}.howdi-role-hero p{margin:0;color:#666b78;max-width:760px}.howdi-role-hero button{border:1px solid #c9cfdf;background:#fff;color:#22304f;border-radius:11px;padding:10px 13px;font-weight:900;cursor:pointer}.howdi-role-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.howdi-role-card{border:1px solid #dce0ea;border-radius:18px;background:#fff;padding:18px;display:flex;flex-direction:column;gap:11px;min-height:205px}.howdi-role-card.active{border-color:#a2afcf;background:#fbfefc}.howdi-role-card.pending{background:#f3f6fd}.howdi-role-card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}.howdi-role-card-head h4{margin:0;font-size:18px;color:#0d1a3a}.howdi-role-status{border-radius:999px;padding:5px 8px;font-size:9px;font-weight:950;letter-spacing:.6px;background:#ebeef4;color:#636872}.howdi-role-status.active{background:#e4eaf8;color:#22304f}.howdi-role-status.pending{background:#ecf1fb;color:#8a5a00}.howdi-role-status.rejected{background:#fde9e7;color:#a33b31}.howdi-role-card p{margin:0;color:#6d727c;font-size:12px;line-height:1.55}.howdi-role-card footer{margin-top:auto;display:flex;align-items:center;justify-content:space-between;gap:10px}.howdi-role-card footer small{color:#7d828c}.howdi-role-card button{border:0;border-radius:11px;padding:10px 12px;background:#1f5af6;color:#fff;font-weight:900;cursor:pointer}.howdi-role-card button.secondary{background:#eceff7;color:#22304f}.howdi-role-card button:disabled{opacity:.55;cursor:not-allowed}.howdi-role-note{padding:12px 14px;border-radius:12px;background:#f3f5f9;border:1px solid #dadfeb;color:#22304f;font-size:12px}.howdi-role-privacy{padding:16px;border-radius:16px;background:#1749d6;color:#fff}.howdi-role-privacy b{display:block;margin-bottom:5px}.howdi-role-privacy p{margin:0;color:#c4ccdd;font-size:11px;line-height:1.55}@media(max-width:760px){.howdi-role-grid{grid-template-columns:1fr}.howdi-role-hero{flex-direction:column}}
                     `}</style>
                     <section className="howdi-role-hero">
                       <div><small>MY HOWDI · ROLE CENTER</small><h3>One account. Multiple HOWDI capabilities.</h3><p>Activate the roles you need without creating another account. Your same login and @username stay with you across Connect, Shop, Works and Learn & Earn.</p></div>
@@ -14620,37 +14621,37 @@ const removeNotification = async (notificationId) => {
                       </div>
                     </div>
 
-                    <section style={{marginBottom:"22px",border:"1px solid #dbe7df",borderRadius:"22px",background:"#fff",overflow:"hidden"}}>
-                      <div style={{padding:"18px 20px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:"12px",flexWrap:"wrap",borderBottom:"1px solid #e6eee9"}}>
+                    <section style={{marginBottom:"22px",border:"1px solid #d8ddea",borderRadius:"22px",background:"#fff",overflow:"hidden"}}>
+                      <div style={{padding:"18px 20px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:"12px",flexWrap:"wrap",borderBottom:"1px solid #e3e7f1"}}>
                         <div>
-                          <div style={{fontSize:"10px",fontWeight:950,letterSpacing:".12em",color:"#a36a2a"}}>HOWDI SHOP</div>
-                          <h4 style={{margin:"5px 0 3px",fontSize:"20px",color:"#173c2c"}}>Shopping purchases</h4>
-                          <p style={{margin:0,color:"#718078",fontSize:"12px"}}>Product orders from HOWDI Shop are stored in PostgreSQL and shown here.</p>
+                          <div style={{fontSize:"10px",fontWeight:950,letterSpacing:".12em",color:"#1f5af6"}}>HOWDI SHOP</div>
+                          <h4 style={{margin:"5px 0 3px",fontSize:"20px",color:"#0d1a3a"}}>Shopping purchases</h4>
+                          <p style={{margin:0,color:"#717680",fontSize:"12px"}}>Product orders from HOWDI Shop are stored in PostgreSQL and shown here.</p>
                         </div>
                         <button type="button" onClick={loadCustomerOrders} disabled={ordersLoading}
-                          style={{border:"1px solid #cfe0d6",borderRadius:"11px",padding:"9px 13px",background:"#fff",color:"#285f43",fontWeight:900,cursor:"pointer"}}>
+                          style={{border:"1px solid #cbd3e4",borderRadius:"11px",padding:"9px 13px",background:"#fff",color:"#22304f",fontWeight:900,cursor:"pointer"}}>
                           {ordersLoading?"Refreshing...":"↻ Refresh Orders"}
                         </button>
                       </div>
                       <div style={{padding:"16px 18px 18px",display:"grid",gap:"10px"}}>
-                        {ordersLoading&&orders.length===0?<div style={{padding:"24px",textAlign:"center",color:"#718078"}}>Loading shopping orders…</div>:
-                        orders.length===0?<div style={{padding:"28px",textAlign:"center",border:"1px dashed #d7e1da",borderRadius:"14px",color:"#718078"}}>
-                          <div style={{fontSize:"34px"}}>📦</div><strong style={{display:"block",marginTop:"8px",color:"#24362d"}}>No shopping orders yet</strong><span style={{fontSize:"12px"}}>Your completed HOWDI Shop checkout will appear here.</span>
+                        {ordersLoading&&orders.length===0?<div style={{padding:"24px",textAlign:"center",color:"#717680"}}>Loading shopping orders…</div>:
+                        orders.length===0?<div style={{padding:"28px",textAlign:"center",border:"1px dashed #d4d9e4",borderRadius:"14px",color:"#717680"}}>
+                          <div style={{fontSize:"34px"}}>📦</div><strong style={{display:"block",marginTop:"8px",color:"#0d1a3a"}}>No shopping orders yet</strong><span style={{fontSize:"12px"}}>Your completed HOWDI Shop checkout will appear here.</span>
                         </div>:
                         orders.slice(0,10).map(order=>{
                           const status=orderStatusLabel(order.status);
                           const first=order.items?.[0];
-                          return <article key={`shop-order-${order.id}`} style={{border:"1px solid #e4ebe6",borderRadius:"15px",padding:"14px",display:"grid",gridTemplateColumns:"1fr auto",gap:"12px",background:"#fbfdfc"}}>
+                          return <article key={`shop-order-${order.id}`} style={{border:"1px solid #e0e5ef",borderRadius:"15px",padding:"14px",display:"grid",gridTemplateColumns:"1fr auto",gap:"12px",background:"#fbfbfd"}}>
                             <div>
-                              <small style={{color:"#7b8981",fontWeight:900}}>ORDER #{order.order_number||order.id}</small>
-                              <strong style={{display:"block",marginTop:"4px",fontSize:"15px",color:"#24362d"}}>{first?.product_name||order.title||"HOWDI Order"}</strong>
-                              <span style={{display:"block",marginTop:"4px",fontSize:"12px",color:"#718078"}}>{formatOrderDate(order.created_at)} · {order.item_count||order.items?.length||1} item(s)</span>
-                              {first&&<span style={{display:"block",marginTop:"5px",fontSize:"11px",color:"#52635a"}}>{first.variant_name||[first.selected_colour,first.selected_size].filter(Boolean).join(" / ")||first.sku||""}</span>}
+                              <small style={{color:"#7b7f89",fontWeight:900}}>ORDER #{order.order_number||order.id}</small>
+                              <strong style={{display:"block",marginTop:"4px",fontSize:"15px",color:"#0d1a3a"}}>{first?.product_name||order.title||"HOWDI Order"}</strong>
+                              <span style={{display:"block",marginTop:"4px",fontSize:"12px",color:"#717680"}}>{formatOrderDate(order.created_at)} · {order.item_count||order.items?.length||1} item(s)</span>
+                              {first&&<span style={{display:"block",marginTop:"5px",fontSize:"11px",color:"#535864"}}>{first.variant_name||[first.selected_colour,first.selected_size].filter(Boolean).join(" / ")||first.sku||""}</span>}
                             </div>
                             <div style={{textAlign:"right",display:"grid",alignContent:"space-between",justifyItems:"end",gap:"7px"}}>
-                              <b style={{fontSize:"16px",color:"#173f30"}}>{order.total||`₹${Number(order.grand_total||0).toLocaleString("en-IN")}`}</b>
-                              <span style={{padding:"6px 9px",borderRadius:"999px",background:status==="Delivered"?"#dcfce7":"#fef3c7",color:status==="Delivered"?"#166534":"#92400e",fontSize:"11px",fontWeight:900}}>{status}</span>
-                              <button type="button" onClick={()=>setSelectedOrder(order)} style={{border:"1px solid #d8e2db",background:"#fff",borderRadius:"9px",padding:"7px 10px",fontWeight:850,cursor:"pointer"}}>View details</button>
+                              <b style={{fontSize:"16px",color:"#0d1a3a"}}>{order.total||`₹${Number(order.grand_total||0).toLocaleString("en-IN")}`}</b>
+                              <span style={{padding:"6px 9px",borderRadius:"999px",background:status==="Delivered"?"#dcfce7":"#ecf1fb",color:status==="Delivered"?"#166534":"#1f5af6",fontSize:"11px",fontWeight:900}}>{status}</span>
+                              <button type="button" onClick={()=>setSelectedOrder(order)} style={{border:"1px solid #d5dae5",background:"#fff",borderRadius:"9px",padding:"7px 10px",fontWeight:850,cursor:"pointer"}}>View details</button>
                             </div>
                           </article>;
                         })}
@@ -14699,7 +14700,7 @@ const removeNotification = async (notificationId) => {
                                   <div style={{ color: "#64748b", fontSize: "13px" }}>{formatOrderDate(order.created_at || order.date)} · {itemCount} {itemCount === 1 ? "item" : "items"}</div>
                                 </div>
                                 <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                                  <span style={{ padding: "7px 10px", borderRadius: "999px", background: status === "Delivered" ? "#dcfce7" : status === "Cancelled" ? "#fee2e2" : "#fef3c7", color: status === "Delivered" ? "#166534" : status === "Cancelled" ? "#991b1b" : "#92400e", fontSize: "12px", fontWeight: 800 }}>{status}</span>
+                                  <span style={{ padding: "7px 10px", borderRadius: "999px", background: status === "Delivered" ? "#dcfce7" : status === "Cancelled" ? "#fee2e2" : "#ecf1fb", color: status === "Delivered" ? "#166534" : status === "Cancelled" ? "#991b1b" : "#1f5af6", fontSize: "12px", fontWeight: 800 }}>{status}</span>
                                   <strong style={{ fontSize: "18px" }}>{order.total || order.amount || "₹0"}</strong>
                                 </div>
                               </div>
@@ -14713,7 +14714,7 @@ const removeNotification = async (notificationId) => {
                                       setSelectedOrder(null);
                                       setSelectedTrackingOrder(order);
                                     }}
-                                    style={{ border: "1px solid #365947", background: "#f1f8f3", color: "#365947", borderRadius: "10px", padding: "9px 13px", fontWeight: 800, cursor: "pointer" }}
+                                    style={{ border: "1px solid #274086", background: "#eff2fa", color: "#22304f", borderRadius: "10px", padding: "9px 13px", fontWeight: 800, cursor: "pointer" }}
                                   >
                                     🚚 Track
                                   </button>
@@ -14726,9 +14727,9 @@ const removeNotification = async (notificationId) => {
                     )}
 
                     {orders.some((order) => ["cancelled", "canceled"].includes(String(order.status || "").toLowerCase())) && (
-                      <section style={{ marginTop: "24px", padding: "20px", borderRadius: "18px", border: "1px solid #eadfd5", background: "#fffaf6" }}>
+                      <section style={{ marginTop: "24px", padding: "20px", borderRadius: "18px", border: "1px solid #eadfd5", background: "#f8f9fd" }}>
                         <div>
-                          <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.08em", color: "#9a5b1f" }}>ORDER TRANSPARENCY</div>
+                          <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.08em", color: "#1f5af6" }}>ORDER TRANSPARENCY</div>
                           <h3 style={{ margin: "5px 0 0", fontSize: 22, color: "#172033" }}>Cancellation history</h3>
                           <p style={{ margin: "6px 0 0", color: "#64748b", fontSize: 13 }}>See who cancelled the order, why it happened, when it happened and what happens to your refund.</p>
                         </div>
@@ -14780,7 +14781,7 @@ const removeNotification = async (notificationId) => {
                               <h3 style={{ margin: "6px 0", fontSize: "24px" }}>#{selectedOrder.order_number || selectedOrder.id || "—"}</h3>
                               <div style={{ color: "#64748b", fontSize: "13px" }}>{formatOrderDate(selectedOrder.created_at || selectedOrder.date)} · {orderStatusLabel(selectedOrder.status)}</div>
                             </div>
-                            <button type="button" aria-label="Close order details" onClick={() => setSelectedOrder(null)} style={{ color: "#244d39", width: "40px", height: "40px", borderRadius: "50%", border: "1px solid #e2e8f0", background: "#f8fafc", cursor: "pointer", fontSize: "18px" }}>×</button>
+                            <button type="button" aria-label="Close order details" onClick={() => setSelectedOrder(null)} style={{ color: "#22304f", width: "40px", height: "40px", borderRadius: "50%", border: "1px solid #e2e8f0", background: "#f8fafc", cursor: "pointer", fontSize: "18px" }}>×</button>
                           </div>
 
                           <div style={{ marginTop: "18px", padding: "16px", borderRadius: "16px", background: "#f8fafc" }}>
@@ -14856,10 +14857,10 @@ const removeNotification = async (notificationId) => {
                           </div>
 
                           {selectedOrder.status !== "cancelled" && selectedOrder.status !== "canceled" && (
-                            <div style={{ marginTop: "18px", padding: "14px 16px", borderRadius: "15px", background: "#f1f8f3", border: "1px solid #d7e7dc" }}>
+                            <div style={{ marginTop: "18px", padding: "14px 16px", borderRadius: "15px", background: "#eff2fa", border: "1px solid #d4dbea" }}>
                               <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>
                                 <div>
-                                  <strong style={{ color: "#315f49" }}>🚚 Delivery status</strong>
+                                  <strong style={{ color: "#22304f" }}>🚚 Delivery status</strong>
                                   <div style={{ marginTop: "4px", color: "#64748b", fontSize: "12px" }}>
                                     {orderStatusLabel(selectedOrder.status)} · ETA {selectedOrder.estimated_delivery || "3–6 days"}
                                   </div>
@@ -14870,7 +14871,7 @@ const removeNotification = async (notificationId) => {
                                     setSelectedTrackingOrder(selectedOrder);
                                     setSelectedOrder(null);
                                   }}
-                                  style={{ border: 0, borderRadius: "10px", padding: "9px 12px", background: "#315f49", color: "#fff", fontWeight: 900, cursor: "pointer" }}
+                                  style={{ border: 0, borderRadius: "10px", padding: "9px 12px", background: "#1f5af6", color: "#fff", fontWeight: 900, cursor: "pointer" }}
                                 >
                                   Open tracking →
                                 </button>
@@ -14907,9 +14908,9 @@ const removeNotification = async (notificationId) => {
                           )}
 
                           <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", marginTop: "18px" }}>
-                            <button type="button" onClick={() => reorderOrder(selectedOrder)} style={{ flex: 1, minWidth: "145px", border: 0, borderRadius: "11px", padding: "12px", background: "#365947", color: "#fff", fontWeight: 900, cursor: "pointer" }}>🔁 Reorder</button>
+                            <button type="button" onClick={() => reorderOrder(selectedOrder)} style={{ flex: 1, minWidth: "145px", border: 0, borderRadius: "11px", padding: "12px", background: "#1f5af6", color: "#fff", fontWeight: 900, cursor: "pointer" }}>🔁 Reorder</button>
                             {String(selectedOrder.status || "").toLowerCase() === "delivered" && (
-                              <button type="button" onClick={() => { setReviewOrder(selectedOrder); setSelectedOrder(null); setReviewRating(selectedOrder.review?.rating || 5); setReviewText(selectedOrder.review?.text || ""); }} style={{ flex: 1, minWidth: "145px", border: "1px solid #d9c28c", borderRadius: "11px", padding: "12px", background: "#fffaf0", color: "#8a5a10", fontWeight: 900, cursor: "pointer" }}>⭐ {selectedOrder.review ? "Edit review" : "Review product"}</button>
+                              <button type="button" onClick={() => { setReviewOrder(selectedOrder); setSelectedOrder(null); setReviewRating(selectedOrder.review?.rating || 5); setReviewText(selectedOrder.review?.text || ""); }} style={{ flex: 1, minWidth: "145px", border: "1px solid #d9c28c", borderRadius: "11px", padding: "12px", background: "#f3f6fc", color: "#1f5af6", fontWeight: 900, cursor: "pointer" }}>⭐ {selectedOrder.review ? "Edit review" : "Review product"}</button>
                             )}
                             {!["delivered", "cancelled", "canceled", "shipped", "out_for_delivery"].includes(String(selectedOrder.status || "").toLowerCase()) && (
                               <button type="button" onClick={() => cancelOrder(selectedOrder.id || selectedOrder.order_id)} style={{ border: "1px solid #fecaca", borderRadius: "11px", padding: "12px", background: "#fff", color: "#b91c1c", fontWeight: 900, cursor: "pointer" }}>Cancel order</button>
@@ -14965,7 +14966,7 @@ const removeNotification = async (notificationId) => {
                           </div>
 
                           {selectedOrder.maker_note && (
-                            <div style={{ marginTop: "16px", padding: "13px 15px", borderRadius: "14px", background: "#fffaf0", color: "#7c5a20", fontSize: "13px", lineHeight: 1.5 }}>
+                            <div style={{ marginTop: "16px", padding: "13px 15px", borderRadius: "14px", background: "#f3f6fc", color: "#1f5af6", fontSize: "13px", lineHeight: 1.5 }}>
                               👵 <strong>From the maker:</strong> {selectedOrder.maker_note}
                             </div>
                           )}
@@ -15016,8 +15017,8 @@ const removeNotification = async (notificationId) => {
                             ))}
                           </div>
                           <textarea value={reviewText} onChange={(e) => setReviewText(e.target.value)} placeholder="Tell other HOWDI customers what you loved..." rows={5} style={{ width: "100%", boxSizing: "border-box", marginTop: "14px", border: "1px solid #cbd5e1", borderRadius: "13px", padding: "12px", resize: "vertical", fontFamily: "inherit" }} />
-                          {reviewMessage && <div style={{ marginTop: "10px", color: "#365947", fontWeight: 800 }}>{reviewMessage}</div>}
-                          <button type="button" onClick={submitOrderReview} style={{ width: "100%", marginTop: "14px", border: 0, borderRadius: "12px", padding: "13px", background: "#365947", color: "#fff", fontWeight: 900, cursor: "pointer" }}>Submit review →</button>
+                          {reviewMessage && <div style={{ marginTop: "10px", color: "#22304f", fontWeight: 800 }}>{reviewMessage}</div>}
+                          <button type="button" onClick={submitOrderReview} style={{ width: "100%", marginTop: "14px", border: 0, borderRadius: "12px", padding: "13px", background: "#1f5af6", color: "#fff", fontWeight: 900, cursor: "pointer" }}>Submit review →</button>
                         </div>
                       </div>
                     )}
@@ -15032,7 +15033,7 @@ const removeNotification = async (notificationId) => {
                     <div style={{ maxWidth: "680px", margin: "35px auto", background: "#fff", borderRadius: "24px", padding: "26px", boxShadow: "0 30px 80px rgba(15,23,42,.28)" }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "16px" }}>
                         <div>
-                          <div style={{ fontSize: "12px", fontWeight: 900, letterSpacing: "1px", color: "#315f49" }}>HOWDI ORDER TRACKING</div>
+                          <div style={{ fontSize: "12px", fontWeight: 900, letterSpacing: "1px", color: "#22304f" }}>HOWDI ORDER TRACKING</div>
                           <h3 style={{ margin: "6px 0", fontSize: "25px", color: "#172033" }}>🚚 Track #{selectedTrackingOrder.order_number || selectedTrackingOrder.id || "—"}</h3>
                           <div style={{ color: "#64748b", fontSize: "13px" }}>
                             {selectedTrackingOrder.title || selectedTrackingOrder.shop || "HOWDI Order"} · ETA {selectedTrackingOrder.estimated_delivery || "3–6 days"}
@@ -15041,11 +15042,11 @@ const removeNotification = async (notificationId) => {
                         <button type="button" onClick={() => setSelectedTrackingOrder(null)} style={{ width: "40px", height: "40px", borderRadius: "50%", border: "1px solid #e2e8f0", background: "#f8fafc", cursor: "pointer", fontSize: "18px" }}>×</button>
                       </div>
 
-                      <div style={{ marginTop: "18px", padding: "15px", borderRadius: "16px", background: "#f1f8f3", border: "1px solid #d7e7dc" }}>
+                      <div style={{ marginTop: "18px", padding: "15px", borderRadius: "16px", background: "#eff2fa", border: "1px solid #d4dbea" }}>
                         <div style={{ display: "flex", justifyContent: "space-between", gap: "10px", flexWrap: "wrap" }}>
                           <div>
                             <div style={{ fontSize: "11px", color: "#64748b", fontWeight: 800 }}>CURRENT STATUS</div>
-                            <strong style={{ display: "block", marginTop: "3px", color: "#315f49", fontSize: "17px" }}>{orderStatusLabel(selectedTrackingOrder.status)}</strong>
+                            <strong style={{ display: "block", marginTop: "3px", color: "#22304f", fontSize: "17px" }}>{orderStatusLabel(selectedTrackingOrder.status)}</strong>
                           </div>
                           <div style={{ textAlign: "right" }}>
                             <div style={{ fontSize: "11px", color: "#64748b", fontWeight: 800 }}>TRACKING REFERENCE</div>
@@ -15086,8 +15087,8 @@ const removeNotification = async (notificationId) => {
                         {getOrderTimeline(selectedTrackingOrder).map((step, index) => (
                           <div key={step.key} style={{ display: "grid", gridTemplateColumns: "34px 1fr", gap: "10px", minHeight: index === 4 ? "42px" : "62px" }}>
                             <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
-                              <div style={{ width: "28px", height: "28px", borderRadius: "50%", display: "grid", placeItems: "center", background: step.active ? "#365947" : "#e2e8f0", color: step.active ? "#fff" : "#94a3b8", fontSize: "13px", fontWeight: 900 }}>{step.icon}</div>
-                              {index < 4 && <div style={{ width: "2px", flex: 1, background: step.active ? "#cfe2d5" : "#e2e8f0", margin: "4px 0" }} />}
+                              <div style={{ width: "28px", height: "28px", borderRadius: "50%", display: "grid", placeItems: "center", background: step.active ? "#1f5af6" : "#e2e8f0", color: step.active ? "#fff" : "#94a3b8", fontSize: "13px", fontWeight: 900 }}>{step.icon}</div>
+                              {index < 4 && <div style={{ width: "2px", flex: 1, background: step.active ? "#cbd3e6" : "#e2e8f0", margin: "4px 0" }} />}
                             </div>
                             <div style={{ paddingBottom: "10px" }}>
                               <div style={{ fontWeight: step.current ? 900 : 800, color: step.active ? "#1f2937" : "#94a3b8" }}>{step.title}{step.current ? " · Current" : ""}</div>
@@ -15109,7 +15110,7 @@ const removeNotification = async (notificationId) => {
                         >
                           View order details
                         </button>
-                        <button type="button" onClick={() => setSelectedTrackingOrder(null)} style={{ border: 0, background: "#365947", color: "#fff", borderRadius: "11px", padding: "11px 15px", fontWeight: 900, cursor: "pointer" }}>
+                        <button type="button" onClick={() => setSelectedTrackingOrder(null)} style={{ border: 0, background: "#1f5af6", color: "#fff", borderRadius: "11px", padding: "11px 15px", fontWeight: 900, cursor: "pointer" }}>
                           Done
                         </button>
                       </div>
@@ -15134,9 +15135,9 @@ const removeNotification = async (notificationId) => {
                           <div style={{
                             padding: "10px 13px",
                             borderRadius: "13px",
-                            background: "#fffaf0",
+                            background: "#f3f6fc",
                             border: "1px solid #eadfca",
-                            color: "#7c5a20",
+                            color: "#1f5af6",
                             fontSize: "11.5px",
                             lineHeight: 1.45
                           }}>
@@ -15191,7 +15192,7 @@ const removeNotification = async (notificationId) => {
                               onClick={() => openProductDetails(product)}
                               style={{
                                 height: "160px",
-                                background: "linear-gradient(135deg,#f5f1e8,#edf5ef)",
+                                background: "linear-gradient(135deg,#ecf1fb,#ebeff7)",
                                 display: "flex",
                                 alignItems: "center",
                                 justifyContent: "center",
@@ -15208,7 +15209,7 @@ const removeNotification = async (notificationId) => {
                                 top: "11px",
                                 padding: "6px 9px",
                                 borderRadius: "999px",
-                                background: "#365947",
+                                background: "#1f5af6",
                                 color: "#fff",
                                 fontSize: "10px",
                                 fontWeight: 900
@@ -15245,7 +15246,7 @@ const removeNotification = async (notificationId) => {
                             </div>
 
                             <div style={{ padding: "16px" }}>
-                              <div style={{ fontSize: "11px", textTransform: "uppercase", letterSpacing: "1px", color: "#9a6b25", fontWeight: 800 }}>
+                              <div style={{ fontSize: "11px", textTransform: "uppercase", letterSpacing: "1px", color: "#1f5af6", fontWeight: 800 }}>
                                 {product.shop}
                               </div>
 
@@ -15277,7 +15278,7 @@ const removeNotification = async (notificationId) => {
                                     border: 0,
                                     borderRadius: "10px",
                                     padding: "10px 8px",
-                                    background: "#365947",
+                                    background: "#1f5af6",
                                     color: "#fff",
                                     fontWeight: 900,
                                     cursor: "pointer"
@@ -15325,14 +15326,14 @@ const removeNotification = async (notificationId) => {
                           setPaymentMessage("");
                           setPaymentFormOpen((open) => !open);
                         }}
-                        style={{ border: 0, borderRadius: "12px", padding: "12px 18px", background: "#365947", color: "#fff", fontWeight: 800, cursor: "pointer", whiteSpace: "nowrap" }}
+                        style={{ border: 0, borderRadius: "12px", padding: "12px 18px", background: "#1f5af6", color: "#fff", fontWeight: 800, cursor: "pointer", whiteSpace: "nowrap" }}
                       >
                         {paymentFormOpen ? "✕ Close" : "+ Add payment"}
                       </button>
                     </div>
 
                     {paymentFormOpen && (
-                      <div style={{ padding: "20px", border: "1px solid #dbe3dc", borderRadius: "18px", background: "#f8faf8", marginBottom: "18px" }}>
+                      <div style={{ padding: "20px", border: "1px solid #d8dce6", borderRadius: "18px", background: "#f7f8fb", marginBottom: "18px" }}>
                         <div style={{ display: "grid", gap: "16px" }}>
                           <div style={{ display: "grid", gridTemplateColumns: "180px 1fr", gap: "14px" }}>
                             <label style={{ fontSize: "12px", fontWeight: 800, color: "#475569" }}>
@@ -15459,13 +15460,13 @@ const removeNotification = async (notificationId) => {
 
                   return (
                     <div style={{ minHeight: "500px" }}>
-                      <div style={{ padding: "25px", borderRadius: "22px", background: "linear-gradient(135deg,#7c2d12,#ea580c 52%,#f59e0b)", color: "#fff", boxShadow: "0 20px 45px rgba(234,88,12,.18)" }}>
+                      <div style={{ padding: "25px", borderRadius: "22px", background: "linear-gradient(135deg,#7c2d12,#ea580c 52%,#144eec)", color: "#fff", boxShadow: "0 20px 45px rgba(234,88,12,.18)" }}>
                         <div style={{ fontSize: "12px", fontWeight: 900, letterSpacing: "1.4px", opacity: .88 }}>HOWDI NOTIFICATION CENTER</div>
                         <h3 style={{ margin: "8px 0 7px", fontSize: "30px" }}>Notifications 🔔📬</h3>
                         <p style={{ margin: 0, maxWidth: "760px", lineHeight: 1.65, opacity: .95 }}>Stay updated with order, wallet, support and important HOWDI system notifications.</p>
                       </div>
 
-                      {notificationsNotice && <div style={{ marginTop: "14px", padding: "11px 13px", borderRadius: "11px", background: "#fff7ed", color: "#c2410c", fontSize: "13px", fontWeight: 800 }}>{notificationsNotice}</div>}
+                      {notificationsNotice && <div style={{ marginTop: "14px", padding: "11px 13px", borderRadius: "11px", background: "#f0f4fc", color: "#c2410c", fontSize: "13px", fontWeight: 800 }}>{notificationsNotice}</div>}
 
                       <div style={{ marginTop: "16px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
                         <div style={{ color: "#475569", fontSize: "13px", fontWeight: 900 }}>
@@ -15480,7 +15481,7 @@ const removeNotification = async (notificationId) => {
                       <div style={{ marginTop: "14px", display: "flex", gap: "8px", flexWrap: "wrap" }}>
                         {["ALL", "UNREAD", "ORDER", "WALLET", "SYSTEM", "SUPPORT"].map((filter) => (
                           <button key={filter} type="button" onClick={() => setNotificationFilter(filter)}
-                            style={{ border: notificationFilter === filter ? "1px solid #ea580c" : "1px solid #e2e8f0", borderRadius: "999px", padding: "7px 11px", background: notificationFilter === filter ? "#fff7ed" : "#fff", color: notificationFilter === filter ? "#c2410c" : "#64748b", fontWeight: 900, fontSize: "11px", cursor: "pointer" }}>
+                            style={{ border: notificationFilter === filter ? "1px solid #ea580c" : "1px solid #e2e8f0", borderRadius: "999px", padding: "7px 11px", background: notificationFilter === filter ? "#f0f4fc" : "#fff", color: notificationFilter === filter ? "#c2410c" : "#64748b", fontWeight: 900, fontSize: "11px", cursor: "pointer" }}>
                             {filter === "ALL" ? "All" : filter === "UNREAD" ? "Unread" : filter.charAt(0) + filter.slice(1).toLowerCase()}
                           </button>
                         ))}
@@ -15491,12 +15492,12 @@ const removeNotification = async (notificationId) => {
 
                       <div style={{ display: "grid", gap: "10px", marginTop: "16px" }}>
                         {visibleNotifications.map((notification) => (
-                          <div key={notification.id} style={{ padding: "16px", border: notification.is_read ? "1px solid #e2e8f0" : "1px solid #fdba74", borderRadius: "14px", background: notification.is_read ? "#fff" : "#fffaf5" }}>
+                          <div key={notification.id} style={{ padding: "16px", border: notification.is_read ? "1px solid #e2e8f0" : "1px solid #fdba74", borderRadius: "14px", background: notification.is_read ? "#fff" : "#f7f9fd" }}>
                             <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", flexWrap: "wrap" }}>
                               <div style={{ flex: 1, minWidth: "220px" }}>
                                 <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
                                   <strong style={{ color: "#334155" }}>{notification.title}</strong>
-                                  {!notification.is_read && <span style={{ padding: "3px 7px", borderRadius: "999px", background: "#ffedd5", color: "#c2410c", fontSize: "9px", fontWeight: 950 }}>NEW</span>}
+                                  {!notification.is_read && <span style={{ padding: "3px 7px", borderRadius: "999px", background: "#ecf1fb", color: "#c2410c", fontSize: "9px", fontWeight: 950 }}>NEW</span>}
                                   <span style={{ padding: "3px 7px", borderRadius: "999px", background: "#f1f5f9", color: "#64748b", fontSize: "9px", fontWeight: 900 }}>{notification.notification_type}</span>
                                 </div>
                                 <div style={{ color: "#64748b", fontSize: "12px", lineHeight: 1.55, marginTop: "7px" }}>{notification.message}</div>
@@ -15832,7 +15833,7 @@ const removeNotification = async (notificationId) => {
                         <div style={{ color: "#475569", fontSize: "12px", fontWeight: 800, marginBottom: "7px" }}>Your rating</div>
                         <div style={{ display: "flex", gap: "7px", flexWrap: "wrap" }}>
                           {[1,2,3,4,5].map((star) => (
-                            <button key={star} type="button" onClick={() => setFeedbackRating(star)} style={{ border: feedbackRating >= star ? "1px solid #facc15" : "1px solid #e2e8f0", borderRadius: "9px", padding: "8px 11px", background: feedbackRating >= star ? "#fef9c3" : "#fff", color: "#ca8a04", cursor: "pointer", fontSize: "17px" }}>★</button>
+                            <button key={star} type="button" onClick={() => setFeedbackRating(star)} style={{ border: feedbackRating >= star ? "1px solid #2258ed" : "1px solid #e2e8f0", borderRadius: "9px", padding: "8px 11px", background: feedbackRating >= star ? "#ecf1fb" : "#fff", color: "#1f5af6", cursor: "pointer", fontSize: "17px" }}>★</button>
                           ))}
                         </div>
                       </div>
@@ -15858,7 +15859,7 @@ const removeNotification = async (notificationId) => {
                               <div>
                                 <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
                                   <strong style={{ color: "#334155" }}>{item.subject}</strong>
-                                  <span style={{ color: "#ca8a04", letterSpacing: "1px", fontSize: "13px" }}>{"★".repeat(Number(item.rating || 0))}{"☆".repeat(Math.max(0,5-Number(item.rating || 0)))}</span>
+                                  <span style={{ color: "#1f5af6", letterSpacing: "1px", fontSize: "13px" }}>{"★".repeat(Number(item.rating || 0))}{"☆".repeat(Math.max(0,5-Number(item.rating || 0)))}</span>
                                 </div>
                                 <div style={{ color: "#7c3aed", fontSize: "10px", fontWeight: 900, marginTop: "5px" }}>{item.feedback_type}</div>
                                 {item.message && <div style={{ color: "#64748b", fontSize: "12px", lineHeight: 1.55, marginTop: "6px" }}>{item.message}</div>}
@@ -15875,13 +15876,13 @@ const removeNotification = async (notificationId) => {
 
                 {false && profileTab === "referrals" && (
                   <div style={{ minHeight: "500px" }}>
-                    <div style={{ padding: "25px", borderRadius: "22px", background: "linear-gradient(135deg,#7c2d12,#ea580c 52%,#f59e0b)", color: "#fff", boxShadow: "0 20px 45px rgba(234,88,12,.18)" }}>
+                    <div style={{ padding: "25px", borderRadius: "22px", background: "linear-gradient(135deg,#7c2d12,#ea580c 52%,#144eec)", color: "#fff", boxShadow: "0 20px 45px rgba(234,88,12,.18)" }}>
                       <div style={{ fontSize: "12px", fontWeight: 900, letterSpacing: "1.4px", opacity: .88 }}>HOWDI REFERRALS</div>
                       <h3 style={{ margin: "8px 0 7px", fontSize: "30px" }}>Invite Friends & Earn 🎁👥</h3>
                       <p style={{ margin: 0, maxWidth: "760px", lineHeight: 1.65, opacity: .95 }}>Share HOWDI with friends and keep a live history of your invitations, successful referrals and future rewards.</p>
                     </div>
 
-                    {referralNotice && <div style={{ marginTop: "14px", padding: "11px 13px", borderRadius: "11px", background: "#fff7ed", color: "#c2410c", fontSize: "13px", fontWeight: 800 }}>{referralNotice}</div>}
+                    {referralNotice && <div style={{ marginTop: "14px", padding: "11px 13px", borderRadius: "11px", background: "#f0f4fc", color: "#c2410c", fontSize: "13px", fontWeight: 800 }}>{referralNotice}</div>}
 
                     <div style={{ marginTop: "16px", display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: "11px" }}>
                       {[
@@ -15898,10 +15899,10 @@ const removeNotification = async (notificationId) => {
                       ))}
                     </div>
 
-                    <div style={{ marginTop: "16px", padding: "20px", border: "1px solid #fed7aa", borderRadius: "18px", background: "#fff7ed" }}>
+                    <div style={{ marginTop: "16px", padding: "20px", border: "1px solid #fed7aa", borderRadius: "18px", background: "#f0f4fc" }}>
                       <div style={{ color: "#9a3412", fontSize: "12px", fontWeight: 900 }}>YOUR HOWDI REFERRAL CODE</div>
                       <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center", marginTop: "9px" }}>
-                        <div style={{ padding: "12px 15px", borderRadius: "10px", background: "#fff", border: "1px dashed #fb923c", color: "#c2410c", fontWeight: 950, letterSpacing: "1.4px", fontSize: "18px" }}>{referralProfile?.referral_code || "Loading..."}</div>
+                        <div style={{ padding: "12px 15px", borderRadius: "10px", background: "#fff", border: "1px dashed #4774f0", color: "#c2410c", fontWeight: 950, letterSpacing: "1.4px", fontSize: "18px" }}>{referralProfile?.referral_code || "Loading..."}</div>
                         <button type="button" onClick={copyReferralCode} style={{ border: 0, borderRadius: "9px", padding: "11px 14px", background: "#ea580c", color: "#fff", fontWeight: 900, cursor: "pointer" }}>📋 Copy code</button>
                       </div>
                     </div>
@@ -15935,7 +15936,7 @@ const removeNotification = async (notificationId) => {
                                 <div style={{ color: "#cbd5e1", fontSize: "10px", marginTop: "6px" }}>{referral.created_at ? new Date(referral.created_at).toLocaleString() : ""}</div>
                               </div>
                               <div style={{ textAlign: "right" }}>
-                                <span style={{ padding: "5px 9px", borderRadius: "999px", background: referral.referral_status === "COMPLETED" ? "#dcfce7" : "#fef3c7", color: referral.referral_status === "COMPLETED" ? "#166534" : "#92400e", fontSize: "10px", fontWeight: 900 }}>{referral.referral_status}</span>
+                                <span style={{ padding: "5px 9px", borderRadius: "999px", background: referral.referral_status === "COMPLETED" ? "#dcfce7" : "#ecf1fb", color: referral.referral_status === "COMPLETED" ? "#166534" : "#1f5af6", fontSize: "10px", fontWeight: 900 }}>{referral.referral_status}</span>
                                 <div style={{ color: "#94a3b8", fontSize: "10px", marginTop: "8px" }}>Reward: {referral.reward_amount || 0}</div>
                               </div>
                             </div>
@@ -16165,7 +16166,7 @@ const removeNotification = async (notificationId) => {
                       <p style={{ margin: 0, maxWidth: "760px", lineHeight: 1.65, opacity: .94 }}>Control how HOWDI communicates with you, personalize your shopping experience and manage privacy preferences.</p>
                     </div>
 
-                    {preferencesNotice && <div style={{ marginTop: "14px", padding: "11px 13px", borderRadius: "11px", background: "#f0fdfa", color: "#0f766e", fontSize: "13px", fontWeight: 800 }}>{preferencesNotice}</div>}
+                    {preferencesNotice && <div style={{ marginTop: "14px", padding: "11px 13px", borderRadius: "11px", background: "#f1f4fc", color: "#0f766e", fontSize: "13px", fontWeight: 800 }}>{preferencesNotice}</div>}
 
                     {preferencesLoading || !accountPreferences ? (
                       <div style={{ padding: "35px", textAlign: "center", color: "#64748b" }}>Loading your preferences...</div>
@@ -16276,7 +16277,7 @@ const removeNotification = async (notificationId) => {
                           <div key={guide.id} style={{ padding: "19px", border: "1px solid #e2e8f0", borderRadius: "18px", background: "#fff", display: "flex", flexDirection: "column" }}>
                             <div style={{ display: "flex", justifyContent: "space-between", gap: "10px" }}>
                               <span style={{ padding: "5px 8px", borderRadius: "999px", background: "#eff6ff", color: "#1d4ed8", fontSize: "10px", fontWeight: 900 }}>{guide.cover_label || guide.guide_type}</span>
-                              <button type="button" onClick={() => toggleSavedGuide(guide)} disabled={learningActionLoading === `save-${guide.id}`} style={{ border: 0, background: "transparent", color: guide.is_saved ? "#d97706" : "#94a3b8", fontSize: "18px", cursor: "pointer" }}>{guide.is_saved ? "★" : "☆"}</button>
+                              <button type="button" onClick={() => toggleSavedGuide(guide)} disabled={learningActionLoading === `save-${guide.id}`} style={{ border: 0, background: "transparent", color: guide.is_saved ? "#1f5af6" : "#94a3b8", fontSize: "18px", cursor: "pointer" }}>{guide.is_saved ? "★" : "☆"}</button>
                             </div>
                             <div style={{ color: "#64748b", fontSize: "10px", fontWeight: 800, marginTop: "13px" }}>{guide.category_name} · {guide.difficulty} · {guide.estimated_minutes} min</div>
                             <h3 style={{ margin: "7px 0", color: "#0f172a", fontSize: "20px" }}>{guide.title}</h3>
@@ -16403,7 +16404,7 @@ const removeNotification = async (notificationId) => {
 
                     <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", marginBottom: "18px" }}>
                       {[['overview','💰','Wallet'],['cashback','💸','Cashback'],['rewards','🎁','Rewards'],['earnings','📈','Earnings'],['withdrawals','🏦','Withdrawals']].map(([section, icon, label]) => (
-                        <button key={section} type="button" onClick={() => openWalletSection(section)} style={{ border: walletSection === section ? 0 : "1px solid #dbe3dc", borderRadius: "999px", padding: "10px 16px", background: walletSection === section ? "#365947" : "#fff", color: walletSection === section ? "#fff" : "#334155", fontWeight: 800, cursor: "pointer" }}>
+                        <button key={section} type="button" onClick={() => openWalletSection(section)} style={{ border: walletSection === section ? 0 : "1px solid #d8dce6", borderRadius: "999px", padding: "10px 16px", background: walletSection === section ? "#1f5af6" : "#fff", color: walletSection === section ? "#fff" : "#334155", fontWeight: 800, cursor: "pointer" }}>
                           {icon} {label}
                         </button>
                       ))}
@@ -16412,12 +16413,12 @@ const removeNotification = async (notificationId) => {
                     {walletSection === "overview" && (
                       <>
                         <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.5fr) minmax(260px, .8fr)", gap: "16px", marginBottom: "16px" }}>
-                          <div style={{ borderRadius: "22px", padding: "26px", background: "#244d3b", color: "#fff", minHeight: "130px" }}>
+                          <div style={{ borderRadius: "22px", padding: "26px", background: "#1f5af6", color: "#fff", minHeight: "130px" }}>
                             <div style={{ fontSize: "12px", fontWeight: 800, opacity: .82, letterSpacing: "1px" }}>AVAILABLE BALANCE</div>
                             <div style={{ fontSize: "38px", fontWeight: 900, marginTop: "8px" }}>₹{walletBalance.toLocaleString("en-IN")}</div>
                             <div style={{ opacity: .78, marginTop: "6px" }}>HOWDI Wallet • Ready to use</div>
                           </div>
-                          <div style={{ border: "1px solid #dbe3dc", borderRadius: "22px", padding: "22px", background: "#f8faf8" }}>
+                          <div style={{ border: "1px solid #d8dce6", borderRadius: "22px", padding: "22px", background: "#f7f8fb" }}>
                             <div style={{ fontWeight: 800, marginBottom: "10px" }}>Add money</div>
                             <div style={{ display: "flex", gap: "8px" }}>
                               <input value={walletAmount} onChange={(e) => { setWalletMessage(""); setWalletAmount(e.target.value.replace(/[^0-9.]/g, "")); }} inputMode="decimal" placeholder="₹ Amount" style={{ minWidth: 0, flex: 1, height: "44px", boxSizing: "border-box", border: "1px solid #cbd5e1", borderRadius: "10px", padding: "0 12px", background: "#fff" }} />
@@ -16431,7 +16432,7 @@ const removeNotification = async (notificationId) => {
                           <div style={{ border: "1px solid #e2e8f0", borderRadius: "18px", padding: "20px", background: "#fff" }}>
                             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
                               <strong style={{ fontSize: "18px" }}>💸 Cashback Overview</strong>
-                              <button type="button" onClick={() => openWalletSection("cashback")} style={{ border: "1px solid #b7cdbf", background: "#fff", color: "#365947", borderRadius: "999px", padding: "8px 12px", fontWeight: 800, cursor: "pointer" }}>View cashback →</button>
+                              <button type="button" onClick={() => openWalletSection("cashback")} style={{ border: "1px solid #b1bbd3", background: "#fff", color: "#22304f", borderRadius: "999px", padding: "8px 12px", fontWeight: 800, cursor: "pointer" }}>View cashback →</button>
                             </div>
                             <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", marginTop: "18px" }}>
                               {[[`₹${cashbackStats.total}`,"Total earned"],[`₹${cashbackStats.available}`,"Available"],[`₹${cashbackStats.pending}`,"Pending"]].map(([value,label],i)=><div key={label} style={{ padding: "4px 14px", borderLeft: i ? "1px solid #e2e8f0" : 0 }}><div style={{ fontSize: "24px", fontWeight: 900 }}>{value}</div><div style={{ color: "#64748b", fontSize: "12px", marginTop: "4px" }}>{label}</div></div>)}
@@ -16441,7 +16442,7 @@ const removeNotification = async (notificationId) => {
                             <div style={{ fontWeight: 800, fontSize: "18px" }}>🎁 Reward Points</div>
                             <div style={{ fontSize: "28px", fontWeight: 900, marginTop: "12px" }}>{rewardPoints.toLocaleString("en-IN")} pts</div>
                             <div style={{ color: "#64748b", fontSize: "12px", margin: "4px 0 14px" }}>Redeem 500 pts = ₹50</div>
-                            <button type="button" onClick={redeemRewards} disabled={rewardPoints < 500} style={{ border: 0, borderRadius: "10px", padding: "10px 14px", background: rewardPoints >= 500 ? "#365947" : "#cbd5e1", color: "#fff", fontWeight: 900, cursor: rewardPoints >= 500 ? "pointer" : "not-allowed" }}>🎁 Redeem now</button>
+                            <button type="button" onClick={redeemRewards} disabled={rewardPoints < 500} style={{ border: 0, borderRadius: "10px", padding: "10px 14px", background: rewardPoints >= 500 ? "#1f5af6" : "#cbd5e1", color: "#fff", fontWeight: 900, cursor: rewardPoints >= 500 ? "pointer" : "not-allowed" }}>🎁 Redeem now</button>
                           </div>
                         </div>
 
@@ -16460,8 +16461,8 @@ const removeNotification = async (notificationId) => {
                     {walletSection === "cashback" && (
                       <div style={{ display: "grid", gap: "14px" }}>
                         <div style={{ border: "1px solid #e2e8f0", borderRadius: "18px", padding: "20px", background: "#fff" }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap" }}><div><div style={{ fontSize: "12px", fontWeight: 800, color: "#64748b", letterSpacing: "1px" }}>CASHBACK</div><h4 style={{ fontSize: "22px", margin: "6px 0" }}>Earn more on every purchase</h4><p style={{ color: "#64748b", margin: 0 }}>Available cashback can be moved into your HOWDI Wallet.</p></div><button type="button" onClick={moveCashbackToWallet} disabled={!cashbackStats.available} style={{ border: 0, borderRadius: "10px", padding: "11px 15px", background: cashbackStats.available ? "#365947" : "#cbd5e1", color: "#fff", fontWeight: 900, cursor: cashbackStats.available ? "pointer" : "not-allowed" }}>Transfer ₹{cashbackStats.available} to wallet →</button></div>
-                          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: "10px", marginTop: "20px" }}>{[[cashbackStats.total,"Total earned"],[cashbackStats.available,"Available"],[cashbackStats.pending,"Pending"]].map(([value,label])=><div key={label} style={{ padding: "16px", borderRadius: "14px", background: "#f8faf8" }}><div style={{ fontSize: "24px", fontWeight: 900 }}>₹{value}</div><div style={{ color: "#64748b", fontSize: "12px" }}>{label}</div></div>)}</div>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap" }}><div><div style={{ fontSize: "12px", fontWeight: 800, color: "#64748b", letterSpacing: "1px" }}>CASHBACK</div><h4 style={{ fontSize: "22px", margin: "6px 0" }}>Earn more on every purchase</h4><p style={{ color: "#64748b", margin: 0 }}>Available cashback can be moved into your HOWDI Wallet.</p></div><button type="button" onClick={moveCashbackToWallet} disabled={!cashbackStats.available} style={{ border: 0, borderRadius: "10px", padding: "11px 15px", background: cashbackStats.available ? "#1f5af6" : "#cbd5e1", color: "#fff", fontWeight: 900, cursor: cashbackStats.available ? "pointer" : "not-allowed" }}>Transfer ₹{cashbackStats.available} to wallet →</button></div>
+                          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: "10px", marginTop: "20px" }}>{[[cashbackStats.total,"Total earned"],[cashbackStats.available,"Available"],[cashbackStats.pending,"Pending"]].map(([value,label])=><div key={label} style={{ padding: "16px", borderRadius: "14px", background: "#f7f8fb" }}><div style={{ fontSize: "24px", fontWeight: 900 }}>₹{value}</div><div style={{ color: "#64748b", fontSize: "12px" }}>{label}</div></div>)}</div>
                         </div>
                         <div style={{ border: "1px solid #e2e8f0", borderRadius: "18px", overflow: "hidden", background: "#fff" }}><div style={{ padding: "16px 18px", fontWeight: 900 }}>Cashback history</div>{cashbackHistory.map((item)=><div key={item.id} style={{ display: "flex", justifyContent: "space-between", padding: "15px 18px", borderTop: "1px solid #f1f5f9", gap: "12px" }}><div><div style={{ fontWeight: 800 }}>{item.title}</div><div style={{ color: "#64748b", fontSize: "12px" }}>{item.date} · {item.status}</div></div><strong style={{ color: "#166534" }}>+₹{item.amount}</strong></div>)}</div>
                       </div>
@@ -16469,8 +16470,8 @@ const removeNotification = async (notificationId) => {
 
                     {walletSection === "rewards" && (
                       <div style={{ display: "grid", gap: "14px" }}>
-                        <div style={{ border: "1px solid #e2e8f0", borderRadius: "18px", padding: "22px", background: "#fff" }}><div style={{ fontSize: "12px", fontWeight: 800, color: "#64748b", letterSpacing: "1px" }}>REWARDS</div><h4 style={{ fontSize: "24px", margin: "6px 0" }}>{rewardPoints.toLocaleString("en-IN")} points available</h4><p style={{ color: "#64748b" }}>Every 500 points can be redeemed for ₹50 wallet credit.</p><button type="button" onClick={redeemRewards} disabled={rewardPoints < 500} style={{ border: 0, borderRadius: "10px", padding: "11px 15px", background: rewardPoints >= 500 ? "#365947" : "#cbd5e1", color: "#fff", fontWeight: 900, cursor: rewardPoints >= 500 ? "pointer" : "not-allowed" }}>🎁 Redeem 500 points → ₹50</button></div>
-                        <div style={{ border: "1px solid #e2e8f0", borderRadius: "18px", overflow: "hidden", background: "#fff" }}><div style={{ padding: "16px 18px", fontWeight: 900 }}>Reward history</div>{walletRewards.map((item)=><div key={item.id} style={{ display: "flex", justifyContent: "space-between", padding: "15px 18px", borderTop: "1px solid #f1f5f9", gap: "12px" }}><div><div style={{ fontWeight: 800 }}>{item.title}</div><div style={{ color: "#64748b", fontSize: "12px" }}>{item.date}</div></div><strong style={{ color: item.points < 0 ? "#b45309" : "#166534" }}>{item.points > 0 ? "+" : ""}{item.points} pts</strong></div>)}</div>
+                        <div style={{ border: "1px solid #e2e8f0", borderRadius: "18px", padding: "22px", background: "#fff" }}><div style={{ fontSize: "12px", fontWeight: 800, color: "#64748b", letterSpacing: "1px" }}>REWARDS</div><h4 style={{ fontSize: "24px", margin: "6px 0" }}>{rewardPoints.toLocaleString("en-IN")} points available</h4><p style={{ color: "#64748b" }}>Every 500 points can be redeemed for ₹50 wallet credit.</p><button type="button" onClick={redeemRewards} disabled={rewardPoints < 500} style={{ border: 0, borderRadius: "10px", padding: "11px 15px", background: rewardPoints >= 500 ? "#1f5af6" : "#cbd5e1", color: "#fff", fontWeight: 900, cursor: rewardPoints >= 500 ? "pointer" : "not-allowed" }}>🎁 Redeem 500 points → ₹50</button></div>
+                        <div style={{ border: "1px solid #e2e8f0", borderRadius: "18px", overflow: "hidden", background: "#fff" }}><div style={{ padding: "16px 18px", fontWeight: 900 }}>Reward history</div>{walletRewards.map((item)=><div key={item.id} style={{ display: "flex", justifyContent: "space-between", padding: "15px 18px", borderTop: "1px solid #f1f5f9", gap: "12px" }}><div><div style={{ fontWeight: 800 }}>{item.title}</div><div style={{ color: "#64748b", fontSize: "12px" }}>{item.date}</div></div><strong style={{ color: item.points < 0 ? "#1f5af6" : "#166534" }}>{item.points > 0 ? "+" : ""}{item.points} pts</strong></div>)}</div>
                       </div>
                     )}
                   </div>
@@ -16478,28 +16479,28 @@ const removeNotification = async (notificationId) => {
 
                 {false && profileTab === "wallet" && walletSection === "earnings" && (
                   <div style={{ display: "grid", gap: "16px" }}>
-                    <div style={{ padding: "24px", borderRadius: "20px", background: "linear-gradient(135deg,#173a2a,#365947 56%,#6f9b7e)", color: "#fff", boxShadow: "0 18px 40px rgba(54,89,71,.18)" }}>
+                    <div style={{ padding: "24px", borderRadius: "20px", background: "linear-gradient(135deg,#1749d6,#1f5af6 56%,#5070ba)", color: "#fff", boxShadow: "0 18px 40px rgba(39,64,134,.18)" }}>
                       <div style={{ fontSize: "12px", fontWeight: 900, letterSpacing: "1.4px", opacity: .78 }}>HOWDI INVITE & EARN · LIVE REFERRAL TRACKING</div>
                       <h4 style={{ margin: "8px 0 7px", fontSize: "29px" }}>Invite people you know. Track every referral. 🎁</h4>
                       <p style={{ margin: 0, maxWidth: "720px", lineHeight: 1.65, opacity: .88 }}>Your unique HOWDI referral link is tied to your account. New registrations through a valid invitation are recorded automatically in PostgreSQL.</p>
                     </div>
 
                     <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1.15fr) minmax(280px,.85fr)", gap: "14px" }}>
-                      <div style={{ border: "1px solid #dbe7de", borderRadius: "18px", padding: "20px", background: "#fff" }}>
+                      <div style={{ border: "1px solid #d8ddea", borderRadius: "18px", padding: "20px", background: "#fff" }}>
                         <div style={{ fontSize: "12px", fontWeight: 900, letterSpacing: "1px", color: "#64748b" }}>YOUR HOWDI REFERRAL CODE</div>
                         <div style={{ marginTop: "10px", display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-                          <strong style={{ fontSize: "28px", color: "#365947", letterSpacing: "1px" }}>{referralData.referral_code || "Loading..."}</strong>
-                          <button type="button" onClick={copyReferralLink} disabled={!referralData.referral_code} style={{ border: "1px solid #b7cdbf", borderRadius: "10px", padding: "8px 12px", background: "#f1f7f2", color: "#365947", fontWeight: 900, cursor: "pointer" }}>📋 Copy</button>
+                          <strong style={{ fontSize: "28px", color: "#22304f", letterSpacing: "1px" }}>{referralData.referral_code || "Loading..."}</strong>
+                          <button type="button" onClick={copyReferralLink} disabled={!referralData.referral_code} style={{ border: "1px solid #b1bbd3", borderRadius: "10px", padding: "8px 12px", background: "#eff2f9", color: "#22304f", fontWeight: 900, cursor: "pointer" }}>📋 Copy</button>
                         </div>
                         <div style={{ marginTop: "13px", display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                          <button type="button" onClick={shareReferralLink} disabled={!referralData.referral_code} style={{ border: 0, borderRadius: "10px", padding: "10px 14px", background: "#365947", color: "#fff", fontWeight: 900, cursor: "pointer" }}>🚀 Share invitation</button>
-                          <button type="button" onClick={loadReferralData} disabled={referralLoading} style={{ border: "1px solid #dbe3dc", borderRadius: "10px", padding: "10px 14px", background: "#fff", color: "#365947", fontWeight: 900, cursor: "pointer" }}>{referralLoading ? "Refreshing..." : "↻ Refresh"}</button>
+                          <button type="button" onClick={shareReferralLink} disabled={!referralData.referral_code} style={{ border: 0, borderRadius: "10px", padding: "10px 14px", background: "#1f5af6", color: "#fff", fontWeight: 900, cursor: "pointer" }}>🚀 Share invitation</button>
+                          <button type="button" onClick={loadReferralData} disabled={referralLoading} style={{ border: "1px solid #d8dce6", borderRadius: "10px", padding: "10px 14px", background: "#fff", color: "#22304f", fontWeight: 900, cursor: "pointer" }}>{referralLoading ? "Refreshing..." : "↻ Refresh"}</button>
                         </div>
                         {referralData.referral_code && <div style={{ marginTop: "14px", padding: "11px 12px", borderRadius: "11px", background: "#f8fafc", color: "#64748b", fontSize: "12px", wordBreak: "break-all" }}>{getReferralLink()}</div>}
                       </div>
 
-                      <div style={{ border: "1px solid #eadfbe", borderRadius: "18px", padding: "20px", background: "#fffdf7" }}>
-                        <div style={{ fontSize: "12px", fontWeight: 900, letterSpacing: "1px", color: "#8a641f" }}>HOW REFERRAL TRACKING WORKS</div>
+                      <div style={{ border: "1px solid #eadfbe", borderRadius: "18px", padding: "20px", background: "#f8fafe" }}>
+                        <div style={{ fontSize: "12px", fontWeight: 900, letterSpacing: "1px", color: "#1f5af6" }}>HOW REFERRAL TRACKING WORKS</div>
                         <div style={{ display: "grid", gap: "9px", marginTop: "12px", color: "#475569", fontSize: "13px", lineHeight: 1.5 }}>
                           <div>① Share your unique invitation.</div>
                           <div>② A new customer registers using your link.</div>
@@ -16509,7 +16510,7 @@ const removeNotification = async (notificationId) => {
                       </div>
                     </div>
 
-                    {referralNotice && <div style={{ padding: "11px 13px", borderRadius: "11px", background: "#f1f7f2", color: "#365947", fontSize: "13px", fontWeight: 800 }}>{referralNotice}</div>}
+                    {referralNotice && <div style={{ padding: "11px 13px", borderRadius: "11px", background: "#eff2f9", color: "#22304f", fontSize: "13px", fontWeight: 800 }}>{referralNotice}</div>}
 
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: "12px" }}>
                       {[
@@ -16528,7 +16529,7 @@ const removeNotification = async (notificationId) => {
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: "12px" }}>
                       <div style={{ padding: "18px", border: "1px solid #e2e8f0", borderRadius: "16px", background: "#fff" }}>
                         <div style={{ color: "#64748b", fontSize: "12px", fontWeight: 900 }}>ELIGIBLE EARNINGS</div>
-                        <div style={{ marginTop: "7px", fontSize: "28px", fontWeight: 900, color: "#365947" }}>₹{Number(referralData.summary?.eligible_earnings || 0).toLocaleString("en-IN")}</div>
+                        <div style={{ marginTop: "7px", fontSize: "28px", fontWeight: 900, color: "#22304f" }}>₹{Number(referralData.summary?.eligible_earnings || 0).toLocaleString("en-IN")}</div>
                         <div style={{ marginTop: "4px", color: "#64748b", fontSize: "12px" }}>Qualified or rewarded referral earnings.</div>
                       </div>
                       <div style={{ padding: "18px", border: "1px solid #e2e8f0", borderRadius: "16px", background: "#fff" }}>
@@ -16556,7 +16557,7 @@ const removeNotification = async (notificationId) => {
 
                       {!referralLoading && referralData.referrals.map((item) => {
                         const statusColors = {
-                          SIGNED_UP: ["#fff7ed", "#9a3412"],
+                          SIGNED_UP: ["#f0f4fc", "#9a3412"],
                           QUALIFIED: ["#ecfdf3", "#166534"],
                           REWARDED: ["#eff6ff", "#1d4ed8"],
                           REJECTED: ["#fef2f2", "#b91c1c"],
@@ -16570,7 +16571,7 @@ const removeNotification = async (notificationId) => {
                             </div>
                             <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                               <span style={{ padding: "5px 9px", borderRadius: "999px", background: statusBg, color: statusColor, fontSize: "10px", fontWeight: 900 }}>{String(item.status || "SIGNED_UP").replace("_", " ")}</span>
-                              <strong style={{ color: "#365947", fontSize: "13px" }}>₹{Number(item.reward_amount || 0).toLocaleString("en-IN")}</strong>
+                              <strong style={{ color: "#22304f", fontSize: "13px" }}>₹{Number(item.reward_amount || 0).toLocaleString("en-IN")}</strong>
                             </div>
                           </div>
                         );
@@ -16622,7 +16623,7 @@ const removeNotification = async (notificationId) => {
                             <strong style={{ fontSize: "20px", color: "#0f172a" }}>Your notifications</strong>
                             <div style={{ color: "#64748b", fontSize: "13px", marginTop: "4px" }}>Orders, offers, wallet, rewards and account activity.</div>
                           </div>
-                          <button type="button" onClick={markAllNotificationsRead} disabled={!unreadNotificationCount} style={{ border: "1px solid #dbe3dc", borderRadius: "10px", padding: "10px 13px", background: "#fff", color: unreadNotificationCount ? "#0f766e" : "#94a3b8", fontWeight: 800, cursor: unreadNotificationCount ? "pointer" : "not-allowed" }}>✓ Mark all read</button>
+                          <button type="button" onClick={markAllNotificationsRead} disabled={!unreadNotificationCount} style={{ border: "1px solid #d8dce6", borderRadius: "10px", padding: "10px 13px", background: "#fff", color: unreadNotificationCount ? "#0f766e" : "#94a3b8", fontWeight: 800, cursor: unreadNotificationCount ? "pointer" : "not-allowed" }}>✓ Mark all read</button>
                         </div>
 
                         {notifications.length === 0 ? (
@@ -16632,7 +16633,7 @@ const removeNotification = async (notificationId) => {
                         ) : (
                           <div style={{ display: "grid", gap: "10px" }}>
                             {notifications.map((item) => (
-                              <div key={item.id} style={{ display: "flex", alignItems: "flex-start", gap: "13px", padding: "16px", border: item.unread ? "1px solid #99f6e4" : "1px solid #e2e8f0", borderRadius: "16px", background: item.unread ? "#f0fdfa" : "#fff" }}>
+                              <div key={item.id} style={{ display: "flex", alignItems: "flex-start", gap: "13px", padding: "16px", border: item.unread ? "1px solid #99f6e4" : "1px solid #e2e8f0", borderRadius: "16px", background: item.unread ? "#f1f4fc" : "#fff" }}>
                                 <div style={{ width: "44px", height: "44px", flex: "0 0 44px", borderRadius: "13px", display: "flex", alignItems: "center", justifyContent: "center", background: item.unread ? "#ccfbf1" : "#f1f5f9", fontSize: "22px" }}>{item.icon}</div>
                                 <div style={{ minWidth: 0, flex: 1 }}>
                                   <div style={{ display: "flex", justifyContent: "space-between", gap: "10px", alignItems: "flex-start" }}>
@@ -16789,7 +16790,7 @@ const removeNotification = async (notificationId) => {
                     <div style={{ marginTop:"20px", padding:"20px", border:"1px solid #e2e8f0", borderRadius:"18px", background:"#fff" }}>
                       <strong style={{fontSize:"20px",color:"#0f172a"}}>Cashback activity</strong>
                       <div style={{display:"grid",gap:"10px",marginTop:"14px"}}>
-                        {(Array.isArray(cashbackHistory) ? cashbackHistory : []).map((item) => <div key={item.id} style={{display:"flex",justifyContent:"space-between",gap:"14px",padding:"13px",border:"1px solid #edf2ef",borderRadius:"12px",background:"#fbfdfc"}}><div><strong style={{color:"#0f172a"}}>{item.title}</strong><div style={{fontSize:"12px",color:"#64748b",marginTop:"3px"}}>{item.date} · {item.status}</div></div><b style={{color:"#047857",whiteSpace:"nowrap"}}>+₹{Number(item.amount || 0).toLocaleString("en-IN")}</b></div>)}
+                        {(Array.isArray(cashbackHistory) ? cashbackHistory : []).map((item) => <div key={item.id} style={{display:"flex",justifyContent:"space-between",gap:"14px",padding:"13px",border:"1px solid #ebeef4",borderRadius:"12px",background:"#fbfbfd"}}><div><strong style={{color:"#0f172a"}}>{item.title}</strong><div style={{fontSize:"12px",color:"#64748b",marginTop:"3px"}}>{item.date} · {item.status}</div></div><b style={{color:"#047857",whiteSpace:"nowrap"}}>+₹{Number(item.amount || 0).toLocaleString("en-IN")}</b></div>)}
                         {!cashbackHistory?.length && <div style={{padding:"28px",textAlign:"center",color:"#64748b"}}>No cashback activity yet.</div>}
                       </div>
                     </div>
@@ -16798,7 +16799,7 @@ const removeNotification = async (notificationId) => {
 
 {profileTab === "rewards" && (
                   <div style={{ minHeight: "500px" }}>
-                    <div style={{ padding: "25px", borderRadius: "22px", background: "linear-gradient(135deg,#78350f,#b45309 48%,#f59e0b)", color: "#fff", boxShadow: "0 20px 45px rgba(180,83,9,.16)" }}>
+                    <div style={{ padding: "25px", borderRadius: "22px", background: "linear-gradient(135deg,#78350f,#1145d4 48%,#144eec)", color: "#fff", boxShadow: "0 20px 45px rgba(17,69,212,.16)" }}>
                       <div style={{ fontSize: "12px", fontWeight: 900, letterSpacing: "1.4px", opacity: .86 }}>HOWDI REWARDS & LOYALTY</div>
                       <h3 style={{ margin: "8px 0 7px", fontSize: "30px" }}>Your HOWDI rewards journey 🏆</h3>
                       <p style={{ margin: 0, maxWidth: "760px", lineHeight: 1.65, opacity: .94 }}>Track your available points, lifetime progress, loyalty tier and reward activity in one place.</p>
@@ -16806,25 +16807,25 @@ const removeNotification = async (notificationId) => {
 
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))", gap: "13px", marginTop: "18px" }}>
                       <div style={{ padding: "19px", border: "1px solid #fde68a", borderRadius: "17px", background: "#fff" }}>
-                        <div style={{ color: "#a16207", fontSize: "11px", fontWeight: 900 }}>AVAILABLE POINTS</div>
+                        <div style={{ color: "#1f5af6", fontSize: "11px", fontWeight: 900 }}>AVAILABLE POINTS</div>
                         <div style={{ fontSize: "31px", fontWeight: 900, color: "#0f172a", marginTop: "6px" }}>{Number(rewardsWallet?.available_points || 0).toLocaleString("en-IN")}</div>
                       </div>
                       <div style={{ padding: "19px", border: "1px solid #fde68a", borderRadius: "17px", background: "#fff" }}>
-                        <div style={{ color: "#a16207", fontSize: "11px", fontWeight: 900 }}>LIFETIME POINTS</div>
+                        <div style={{ color: "#1f5af6", fontSize: "11px", fontWeight: 900 }}>LIFETIME POINTS</div>
                         <div style={{ fontSize: "31px", fontWeight: 900, color: "#0f172a", marginTop: "6px" }}>{Number(rewardsWallet?.lifetime_points || 0).toLocaleString("en-IN")}</div>
                       </div>
                       <div style={{ padding: "19px", border: "1px solid #fde68a", borderRadius: "17px", background: "#fff" }}>
-                        <div style={{ color: "#a16207", fontSize: "11px", fontWeight: 900 }}>CURRENT TIER</div>
-                        <div style={{ fontSize: "22px", fontWeight: 900, color: "#92400e", marginTop: "9px" }}>{rewardsTier?.name || "HOWDI Starter"}</div>
+                        <div style={{ color: "#1f5af6", fontSize: "11px", fontWeight: 900 }}>CURRENT TIER</div>
+                        <div style={{ fontSize: "22px", fontWeight: 900, color: "#1f5af6", marginTop: "9px" }}>{rewardsTier?.name || "HOWDI Starter"}</div>
                       </div>
                     </div>
 
-                    {rewardsNotice && !/(failed to fetch|temporarily unavailable|server|backend|postgres|network|database|sql|column .*does not exist|is not defined|parsedurl|connection refused|undefined)/i.test(String(rewardsNotice)) && <div style={{ marginTop: "14px", padding: "11px 13px", borderRadius: "11px", background: "#fffbeb", color: "#92400e", fontSize: "13px", fontWeight: 800 }}>{rewardsNotice}</div>}
+                    {rewardsNotice && !/(failed to fetch|temporarily unavailable|server|backend|postgres|network|database|sql|column .*does not exist|is not defined|parsedurl|connection refused|undefined)/i.test(String(rewardsNotice)) && <div style={{ marginTop: "14px", padding: "11px 13px", borderRadius: "11px", background: "#eef2fc", color: "#1f5af6", fontSize: "13px", fontWeight: 800 }}>{rewardsNotice}</div>}
 
                     {rewardsNextTier && (
-                      <div style={{ marginTop: "17px", padding: "16px", border: "1px solid #fde68a", borderRadius: "15px", background: "#fffbeb" }}>
-                        <strong style={{ color: "#92400e" }}>Next tier: {rewardsNextTier.name}</strong>
-                        <div style={{ color: "#a16207", fontSize: "12px", marginTop: "4px" }}>
+                      <div style={{ marginTop: "17px", padding: "16px", border: "1px solid #fde68a", borderRadius: "15px", background: "#eef2fc" }}>
+                        <strong style={{ color: "#1f5af6" }}>Next tier: {rewardsNextTier.name}</strong>
+                        <div style={{ color: "#1f5af6", fontSize: "12px", marginTop: "4px" }}>
                           {Math.max(0, Number(rewardsNextTier.min_lifetime_points) - Number(rewardsWallet?.lifetime_points || 0)).toLocaleString("en-IN")} more lifetime points to reach this tier.
                         </div>
                       </div>
@@ -16835,7 +16836,7 @@ const removeNotification = async (notificationId) => {
                         <strong style={{ fontSize: "21px", color: "#0f172a" }}>Your current benefits</strong>
                         <div style={{ display: "grid", gap: "9px", marginTop: "13px" }}>
                           {(rewardsTier?.benefits || []).map((benefit, index) => (
-                            <div key={index} style={{ padding: "11px 12px", border: "1px solid #fef3c7", borderRadius: "10px", color: "#475569", fontSize: "13px" }}>✓ {benefit}</div>
+                            <div key={index} style={{ padding: "11px 12px", border: "1px solid #ecf1fb", borderRadius: "10px", color: "#475569", fontSize: "13px" }}>✓ {benefit}</div>
                           ))}
                         </div>
                       </div>
@@ -16844,10 +16845,10 @@ const removeNotification = async (notificationId) => {
                         <strong style={{ fontSize: "20px", color: "#0f172a" }}>Redeem points</strong>
                         <p style={{ color: "#64748b", fontSize: "12px", lineHeight: 1.5 }}>Redeem available points for eligible HOWDI benefits.</p>
                         <input type="number" min="1" value={rewardRedeemPoints} onChange={(event) => setRewardRedeemPoints(event.target.value)} placeholder="Points to redeem" style={{ width: "100%", boxSizing: "border-box", padding: "11px", border: "1px solid #cbd5e1", borderRadius: "9px", marginTop: "8px" }} />
-                        <button type="button" onClick={redeemRewardPoints} disabled={rewardsActionLoading === "redeem"} style={{ width: "100%", marginTop: "10px", border: 0, borderRadius: "9px", padding: "11px", background: "#a16207", color: "#fff", fontWeight: 900, cursor: "pointer" }}>
+                        <button type="button" onClick={redeemRewardPoints} disabled={rewardsActionLoading === "redeem"} style={{ width: "100%", marginTop: "10px", border: 0, borderRadius: "9px", padding: "11px", background: "#1145d4", color: "#fff", fontWeight: 900, cursor: "pointer" }}>
                           {rewardsActionLoading === "redeem" ? "Redeeming..." : "Redeem points"}
                         </button>
-                        <button type="button" onClick={loadRewardsCenter} disabled={rewardsLoading} style={{ width: "100%", marginTop: "8px", border: "1px solid #fde68a", borderRadius: "9px", padding: "10px", background: "#fff", color: "#a16207", fontWeight: 900, cursor: "pointer" }}>
+                        <button type="button" onClick={loadRewardsCenter} disabled={rewardsLoading} style={{ width: "100%", marginTop: "8px", border: "1px solid #fde68a", borderRadius: "9px", padding: "10px", background: "#fff", color: "#1f5af6", fontWeight: 900, cursor: "pointer" }}>
                           {rewardsLoading ? "Loading..." : "↻ Refresh rewards"}
                         </button>
                       </div>
@@ -16859,8 +16860,8 @@ const removeNotification = async (notificationId) => {
                         {rewardsTiers.map((tier) => {
                           const active = rewardsTier?.tier_code === tier.tier_code;
                           return (
-                            <div key={tier.tier_code} style={{ padding: "17px", border: active ? "2px solid #d97706" : "1px solid #e2e8f0", borderRadius: "14px", background: active ? "#fffbeb" : "#fff" }}>
-                              <div style={{ color: "#a16207", fontSize: "11px", fontWeight: 900 }}>{active ? "YOUR CURRENT TIER" : tier.tier_code.replace("HOWDI_","HOWDI ")}</div>
+                            <div key={tier.tier_code} style={{ padding: "17px", border: active ? "2px solid #1145d4" : "1px solid #e2e8f0", borderRadius: "14px", background: active ? "#eef2fc" : "#fff" }}>
+                              <div style={{ color: "#1f5af6", fontSize: "11px", fontWeight: 900 }}>{active ? "YOUR CURRENT TIER" : tier.tier_code.replace("HOWDI_","HOWDI ")}</div>
                               <h4 style={{ margin: "7px 0", color: "#0f172a", fontSize: "19px" }}>{tier.name}</h4>
                               <div style={{ color: "#64748b", fontSize: "11px", marginBottom: "10px" }}>{Number(tier.min_lifetime_points).toLocaleString("en-IN")} lifetime points required</div>
                               {(tier.benefits || []).map((benefit, index) => <div key={index} style={{ color: "#475569", fontSize: "11px", marginTop: "6px" }}>✓ {benefit}</div>)}
@@ -16950,7 +16951,7 @@ const removeNotification = async (notificationId) => {
                           <div key={item.id} style={{ padding: "14px", border: "1px solid #f1f5f9", borderRadius: "12px" }}>
                             <div style={{ display: "flex", justifyContent: "space-between", gap: "10px", flexWrap: "wrap" }}>
                               <strong style={{ color: "#334155" }}>{item.subject}</strong>
-                              <span style={{ color: item.status === "RESOLVED" ? "#15803d" : "#d97706", fontSize: "10px", fontWeight: 900 }}>{item.status.replaceAll("_"," ")}</span>
+                              <span style={{ color: item.status === "RESOLVED" ? "#15803d" : "#1f5af6", fontSize: "10px", fontWeight: 900 }}>{item.status.replaceAll("_"," ")}</span>
                             </div>
                             <div style={{ color: "#64748b", fontSize: "12px", lineHeight: 1.5, marginTop: "5px" }}>{item.message}</div>
                             <div style={{ color: "#94a3b8", fontSize: "10px", marginTop: "8px" }}>{new Date(item.created_at).toLocaleDateString("en-IN")}</div>
@@ -16969,7 +16970,7 @@ const removeNotification = async (notificationId) => {
                         <h3 style={{ fontSize: "28px", margin: "6px 0" }}>Learn. Grow. Earn. 🎓</h3>
                         <p style={{ color: "#64748b", margin: 0 }}>Build practical skills for work, business and everyday life.</p>
                       </div>
-                      <button type="button" onClick={openLearningCatalog} style={{ border: 0, borderRadius: "10px", padding: "10px 15px", background: "#365947", color: "#fff", fontWeight: 900, cursor: "pointer" }}>Browse courses →</button>
+                      <button type="button" onClick={openLearningCatalog} style={{ border: 0, borderRadius: "10px", padding: "10px 15px", background: "#1f5af6", color: "#fff", fontWeight: 900, cursor: "pointer" }}>Browse courses →</button>
                     </div>
 
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: "12px", marginBottom: "18px" }}>
@@ -16993,7 +16994,7 @@ const removeNotification = async (notificationId) => {
                         ["completed", "Completed"],
                         ["saved", "Saved"],
                       ].map(([filter, label]) => (
-                        <button key={filter} type="button" onClick={() => setLearningFilter(filter)} style={{ border: learningFilter === filter ? 0 : "1px solid #dbe3dc", borderRadius: "999px", padding: "9px 13px", background: learningFilter === filter ? "#365947" : "#fff", color: learningFilter === filter ? "#fff" : "#334155", fontWeight: 800, cursor: "pointer" }}>{label}</button>
+                        <button key={filter} type="button" onClick={() => setLearningFilter(filter)} style={{ border: learningFilter === filter ? 0 : "1px solid #d8dce6", borderRadius: "999px", padding: "9px 13px", background: learningFilter === filter ? "#1f5af6" : "#fff", color: learningFilter === filter ? "#fff" : "#334155", fontWeight: 800, cursor: "pointer" }}>{label}</button>
                       ))}
                     </div>
 
@@ -17010,17 +17011,17 @@ const removeNotification = async (notificationId) => {
                         {filteredLearningCourses.map((course) => (
                           <div key={course.id} style={{ border: "1px solid #e2e8f0", borderRadius: "18px", padding: "17px", background: "#fff", boxShadow: "0 6px 18px rgba(15,23,42,.04)" }}>
                             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "10px" }}>
-                              <div style={{ width: "48px", height: "48px", borderRadius: "14px", background: "#eef5f0", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "25px" }}>{course.icon}</div>
-                              <span style={{ padding: "5px 8px", borderRadius: "999px", background: course.status === "completed" ? "#ecfdf3" : course.status === "saved" ? "#f8fafc" : "#fff7ed", color: course.status === "completed" ? "#166534" : course.status === "saved" ? "#475569" : "#9a3412", fontSize: "11px", fontWeight: 900 }}>{course.status === "completed" ? "COMPLETED" : course.status === "saved" ? "SAVED" : "IN PROGRESS"}</span>
+                              <div style={{ width: "48px", height: "48px", borderRadius: "14px", background: "#eceff7", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "25px" }}>{course.icon}</div>
+                              <span style={{ padding: "5px 8px", borderRadius: "999px", background: course.status === "completed" ? "#ecfdf3" : course.status === "saved" ? "#f8fafc" : "#f0f4fc", color: course.status === "completed" ? "#166534" : course.status === "saved" ? "#475569" : "#9a3412", fontSize: "11px", fontWeight: 900 }}>{course.status === "completed" ? "COMPLETED" : course.status === "saved" ? "SAVED" : "IN PROGRESS"}</span>
                             </div>
-                            <div style={{ color: "#8b6a2d", fontSize: "11px", fontWeight: 900, letterSpacing: ".8px", marginTop: "14px" }}>{course.category.toUpperCase()}</div>
+                            <div style={{ color: "#1f5af6", fontSize: "11px", fontWeight: 900, letterSpacing: ".8px", marginTop: "14px" }}>{course.category.toUpperCase()}</div>
                             <h4 style={{ fontSize: "18px", margin: "5px 0 4px" }}>{course.title}</h4>
                             <div style={{ color: "#64748b", fontSize: "12px" }}>{course.instructor} · {course.duration}</div>
                             <div style={{ marginTop: "15px" }}>
-                              <div style={{ display: "flex", justifyContent: "space-between", color: "#64748b", fontSize: "12px", marginBottom: "6px" }}><span>{course.lessons}</span><strong style={{ color: "#365947" }}>{course.progress}%</strong></div>
-                              <div style={{ height: "8px", borderRadius: "999px", background: "#e5e7eb", overflow: "hidden" }}><div style={{ width: `${course.progress}%`, height: "100%", background: "#365947", borderRadius: "999px" }} /></div>
+                              <div style={{ display: "flex", justifyContent: "space-between", color: "#64748b", fontSize: "12px", marginBottom: "6px" }}><span>{course.lessons}</span><strong style={{ color: "#22304f" }}>{course.progress}%</strong></div>
+                              <div style={{ height: "8px", borderRadius: "999px", background: "#e5e7eb", overflow: "hidden" }}><div style={{ width: `${course.progress}%`, height: "100%", background: "#1f5af6", borderRadius: "999px" }} /></div>
                             </div>
-                            <button type="button" onClick={() => course.status === "completed" ? viewLearningCertificate(course) : updateLearningCourse(course.id)} style={{ width: "100%", marginTop: "15px", border: course.status === "completed" ? "1px solid #b7cdbf" : 0, borderRadius: "10px", padding: "10px 12px", background: course.status === "completed" ? "#f8faf8" : "#365947", color: course.status === "completed" ? "#365947" : "#fff", fontWeight: 900, cursor: "pointer" }}>{course.status === "completed" ? "🏆 View certificate" : course.status === "saved" ? "▶ Start course" : "▶ Continue learning"}</button>
+                            <button type="button" onClick={() => course.status === "completed" ? viewLearningCertificate(course) : updateLearningCourse(course.id)} style={{ width: "100%", marginTop: "15px", border: course.status === "completed" ? "1px solid #b1bbd3" : 0, borderRadius: "10px", padding: "10px 12px", background: course.status === "completed" ? "#f7f8fb" : "#1f5af6", color: course.status === "completed" ? "#22304f" : "#fff", fontWeight: 900, cursor: "pointer" }}>{course.status === "completed" ? "🏆 View certificate" : course.status === "saved" ? "▶ Start course" : "▶ Continue learning"}</button>
                           </div>
                         ))}
                       </div>
@@ -17032,14 +17033,14 @@ const removeNotification = async (notificationId) => {
                   <div style={{ position: "fixed", inset: 0, zIndex: 2100, background: "rgba(15,23,42,.58)", display: "flex", alignItems: "center", justifyContent: "center", padding: "24px" }} onClick={() => setCertificateCourse(null)}>
                     <div style={{ width: "min(620px, 100%)", background: "#fff", borderRadius: "24px", padding: "32px", textAlign: "center", boxShadow: "0 25px 80px rgba(15,23,42,.25)" }} onClick={(e) => e.stopPropagation()}>
                       <div style={{ fontSize: "52px" }}>🏆</div>
-                      <div style={{ fontSize: "12px", fontWeight: 900, letterSpacing: "2px", color: "#8b6a2d", marginTop: "8px" }}>HOWDI LEARNING</div>
+                      <div style={{ fontSize: "12px", fontWeight: 900, letterSpacing: "2px", color: "#1f5af6", marginTop: "8px" }}>HOWDI LEARNING</div>
                       <h2 style={{ margin: "8px 0" }}>Certificate of Completion</h2>
                       <p style={{ color: "#64748b", margin: "0 auto", maxWidth: "470px" }}>This certifies that</p>
                       <h3 style={{ fontSize: "24px", margin: "8px 0" }}>{customerDisplayName||currentUser?.full_name||"HOWDI Learner"}</h3>
                       <p style={{ color: "#64748b", margin: "0 auto", maxWidth: "470px" }}>has successfully completed</p>
                       <h3 style={{ fontSize: "21px", margin: "8px 0 18px" }}>{certificateCourse.title}</h3>
                       <div style={{ display: "flex", justifyContent: "center", gap: "10px", flexWrap: "wrap", color: "#475569", fontSize: "12px" }}><span>✓ 100% complete</span><span>•</span><span>HOWDI Learning</span></div>
-                      <button type="button" onClick={() => setCertificateCourse(null)} style={{ marginTop: "24px", border: 0, borderRadius: "10px", padding: "11px 20px", background: "#365947", color: "#fff", fontWeight: 900, cursor: "pointer" }}>Done</button>
+                      <button type="button" onClick={() => setCertificateCourse(null)} style={{ marginTop: "24px", border: 0, borderRadius: "10px", padding: "11px 20px", background: "#1f5af6", color: "#fff", fontWeight: 900, cursor: "pointer" }}>Done</button>
                     </div>
                   </div>
                 )}
@@ -17063,9 +17064,9 @@ const removeNotification = async (notificationId) => {
 
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap", marginBottom: "14px" }}>
                       <div style={{ fontWeight: 900, color: "#334155" }}>Billing frequency</div>
-                      <div style={{ display: "flex", gap: "5px", padding: "4px", border: "1px solid #dbe3dc", borderRadius: "12px", background: "#f8faf8" }}>
-                        <button type="button" onClick={() => changeSubscriptionBilling("monthly")} style={{ border: 0, borderRadius: "9px", padding: "8px 12px", background: subscriptionBilling === "monthly" ? "#365947" : "transparent", color: subscriptionBilling === "monthly" ? "#fff" : "#475569", fontWeight: 900, cursor: "pointer" }}>Monthly</button>
-                        <button type="button" onClick={() => changeSubscriptionBilling("yearly")} style={{ border: 0, borderRadius: "9px", padding: "8px 12px", background: subscriptionBilling === "yearly" ? "#365947" : "transparent", color: subscriptionBilling === "yearly" ? "#fff" : "#475569", fontWeight: 900, cursor: "pointer" }}>Yearly · Save more</button>
+                      <div style={{ display: "flex", gap: "5px", padding: "4px", border: "1px solid #d8dce6", borderRadius: "12px", background: "#f7f8fb" }}>
+                        <button type="button" onClick={() => changeSubscriptionBilling("monthly")} style={{ border: 0, borderRadius: "9px", padding: "8px 12px", background: subscriptionBilling === "monthly" ? "#1f5af6" : "transparent", color: subscriptionBilling === "monthly" ? "#fff" : "#475569", fontWeight: 900, cursor: "pointer" }}>Monthly</button>
+                        <button type="button" onClick={() => changeSubscriptionBilling("yearly")} style={{ border: 0, borderRadius: "9px", padding: "8px 12px", background: subscriptionBilling === "yearly" ? "#1f5af6" : "transparent", color: subscriptionBilling === "yearly" ? "#fff" : "#475569", fontWeight: 900, cursor: "pointer" }}>Yearly · Save more</button>
                       </div>
                     </div>
 
@@ -17078,14 +17079,14 @@ const removeNotification = async (notificationId) => {
                         const active = subscriptionPlan === plan.id;
                         const price = subscriptionBilling === "yearly" ? plan.yearly : plan.monthly;
                         return (
-                          <div key={plan.id} style={{ position: "relative", border: active ? "2px solid #365947" : "1px solid #e2e8f0", borderRadius: "18px", padding: "18px", background: active ? "#f8faf8" : "#fff", boxShadow: active ? "0 8px 24px rgba(54,89,71,.08)" : "none" }}>
-                            {plan.id === "plus" && <div style={{ position: "absolute", top: "12px", right: "12px", padding: "4px 7px", borderRadius: "999px", background: "#fff7ed", color: "#9a3412", fontSize: "10px", fontWeight: 900 }}>POPULAR</div>}
+                          <div key={plan.id} style={{ position: "relative", border: active ? "2px solid #274086" : "1px solid #e2e8f0", borderRadius: "18px", padding: "18px", background: active ? "#f7f8fb" : "#fff", boxShadow: active ? "0 8px 24px rgba(39,64,134,.08)" : "none" }}>
+                            {plan.id === "plus" && <div style={{ position: "absolute", top: "12px", right: "12px", padding: "4px 7px", borderRadius: "999px", background: "#f0f4fc", color: "#9a3412", fontSize: "10px", fontWeight: 900 }}>POPULAR</div>}
                             <div style={{ fontSize: "28px" }}>{plan.icon}</div>
                             <h4 style={{ fontSize: "18px", margin: "10px 0 4px" }}>{plan.name}</h4>
                             <div style={{ display: "flex", alignItems: "baseline", gap: "5px" }}><strong style={{ fontSize: "27px" }}>₹{price}</strong><span style={{ color: "#64748b", fontSize: "12px" }}>{plan.id === "free" ? "forever" : subscriptionBilling === "yearly" ? "/ year" : "/ month"}</span></div>
                             {subscriptionBilling === "yearly" && plan.id !== "free" && <div style={{ color: "#166534", fontSize: "11px", fontWeight: 800, marginTop: "4px" }}>Save vs monthly billing</div>}
                             <div style={{ display: "grid", gap: "8px", margin: "16px 0" }}>{plan.features.map((feature) => <div key={feature} style={{ color: "#475569", fontSize: "13px" }}>✓ {feature}</div>)}</div>
-                            <button type="button" onClick={() => chooseSubscriptionPlan(plan.id)} style={{ width: "100%", border: active ? "1px solid #b7cdbf" : 0, borderRadius: "10px", padding: "10px 12px", background: active ? "#fff" : "#365947", color: active ? "#365947" : "#fff", fontWeight: 900, cursor: active ? "default" : "pointer" }}>{active ? "Current plan" : plan.id === "free" ? "Cancel paid plan" : "Choose plan →"}</button>
+                            <button type="button" onClick={() => chooseSubscriptionPlan(plan.id)} style={{ width: "100%", border: active ? "1px solid #b1bbd3" : 0, borderRadius: "10px", padding: "10px 12px", background: active ? "#fff" : "#1f5af6", color: active ? "#22304f" : "#fff", fontWeight: 900, cursor: active ? "default" : "pointer" }}>{active ? "Current plan" : plan.id === "free" ? "Cancel paid plan" : "Choose plan →"}</button>
                           </div>
                         );
                       })}
@@ -17098,12 +17099,12 @@ const removeNotification = async (notificationId) => {
                           <p style={{ color: "#64748b", fontSize: "13px", margin: "7px 0 12px" }}>Choose one of your saved payment methods for subscription billing.</p>
                           {paymentMethods.length ? <select value={subscriptionPayment || String(paymentMethods[0].id)} onChange={(e) => setSubscriptionPayment(e.target.value)} style={{ width: "100%", height: "42px", border: "1px solid #cbd5e1", borderRadius: "10px", padding: "0 10px", background: "#fff", fontWeight: 700 }}>
                             {paymentMethods.map((method) => <option key={method.id} value={String(method.id)}>{method.type === "UPI" ? `UPI · ${method.value}` : `${method.type === "CARD" ? "Card" : "Bank"} · ${method.value}`}</option>)}
-                          </select> : <div style={{ padding: "11px", borderRadius: "10px", background: "#fff7ed", color: "#9a3412", fontSize: "13px", fontWeight: 800 }}>Add a payment method in Payments before subscribing.</div>}
+                          </select> : <div style={{ padding: "11px", borderRadius: "10px", background: "#f0f4fc", color: "#9a3412", fontSize: "13px", fontWeight: 800 }}>Add a payment method in Payments before subscribing.</div>}
                         </div>
                         <div style={{ border: "1px solid #e2e8f0", borderRadius: "18px", padding: "18px", background: "#fff" }}>
                           <div style={{ fontWeight: 900, fontSize: "17px" }}>🔄 Auto-renew</div>
                           <p style={{ color: "#64748b", fontSize: "13px", lineHeight: 1.5, margin: "7px 0 12px" }}>Automatically renew your membership at the end of the billing period.</p>
-                          <button type="button" onClick={toggleSubscriptionAutoRenew} style={{ width: "100%", border: "1px solid #dbe3dc", borderRadius: "10px", padding: "10px 12px", background: subscriptionAutoRenew ? "#365947" : "#fff", color: subscriptionAutoRenew ? "#fff" : "#334155", fontWeight: 900, cursor: "pointer" }}>{subscriptionAutoRenew ? "✓ Auto-renew on" : "Auto-renew off"}</button>
+                          <button type="button" onClick={toggleSubscriptionAutoRenew} style={{ width: "100%", border: "1px solid #d8dce6", borderRadius: "10px", padding: "10px 12px", background: subscriptionAutoRenew ? "#1f5af6" : "#fff", color: subscriptionAutoRenew ? "#fff" : "#334155", fontWeight: 900, cursor: "pointer" }}>{subscriptionAutoRenew ? "✓ Auto-renew on" : "Auto-renew off"}</button>
                         </div>
                       </div>
                     )}
@@ -17130,7 +17131,7 @@ const removeNotification = async (notificationId) => {
                           <div style={{ fontSize: "32px" }}>⚠️</div>
                           <h3 style={{ margin: "8px 0" }}>Cancel paid subscription?</h3>
                           <p style={{ color: "#64748b", lineHeight: 1.5, fontSize: "14px" }}>You'll switch to HOWDI Free and paid benefits will stop.</p>
-                          <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "18px" }}><button type="button" onClick={() => setSubscriptionCancelOpen(false)} style={{ border: "1px solid #dbe3dc", borderRadius: "10px", padding: "10px 14px", background: "#fff", fontWeight: 800, cursor: "pointer" }}>Keep plan</button><button type="button" onClick={confirmSubscriptionCancellation} style={{ border: 0, borderRadius: "10px", padding: "10px 14px", background: "#b91c1c", color: "#fff", fontWeight: 900, cursor: "pointer" }}>Yes, cancel</button></div>
+                          <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "18px" }}><button type="button" onClick={() => setSubscriptionCancelOpen(false)} style={{ border: "1px solid #d8dce6", borderRadius: "10px", padding: "10px 14px", background: "#fff", fontWeight: 800, cursor: "pointer" }}>Keep plan</button><button type="button" onClick={confirmSubscriptionCancellation} style={{ border: 0, borderRadius: "10px", padding: "10px 14px", background: "#b91c1c", color: "#fff", fontWeight: 900, cursor: "pointer" }}>Yes, cancel</button></div>
                         </div>
                       </div>
                     )}
@@ -17321,31 +17322,31 @@ const removeNotification = async (notificationId) => {
 
                 {profileTab === "membership" && (
                   <div style={{ minHeight: "500px" }}>
-                    <div style={{ padding: "25px", borderRadius: "22px", background: "linear-gradient(135deg,#0f172a,#334155 48%,#ca8a04)", color: "#fff", boxShadow: "0 20px 45px rgba(15,23,42,.18)" }}>
+                    <div style={{ padding: "25px", borderRadius: "22px", background: "linear-gradient(135deg,#0f172a,#334155 48%,#1145d4)", color: "#fff", boxShadow: "0 20px 45px rgba(15,23,42,.18)" }}>
                       <div style={{ fontSize: "12px", fontWeight: 900, letterSpacing: "1.4px", opacity: .84 }}>HOWDI MEMBERSHIP</div>
                       <h3 style={{ margin: "8px 0 7px", fontSize: "30px" }}>More benefits with HOWDI ⭐</h3>
                       <p style={{ margin: 0, maxWidth: "760px", lineHeight: 1.65, opacity: .93 }}>Manage your membership, benefits and renewal preferences in one place.</p>
                     </div>
 
-                    {membershipNotice && <div style={{ marginTop: "14px", padding: "11px 13px", borderRadius: "11px", background: "#fffbeb", color: "#92400e", fontSize: "13px", fontWeight: 800 }}>{membershipNotice}</div>}
+                    {membershipNotice && <div style={{ marginTop: "14px", padding: "11px 13px", borderRadius: "11px", background: "#eef2fc", color: "#1f5af6", fontSize: "13px", fontWeight: 800 }}>{membershipNotice}</div>}
 
                     {membershipData.membership && (
                       <div style={{ marginTop: "18px", padding: "20px", border: "1px solid #fde68a", borderRadius: "18px", background: "#fff" }}>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "15px", flexWrap: "wrap" }}>
                           <div>
-                            <div style={{ color: "#a16207", fontSize: "11px", fontWeight: 900, letterSpacing: "1px" }}>CURRENT MEMBERSHIP</div>
+                            <div style={{ color: "#1f5af6", fontSize: "11px", fontWeight: 900, letterSpacing: "1px" }}>CURRENT MEMBERSHIP</div>
                             <h3 style={{ margin: "6px 0", color: "#0f172a", fontSize: "26px" }}>{membershipData.membership.plan_name}</h3>
                             <div style={{ color: "#64748b", fontSize: "13px" }}>Status: <strong style={{ color: "#15803d" }}>{membershipData.membership.status}</strong></div>
                             {membershipData.membership.expires_at && <div style={{ color: "#64748b", fontSize: "12px", marginTop: "5px" }}>Next renewal / expiry: {new Date(membershipData.membership.expires_at).toLocaleDateString("en-IN")}</div>}
                           </div>
-                          <div style={{ padding: "10px 14px", borderRadius: "12px", background: "#fffbeb", textAlign: "right" }}>
-                            <div style={{ color: "#92400e", fontSize: "11px", fontWeight: 900 }}>AUTO RENEWAL</div>
-                            <div style={{ fontWeight: 900, color: membershipData.membership.auto_renew ? "#15803d" : "#b45309", marginTop: "4px" }}>{membershipData.membership.auto_renew ? "ON" : "OFF"}</div>
+                          <div style={{ padding: "10px 14px", borderRadius: "12px", background: "#eef2fc", textAlign: "right" }}>
+                            <div style={{ color: "#1f5af6", fontSize: "11px", fontWeight: 900 }}>AUTO RENEWAL</div>
+                            <div style={{ fontWeight: 900, color: membershipData.membership.auto_renew ? "#15803d" : "#1f5af6", marginTop: "4px" }}>{membershipData.membership.auto_renew ? "ON" : "OFF"}</div>
                           </div>
                         </div>
 
                         <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", marginTop: "18px" }}>
-                          <button type="button" onClick={() => updateAutoRenew(!membershipData.membership.auto_renew)} disabled={membershipActionLoading === "renewal"} style={{ border: "1px solid #fcd34d", borderRadius: "9px", padding: "10px 14px", background: "#fff", color: "#92400e", fontWeight: 900, cursor: "pointer" }}>
+                          <button type="button" onClick={() => updateAutoRenew(!membershipData.membership.auto_renew)} disabled={membershipActionLoading === "renewal"} style={{ border: "1px solid #5881f1", borderRadius: "9px", padding: "10px 14px", background: "#fff", color: "#1f5af6", fontWeight: 900, cursor: "pointer" }}>
                             {membershipActionLoading === "renewal" ? "Updating..." : membershipData.membership.auto_renew ? "Turn auto-renew OFF" : "Turn auto-renew ON"}
                           </button>
                           <button type="button" onClick={cancelMembership} disabled={membershipActionLoading === "cancel"} style={{ border: 0, borderRadius: "9px", padding: "10px 14px", background: "#dc2626", color: "#fff", fontWeight: 900, cursor: "pointer" }}>
@@ -17353,7 +17354,7 @@ const removeNotification = async (notificationId) => {
                           </button>
                         </div>
 
-                        <div style={{ marginTop: "18px", paddingTop: "16px", borderTop: "1px solid #fef3c7" }}>
+                        <div style={{ marginTop: "18px", paddingTop: "16px", borderTop: "1px solid #ecf1fb" }}>
                           <strong style={{ color: "#334155" }}>Your benefits</strong>
                           <div style={{ display: "grid", gap: "8px", marginTop: "10px" }}>
                             {(membershipData.membership.benefits || []).map((benefit, index) => (
@@ -17367,23 +17368,23 @@ const removeNotification = async (notificationId) => {
                     <div style={{ marginTop: "20px" }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap", marginBottom: "12px" }}>
                         <div><strong style={{ fontSize: "21px", color: "#0f172a" }}>{membershipData.membership ? "Change or upgrade your plan" : "Choose your HOWDI membership"}</strong><div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>Explore available membership benefits.</div></div>
-                        <button type="button" onClick={loadMembershipCenter} disabled={membershipLoading} style={{ border: "1px solid #fde68a", borderRadius: "9px", padding: "9px 12px", background: "#fff", color: "#a16207", fontWeight: 900, cursor: "pointer" }}>{membershipLoading ? "Loading..." : "↻ Refresh"}</button>
+                        <button type="button" onClick={loadMembershipCenter} disabled={membershipLoading} style={{ border: "1px solid #fde68a", borderRadius: "9px", padding: "9px 12px", background: "#fff", color: "#1f5af6", fontWeight: 900, cursor: "pointer" }}>{membershipLoading ? "Loading..." : "↻ Refresh"}</button>
                       </div>
 
                       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(280px,1fr))", gap: "16px" }}>
                         {membershipPlans.map((plan) => {
                           const active = membershipData.membership?.plan_code === plan.plan_code && membershipData.membership?.status === "ACTIVE";
                           return (
-                            <div key={plan.plan_code} style={{ padding: "22px", border: active ? "2px solid #ca8a04" : "1px solid #e2e8f0", borderRadius: "19px", background: active ? "#fffbeb" : "#fff", position: "relative" }}>
-                              {active && <div style={{ position: "absolute", top: "14px", right: "14px", fontSize: "10px", fontWeight: 900, color: "#92400e", background: "#fef3c7", padding: "5px 8px", borderRadius: "999px" }}>CURRENT PLAN</div>}
-                              <div style={{ fontSize: "12px", color: "#a16207", fontWeight: 900, letterSpacing: "1px" }}>{plan.plan_code.replace("HOWDI_", "HOWDI ")}</div>
+                            <div key={plan.plan_code} style={{ padding: "22px", border: active ? "2px solid #1145d4" : "1px solid #e2e8f0", borderRadius: "19px", background: active ? "#eef2fc" : "#fff", position: "relative" }}>
+                              {active && <div style={{ position: "absolute", top: "14px", right: "14px", fontSize: "10px", fontWeight: 900, color: "#1f5af6", background: "#ecf1fb", padding: "5px 8px", borderRadius: "999px" }}>CURRENT PLAN</div>}
+                              <div style={{ fontSize: "12px", color: "#1f5af6", fontWeight: 900, letterSpacing: "1px" }}>{plan.plan_code.replace("HOWDI_", "HOWDI ")}</div>
                               <h3 style={{ margin: "8px 0 6px", color: "#0f172a", fontSize: "25px" }}>{plan.name}</h3>
                               <p style={{ color: "#64748b", fontSize: "13px", minHeight: "42px", lineHeight: 1.5 }}>{plan.description}</p>
                               <div style={{ margin: "16px 0", color: "#0f172a" }}><strong style={{ fontSize: "29px" }}>₹{Number(plan.price).toFixed(0)}</strong><span style={{ color: "#64748b", fontSize: "12px" }}> / {String(plan.billing_cycle).toLowerCase()}</span></div>
                               <div style={{ display: "grid", gap: "8px", marginBottom: "18px" }}>
                                 {(plan.benefits || []).map((benefit, index) => <div key={index} style={{ color: "#475569", fontSize: "12px" }}>✓ {benefit}</div>)}
                               </div>
-                              <button type="button" onClick={() => subscribeMembership(plan.plan_code)} disabled={active || membershipActionLoading === plan.plan_code} style={{ width: "100%", border: 0, borderRadius: "10px", padding: "12px", background: active ? "#94a3b8" : "#a16207", color: "#fff", fontWeight: 900, cursor: active ? "default" : "pointer" }}>
+                              <button type="button" onClick={() => subscribeMembership(plan.plan_code)} disabled={active || membershipActionLoading === plan.plan_code} style={{ width: "100%", border: 0, borderRadius: "10px", padding: "12px", background: active ? "#94a3b8" : "#1145d4", color: "#fff", fontWeight: 900, cursor: active ? "default" : "pointer" }}>
                                 {membershipActionLoading === plan.plan_code ? "Activating..." : active ? "Current membership" : membershipData.membership ? "Switch to this plan" : "Join membership"}
                               </button>
                             </div>
@@ -17422,7 +17423,7 @@ const removeNotification = async (notificationId) => {
                         <div style={{ fontSize: "34px", fontWeight: 900, color: "#0f172a", marginTop: "8px" }}>₹{Number(giftWallet.store_credit?.balance ?? 0).toFixed(2)}</div>
                         <div style={{ fontSize: "12px", color: "#64748b", marginTop: "5px" }}>Ready to use with eligible HOWDI purchases.</div>
                       </div>
-                      <div style={{ padding: "20px", border: "1px solid #ccfbf1", borderRadius: "18px", background: "#f0fdfa" }}>
+                      <div style={{ padding: "20px", border: "1px solid #ccfbf1", borderRadius: "18px", background: "#f1f4fc" }}>
                         <div style={{ fontSize: "28px" }}>🎫</div>
                         <div style={{ fontSize: "23px", fontWeight: 900, color: "#134e4a", marginTop: "6px" }}>{giftWallet.gift_cards.length}</div>
                         <div style={{ fontSize: "12px", color: "#64748b" }}>Gift cards on your account</div>
@@ -17459,7 +17460,7 @@ const removeNotification = async (notificationId) => {
                       </div>
 
                       {giftWallet.gift_cards.length === 0 ? (
-                        <div style={{ padding: "28px", textAlign: "center", border: "1px dashed #99f6e4", borderRadius: "15px", background: "#f0fdfa", color: "#64748b" }}>
+                        <div style={{ padding: "28px", textAlign: "center", border: "1px dashed #99f6e4", borderRadius: "15px", background: "#f1f4fc", color: "#64748b" }}>
                           <div style={{ fontSize: "38px" }}>🎁</div><strong style={{ display: "block", color: "#334155", marginTop: "8px" }}>No gift cards yet</strong><span style={{ fontSize: "12px" }}>Gift cards assigned to your HOWDI account will appear here.</span>
                         </div>
                       ) : (
@@ -17574,12 +17575,12 @@ const removeNotification = async (notificationId) => {
                         <h3 style={{ fontSize: "28px", margin: "6px 0" }}>How can we help? 🆘</h3>
                         <p style={{ color: "#64748b", margin: 0 }}>Find quick answers or contact the HOWDI support team.</p>
                       </div>
-                      <button type="button" onClick={() => setSupportTicketOpen((open) => !open)} style={{ border: 0, borderRadius: "11px", padding: "12px 16px", background: "#365947", color: "#fff", fontWeight: 900, cursor: "pointer" }}>{supportTicketOpen ? "✕ Close" : "+ Contact support"}</button>
+                      <button type="button" onClick={() => setSupportTicketOpen((open) => !open)} style={{ border: 0, borderRadius: "11px", padding: "12px 16px", background: "#1f5af6", color: "#fff", fontWeight: 900, cursor: "pointer" }}>{supportTicketOpen ? "✕ Close" : "+ Contact support"}</button>
                     </div>
 
                     {supportNotice && <p role="status">{supportNotice}</p>}
                     {supportTicketOpen && (
-                      <div style={{ padding: "18px", border: "1px solid #dbe3dc", borderRadius: "18px", background: "#f8faf8", marginBottom: "18px" }}>
+                      <div style={{ padding: "18px", border: "1px solid #d8dce6", borderRadius: "18px", background: "#f7f8fb", marginBottom: "18px" }}>
                         <div style={{ fontWeight: 900, fontSize: "17px", marginBottom: "10px" }}>Create a support request</div>
                         <div style={{ display: "grid", gap: "10px" }}>
                           <input value={supportSubject} onChange={(e) => setSupportSubject(e.target.value)} placeholder="What do you need help with?" style={{ width: "100%", height: "44px", boxSizing: "border-box", border: "1px solid #cbd5e1", borderRadius: "10px", padding: "0 12px", background: "#fff" }} />
@@ -17590,8 +17591,8 @@ const removeNotification = async (notificationId) => {
                     )}
 
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 220px", gap: "12px", marginBottom: "16px" }}>
-                      <input value={supportSearch} onChange={(e) => setSupportSearch(e.target.value)} placeholder="🔎 Search help" style={{ width: "100%", height: "44px", boxSizing: "border-box", border: "1px solid #dbe3dc", borderRadius: "12px", padding: "0 13px", background: "#fff" }} />
-                      <select value={supportCategory} onChange={(e) => setSupportCategory(e.target.value)} style={{ height: "44px", border: "1px solid #dbe3dc", borderRadius: "12px", padding: "0 12px", background: "#fff", fontWeight: 700, color: "#334155" }}>
+                      <input value={supportSearch} onChange={(e) => setSupportSearch(e.target.value)} placeholder="🔎 Search help" style={{ width: "100%", height: "44px", boxSizing: "border-box", border: "1px solid #d8dce6", borderRadius: "12px", padding: "0 13px", background: "#fff" }} />
+                      <select value={supportCategory} onChange={(e) => setSupportCategory(e.target.value)} style={{ height: "44px", border: "1px solid #d8dce6", borderRadius: "12px", padding: "0 12px", background: "#fff", fontWeight: 700, color: "#334155" }}>
                         {supportFaqCategories.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                       </select>
                     </div>
@@ -17614,7 +17615,7 @@ const removeNotification = async (notificationId) => {
                         <div style={{ border: "1px solid #e2e8f0", borderRadius: "15px", overflow: "hidden", background: "#fff" }}>
                           {supportTickets.length ? supportTickets.map((ticket) => (
                             <div key={ticket.id} style={{ padding: "13px 14px", borderBottom: "1px solid #eef2f4" }}>
-                              <div style={{ display: "flex", justifyContent: "space-between", gap: "8px" }}><strong>{ticket.subject}</strong><span style={{ fontSize: "11px", color: "#365947", fontWeight: 900 }}>{ticket.status}</span></div>
+                              <div style={{ display: "flex", justifyContent: "space-between", gap: "8px" }}><strong>{ticket.subject}</strong><span style={{ fontSize: "11px", color: "#22304f", fontWeight: 900 }}>{ticket.status}</span></div>
                               <div style={{ color: "#64748b", fontSize: "12px", marginTop: "5px" }}>{ticket.id} · {ticket.date}</div>
                               <div style={{ color: "#64748b", fontSize: "13px", marginTop: "6px" }}>{ticket.message}</div>
                             </div>
@@ -17668,13 +17669,13 @@ const removeNotification = async (notificationId) => {
 
                 {false && profileTab === "connect" && (
                   <div>
-                    <div style={{ padding: "24px", borderRadius: "22px", background: "linear-gradient(135deg, #10251b 0%, #365947 55%, #5c7f69 100%)", color: "#fff", boxShadow: "0 20px 45px rgba(54,89,71,.18)" }}>
+                    <div style={{ padding: "24px", borderRadius: "22px", background: "linear-gradient(135deg, #0f1e50 0%, #1f5af6 55%, #415c9a 100%)", color: "#fff", boxShadow: "0 20px 45px rgba(39,64,134,.18)" }}>
                       <div style={{ fontSize: "12px", fontWeight: 900, letterSpacing: "1.4px", opacity: .76 }}>HOWDI CONNECT · LIVE COMMUNITY</div>
                       <h3 style={{ fontSize: "30px", margin: "8px 0 7px" }}>Connect. Share. Discover. 🔗</h3>
                       <p style={{ margin: 0, maxWidth: "680px", lineHeight: 1.65, opacity: .88 }}>Share useful local discoveries, work, shopping ideas, learning moments and community updates with HOWDI.</p>
                     </div>
 
-                    <div style={{ marginTop: "18px", padding: "18px", border: "1px solid #dbe7de", borderRadius: "18px", background: "#fff", boxShadow: "0 8px 24px rgba(15,23,42,.05)" }}>
+                    <div style={{ marginTop: "18px", padding: "18px", border: "1px solid #d8ddea", borderRadius: "18px", background: "#fff", boxShadow: "0 8px 24px rgba(15,23,42,.05)" }}>
                       <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>
                         <strong style={{ fontSize: "17px", color: "#0f172a" }}>✨ Share with the HOWDI community</strong>
                         <select value={connectCategory} onChange={(e) => setConnectCategory(e.target.value)} style={{ border: "1px solid #cbd5e1", borderRadius: "10px", padding: "9px 11px", background: "#fff", color: "#0f172a", fontWeight: 700 }}>
@@ -17684,9 +17685,9 @@ const removeNotification = async (notificationId) => {
                       <textarea value={connectComposer} onChange={(e) => setConnectComposer(e.target.value)} maxLength={2000} placeholder="What would you like to share with the HOWDI community?" style={{ width: "100%", minHeight: "110px", marginTop: "12px", boxSizing: "border-box", border: "1px solid #cbd5e1", borderRadius: "14px", padding: "13px", resize: "vertical", fontFamily: "inherit", fontSize: "14px" }} />
                       <div style={{ marginTop: "10px", display: "flex", justifyContent: "space-between", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>
                         <span style={{ color: "#64748b", fontSize: "12px" }}>{connectComposer.length}/2000 · Community posts should be useful and respectful.</span>
-                        <button type="button" onClick={publishConnectPost} disabled={connectPosting} style={{ border: 0, borderRadius: "10px", padding: "10px 16px", background: "#365947", color: "#fff", fontWeight: 900, cursor: connectPosting ? "wait" : "pointer", opacity: connectPosting ? .7 : 1 }}>{connectPosting ? "Publishing..." : "Publish to Connect →"}</button>
+                        <button type="button" onClick={publishConnectPost} disabled={connectPosting} style={{ border: 0, borderRadius: "10px", padding: "10px 16px", background: "#1f5af6", color: "#fff", fontWeight: 900, cursor: connectPosting ? "wait" : "pointer", opacity: connectPosting ? .7 : 1 }}>{connectPosting ? "Publishing..." : "Publish to Connect →"}</button>
                       </div>
-                      {connectNotice && <div style={{ marginTop: "12px", padding: "10px 12px", borderRadius: "10px", background: "#f1f7f2", color: "#365947", fontSize: "13px", fontWeight: 700 }}>{connectNotice}</div>}
+                      {connectNotice && <div style={{ marginTop: "12px", padding: "10px 12px", borderRadius: "10px", background: "#eff2f9", color: "#22304f", fontSize: "13px", fontWeight: 700 }}>{connectNotice}</div>}
                     </div>
 
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: "12px", marginTop: "18px" }}>
@@ -17697,7 +17698,7 @@ const removeNotification = async (notificationId) => {
                         ["🔐", "Privacy-first", "Community activity stays tied to HOWDI accounts", "Live"],
                       ].map(([icon, title, textValue, value]) => (
                         <div key={title} style={{ padding: "15px", border: "1px solid #e2e8f0", borderRadius: "16px", background: "#fff" }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", gap: "8px" }}><span style={{ fontSize: "23px" }}>{icon}</span><strong style={{ color: "#365947", fontSize: "13px" }}>{value}</strong></div>
+                          <div style={{ display: "flex", justifyContent: "space-between", gap: "8px" }}><span style={{ fontSize: "23px" }}>{icon}</span><strong style={{ color: "#22304f", fontSize: "13px" }}>{value}</strong></div>
                           <strong style={{ display: "block", marginTop: "10px", color: "#0f172a" }}>{title}</strong>
                           <span style={{ display: "block", marginTop: "4px", color: "#64748b", fontSize: "12px", lineHeight: 1.45 }}>{textValue}</span>
                         </div>
@@ -17707,7 +17708,7 @@ const removeNotification = async (notificationId) => {
                     <div style={{ marginTop: "18px" }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", marginBottom: "12px", flexWrap: "wrap" }}>
                         <div><strong style={{ fontSize: "20px", color: "#0f172a" }}>🌐 Community feed</strong><div style={{ color: "#64748b", fontSize: "13px", marginTop: "4px" }}>Live posts from HOWDI customers.</div></div>
-                        <button type="button" onClick={loadConnectFeed} disabled={connectLoading} style={{ border: "1px solid #b7cdbf", borderRadius: "10px", padding: "9px 13px", background: "#fff", color: "#365947", fontWeight: 900, cursor: "pointer" }}>{connectLoading ? "Refreshing..." : "↻ Refresh"}</button>
+                        <button type="button" onClick={loadConnectFeed} disabled={connectLoading} style={{ border: "1px solid #b1bbd3", borderRadius: "10px", padding: "9px 13px", background: "#fff", color: "#22304f", fontWeight: 900, cursor: "pointer" }}>{connectLoading ? "Refreshing..." : "↻ Refresh"}</button>
                       </div>
 
                       {connectLoading && <div style={{ padding: "22px", textAlign: "center", color: "#64748b" }}>Loading HOWDI Connect...</div>}
@@ -17725,18 +17726,18 @@ const removeNotification = async (notificationId) => {
                           <div key={post.id} style={{ padding: "18px", border: "1px solid #e2e8f0", borderRadius: "18px", background: "#fff", boxShadow: "0 8px 22px rgba(15,23,42,.04)" }}>
                             <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", alignItems: "flex-start" }}>
                               <div style={{ display: "flex", gap: "10px", minWidth: 0 }}>
-                                <div style={{ width: "42px", height: "42px", borderRadius: "50%", overflow: "hidden", background: "#eaf1ec", display: "grid", placeItems: "center", flexShrink: 0, fontWeight: 900, color: "#365947" }}>
+                                <div style={{ width: "42px", height: "42px", borderRadius: "50%", overflow: "hidden", background: "#e7ebf4", display: "grid", placeItems: "center", flexShrink: 0, fontWeight: 900, color: "#22304f" }}>
                                   {post.profile_image ? <img src={post.profile_image} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : String(post.full_name || "H").slice(0, 1).toUpperCase()}
                                 </div>
                                 <div><strong style={{ color: "#0f172a" }}>{post.full_name || "HOWDI Member"}</strong><div style={{ color: "#64748b", fontSize: "12px", marginTop: "2px" }}>{post.public_username ? `@${post.public_username}` : "HOWDI member"} · {formatConnectDate(post.created_at)}</div></div>
                               </div>
-                              <span style={{ padding: "5px 8px", borderRadius: "999px", background: "#f1f7f2", color: "#365947", fontSize: "10px", fontWeight: 900 }}>{post.category}</span>
+                              <span style={{ padding: "5px 8px", borderRadius: "999px", background: "#eff2f9", color: "#22304f", fontSize: "10px", fontWeight: 900 }}>{post.category}</span>
                             </div>
                             <div style={{ marginTop: "14px", color: "#1f2937", whiteSpace: "pre-wrap", lineHeight: 1.65 }}>{post.content}</div>
-                            {post.media_data&&<img src={post.media_data} alt="HOWDI Connect post" style={{display:"block",width:"100%",maxHeight:560,objectFit:"contain",marginTop:12,borderRadius:16,background:"#f5f7f5"}}/>}
+                            {post.media_data&&<img src={post.media_data} alt="HOWDI Connect post" style={{display:"block",width:"100%",maxHeight:560,objectFit:"contain",marginTop:12,borderRadius:16,background:"#f4f5f8"}}/>}
                             <div style={{ marginTop: "15px", paddingTop: "12px", borderTop: "1px solid #edf0f2", display: "flex", gap: "9px", flexWrap: "wrap" }}>
-                              <button type="button" onClick={() => toggleConnectReaction(post.id)} style={{ border: "1px solid #dbe3dc", borderRadius: "999px", padding: "8px 12px", background: post.reacted_by_viewer ? "#eef7f0" : "#fff", color: post.reacted_by_viewer ? "#365947" : "#475569", fontWeight: 800, cursor: "pointer" }}>{post.reacted_by_viewer ? "❤️ Liked" : "🤍 Like"} {Number(post.reaction_count || 0) > 0 ? `(${post.reaction_count})` : ""}</button>
-                              <button type="button" onClick={() => openConnectComments(post)} style={{ border: "1px solid #dbe3dc", borderRadius: "999px", padding: "8px 12px", background: "#fff", color: "#475569", fontWeight: 800, cursor: "pointer" }}>💬 Comment {Number(post.comment_count || 0) > 0 ? `(${post.comment_count})` : ""}</button>
+                              <button type="button" onClick={() => toggleConnectReaction(post.id)} style={{ border: "1px solid #d8dce6", borderRadius: "999px", padding: "8px 12px", background: post.reacted_by_viewer ? "#ecf0f9" : "#fff", color: post.reacted_by_viewer ? "#22304f" : "#475569", fontWeight: 800, cursor: "pointer" }}>{post.reacted_by_viewer ? "❤️ Liked" : "🤍 Like"} {Number(post.reaction_count || 0) > 0 ? `(${post.reaction_count})` : ""}</button>
+                              <button type="button" onClick={() => openConnectComments(post)} style={{ border: "1px solid #d8dce6", borderRadius: "999px", padding: "8px 12px", background: "#fff", color: "#475569", fontWeight: 800, cursor: "pointer" }}>💬 Comment {Number(post.comment_count || 0) > 0 ? `(${post.comment_count})` : ""}</button>
                             </div>
                           </div>
                         ))}
@@ -17758,7 +17759,7 @@ const removeNotification = async (notificationId) => {
                           </div>
                           <div style={{ marginTop: "16px", display: "flex", gap: "8px" }}>
                             <input value={connectCommentText} onChange={(e) => setConnectCommentText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") submitConnectComment(); }} placeholder="Write a comment..." style={{ flex: 1, minWidth: 0, border: "1px solid #cbd5e1", borderRadius: "10px", padding: "11px" }} />
-                            <button type="button" onClick={submitConnectComment} disabled={connectCommentsLoading} style={{ border: 0, borderRadius: "10px", padding: "10px 14px", background: "#365947", color: "#fff", fontWeight: 900, cursor: "pointer" }}>Send</button>
+                            <button type="button" onClick={submitConnectComment} disabled={connectCommentsLoading} style={{ border: 0, borderRadius: "10px", padding: "10px 14px", background: "#1f5af6", color: "#fff", fontWeight: 900, cursor: "pointer" }}>Send</button>
                           </div>
                         </div>
                       </div>
@@ -17771,17 +17772,17 @@ const removeNotification = async (notificationId) => {
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "18px", flexWrap: "wrap", marginBottom: "22px" }}>
                       <div>
                         <div style={{ fontSize: "12px", fontWeight: 800, letterSpacing: "1px", color: "#64748b" }}>HOWDI MESSAGES</div>
-                        <h3 style={{ fontSize: "28px", margin: "6px 0" }}>Your messages {unreadMessageCount > 0 && <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", minWidth: "28px", height: "28px", padding: "0 7px", borderRadius: "999px", background: "#365947", color: "#fff", fontSize: "13px", verticalAlign: "middle" }}>{unreadMessageCount}</span>}</h3>
+                        <h3 style={{ fontSize: "28px", margin: "6px 0" }}>Your messages {unreadMessageCount > 0 && <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", minWidth: "28px", height: "28px", padding: "0 7px", borderRadius: "999px", background: "#1f5af6", color: "#fff", fontSize: "13px", verticalAlign: "middle" }}>{unreadMessageCount}</span>}</h3>
                         <p style={{ color: "#64748b", margin: 0 }}>Stay updated with orders, offers, wallet activity and HOWDI support.</p>
                       </div>
                       <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                        <button type="button" onClick={markAllMessagesRead} disabled={!unreadMessageCount} style={{ border: "1px solid #dbe3dc", borderRadius: "10px", padding: "10px 13px", background: "#fff", color: unreadMessageCount ? "#365947" : "#94a3b8", fontWeight: 800, cursor: unreadMessageCount ? "pointer" : "not-allowed" }}>✓ Mark all read</button>
-                        <button type="button" onClick={() => setMessageComposeOpen((open) => !open)} style={{ border: 0, borderRadius: "10px", padding: "10px 15px", background: "#365947", color: "#fff", fontWeight: 900, cursor: "pointer" }}>{messageComposeOpen ? "✕ Close" : "+ New message"}</button>
+                        <button type="button" onClick={markAllMessagesRead} disabled={!unreadMessageCount} style={{ border: "1px solid #d8dce6", borderRadius: "10px", padding: "10px 13px", background: "#fff", color: unreadMessageCount ? "#22304f" : "#94a3b8", fontWeight: 800, cursor: unreadMessageCount ? "pointer" : "not-allowed" }}>✓ Mark all read</button>
+                        <button type="button" onClick={() => setMessageComposeOpen((open) => !open)} style={{ border: 0, borderRadius: "10px", padding: "10px 15px", background: "#1f5af6", color: "#fff", fontWeight: 900, cursor: "pointer" }}>{messageComposeOpen ? "✕ Close" : "+ New message"}</button>
                       </div>
                     </div>
 
                     {messageComposeOpen && (
-                      <div style={{ padding: "18px", border: "1px solid #dbe3dc", borderRadius: "18px", background: "#f8faf8", marginBottom: "16px" }}>
+                      <div style={{ padding: "18px", border: "1px solid #d8dce6", borderRadius: "18px", background: "#f7f8fb", marginBottom: "16px" }}>
                         <div style={{ display: "grid", gap: "10px" }}>
                           <input value={messageRecipient} onChange={(e) => setMessageRecipient(e.target.value)} placeholder="Recipient / support team" style={{ width: "100%", height: "44px", boxSizing: "border-box", border: "1px solid #cbd5e1", borderRadius: "10px", padding: "0 12px", background: "#fff" }} />
                           <textarea value={messageBody} onChange={(e) => setMessageBody(e.target.value)} placeholder="Write your message..." rows={3} style={{ width: "100%", boxSizing: "border-box", border: "1px solid #cbd5e1", borderRadius: "10px", padding: "12px", background: "#fff", resize: "vertical", fontFamily: "inherit" }} />
@@ -17791,8 +17792,8 @@ const removeNotification = async (notificationId) => {
                     )}
 
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 220px", gap: "12px", marginBottom: "16px" }}>
-                      <input value={messageSearch} onChange={(e) => setMessageSearch(e.target.value)} placeholder="🔎 Search messages" style={{ width: "100%", height: "44px", boxSizing: "border-box", border: "1px solid #dbe3dc", borderRadius: "12px", padding: "0 13px", background: "#fff" }} />
-                      <select value={messageFilter} onChange={(e) => setMessageFilter(e.target.value)} style={{ height: "44px", border: "1px solid #dbe3dc", borderRadius: "12px", padding: "0 12px", background: "#fff", fontWeight: 700, color: "#334155" }}>
+                      <input value={messageSearch} onChange={(e) => setMessageSearch(e.target.value)} placeholder="🔎 Search messages" style={{ width: "100%", height: "44px", boxSizing: "border-box", border: "1px solid #d8dce6", borderRadius: "12px", padding: "0 13px", background: "#fff" }} />
+                      <select value={messageFilter} onChange={(e) => setMessageFilter(e.target.value)} style={{ height: "44px", border: "1px solid #d8dce6", borderRadius: "12px", padding: "0 12px", background: "#fff", fontWeight: 700, color: "#334155" }}>
                         <option value="all">All messages</option>
                         <option value="unread">Unread</option>
                         <option value="order">Orders</option>
@@ -17809,16 +17810,16 @@ const removeNotification = async (notificationId) => {
                     ) : (
                       <div style={{ display: "grid", gap: "10px" }}>
                         {filteredMessages.map((item) => (
-                          <div key={item.id} style={{ display: "flex", alignItems: "flex-start", gap: "13px", padding: "16px", border: item.unread ? "1px solid #b7cdbf" : "1px solid #e2e8f0", borderRadius: "16px", background: item.unread ? "#f8faf8" : "#fff", boxShadow: item.unread ? "0 5px 16px rgba(54,89,71,.06)" : "none" }}>
-                            <div style={{ width: "44px", height: "44px", flex: "0 0 44px", borderRadius: "13px", display: "flex", alignItems: "center", justifyContent: "center", background: item.unread ? "#e5f2e9" : "#f1f5f9", fontSize: "22px" }}>{item.icon}</div>
+                          <div key={item.id} style={{ display: "flex", alignItems: "flex-start", gap: "13px", padding: "16px", border: item.unread ? "1px solid #b1bbd3" : "1px solid #e2e8f0", borderRadius: "16px", background: item.unread ? "#f7f8fb" : "#fff", boxShadow: item.unread ? "0 5px 16px rgba(39,64,134,.06)" : "none" }}>
+                            <div style={{ width: "44px", height: "44px", flex: "0 0 44px", borderRadius: "13px", display: "flex", alignItems: "center", justifyContent: "center", background: item.unread ? "#e2e8f5" : "#f1f5f9", fontSize: "22px" }}>{item.icon}</div>
                             <div style={{ minWidth: 0, flex: 1 }}>
                               <div style={{ display: "flex", justifyContent: "space-between", gap: "10px", alignItems: "flex-start" }}>
-                                <div style={{ fontWeight: item.unread ? 900 : 800 }}>{item.title}{item.unread && <span style={{ display: "inline-block", width: "7px", height: "7px", borderRadius: "50%", background: "#365947", marginLeft: "7px", verticalAlign: "middle" }} />}</div>
+                                <div style={{ fontWeight: item.unread ? 900 : 800 }}>{item.title}{item.unread && <span style={{ display: "inline-block", width: "7px", height: "7px", borderRadius: "50%", background: "#1f5af6", marginLeft: "7px", verticalAlign: "middle" }} />}</div>
                                 <div style={{ color: "#94a3b8", fontSize: "11px", whiteSpace: "nowrap" }}>{item.date}</div>
                               </div>
                               <div style={{ color: "#64748b", fontSize: "13px", lineHeight: 1.5, marginTop: "5px" }}>{item.text}</div>
                               <div style={{ display: "flex", gap: "8px", marginTop: "10px" }}>
-                                {item.unread && <button type="button" onClick={() => markMessageRead(item.id)} style={{ border: 0, borderRadius: "8px", padding: "7px 10px", background: "#e7f2eb", color: "#365947", fontWeight: 800, cursor: "pointer", fontSize: "12px" }}>Mark read</button>}
+                                {item.unread && <button type="button" onClick={() => markMessageRead(item.id)} style={{ border: 0, borderRadius: "8px", padding: "7px 10px", background: "#e4e9f5", color: "#22304f", fontWeight: 800, cursor: "pointer", fontSize: "12px" }}>Mark read</button>}
                                 <button type="button" onClick={() => deleteMessage(item.id)} style={{ border: "1px solid #fecaca", borderRadius: "8px", padding: "7px 10px", background: "#fff", color: "#b91c1c", fontWeight: 800, cursor: "pointer", fontSize: "12px" }}>Delete</button>
                               </div>
                             </div>
@@ -17837,7 +17838,7 @@ const removeNotification = async (notificationId) => {
                   <div style={{ display: "grid", gap: "14px", marginTop: "20px" }}>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "14px", padding: "14px", border: "1px solid #e2e8f0", borderRadius: "14px", background: "#f8fafc", flexWrap: "wrap" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: "12px", minWidth: 0 }}>
-                        <div style={{ width: "58px", height: "58px", borderRadius: "50%", overflow: "hidden", background: "#e8f0ea", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "24px", fontWeight: 900, color: "#365947", flex: "0 0 58px" }}>{profileAvatar ? <img src={profileAvatar} alt="Profile" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : (currentUser?.full_name || currentUser?.name || "C").charAt(0).toUpperCase()}</div>
+                        <div style={{ width: "58px", height: "58px", borderRadius: "50%", overflow: "hidden", background: "#e5e9f3", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "24px", fontWeight: 900, color: "#22304f", flex: "0 0 58px" }}>{profileAvatar ? <img src={profileAvatar} alt="Profile" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : (currentUser?.full_name || currentUser?.name || "C").charAt(0).toUpperCase()}</div>
                         <div><div style={{ fontWeight: 900, fontSize: "16px" }}>Profile picture</div><div style={{ color: "#64748b", fontSize: "12px", marginTop: "3px" }}>Add a photo like a social profile.</div></div>
                       </div>
                       <label style={{ border: "1px solid #cbd5e1", borderRadius: "10px", padding: "10px 13px", background: "#fff", fontWeight: 800, cursor: "pointer", whiteSpace: "nowrap" }}>📷 {profileAvatar ? "Change photo" : "Add photo"}<input type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => { const file = e.target.files?.[0]; if (!file) return; if (!file.type.startsWith("image/")) return; if (file.size > 3 * 1024 * 1024) { alert("Please choose an image smaller than 3 MB."); return; } const reader = new FileReader(); reader.onload = () => saveProfileMedia(String(reader.result || ""), profileStatus); reader.readAsDataURL(file); }} /></label>
@@ -17847,7 +17848,7 @@ const removeNotification = async (notificationId) => {
                     <label style={{ display: "grid", gap: "7px", fontSize: "13px", fontWeight: 800 }}>Email address<input value={currentUser?.email || ""} readOnly style={{ height: "44px", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "0 12px", fontSize: "14px", background: "#f8fafc", color: "#64748b" }} /></label>
                     <label style={{ display: "grid", gap: "7px", fontSize: "13px", fontWeight: 800 }}>Profile status<select value={profileStatus} onChange={(e) => { setProfileStatus(e.target.value); saveProfileMedia(profileAvatar, e.target.value); }} style={{ height: "44px", border: "1px solid #cbd5e1", borderRadius: "10px", padding: "0 12px", fontSize: "14px", color: "#0f172a", background: "#fff", fontWeight: 700 }}><option>Available</option><option>Busy</option><option>Away</option></select></label>
                   </div>
-                  <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "22px" }}><button type="button" onClick={() => setProfileEditOpen(false)} style={{ border: "1px solid #cbd5e1", borderRadius: "10px", padding: "10px 15px", background: "#fff", fontWeight: 800, cursor: "pointer" }}>Cancel</button><button type="submit" style={{ border: 0, borderRadius: "10px", padding: "10px 17px", background: "#365947", color: "#fff", fontWeight: 900, cursor: "pointer" }}>Save changes</button></div>
+                  <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "22px" }}><button type="button" onClick={() => setProfileEditOpen(false)} style={{ border: "1px solid #cbd5e1", borderRadius: "10px", padding: "10px 15px", background: "#fff", fontWeight: 800, cursor: "pointer" }}>Cancel</button><button type="submit" style={{ border: 0, borderRadius: "10px", padding: "10px 17px", background: "#1f5af6", color: "#fff", fontWeight: 900, cursor: "pointer" }}>Save changes</button></div>
                 </form>
               </div>
             )}
@@ -18114,15 +18115,15 @@ const removeNotification = async (notificationId) => {
         ==================================== */}
 
         {currentUser && (
-          <section style={{ padding: "24px", margin: "0 0 10px", borderBottom: "1px solid #edf1ee", background: "#fff" }}>
+          <section style={{ padding: "24px", margin: "0 0 10px", borderBottom: "1px solid #ebedf3", background: "#fff" }}>
             <div style={{ maxWidth: "1180px", margin: "0 auto" }}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: "14px", alignItems: "flex-start", flexWrap: "wrap" }}>
                 <div>
-                  <div style={{ fontSize: "11px", fontWeight: 900, letterSpacing: ".08em", color: "#9a5b1f" }}>YOUR HOWDI</div>
+                  <div style={{ fontSize: "11px", fontWeight: 900, letterSpacing: ".08em", color: "#1f5af6" }}>YOUR HOWDI</div>
                   <h2 style={{ margin: "5px 0 4px", fontSize: "26px", color: "#172033" }}>Welcome back, {customerDisplayName}! 👋</h2>
-                  <p style={{ margin: 0, color: "#64748b", fontSize: "13px" }}>Showing nearby experiences for <strong style={{ color: "#365947" }}>📍 {customerLocation}</strong></p>
+                  <p style={{ margin: 0, color: "#64748b", fontSize: "13px" }}>Showing nearby experiences for <strong style={{ color: "#22304f" }}>📍 {customerLocation}</strong></p>
                 </div>
-                <button type="button" onClick={() => setLocationPickerOpen(true)} style={{ border: "1px solid #d9e3dc", borderRadius: "11px", background: "#f7faf8", color: "#365947", padding: "10px 13px", fontWeight: 900, cursor: "pointer" }}>Change location</button>
+                <button type="button" onClick={() => setLocationPickerOpen(true)} style={{ border: "1px solid #d6dbe6", borderRadius: "11px", background: "#f6f8fb", color: "#22304f", padding: "10px 13px", fontWeight: 900, cursor: "pointer" }}>Change location</button>
               </div>
 
               <form onSubmit={submitHomeSearch} style={{ display: "flex", gap: "10px", marginTop: "18px", maxWidth: "820px" }}>
@@ -18132,7 +18133,7 @@ const removeNotification = async (notificationId) => {
                   placeholder={`Search handmade crochet in ${customerLocation}`}
                   style={{ flex: 1, minWidth: 0, height: "48px", boxSizing: "border-box", border: "1px solid #cbd5e1", borderRadius: "12px", padding: "0 14px", background: "#fff", color: "#172033", fontSize: "14px" }}
                 />
-                <button type="submit" style={{ minWidth: "112px", border: 0, borderRadius: "12px", background: "#365947", color: "#fff", fontWeight: 900, cursor: "pointer" }}>🔎 Search</button>
+                <button type="submit" style={{ minWidth: "112px", border: 0, borderRadius: "12px", background: "#1f5af6", color: "#fff", fontWeight: 900, cursor: "pointer" }}>🔎 Search</button>
               </form>
 
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(190px,1fr))", gap: "10px", marginTop: "16px" }}>
@@ -18159,31 +18160,31 @@ const removeNotification = async (notificationId) => {
         ==================================== */}
 
         {currentUser && activeSection === "search" && (
-          <section id="search" style={{ padding: "26px 24px 30px", background: "#f8faf9", borderBottom: "1px solid #e6ece8" }}>
+          <section id="search" style={{ padding: "26px 24px 30px", background: "#f7f8fb", borderBottom: "1px solid #e3e6ef" }}>
             <div style={{ maxWidth: "1180px", margin: "0 auto" }}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: "14px", alignItems: "flex-start", flexWrap: "wrap" }}>
                 <div>
-                  <div style={{ fontSize: "11px", fontWeight: 900, letterSpacing: ".08em", color: "#9a5b1f" }}>SEARCH • DISCOVER NEAR YOU</div>
+                  <div style={{ fontSize: "11px", fontWeight: 900, letterSpacing: ".08em", color: "#1f5af6" }}>SEARCH • DISCOVER NEAR YOU</div>
                   <h2 style={{ margin: "5px 0 4px", fontSize: "27px", color: "#172033" }}>Find handmade crochet & creators 🔎</h2>
-                  <p style={{ margin: 0, color: "#64748b", fontSize: "13px" }}>Results are focused on <strong style={{ color: "#365947" }}>📍 {customerLocation}</strong>.</p>
+                  <p style={{ margin: 0, color: "#64748b", fontSize: "13px" }}>Results are focused on <strong style={{ color: "#22304f" }}>📍 {customerLocation}</strong>.</p>
                 </div>
               </div>
 
               <form onSubmit={runDiscoverySearch} style={{ display: "flex", gap: "10px", marginTop: "18px" }}>
                 <input value={homeSearch} onChange={(e) => setHomeSearch(e.target.value)} placeholder={`Search in ${customerLocation}`} style={{ flex: 1, minWidth: 0, height: "48px", boxSizing: "border-box", border: "1px solid #cbd5e1", borderRadius: "12px", padding: "0 14px", background: "#fff", color: "#172033", fontSize: "14px" }} />
-                <button type="submit" style={{ minWidth: "112px", border: 0, borderRadius: "12px", background: "#365947", color: "#fff", fontWeight: 900, cursor: "pointer" }}>Search</button>
+                <button type="submit" style={{ minWidth: "112px", border: 0, borderRadius: "12px", background: "#1f5af6", color: "#fff", fontWeight: 900, cursor: "pointer" }}>Search</button>
               </form>
 
               <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "14px" }}>
                 {[['all','Everything'],['products','Crochet'],['shops','Creators']].map(([value,label]) => (
-                  <button key={value} type="button" onClick={() => setSearchType(value)} style={{ border: searchType === value ? "2px solid #365947" : "1px solid #d8e1dc", borderRadius: "999px", padding: "8px 13px", background: searchType === value ? "#edf6ef" : "#fff", color: "#172033", fontWeight: 800, cursor: "pointer" }}>{label}</button>
+                  <button key={value} type="button" onClick={() => setSearchType(value)} style={{ border: searchType === value ? "2px solid #274086" : "1px solid #d5d9e4", borderRadius: "999px", padding: "8px 13px", background: searchType === value ? "#ebeff8" : "#fff", color: "#172033", fontWeight: 800, cursor: "pointer" }}>{label}</button>
                 ))}
               </div>
 
               <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap", marginTop: "12px" }}>
                 <span style={{ fontSize: "12px", fontWeight: 900, color: "#64748b" }}>CATEGORY</span>
                 {discoveryCategories.map((category) => (
-                  <button key={category} type="button" onClick={() => setSearchCategory(category)} style={{ border: searchCategory === category ? "1px solid #365947" : "1px solid #e2e8f0", borderRadius: "9px", padding: "7px 10px", background: searchCategory === category ? "#f0f7f2" : "#fff", color: searchCategory === category ? "#365947" : "#475569", fontSize: "12px", fontWeight: 800, cursor: "pointer" }}>{category}</button>
+                  <button key={category} type="button" onClick={() => setSearchCategory(category)} style={{ border: searchCategory === category ? "1px solid #274086" : "1px solid #e2e8f0", borderRadius: "9px", padding: "7px 10px", background: searchCategory === category ? "#eef1f9" : "#fff", color: searchCategory === category ? "#22304f" : "#475569", fontSize: "12px", fontWeight: 800, cursor: "pointer" }}>{category}</button>
                 ))}
                 <select value={searchSort} onChange={(e) => setSearchSort(e.target.value)} style={{ marginLeft: "auto", border: "1px solid #cbd5e1", borderRadius: "9px", padding: "8px 10px", background: "#fff", color: "#172033", fontWeight: 700 }}>
                   <option value="relevance">Sort: Relevance</option>
@@ -18200,19 +18201,19 @@ const removeNotification = async (notificationId) => {
               {discoveryResults.length ? (
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(245px,1fr))", gap: "12px", marginTop: "12px" }}>
                   {discoveryResults.map((result, index) => (
-                    <article key={`${result.type}-${result.title}-${index}`} style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "15px", padding: "15px", boxShadow: "0 5px 16px rgba(23,32,25,.05)" }}>
+                    <article key={`${result.type}-${result.title}-${index}`} style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "15px", padding: "15px", boxShadow: "0 5px 16px rgba(39,64,134,.05)" }}>
                       <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
-                        <div style={{ width: 48, height: 48, borderRadius: 13, background: "#f4f7f5", display: "grid", placeItems: "center", fontSize: 25 }}>{result.icon}</div>
+                        <div style={{ width: 48, height: 48, borderRadius: 13, background: "#f3f4f8", display: "grid", placeItems: "center", fontSize: 25 }}>{result.icon}</div>
                         <div style={{ minWidth: 0, flex: 1 }}>
-                          <div style={{ fontSize: "11px", fontWeight: 900, color: "#9a5b1f", textTransform: "uppercase" }}>{result.type}</div>
+                          <div style={{ fontSize: "11px", fontWeight: 900, color: "#1f5af6", textTransform: "uppercase" }}>{result.type}</div>
                           <strong style={{ display: "block", marginTop: 2, color: "#172033" }}>{result.title}</strong>
                           <div style={{ marginTop: 3, fontSize: "12px", color: "#64748b" }}>{result.subtitle}</div>
                         </div>
                       </div>
                       <div style={{ marginTop: 12, fontSize: "12px", color: "#475569", fontWeight: 800 }}>{result.meta}</div>
-                      {result.type === "product" && <button type="button" onClick={() => openProductDetails(result.item)} style={{ width: "100%", marginTop: 12, border: 0, borderRadius: 10, padding: "10px", background: "#365947", color: "#fff", fontWeight: 900, cursor: "pointer" }}>View product</button>}
-                      {result.type === "shop" && <button type="button" onClick={() => { setShopSearch(result.title); navigate("shop"); }} style={{ width: "100%", marginTop: 12, border: "1px solid #365947", borderRadius: 10, padding: "10px", background: "#f7faf8", color: "#365947", fontWeight: 900, cursor: "pointer" }}>View shop products</button>}
-                      {result.type === "worker" && <button type="button" onClick={() => openWorksExperience("find")} style={{ width: "100%", marginTop: 12, border: "1px solid #365947", borderRadius: 10, padding: "10px", background: "#f7faf8", color: "#365947", fontWeight: 900, cursor: "pointer" }}>View workers</button>}
+                      {result.type === "product" && <button type="button" onClick={() => openProductDetails(result.item)} style={{ width: "100%", marginTop: 12, border: 0, borderRadius: 10, padding: "10px", background: "#1f5af6", color: "#fff", fontWeight: 900, cursor: "pointer" }}>View product</button>}
+                      {result.type === "shop" && <button type="button" onClick={() => { setShopSearch(result.title); navigate("shop"); }} style={{ width: "100%", marginTop: 12, border: "1px solid #274086", borderRadius: 10, padding: "10px", background: "#f6f8fb", color: "#22304f", fontWeight: 900, cursor: "pointer" }}>View shop products</button>}
+                      {result.type === "worker" && <button type="button" onClick={() => openWorksExperience("find")} style={{ width: "100%", marginTop: 12, border: "1px solid #274086", borderRadius: 10, padding: "10px", background: "#f6f8fb", color: "#22304f", fontWeight: 900, cursor: "pointer" }}>View workers</button>}
                     </article>
                   ))}
                 </div>
@@ -18547,31 +18548,31 @@ const removeNotification = async (notificationId) => {
                 {["Requested","Worker accepts","Journey","Arrival","Job PIN","Work","Confirm","Pay","Review"].map((x,i)=><span key={x}><b>{i+1}</b>{x}</span>)}
               </div>
 
-                    <section style={{ marginBottom:"22px", border:"1px solid #dbe7df", borderRadius:"22px", background:"linear-gradient(180deg,#f8fcf9,#fff)", overflow:"hidden" }}>
-                      <div style={{ padding:"18px 20px", display:"flex", justifyContent:"space-between", alignItems:"center", gap:"12px", flexWrap:"wrap", borderBottom:"1px solid #e6eee9" }}>
+                    <section style={{ marginBottom:"22px", border:"1px solid #d8ddea", borderRadius:"22px", background:"linear-gradient(180deg,#f7f9fd,#fff)", overflow:"hidden" }}>
+                      <div style={{ padding:"18px 20px", display:"flex", justifyContent:"space-between", alignItems:"center", gap:"12px", flexWrap:"wrap", borderBottom:"1px solid #e3e7f1" }}>
                         <div>
-                          <div style={{ fontSize:"10px", fontWeight:950, letterSpacing:".12em", color:"#a36a2a" }}>HOWDI WORKS</div>
-                          <h4 style={{ margin:"5px 0 3px", fontSize:"20px", color:"#173c2c" }}>Service bookings & live jobs</h4>
-                          <p style={{ margin:0, color:"#718078", fontSize:"12px" }}>Track your worker, Job PIN, service journey, completion, payment and history inside HOWDI Works.</p>
+                          <div style={{ fontSize:"10px", fontWeight:950, letterSpacing:".12em", color:"#1f5af6" }}>HOWDI WORKS</div>
+                          <h4 style={{ margin:"5px 0 3px", fontSize:"20px", color:"#0d1a3a" }}>Service bookings & live jobs</h4>
+                          <p style={{ margin:0, color:"#717680", fontSize:"12px" }}>Track your worker, Job PIN, service journey, completion, payment and history inside HOWDI Works.</p>
                         </div>
                         <button type="button" onClick={loadCustomerWorksBookings} disabled={worksCustomerBookingsLoading}
-                          style={{ border:"1px solid #cfe0d6", borderRadius:"11px", padding:"9px 13px", background:"#fff", color:"#285f43", fontWeight:900, cursor:"pointer" }}>
+                          style={{ border:"1px solid #cbd3e4", borderRadius:"11px", padding:"9px 13px", background:"#fff", color:"#22304f", fontWeight:900, cursor:"pointer" }}>
                           {worksCustomerBookingsLoading?"Refreshing...":"↻ Refresh Works"}
                         </button>
                       </div>
 
-                      <div style={{ margin:"14px 18px 0", border:"1px solid #dfe8e2", borderRadius:"16px", background:"#fff", overflow:"hidden" }}>
-                        <div style={{padding:"12px 14px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:"10px",borderBottom:worksNotifications.length?"1px solid #edf2ef":"0"}}>
-                          <div><strong style={{color:"#173c2c",fontSize:"13px"}}>🔔 Works notifications</strong>{worksNotificationUnread>0&&<span style={{marginLeft:"7px",padding:"3px 7px",borderRadius:"999px",background:"#fee2e2",color:"#991b1b",fontSize:"10px",fontWeight:900}}>{worksNotificationUnread} new</span>}</div>
-                          {worksNotificationUnread>0&&<button type="button" onClick={markAllWorksNotificationsRead} style={{border:0,background:"transparent",color:"#365947",fontWeight:850,cursor:"pointer",fontSize:"11px"}}>Mark all read</button>}
+                      <div style={{ margin:"14px 18px 0", border:"1px solid #dce1eb", borderRadius:"16px", background:"#fff", overflow:"hidden" }}>
+                        <div style={{padding:"12px 14px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:"10px",borderBottom:worksNotifications.length?"1px solid #ebeef4":"0"}}>
+                          <div><strong style={{color:"#0d1a3a",fontSize:"13px"}}>🔔 Works notifications</strong>{worksNotificationUnread>0&&<span style={{marginLeft:"7px",padding:"3px 7px",borderRadius:"999px",background:"#fee2e2",color:"#991b1b",fontSize:"10px",fontWeight:900}}>{worksNotificationUnread} new</span>}</div>
+                          {worksNotificationUnread>0&&<button type="button" onClick={markAllWorksNotificationsRead} style={{border:0,background:"transparent",color:"#22304f",fontWeight:850,cursor:"pointer",fontSize:"11px"}}>Mark all read</button>}
                         </div>
                         {worksNotifications.slice(0,4).map(n=>(
-                          <button key={n.id} type="button" onClick={()=>markWorksNotificationRead(n.id)} style={{width:"100%",border:0,borderBottom:"1px solid #f1f5f3",background:n.isRead?"#fff":"#f2fbf5",padding:"11px 14px",display:"flex",gap:"10px",textAlign:"left",cursor:"pointer"}}>
+                          <button key={n.id} type="button" onClick={()=>markWorksNotificationRead(n.id)} style={{width:"100%",border:0,borderBottom:"1px solid #eff1f7",background:n.isRead?"#fff":"#f1f4fc",padding:"11px 14px",display:"flex",gap:"10px",textAlign:"left",cursor:"pointer"}}>
                             <span style={{fontSize:"19px"}}>{n.icon||"🔔"}</span>
-                            <span style={{minWidth:0,flex:1}}><strong style={{display:"block",fontSize:"12px",color:"#173c2c"}}>{n.title}</strong><span style={{display:"block",marginTop:"2px",fontSize:"11px",color:"#66776e",lineHeight:1.45}}>{n.message}</span><small style={{display:"block",marginTop:"4px",color:"#94a3b8"}}>{n.workCode||""}{n.createdAt?` · ${new Date(n.createdAt).toLocaleString("en-IN")}`:""}</small></span>
+                            <span style={{minWidth:0,flex:1}}><strong style={{display:"block",fontSize:"12px",color:"#0d1a3a"}}>{n.title}</strong><span style={{display:"block",marginTop:"2px",fontSize:"11px",color:"#666b77",lineHeight:1.45}}>{n.message}</span><small style={{display:"block",marginTop:"4px",color:"#94a3b8"}}>{n.workCode||""}{n.createdAt?` · ${new Date(n.createdAt).toLocaleString("en-IN")}`:""}</small></span>
                           </button>
                         ))}
-                        {!worksNotifications.length&&<div style={{padding:"12px 14px",fontSize:"11px",color:"#7b8981"}}>Booking, acceptance, rejection, journey and completion alerts will appear here.</div>}
+                        {!worksNotifications.length&&<div style={{padding:"12px 14px",fontSize:"11px",color:"#7b7f89"}}>Booking, acceptance, rejection, journey and completion alerts will appear here.</div>}
                       </div>
 
                       {worksCustomerBookingsError && (
@@ -18587,9 +18588,9 @@ const removeNotification = async (notificationId) => {
 
                       <div style={{ padding:"16px 18px 18px", display:"grid", gap:"12px" }}>
                         {!worksCustomerBookingsLoading && worksCustomerBookings.length===0 && (
-                          <div style={{ padding:"28px", textAlign:"center", border:"1px dashed #cad9d0", borderRadius:"16px", color:"#7b8981", background:"#fff" }}>
+                          <div style={{ padding:"28px", textAlign:"center", border:"1px dashed #c5cdde", borderRadius:"16px", color:"#7b7f89", background:"#fff" }}>
                             <div style={{ fontSize:"30px" }}>🛠️</div>
-                            <strong style={{ display:"block", marginTop:"7px", color:"#365947" }}>No HOWDI Works bookings yet</strong>
+                            <strong style={{ display:"block", marginTop:"7px", color:"#22304f" }}>No HOWDI Works bookings yet</strong>
                             <span style={{ fontSize:"13px", display:"block", margin:"4px auto 12px", maxWidth:"44ch" }}>Book a verified local worker and your request, worker status and Job PIN will appear here.</span>
                             <button type="button" className="howdi-works-empty-cta" onClick={()=>setWorksExperienceTab("find")}>Find a worker →</button>
                             <HowdiForEmptyStateLink context="works" onNavigate={navigateHowdiFor}/>
@@ -18612,27 +18613,27 @@ const removeNotification = async (notificationId) => {
                           const form=worksActionForm[booking.workCode]||{};
                           const setForm=(patch)=>setWorksActionForm(prev=>({...prev,[booking.workCode]:{...(prev[booking.workCode]||{}),...patch}}));
                           return (
-                            <article key={booking.workCode||booking.id} style={{ border:"1px solid #dfe8e2", borderRadius:"17px", background:"#fff", padding:"16px", boxShadow:"0 7px 20px rgba(33,74,52,.04)" }}>
+                            <article key={booking.workCode||booking.id} style={{ border:"1px solid #dce1eb", borderRadius:"17px", background:"#fff", padding:"16px", boxShadow:"0 7px 20px rgba(39,64,134,.04)" }}>
                               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:"14px", flexWrap:"wrap" }}>
                                 <div>
-                                  <div style={{ fontSize:"10px", fontWeight:900, color:"#87958e" }}>{booking.workCode}</div>
-                                  <h4 style={{ margin:"5px 0 4px", color:"#173c2c", fontSize:"18px" }}>{booking.title||`${booking.category||"HOWDI"} service request`}</h4>
-                                  <div style={{ fontSize:"12px", color:"#66776e" }}>
+                                  <div style={{ fontSize:"10px", fontWeight:900, color:"#7d828c" }}>{booking.workCode}</div>
+                                  <h4 style={{ margin:"5px 0 4px", color:"#0d1a3a", fontSize:"18px" }}>{booking.title||`${booking.category||"HOWDI"} service request`}</h4>
+                                  <div style={{ fontSize:"12px", color:"#666b77" }}>
                                     {booking.preferredWorkerName?`Worker: ${booking.preferredWorkerName}`:"Finding worker"}
                                     {booking.scheduleDate?` · ${booking.scheduleDate}`:""}
                                     {booking.scheduleTime?` · ${booking.scheduleTime}`:""}
                                   </div>
                                 </div>
                                 <div style={{ display:"flex", gap:"8px", alignItems:"center", flexWrap:"wrap" }}>
-                                  <span style={{ padding:"6px 9px", borderRadius:"999px", background:stage==="completed"||stage==="customer_confirmed"||stage==="closed"?"#dcfce7":stage==="cancelled"||stage==="rejected"?"#fee2e2":"#fff4d9", color:stage==="completed"||stage==="customer_confirmed"||stage==="closed"?"#166534":stage==="cancelled"||stage==="rejected"?"#991b1b":"#8a5b00", fontSize:"10px", fontWeight:950 }}>{stageLabel}</span>
-                                  <strong style={{ color:"#173c2c" }}>₹{Number(booking.budget||0).toLocaleString("en-IN")}</strong>
+                                  <span style={{ padding:"6px 9px", borderRadius:"999px", background:stage==="completed"||stage==="customer_confirmed"||stage==="closed"?"#dcfce7":stage==="cancelled"||stage==="rejected"?"#fee2e2":"#ecf1fb", color:stage==="completed"||stage==="customer_confirmed"||stage==="closed"?"#166534":stage==="cancelled"||stage==="rejected"?"#991b1b":"#8a5b00", fontSize:"10px", fontWeight:950 }}>{stageLabel}</span>
+                                  <strong style={{ color:"#0d1a3a" }}>₹{Number(booking.budget||0).toLocaleString("en-IN")}</strong>
                                 </div>
                               </div>
 
                               <div style={{ marginTop:"13px", display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(155px,1fr))", gap:"8px" }}>
-                                <div style={{ padding:"10px", borderRadius:"11px", background:"#f8faf9" }}><small style={{ color:"#8a9890" }}>Service</small><div style={{ marginTop:"3px", fontWeight:850, color:"#365947" }}>{booking.category||"HOWDI Works"}</div></div>
-                                <div style={{ padding:"10px", borderRadius:"11px", background:"#f8faf9" }}><small style={{ color:"#8a9890" }}>Location</small><div style={{ marginTop:"3px", fontWeight:850, color:"#365947" }}>{[booking.city,booking.pincode].filter(Boolean).join(" · ")||"—"}</div></div>
-                                <div style={{ padding:"10px", borderRadius:"11px", background:"#f8faf9" }}><small style={{ color:"#8a9890" }}>Worker</small><div style={{ marginTop:"3px", fontWeight:850, color:"#365947" }}>{booking.workerName||booking.preferredWorkerName||"Pending acceptance"}</div></div>
+                                <div style={{ padding:"10px", borderRadius:"11px", background:"#f7f8fb" }}><small style={{ color:"#7d818c" }}>Service</small><div style={{ marginTop:"3px", fontWeight:850, color:"#22304f" }}>{booking.category||"HOWDI Works"}</div></div>
+                                <div style={{ padding:"10px", borderRadius:"11px", background:"#f7f8fb" }}><small style={{ color:"#7d818c" }}>Location</small><div style={{ marginTop:"3px", fontWeight:850, color:"#22304f" }}>{[booking.city,booking.pincode].filter(Boolean).join(" · ")||"—"}</div></div>
+                                <div style={{ padding:"10px", borderRadius:"11px", background:"#f7f8fb" }}><small style={{ color:"#7d818c" }}>Worker</small><div style={{ marginTop:"3px", fontWeight:850, color:"#22304f" }}>{booking.workerName||booking.preferredWorkerName||"Pending acceptance"}</div></div>
                               </div>
 
                               {stage==="rejected" && (
@@ -18655,16 +18656,16 @@ const removeNotification = async (notificationId) => {
                               )}
 
                               {activeStages.includes(stage) && (
-                                <div style={{ marginTop:"13px", padding:"14px", borderRadius:"14px", background:"#eef7f1", color:"#315843", fontSize:"12px", lineHeight:1.55, border:"1px solid #d6eadc" }}>
+                                <div style={{ marginTop:"13px", padding:"14px", borderRadius:"14px", background:"#ecf0f9", color:"#22304f", fontSize:"12px", lineHeight:1.55, border:"1px solid #d5dceb" }}>
                                   <div style={{display:"flex",justifyContent:"space-between",gap:"10px",alignItems:"center",flexWrap:"wrap"}}>
                                     <strong>● LIVE WORKER TRACKING</strong>
-                                    <span style={{fontSize:"10px",fontWeight:900,color:"#557565"}}>Auto-refreshes every 4 sec</span>
+                                    <span style={{fontSize:"10px",fontWeight:900,color:"#555f75"}}>Auto-refreshes every 4 sec</span>
                                   </div>
                                   <div style={{marginTop:"7px"}}><strong>Status:</strong> {stageLabel}
                                   {booking.etaMinutes!=null?` · ETA ${booking.etaMinutes} min`:""}
                                   {booking.lastLocationAt?` · Location updated ${new Date(booking.lastLocationAt).toLocaleString("en-IN")}`:""}</div>
                                   {booking.location&&(
-                                    <div style={{marginTop:"7px",fontSize:"11px",color:"#557565"}}>
+                                    <div style={{marginTop:"7px",fontSize:"11px",color:"#555f75"}}>
                                       Worker location: {Number(booking.location.latitude).toFixed(5)}, {Number(booking.location.longitude).toFixed(5)}
                                     </div>
                                   )}
@@ -18672,16 +18673,16 @@ const removeNotification = async (notificationId) => {
                               )}
 
                               {showPin && (
-                                <div style={{ marginTop:"13px", padding:"14px", border:"1px solid #ead8a8", borderRadius:"14px", background:"#fffaf0", display:"flex", justifyContent:"space-between", alignItems:"center", gap:"14px", flexWrap:"wrap" }}>
+                                <div style={{ marginTop:"13px", padding:"14px", border:"1px solid #ead8a8", borderRadius:"14px", background:"#f3f6fc", display:"flex", justifyContent:"space-between", alignItems:"center", gap:"14px", flexWrap:"wrap" }}>
                                   <div>
-                                    <small style={{ color:"#98742b", fontWeight:900 }}>YOUR JOB PIN</small>
-                                    <div style={{ marginTop:"3px", fontSize:"26px", fontWeight:950, letterSpacing:".18em", color:"#173c2c" }}>{booking.jobPin}</div>
+                                    <small style={{ color:"#1f5af6", fontWeight:900 }}>YOUR JOB PIN</small>
+                                    <div style={{ marginTop:"3px", fontSize:"26px", fontWeight:950, letterSpacing:".18em", color:"#0d1a3a" }}>{booking.jobPin}</div>
                                     <div style={{ marginTop:"4px", fontSize:"11px", color:"#7e6d49" }}>
                                       {canVerify?"Confirm only after the assigned worker is physically at your address.":"PIN verification unlocks when the worker marks Arrived."}
                                     </div>
                                   </div>
                                   <button type="button" disabled={!canVerify||worksCustomerAction===`verify-${booking.workCode}`} onClick={()=>verifyWorksJobPin(booking)}
-                                    style={{ border:0, borderRadius:"11px", padding:"11px 15px", background:canVerify?"#285f43":"#d8dfda", color:"#fff", fontWeight:950, cursor:canVerify?"pointer":"not-allowed" }}>
+                                    style={{ border:0, borderRadius:"11px", padding:"11px 15px", background:canVerify?"#1f5af6":"#d4d9e3", color:"#fff", fontWeight:950, cursor:canVerify?"pointer":"not-allowed" }}>
                                     {worksCustomerAction===`verify-${booking.workCode}`?"Verifying...":"✓ Verify worker & allow work"}
                                   </button>
                                 </div>
@@ -18692,32 +18693,32 @@ const removeNotification = async (notificationId) => {
                               )}
 
                               {quote?.id && (
-                                <div style={{marginTop:"13px",padding:"14px",border:"1px solid #e4d7b2",borderRadius:"14px",background:"#fffaf0"}}>
+                                <div style={{marginTop:"13px",padding:"14px",border:"1px solid #e4d7b2",borderRadius:"14px",background:"#f3f6fc"}}>
                                   <div style={{display:"flex",justifyContent:"space-between",gap:"10px",alignItems:"center",flexWrap:"wrap"}}>
                                     <strong style={{color:"#6f541e"}}>🧾 Quotation · ₹{Number(quote.total||0).toLocaleString("en-IN")}</strong>
                                     <span style={{fontSize:"10px",fontWeight:950,textTransform:"uppercase",color:quote.status==="approved"?"#166534":quote.status==="rejected"?"#991b1b":"#8a5b00"}}>{quote.status||"submitted"}</span>
                                   </div>
                                   {(quote.items||[]).map((i,idx)=><div key={i.id||idx} style={{marginTop:"7px",display:"flex",justifyContent:"space-between",gap:"10px",fontSize:"11px",color:"#6b5e40"}}><span>{i.label} · {Number(i.quantity||1)} × ₹{Number(i.unitPrice||0).toLocaleString("en-IN")}</span><b>₹{Number(i.lineTotal||0).toLocaleString("en-IN")}</b></div>)}
                                   {quote.status==="submitted"&&<div style={{display:"flex",gap:"8px",marginTop:"10px",flexWrap:"wrap"}}>
-                                    <button type="button" onClick={()=>worksCustomerPost(booking,"quote-response",{decision:"approved"})} style={{border:0,borderRadius:"10px",padding:"9px 12px",background:"#285f43",color:"#fff",fontWeight:900,cursor:"pointer"}}>Approve quote</button>
+                                    <button type="button" onClick={()=>worksCustomerPost(booking,"quote-response",{decision:"approved"})} style={{border:0,borderRadius:"10px",padding:"9px 12px",background:"#1f5af6",color:"#fff",fontWeight:900,cursor:"pointer"}}>Approve quote</button>
                                     <button type="button" onClick={()=>worksCustomerPost(booking,"quote-response",{decision:"rejected"})} style={{border:"1px solid #fecaca",borderRadius:"10px",padding:"9px 12px",background:"#fff",color:"#991b1b",fontWeight:900,cursor:"pointer"}}>Reject quote</button>
                                   </div>}
                                 </div>
                               )}
 
                               {pendingReschedule && (
-                                <div style={{marginTop:"13px",padding:"13px",border:"1px solid #cfe0d6",borderRadius:"13px",background:"#f5faf7"}}>
-                                  <strong style={{fontSize:"12px",color:"#285f43"}}>📅 Reschedule requested</strong>
-                                  <div style={{marginTop:"5px",fontSize:"11px",color:"#66776e"}}>{String(pendingReschedule.proposed_date||"").slice(0,10)} · {String(pendingReschedule.proposed_time||"").slice(0,5)} {pendingReschedule.reason?`· ${pendingReschedule.reason}`:""}</div>
+                                <div style={{marginTop:"13px",padding:"13px",border:"1px solid #cbd3e4",borderRadius:"13px",background:"#f4f6fb"}}>
+                                  <strong style={{fontSize:"12px",color:"#22304f"}}>📅 Reschedule requested</strong>
+                                  <div style={{marginTop:"5px",fontSize:"11px",color:"#666b77"}}>{String(pendingReschedule.proposed_date||"").slice(0,10)} · {String(pendingReschedule.proposed_time||"").slice(0,5)} {pendingReschedule.reason?`· ${pendingReschedule.reason}`:""}</div>
                                   <div style={{display:"flex",gap:"8px",marginTop:"9px"}}>
-                                    <button type="button" onClick={()=>worksCustomerPost(booking,"reschedule-response",{decision:"approved"})} style={{border:0,borderRadius:"9px",padding:"8px 11px",background:"#285f43",color:"#fff",fontWeight:850,cursor:"pointer"}}>Approve</button>
+                                    <button type="button" onClick={()=>worksCustomerPost(booking,"reschedule-response",{decision:"approved"})} style={{border:0,borderRadius:"9px",padding:"8px 11px",background:"#1f5af6",color:"#fff",fontWeight:850,cursor:"pointer"}}>Approve</button>
                                     <button type="button" onClick={()=>worksCustomerPost(booking,"reschedule-response",{decision:"rejected"})} style={{border:"1px solid #ddd",borderRadius:"9px",padding:"8px 11px",background:"#fff",fontWeight:850,cursor:"pointer"}}>Reject</button>
                                   </div>
                                 </div>
                               )}
 
                               {(lifecycle.evidence||[]).length>0&&(
-                                <div style={{marginTop:"12px",padding:"12px",borderRadius:"12px",background:"#f8faf9",fontSize:"11px",color:"#5e6d65"}}>
+                                <div style={{marginTop:"12px",padding:"12px",borderRadius:"12px",background:"#f7f8fb",fontSize:"11px",color:"#5e626d"}}>
                                   <strong>📷 Work evidence ({lifecycle.evidence.length})</strong>
                                   {(lifecycle.evidence||[]).slice(0,3).map(e=><div key={e.id} style={{marginTop:"5px"}}>{e.evidence_type||"update"}: {e.note||"Attachment added"} {e.has_file?"· file attached":""}</div>)}
                                 </div>
@@ -18726,8 +18727,8 @@ const removeNotification = async (notificationId) => {
                               {stage==="completed" && !completion?.status && (
                                 <div style={{marginTop:"13px",padding:"14px",border:"1px solid #bbf7d0",borderRadius:"14px",background:"#f0fdf4"}}>
                                   <strong style={{color:"#166534"}}>✅ Worker marked this job complete</strong>
-                                  <div style={{marginTop:"6px",fontSize:"11px",color:"#557565"}}>Check the work before confirming. If something is wrong, report a problem instead.</div>
-                                  <textarea value={form.completionNote||""} onChange={e=>setForm({completionNote:e.target.value})} placeholder="Optional completion note" style={{width:"100%",marginTop:"9px",minHeight:"58px",border:"1px solid #d7e6dc",borderRadius:"10px",padding:"9px",boxSizing:"border-box"}}/>
+                                  <div style={{marginTop:"6px",fontSize:"11px",color:"#555f75"}}>Check the work before confirming. If something is wrong, report a problem instead.</div>
+                                  <textarea value={form.completionNote||""} onChange={e=>setForm({completionNote:e.target.value})} placeholder="Optional completion note" style={{width:"100%",marginTop:"9px",minHeight:"58px",border:"1px solid #d4dae9",borderRadius:"10px",padding:"9px",boxSizing:"border-box"}}/>
                                   <div style={{display:"flex",gap:"8px",marginTop:"9px",flexWrap:"wrap"}}>
                                     <button type="button" onClick={()=>worksCustomerPost(booking,"completion",{decision:"confirmed",note:form.completionNote||""})} style={{border:0,borderRadius:"10px",padding:"9px 12px",background:"#166534",color:"#fff",fontWeight:900,cursor:"pointer"}}>Confirm work completed</button>
                                     <button type="button" onClick={()=>worksCustomerPost(booking,"completion",{decision:"problem_reported",note:form.completionNote||"Customer reported a problem"})} style={{border:"1px solid #fecaca",borderRadius:"10px",padding:"9px 12px",background:"#fff",color:"#991b1b",fontWeight:900,cursor:"pointer"}}>Report a problem</button>
@@ -18736,35 +18737,35 @@ const removeNotification = async (notificationId) => {
                               )}
 
                               {completion?.status==="confirmed"&&(
-                                <div style={{marginTop:"13px",padding:"14px",border:"1px solid #dbe7df",borderRadius:"14px",background:"#fff"}}>
+                                <div style={{marginTop:"13px",padding:"14px",border:"1px solid #d8ddea",borderRadius:"14px",background:"#fff"}}>
                                   <div style={{display:"flex",justifyContent:"space-between",gap:"10px",alignItems:"center",flexWrap:"wrap"}}>
-                                    <strong style={{color:"#173c2c"}}>💳 Payment</strong>
+                                    <strong style={{color:"#0d1a3a"}}>💳 Payment</strong>
                                     <span style={{fontSize:"10px",fontWeight:950,textTransform:"uppercase",color:servicePayment?.status==="success"?"#166534":"#8a5b00"}}>{servicePayment?.status||"not started"}</span>
                                   </div>
-                                  <div style={{marginTop:"5px",fontSize:"12px",color:"#66776e"}}>Amount due: <b>₹{Number(quote?.status==="approved"?quote.total:booking.budget||0).toLocaleString("en-IN")}</b></div>
-                                  {!servicePayment?.status&&<button type="button" onClick={()=>worksCustomerPost(booking,"pay",{method:"HPAY"})} style={{marginTop:"9px",border:0,borderRadius:"10px",padding:"10px 13px",background:"#173c2c",color:"#fff",fontWeight:900,cursor:"pointer"}}>Pay with HPay</button>}
+                                  <div style={{marginTop:"5px",fontSize:"12px",color:"#666b77"}}>Amount due: <b>₹{Number(quote?.status==="approved"?quote.total:booking.budget||0).toLocaleString("en-IN")}</b></div>
+                                  {!servicePayment?.status&&<button type="button" onClick={()=>worksCustomerPost(booking,"pay",{method:"HPAY"})} style={{marginTop:"9px",border:0,borderRadius:"10px",padding:"10px 13px",background:"#1749d6",color:"#fff",fontWeight:900,cursor:"pointer"}}>Pay with HPay</button>}
                                   {["pending","processing"].includes(String(servicePayment?.status))&&<div style={{marginTop:"7px",fontSize:"11px",color:"#8a5b00"}}>Payment request created. Waiting for provider confirmation — HOWDI will not mark it paid until confirmed.</div>}
                                   {servicePayment?.status==="success"&&<div style={{marginTop:"7px",fontSize:"11px",color:"#166534",fontWeight:850}}>✓ Payment confirmed</div>}
                                 </div>
                               )}
 
                               {completion?.status==="confirmed"&&!review&&(
-                                <div style={{marginTop:"13px",padding:"14px",border:"1px solid #e8e1c7",borderRadius:"14px",background:"#fffdf7"}}>
+                                <div style={{marginTop:"13px",padding:"14px",border:"1px solid #e8e1c7",borderRadius:"14px",background:"#f8fafe"}}>
                                   <strong style={{color:"#6b5421"}}>⭐ Rate your worker</strong>
                                   <div style={{display:"flex",gap:"6px",marginTop:"8px"}}>{[1,2,3,4,5].map(r=><button type="button" key={r} onClick={()=>setForm({rating:r})} style={{border:0,background:"transparent",fontSize:"23px",cursor:"pointer",opacity:Number(form.rating||0)>=r?1:.25}}>★</button>)}</div>
                                   <textarea value={form.review||""} onChange={e=>setForm({review:e.target.value})} placeholder="Write a short review" style={{width:"100%",minHeight:"58px",border:"1px solid #e5e7eb",borderRadius:"10px",padding:"9px",boxSizing:"border-box"}}/>
-                                  <button type="button" disabled={!form.rating} onClick={()=>worksCustomerPost(booking,"review",{rating:Number(form.rating),review:form.review||""})} style={{marginTop:"8px",border:0,borderRadius:"10px",padding:"9px 12px",background:form.rating?"#285f43":"#cbd5e1",color:"#fff",fontWeight:900,cursor:form.rating?"pointer":"not-allowed"}}>Submit review</button>
+                                  <button type="button" disabled={!form.rating} onClick={()=>worksCustomerPost(booking,"review",{rating:Number(form.rating),review:form.review||""})} style={{marginTop:"8px",border:0,borderRadius:"10px",padding:"9px 12px",background:form.rating?"#1f5af6":"#cbd5e1",color:"#fff",fontWeight:900,cursor:form.rating?"pointer":"not-allowed"}}>Submit review</button>
                                 </div>
                               )}
 
                               {review&&(
-                                <div style={{marginTop:"11px",padding:"11px 12px",borderRadius:"12px",background:"#fffaf0",color:"#6b5421",fontSize:"11px"}}><b>⭐ Your review:</b> {review.rating}/5 {review.review?`· ${review.review}`:""}</div>
+                                <div style={{marginTop:"11px",padding:"11px 12px",borderRadius:"12px",background:"#f3f6fc",color:"#6b5421",fontSize:"11px"}}><b>⭐ Your review:</b> {review.rating}/5 {review.review?`· ${review.review}`:""}</div>
                               )}
 
                               {completion?.status==="confirmed"&&!tipPayment?.status&&(
                                 <div style={{marginTop:"11px",display:"flex",gap:"8px",alignItems:"center",flexWrap:"wrap"}}>
-                                  <input type="number" min="1" value={form.tipAmount||""} onChange={e=>setForm({tipAmount:e.target.value})} placeholder="Tip amount ₹" style={{width:"120px",border:"1px solid #d8e2dc",borderRadius:"10px",padding:"9px"}}/>
-                                  <button type="button" disabled={!Number(form.tipAmount||0)} onClick={()=>worksCustomerPost(booking,"tip",{amount:Number(form.tipAmount),method:"HPAY"})} style={{border:"1px solid #d8e2dc",borderRadius:"10px",padding:"9px 12px",background:"#fff",color:"#365947",fontWeight:850,cursor:"pointer"}}>Tip worker</button>
+                                  <input type="number" min="1" value={form.tipAmount||""} onChange={e=>setForm({tipAmount:e.target.value})} placeholder="Tip amount ₹" style={{width:"120px",border:"1px solid #d5dae5",borderRadius:"10px",padding:"9px"}}/>
+                                  <button type="button" disabled={!Number(form.tipAmount||0)} onClick={()=>worksCustomerPost(booking,"tip",{amount:Number(form.tipAmount),method:"HPAY"})} style={{border:"1px solid #d5dae5",borderRadius:"10px",padding:"9px 12px",background:"#fff",color:"#22304f",fontWeight:850,cursor:"pointer"}}>Tip worker</button>
                                 </div>
                               )}
 
@@ -18773,17 +18774,17 @@ const removeNotification = async (notificationId) => {
                                 <button type="button" onClick={()=>setWorksCaseModal({booking,type:"dispute",title:"Raise a dispute",label:"Describe the problem or dispute",reason:""})} style={{border:"1px solid #e5e7eb",borderRadius:"10px",padding:"8px 11px",background:"#fff",color:"#475569",fontWeight:850,cursor:"pointer"}}>Raise dispute</button>
                                 <button type="button" onClick={()=>setWorksCaseModal({booking,type:"safety",title:"Safety & emergency support",label:"Describe the safety issue",reason:""})} style={{border:"1px solid #fecaca",borderRadius:"10px",padding:"8px 11px",background:"#fff5f5",color:"#b91c1c",fontWeight:900,cursor:"pointer"}}>🆘 Safety</button>
                                 {servicePayment?.status==="success"&&<button type="button" onClick={()=>setWorksCaseModal({booking,type:"refund",title:"Request a refund",label:"Tell us why you are requesting a refund",reason:""})} style={{border:"1px solid #e5e7eb",borderRadius:"10px",padding:"8px 11px",background:"#fff",color:"#475569",fontWeight:850,cursor:"pointer"}}>Request refund</button>}
-                                {servicePayment?.status==="success"&&<button type="button" disabled={worksCustomerAction===`invoice-${booking.workCode}`} onClick={()=>downloadWorksInvoice(booking)} style={{border:0,borderRadius:"10px",padding:"8px 11px",background:"#173c2c",color:"#fff",fontWeight:900,cursor:"pointer"}}>{worksCustomerAction===`invoice-${booking.workCode}`?"Preparing invoice…":"↓ Download paid invoice"}</button>}
-                                {completion?.status&&<button type="button" onClick={()=>openWorksReceipt(booking)} style={{border:"1px solid #cbd9d1",borderRadius:"10px",padding:"8px 11px",background:"#fff",color:"#365947",fontWeight:850,cursor:"pointer"}}>Receipt / lifecycle</button>}
+                                {servicePayment?.status==="success"&&<button type="button" disabled={worksCustomerAction===`invoice-${booking.workCode}`} onClick={()=>downloadWorksInvoice(booking)} style={{border:0,borderRadius:"10px",padding:"8px 11px",background:"#1749d6",color:"#fff",fontWeight:900,cursor:"pointer"}}>{worksCustomerAction===`invoice-${booking.workCode}`?"Preparing invoice…":"↓ Download paid invoice"}</button>}
+                                {completion?.status&&<button type="button" onClick={()=>openWorksReceipt(booking)} style={{border:"1px solid #c6cdde",borderRadius:"10px",padding:"8px 11px",background:"#fff",color:"#22304f",fontWeight:850,cursor:"pointer"}}>Receipt / lifecycle</button>}
                               </div>
 
                               <div style={{ marginTop:"13px", display:"flex", gap:"8px", flexWrap:"wrap" }}>
                                 <button type="button" onClick={()=>refreshWorksBooking(booking)} disabled={worksCustomerAction===`refresh-${booking.workCode}`}
-                                  style={{ border:"1px solid #cbd9d1", borderRadius:"10px", padding:"9px 12px", background:"#fff", color:"#365947", fontWeight:850, cursor:"pointer" }}>
+                                  style={{ border:"1px solid #c6cdde", borderRadius:"10px", padding:"9px 12px", background:"#fff", color:"#22304f", fontWeight:850, cursor:"pointer" }}>
                                   {worksCustomerAction===`refresh-${booking.workCode}`?"Refreshing...":"↻ Refresh status"}
                                 </button>
                                 <button type="button" onClick={()=>setWorksExperienceTab("find")}
-                                  style={{ border:"1px solid #cbd9d1", borderRadius:"10px", padding:"9px 12px", background:stage==="rejected"?"#285f43":"#fff", color:stage==="rejected"?"#fff":"#365947", fontWeight:850, cursor:"pointer" }}>
+                                  style={{ border:"1px solid #c6cdde", borderRadius:"10px", padding:"9px 12px", background:stage==="rejected"?"#1f5af6":"#fff", color:stage==="rejected"?"#fff":"#22304f", fontWeight:850, cursor:"pointer" }}>
                                   {stage==="rejected"?"Choose another worker":"Open HOWDI Works"}
                                 </button>
                               </div>
@@ -18792,13 +18793,13 @@ const removeNotification = async (notificationId) => {
                         })}
                       </div>
 
-                      <div style={{ borderTop:"1px solid #e4ebe6", padding:"22px", background:"linear-gradient(180deg,#fbfdfb 0%,#f7faf8 100%)", borderRadius:"0 0 20px 20px" }}>
+                      <div style={{ borderTop:"1px solid #e0e5ef", padding:"22px", background:"linear-gradient(180deg,#fbfbfd 0%,#f6f8fb 100%)", borderRadius:"0 0 20px 20px" }}>
                         <div style={{ display:"flex", justifyContent:"space-between", gap:"10px", alignItems:"center", flexWrap:"wrap", marginBottom:"11px" }}>
                           <div>
-                            <div style={{ fontSize:"10px", fontWeight:950, letterSpacing:".11em", color:"#7d8d84" }}>WORKS HISTORY</div>
-                            <strong style={{ display:"block", marginTop:"4px", color:"#173c2c", fontSize:"17px", letterSpacing:"-.01em" }}>Works activity history</strong><div style={{ marginTop:"4px", fontSize:"10px", color:"#87938c" }}>Rejected, cancelled and completed service records stay here permanently.</div>
+                            <div style={{ fontSize:"10px", fontWeight:950, letterSpacing:".11em", color:"#7d818d" }}>WORKS HISTORY</div>
+                            <strong style={{ display:"block", marginTop:"4px", color:"#0d1a3a", fontSize:"17px", letterSpacing:"-.01em" }}>Works activity history</strong><div style={{ marginTop:"4px", fontSize:"10px", color:"#7e828b" }}>Rejected, cancelled and completed service records stay here permanently.</div>
                           </div>
-                          <span style={{ fontSize:"11px", color:"#7b8981" }}>{worksCustomerHistory.filter(item=>item.status==="rejected").length} rejected · {worksCustomerHistory.length} total records</span>
+                          <span style={{ fontSize:"11px", color:"#7b7f89" }}>{worksCustomerHistory.filter(item=>item.status==="rejected").length} rejected · {worksCustomerHistory.length} total records</span>
                         </div>
 
                         <div style={{ display:"grid", gap:"10px" }}>
@@ -18818,22 +18819,22 @@ const removeNotification = async (notificationId) => {
                                 happenedAt:item.rejectionRespondedAt||item.updatedAt||item.createdAt
                               }))
                           ].map(item=>(
-                            <div key={`history-${item.id}`} style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:"14px", flexWrap:"wrap", padding:"16px 17px", border:"1px solid #eadfdd", borderLeft:"4px solid #c85d4c", borderRadius:"14px", background:"#fff", boxShadow:"0 6px 18px rgba(44,67,54,.045)" }}>
+                            <div key={`history-${item.id}`} style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:"14px", flexWrap:"wrap", padding:"16px 17px", border:"1px solid #eadfdd", borderLeft:"4px solid #c85d4c", borderRadius:"14px", background:"#fff", boxShadow:"0 6px 18px rgba(39,64,134,.045)" }}>
                               <div style={{ minWidth:"220px", flex:1 }}>
-                                <div style={{ fontSize:"9px", color:"#87938c", fontWeight:900, letterSpacing:".04em" }}>{item.workCode}</div>
-                                <div style={{ marginTop:"5px", fontWeight:950, color:"#173c2c", fontSize:"13px" }}>{item.title||`${item.serviceName||"Service"} request`}</div>
-                                <div style={{ marginTop:"5px", fontSize:"10px", color:"#6f7e76" }}>Worker: <strong style={{color:"#425d4e"}}>{item.workerName||"Assigned worker"}</strong></div>
+                                <div style={{ fontSize:"9px", color:"#7e828b", fontWeight:900, letterSpacing:".04em" }}>{item.workCode}</div>
+                                <div style={{ marginTop:"5px", fontWeight:950, color:"#0d1a3a", fontSize:"13px" }}>{item.title||`${item.serviceName||"Service"} request`}</div>
+                                <div style={{ marginTop:"5px", fontSize:"10px", color:"#6f737e" }}>Worker: <strong style={{color:"#4c566b"}}>{item.workerName||"Assigned worker"}</strong></div>
                                 <div style={{ marginTop:"10px", padding:"9px 10px", borderRadius:"9px", background:"#fff5f3", border:"1px solid #f3ded9", fontSize:"10px", color:"#7f433b" }}><strong>Rejection reason:</strong> {item.reason||"No reason provided."}</div>
                               </div>
                               <div style={{ textAlign:"right" }}>
                                 <span style={{ display:"inline-block", padding:"6px 10px", borderRadius:"999px", background:"#fff1ee", border:"1px solid #f0d6d0", color:"#a24537", fontSize:"9px", fontWeight:950 }}>Rejected</span>
-                                {item.happenedAt&&<div style={{ marginTop:"7px", fontSize:"9px", color:"#8a9690" }}>{new Date(item.happenedAt).toLocaleString("en-IN")}</div>}
+                                {item.happenedAt&&<div style={{ marginTop:"7px", fontSize:"9px", color:"#7e828b" }}>{new Date(item.happenedAt).toLocaleString("en-IN")}</div>}
                               </div>
                             </div>
                           ))}
                           {worksCustomerHistory.filter(item=>item.status==="rejected").length===0 &&
                             worksCustomerBookings.filter(item=>String(item.stage||item.status||"").toLowerCase()==="rejected").length===0 && (
-                            <div style={{ padding:"14px", border:"1px dashed #d7e1da", borderRadius:"12px", color:"#87938c", textAlign:"center", fontSize:"11px" }}>No rejected Works requests in history.</div>
+                            <div style={{ padding:"14px", border:"1px dashed #d4d9e4", borderRadius:"12px", color:"#7e828b", textAlign:"center", fontSize:"11px" }}>No rejected Works requests in history.</div>
                           )}
                         </div>
                       </div>
@@ -19172,11 +19173,11 @@ const removeNotification = async (notificationId) => {
           >
             <div
               onClick={(event) => event.stopPropagation()}
-              style={{ width: "min(1320px, 100%)", maxHeight: "94vh", overflowY: "auto", background: "linear-gradient(135deg,#ffffff 0%,#fbfcff 48%,#f8fbf8 100%)", color: "#172033", borderRadius: "28px", boxShadow: "0 30px 90px rgba(0,0,0,.30)", padding: "28px", position: "relative", zIndex: 1, opacity: 1, visibility: "visible" }}
+              style={{ width: "min(1320px, 100%)", maxHeight: "94vh", overflowY: "auto", background: "linear-gradient(135deg,#ffffff 0%,#fbfcff 48%,#f7f9fc 100%)", color: "#172033", borderRadius: "28px", boxShadow: "0 30px 90px rgba(0,0,0,.30)", padding: "28px", position: "relative", zIndex: 1, opacity: 1, visibility: "visible" }}
             >
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", marginBottom: "14px" }}>
                 <div>
-                  <div style={{ fontSize: "11px", fontWeight: 900, letterSpacing: ".12em", color: "#8b6a3f" }}>HOWDI HOME  ›  HANDMADE  ›  {selectedProduct.category}</div>
+                  <div style={{ fontSize: "11px", fontWeight: 900, letterSpacing: ".12em", color: "#1f5af6" }}>HOWDI HOME  ›  HANDMADE  ›  {selectedProduct.category}</div>
                   <div style={{ fontSize: "14px", color: "#64748b", marginTop: "5px" }}>Discover the hands, story and community behind this piece. ❤️</div>
                 </div>
                 <button type="button" onClick={() => setProductDetailOpen(false)} style={{ width: "42px", height: "42px", borderRadius: "50%", border: "1px solid #cbd5e1", background: "#f8fafc", color: "#172033", WebkitTextFillColor: "#172033", fontSize: "22px", lineHeight: 1, fontWeight: 900, cursor: "pointer", display: "grid", placeItems: "center" }}>×</button>
@@ -19184,16 +19185,16 @@ const removeNotification = async (notificationId) => {
 
               <div style={{ display: "grid", gridTemplateColumns: "minmax(420px, 1.05fr) minmax(440px, .95fr)", gap: "30px", alignItems: "start" }}>
                 <div>
-                  <div style={{ minHeight: "430px", borderRadius: "24px", background: "radial-gradient(circle at 18% 16%,#fff5e9 0%,#f8efe4 34%,#e8f1eb 100%)", border: "1px solid #e4e8e2", display: "flex", alignItems: "center", justifyContent: "center", position: "relative", overflow: "hidden", boxShadow: "0 16px 40px rgba(73,91,77,.10)" }}>
+                  <div style={{ minHeight: "430px", borderRadius: "24px", background: "radial-gradient(circle at 18% 16%,#edf1fb 0%,#ecf1fb 34%,#e5eaf4 100%)", border: "1px solid #dfe3eb", display: "flex", alignItems: "center", justifyContent: "center", position: "relative", overflow: "hidden", boxShadow: "0 16px 40px rgba(52,70,112,.10)" }}>
                     {selectedDetailImages[selectedProductImage]?
                       <img src={selectedDetailImages[selectedProductImage]} alt={`${selectedProduct.name} view ${selectedProductImage+1}`} style={{width:"100%",height:"100%",minHeight:"420px",objectFit:"contain",display:"block",borderRadius:"18px"}}/>:
                       <div style={{ fontSize: "150px", lineHeight: 1, transform: `scale(${selectedProductImage === 1 ? 1.08 : selectedProductImage === 2 ? .92 : 1})`, transition: "transform .35s ease" }}>{selectedProduct.icon}</div>}
-                    <span style={{ position: "absolute", top: "14px", left: "14px", padding: "7px 10px", borderRadius: "999px", background: "#365947", color: "#fff", fontSize: "11px", fontWeight: 900 }}>{selectedProduct.badges?.[selectedProductImage % (selectedProduct.badges?.length || 1)] || "HANDMADE"}</span>
-                    <span style={{ position: "absolute", bottom: "14px", right: "14px", padding: "7px 10px", borderRadius: "999px", background: "rgba(255,255,255,.9)", color: "#365947", fontSize: "11px", fontWeight: 900 }}>View {selectedProductImage + 1} / {Math.max(1,selectedDetailImages.length||3)}</span>
+                    <span style={{ position: "absolute", top: "14px", left: "14px", padding: "7px 10px", borderRadius: "999px", background: "#1f5af6", color: "#fff", fontSize: "11px", fontWeight: 900 }}>{selectedProduct.badges?.[selectedProductImage % (selectedProduct.badges?.length || 1)] || "HANDMADE"}</span>
+                    <span style={{ position: "absolute", bottom: "14px", right: "14px", padding: "7px 10px", borderRadius: "999px", background: "rgba(255,255,255,.9)", color: "#22304f", fontSize: "11px", fontWeight: 900 }}>View {selectedProductImage + 1} / {Math.max(1,selectedDetailImages.length||3)}</span>
                   </div>
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: "10px", marginTop: "12px" }}>
                     {["Front / hero", "Texture close-up", "Craft detail", "Customer view"].map((label, index) => (
-                      <button key={label} type="button" onClick={() => setSelectedProductImage(index)} style={{ minHeight: "72px", borderRadius: "14px", border: selectedProductImage === index ? "2px solid #365947" : "1px solid #d8e0da", background: index === 0 ? "#f8f5ed" : index === 1 ? "#eef6f0" : "#f6eff6", color: "#24362d", WebkitTextFillColor: "#24362d", cursor: "pointer" }}>
+                      <button key={label} type="button" onClick={() => setSelectedProductImage(index)} style={{ minHeight: "72px", borderRadius: "14px", border: selectedProductImage === index ? "2px solid #274086" : "1px solid #d5d9e3", background: index === 0 ? "#ecf1fb" : index === 1 ? "#ecf0f8" : "#f6eff6", color: "#0d1a3a", WebkitTextFillColor: "#1749d6", cursor: "pointer" }}>
                         <div style={{ fontSize: "26px" }}>{index === 0 ? selectedProduct.icon : index === 1 ? "🧶" : index === 2 ? "🪡" : "📸"}</div>
                         <div style={{ fontSize: "10px", fontWeight: 800, color: "#475569" }}>{label}</div>
                       </button>
@@ -19201,54 +19202,54 @@ const removeNotification = async (notificationId) => {
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px", marginTop: "10px" }}>
                     <div style={{ fontSize: "11px", color: "#64748b" }}>Auto-rotates every few seconds</div>
-                    <button type="button" onClick={(event) => { event.stopPropagation(); setCustomerPhotoOpen(true); }} style={{ border: 0, background: "transparent", color: "#365947", fontWeight: 900, cursor: "pointer" }}>📸 Customer photos</button>
+                    <button type="button" onClick={(event) => { event.stopPropagation(); setCustomerPhotoOpen(true); }} style={{ border: 0, background: "transparent", color: "#22304f", fontWeight: 900, cursor: "pointer" }}>📸 Customer photos</button>
                   </div>
-                  <div style={{ marginTop: "14px", padding: "14px", borderRadius: "16px", background: "#fffaf0", border: "1px solid #eee2c5" }}>
-                    <div style={{ fontWeight: 900, color: "#7a531d" }}>❤️ The hands behind your product</div>
+                  <div style={{ marginTop: "14px", padding: "14px", borderRadius: "16px", background: "#f3f6fc", border: "1px solid #eee2c5" }}>
+                    <div style={{ fontWeight: 900, color: "#1f5af6" }}>❤️ The hands behind your product</div>
                     <div style={{ marginTop: "5px", fontSize: "13px", color: "#5f665f", lineHeight: 1.55 }}><strong>{selectedProduct.artisan}</strong> · {selectedProduct.makingTime} of careful handwork.</div>
                     <div style={{ marginTop: "6px", fontSize: "13px", color: "#5f665f", lineHeight: 1.55 }}>{selectedProduct.story}</div>
                   </div>
 
                   <div style={{ marginTop: "12px", display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "9px" }}>
-                    <div style={{ padding: "12px", borderRadius: "14px", background: "#f7faf8", border: "1px solid #dfe9e2" }}>
+                    <div style={{ padding: "12px", borderRadius: "14px", background: "#f6f8fb", border: "1px solid #dce1ec" }}>
                       <div style={{ fontSize: "18px" }}>🧶</div>
-                      <strong style={{ display: "block", marginTop: "4px", color: "#24362d", fontSize: "13px" }}>Hand-finished</strong>
+                      <strong style={{ display: "block", marginTop: "4px", color: "#0d1a3a", fontSize: "13px" }}>Hand-finished</strong>
                       <div style={{ marginTop: "3px", fontSize: "11px", color: "#64748b", lineHeight: 1.4 }}>Every piece is checked before dispatch.</div>
                     </div>
-                    <div style={{ padding: "12px", borderRadius: "14px", background: "#fffaf0", border: "1px solid #eee2c5" }}>
+                    <div style={{ padding: "12px", borderRadius: "14px", background: "#f3f6fc", border: "1px solid #eee2c5" }}>
                       <div style={{ fontSize: "18px" }}>❤️</div>
-                      <strong style={{ display: "block", marginTop: "4px", color: "#24362d", fontSize: "13px" }}>Made with care</strong>
+                      <strong style={{ display: "block", marginTop: "4px", color: "#0d1a3a", fontSize: "13px" }}>Made with care</strong>
                       <div style={{ marginTop: "3px", fontSize: "11px", color: "#64748b", lineHeight: 1.4 }}>Not factory-made. Small-batch handmade work.</div>
                     </div>
-                    <div style={{ padding: "12px", borderRadius: "14px", background: "#f7faf8", border: "1px solid #dfe9e2" }}>
+                    <div style={{ padding: "12px", borderRadius: "14px", background: "#f6f8fb", border: "1px solid #dce1ec" }}>
                       <div style={{ fontSize: "18px" }}>📦</div>
-                      <strong style={{ display: "block", marginTop: "4px", color: "#24362d", fontSize: "13px" }}>Quality checked</strong>
+                      <strong style={{ display: "block", marginTop: "4px", color: "#0d1a3a", fontSize: "13px" }}>Quality checked</strong>
                       <div style={{ marginTop: "3px", fontSize: "11px", color: "#64748b", lineHeight: 1.4 }}>{selectedProduct.shippingNote || "Packed carefully for you."}</div>
                     </div>
-                    <div style={{ padding: "12px", borderRadius: "14px", background: "#f7faf8", border: "1px solid #dfe9e2" }}>
+                    <div style={{ padding: "12px", borderRadius: "14px", background: "#f6f8fb", border: "1px solid #dce1ec" }}>
                       <div style={{ fontSize: "18px" }}>♻️</div>
-                      <strong style={{ display: "block", marginTop: "4px", color: "#24362d", fontSize: "13px" }}>Thoughtful choice</strong>
+                      <strong style={{ display: "block", marginTop: "4px", color: "#0d1a3a", fontSize: "13px" }}>Thoughtful choice</strong>
                       <div style={{ marginTop: "3px", fontSize: "11px", color: "#64748b", lineHeight: 1.4 }}>Made slowly, designed to be loved longer.</div>
                     </div>
                   </div>
 
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: "10px", marginTop: "12px" }}>
-                  <div style={{ padding: "14px", borderRadius: "16px", background: "linear-gradient(135deg,#f8f5ed,#f1f7f3)", border: "1px solid #dfe7e1" }}>
+                  <div style={{ padding: "14px", borderRadius: "16px", background: "linear-gradient(135deg,#ecf1fb,#eff2f9)", border: "1px solid #dce0ea" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" }}>
                       <div>
-                        <div style={{ fontSize: "11px", fontWeight: 900, letterSpacing: ".08em", color: "#a36a2a" }}>REAL CUSTOMER LOVE</div>
-                        <div style={{ marginTop: "3px", fontWeight: 900, color: "#24362d" }}>⭐ {selectedProduct.rating} · {selectedProduct.reviewCount || selectedProduct.reviews || 86} reviews</div>
+                        <div style={{ fontSize: "11px", fontWeight: 900, letterSpacing: ".08em", color: "#1f5af6" }}>REAL CUSTOMER LOVE</div>
+                        <div style={{ marginTop: "3px", fontWeight: 900, color: "#0d1a3a" }}>⭐ {selectedProduct.rating} · {selectedProduct.reviewCount || selectedProduct.reviews || 86} reviews</div>
                       </div>
                       <div style={{ fontSize: "25px" }}>💚</div>
                     </div>
                     <div style={{ marginTop: "9px", display: "flex", gap: "6px" }}>
                       {(selectedProduct.customerPhotos || []).slice(0, 4).map((photo, index) => (
-                        <button key={`left-photo-${photo}-${index}`} type="button" onClick={(event) => { event.stopPropagation(); setCustomerPhotoOpen(true); }} aria-label="View customer photo" style={{ width: "48px", height: "48px", borderRadius: "11px", border: "1px solid #dbe4de", background: index % 2 ? "#fffaf0" : "#eef6f0", fontSize: "22px", cursor: "pointer" }}>{photo}</button>
+                        <button key={`left-photo-${photo}-${index}`} type="button" onClick={(event) => { event.stopPropagation(); setCustomerPhotoOpen(true); }} aria-label="View customer photo" style={{ width: "48px", height: "48px", borderRadius: "11px", border: "1px solid #d8dce7", background: index % 2 ? "#f3f6fc" : "#ecf0f8", fontSize: "22px", cursor: "pointer" }}>{photo}</button>
                       ))}
-                      <button type="button" onClick={(event) => { event.stopPropagation(); setCustomerPhotoOpen(true); }} style={{ flex: 1, borderRadius: "11px", border: "1px solid #dbe4de", background: "#fff", color: "#365947", fontWeight: 900, fontSize: "11px", cursor: "pointer" }}>View customer photos →</button>
+                      <button type="button" onClick={(event) => { event.stopPropagation(); setCustomerPhotoOpen(true); }} style={{ flex: 1, borderRadius: "11px", border: "1px solid #d8dce7", background: "#fff", color: "#22304f", fontWeight: 900, fontSize: "11px", cursor: "pointer" }}>View customer photos →</button>
                     </div>
-                  </div>                  <div style={{ marginTop: "12px", padding: "14px", borderRadius: "16px", background: "#fbfcfb", border: "1px solid #dfe7e1" }}>
-                    <div style={{ fontSize: "11px", fontWeight: 900, letterSpacing: ".08em", color: "#6b806f" }}>WHY PEOPLE LOVE IT</div>
+                  </div>                  <div style={{ marginTop: "12px", padding: "14px", borderRadius: "16px", background: "#fafbfd", border: "1px solid #dce0ea" }}>
+                    <div style={{ fontSize: "11px", fontWeight: 900, letterSpacing: ".08em", color: "#6b7180" }}>WHY PEOPLE LOVE IT</div>
                     <div style={{ display: "grid", gap: "10px", marginTop: "11px", fontSize: "12px", color: "#475569" }}>
                       <div>✓ Beautiful handmade quality</div>
                       <div>✓ Sturdy & spacious</div>
@@ -19258,13 +19259,13 @@ const removeNotification = async (notificationId) => {
                   </div>
                   </div>
 
-                  <div style={{ marginTop: "14px", padding: "15px", border: "1px solid #dfe7e1", borderRadius: "20px", background: "linear-gradient(135deg,#ffffff,#f6fbf7)" }}>
+                  <div style={{ marginTop: "14px", padding: "15px", border: "1px solid #dce0ea", borderRadius: "20px", background: "linear-gradient(135deg,#ffffff,#f5f7fc)" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px" }}>
                       <div>
-                        <div style={{ fontSize: "11px", letterSpacing: ".08em", fontWeight: 900, color: "#a36a2a" }}>HOWDI COMMUNITY</div>
-                        <div style={{ marginTop: "3px", fontSize: "16px", fontWeight: 900, color: "#24362d" }}>📸 Customers with their HOWDI pieces</div>
+                        <div style={{ fontSize: "11px", letterSpacing: ".08em", fontWeight: 900, color: "#1f5af6" }}>HOWDI COMMUNITY</div>
+                        <div style={{ marginTop: "3px", fontSize: "16px", fontWeight: 900, color: "#0d1a3a" }}>📸 Customers with their HOWDI pieces</div>
                       </div>
-                      <button type="button" onClick={() => setCustomerPhotoOpen(true)} style={{ border: "1px solid #cfe0d3", background: "#ffffff", color: "#365947", WebkitTextFillColor: "#365947", padding: "8px 10px", borderRadius: "10px", fontSize: "11px", fontWeight: 900, cursor: "pointer" }}>View all →</button>
+                      <button type="button" onClick={() => setCustomerPhotoOpen(true)} style={{ border: "1px solid #cbd3e4", background: "#ffffff", color: "#22304f", WebkitTextFillColor: "#1f5af6", padding: "8px 10px", borderRadius: "10px", fontSize: "11px", fontWeight: 900, cursor: "pointer" }}>View all →</button>
                     </div>
 
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: "8px", marginTop: "12px" }}>
@@ -19275,7 +19276,7 @@ const removeNotification = async (notificationId) => {
                             key={`customer-love-top-${photo}-${index}`}
                             type="button"
                             onClick={() => setCustomerPhotoOpen(true)}
-                            style={{ minHeight: "112px", overflow: "hidden", borderRadius: "14px", border: "1px solid #e2e8e4", background: index % 2 ? "#fff8ef" : "#eef7f0", cursor: "pointer", padding: 0, position: "relative" }}
+                            style={{ minHeight: "112px", overflow: "hidden", borderRadius: "14px", border: "1px solid #dfe3eb", background: index % 2 ? "#f2f5fc" : "#ecf0f9", cursor: "pointer", padding: 0, position: "relative" }}
                           >
                             {isImage ? (
                               <img src={photo} alt="Customer with their HOWDI piece" style={{ width: "100%", height: "100%", minHeight: "112px", objectFit: "cover", display: "block" }} />
@@ -19285,7 +19286,7 @@ const removeNotification = async (notificationId) => {
                                 <span style={{ fontSize: "28px" }}>{photo || selectedProduct.icon}</span>
                               </div>
                             )}
-                            <span style={{ position: "absolute", left: "7px", bottom: "7px", padding: "4px 6px", borderRadius: "999px", background: "rgba(255,255,255,.94)", color: "#365947", WebkitTextFillColor: "#365947", fontSize: "9px", fontWeight: 900 }}>HOWDI LOVE</span>
+                            <span style={{ position: "absolute", left: "7px", bottom: "7px", padding: "4px 6px", borderRadius: "999px", background: "rgba(255,255,255,.94)", color: "#22304f", WebkitTextFillColor: "#1f5af6", fontSize: "9px", fontWeight: 900 }}>HOWDI LOVE</span>
                           </button>
                         );
                       })}
@@ -19293,17 +19294,17 @@ const removeNotification = async (notificationId) => {
 
                     <div style={{ marginTop: "10px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", color: "#64748b", WebkitTextFillColor: "#64748b", fontSize: "11px" }}>
                       <span>Real customer moments from verified HOWDI buyers.</span>
-                      <span style={{ color: "#365947", fontWeight: 900 }}>❤️ Community</span>
+                      <span style={{ color: "#22304f", fontWeight: 900 }}>❤️ Community</span>
                     </div>
                   </div>
 
-                  <div style={{ marginTop: "14px", padding: "16px", border: "1px solid #ead9de", borderRadius: "20px", background: "linear-gradient(135deg,#fffdfd,#f8fbf8)" }}>
+                  <div style={{ marginTop: "14px", padding: "16px", border: "1px solid #ead9de", borderRadius: "20px", background: "linear-gradient(135deg,#fffdfd,#f7f9fc)" }}>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", marginBottom: "10px" }}>
                       <div>
-                        <div style={{ fontSize: "11px", letterSpacing: ".08em", fontWeight: 900, color: "#a36a2a" }}>HOWDI COMMUNITY</div>
-                        <div style={{ marginTop: "3px", fontSize: "17px", fontWeight: 900, color: "#24362d" }}>💬 Discuss this product</div>
+                        <div style={{ fontSize: "11px", letterSpacing: ".08em", fontWeight: 900, color: "#1f5af6" }}>HOWDI COMMUNITY</div>
+                        <div style={{ marginTop: "3px", fontSize: "17px", fontWeight: 900, color: "#0d1a3a" }}>💬 Discuss this product</div>
                       </div>
-                      <span style={{ padding: "6px 9px", borderRadius: "999px", background: "#eef6f0", color: "#365947", fontSize: "11px", fontWeight: 900 }}>
+                      <span style={{ padding: "6px 9px", borderRadius: "999px", background: "#ecf0f8", color: "#22304f", fontSize: "11px", fontWeight: 900 }}>
                         {getCommentsForSelectedProduct().length} comments
                       </span>
                     </div>
@@ -19315,7 +19316,7 @@ const removeNotification = async (notificationId) => {
                           onChange={(event) => handleCommentDraftChange(event.target.value)}
                           placeholder={currentUser ? "Write a comment… Type @ to tag a HOWDI user" : "Login to join the discussion"}
                           rows={2}
-                          style={{ width: "100%", boxSizing: "border-box", resize: "vertical", border: "1px solid #b9c9bd", borderRadius: "14px", padding: "12px 48px 12px 13px", fontFamily: "inherit", fontSize: "13px", color: "#24362d", WebkitTextFillColor: "#24362d", outline: "none", background: "#ffffff", lineHeight: 1.5 }}
+                          style={{ width: "100%", boxSizing: "border-box", resize: "vertical", border: "1px solid #b3bbcf", borderRadius: "14px", padding: "12px 48px 12px 13px", fontFamily: "inherit", fontSize: "13px", color: "#0d1a3a", WebkitTextFillColor: "#274086", outline: "none", background: "#ffffff", lineHeight: 1.5 }}
                         />
                         <button
                           type="button"
@@ -19326,15 +19327,15 @@ const removeNotification = async (notificationId) => {
                             }
                             searchMentionUsers("");
                           }}
-                          style={{ position: "absolute", right: "8px", bottom: "8px", width: "34px", height: "34px", border: "1px solid #cbd8cf", borderRadius: "10px", background: "#eef6f0", color: "#244c35", WebkitTextFillColor: "#244c35", fontWeight: 900, cursor: "pointer", fontSize: "16px" }}
+                          style={{ position: "absolute", right: "8px", bottom: "8px", width: "34px", height: "34px", border: "1px solid #c6cddd", borderRadius: "10px", background: "#ecf0f8", color: "#22304f", WebkitTextFillColor: "#1f5af6", fontWeight: 900, cursor: "pointer", fontSize: "16px" }}
                         >
                           @
                         </button>
                       </div>
 
                       {mentionOpen && (
-                        <div style={{ position: "absolute", left: 0, right: 0, top: "calc(100% + 7px)", zIndex: 60, border: "1px solid #c8d7cc", borderRadius: "15px", background: "#ffffff", boxShadow: "0 18px 42px rgba(15,23,42,.18)", overflow: "hidden" }}>
-                          <div style={{ padding: "10px 12px", fontSize: "11px", color: "#475569", WebkitTextFillColor: "#475569", fontWeight: 900, background: "#f6faf7", borderBottom: "1px solid #e6eee8" }}>
+                        <div style={{ position: "absolute", left: 0, right: 0, top: "calc(100% + 7px)", zIndex: 60, border: "1px solid #c3cbdc", borderRadius: "15px", background: "#ffffff", boxShadow: "0 18px 42px rgba(15,23,42,.18)", overflow: "hidden" }}>
+                          <div style={{ padding: "10px 12px", fontSize: "11px", color: "#475569", WebkitTextFillColor: "#475569", fontWeight: 900, background: "#f5f7fb", borderBottom: "1px solid #e3e7f1" }}>
                             {mentionLoading ? "Searching HOWDI users…" : mentionUsers.length ? "👤 Select a HOWDI user to tag" : "No matching HOWDI users found"}
                           </div>
                           {mentionUsers.slice(0, 8).map((user) => (
@@ -19342,11 +19343,11 @@ const removeNotification = async (notificationId) => {
                               key={user.id}
                               type="button"
                               onClick={() => selectMentionUser(user)}
-                              style={{ width: "100%", border: 0, borderTop: "1px solid #eef3ef", background: "#ffffff", color: "#24362d", WebkitTextFillColor: "#24362d", padding: "11px 12px", display: "flex", alignItems: "center", gap: "10px", textAlign: "left", cursor: "pointer" }}
+                              style={{ width: "100%", border: 0, borderTop: "1px solid #eceff5", background: "#ffffff", color: "#0d1a3a", WebkitTextFillColor: "#1749d6", padding: "11px 12px", display: "flex", alignItems: "center", gap: "10px", textAlign: "left", cursor: "pointer" }}
                             >
-                              <span style={{ width: "34px", height: "34px", flex: "0 0 34px", borderRadius: "50%", background: "#eaf4ed", color: "#365947", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>👤</span>
+                              <span style={{ width: "34px", height: "34px", flex: "0 0 34px", borderRadius: "50%", background: "#e8ecf6", color: "#22304f", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>👤</span>
                               <span style={{ minWidth: 0 }}>
-                                <strong style={{ display: "block", color: "#24362d", WebkitTextFillColor: "#24362d", fontSize: "12px", lineHeight: 1.35 }}>{user.full_name || user.name}</strong>
+                                <strong style={{ display: "block", color: "#0d1a3a", WebkitTextFillColor: "#0d1a3a", fontSize: "12px", lineHeight: 1.35 }}>{user.full_name || user.name}</strong>
                                 <small style={{ display: "block", marginTop: "2px", color: "#64748b", WebkitTextFillColor: "#64748b" }}>{user.howdi_id || "HOWDI member"}</small>
                               </span>
                             </button>
@@ -19356,19 +19357,19 @@ const removeNotification = async (notificationId) => {
                     </div>
 
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", marginTop: "10px" }}>
-                      <span style={{ fontSize: "11px", color: "#64748b", WebkitTextFillColor: "#64748b" }}>Tap <strong style={{ color: "#244c35" }}>@</strong> to tag anyone registered on HOWDI.</span>
-                      <button type="button" onClick={submitProductComment} style={{ border: 0, borderRadius: "11px", background: "#365947", color: "#ffffff", WebkitTextFillColor: "#ffffff", padding: "10px 19px", minWidth: "78px", fontWeight: 900, cursor: "pointer" }}>Post</button>
+                      <span style={{ fontSize: "11px", color: "#64748b", WebkitTextFillColor: "#64748b" }}>Tap <strong style={{ color: "#22304f" }}>@</strong> to tag anyone registered on HOWDI.</span>
+                      <button type="button" onClick={submitProductComment} style={{ border: 0, borderRadius: "11px", background: "#1f5af6", color: "#ffffff", WebkitTextFillColor: "#ffffff", padding: "10px 19px", minWidth: "78px", fontWeight: 900, cursor: "pointer" }}>Post</button>
                     </div>
 
-                    {commentNotice && <div style={{ marginTop: "8px", fontSize: "11px", fontWeight: 800, color: "#24613d" }}>{commentNotice}</div>}
+                    {commentNotice && <div style={{ marginTop: "8px", fontSize: "11px", fontWeight: 800, color: "#22304f" }}>{commentNotice}</div>}
 
                     <div style={{ marginTop: "14px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
                       <div style={{ fontSize: "11px", color: "#64748b", fontWeight: 800 }}>
                         Latest comments · {getCommentsForSelectedProduct().length} total · scroll to see more
                       </div>
                       <div style={{ display: "flex", gap: "6px" }}>
-                        <button type="button" title="Scroll comments up" onClick={() => commentsScrollRef.current?.scrollBy({ top: -260, behavior: "smooth" })} style={{ width: "32px", height: "30px", border: "1px solid #d8e3db", borderRadius: "9px", background: "#ffffff", color: "#365947", fontWeight: 900, cursor: "pointer" }}>↑</button>
-                        <button type="button" title="Scroll comments down" onClick={() => commentsScrollRef.current?.scrollBy({ top: 260, behavior: "smooth" })} style={{ width: "32px", height: "30px", border: "1px solid #d8e3db", borderRadius: "9px", background: "#eef6f0", color: "#365947", fontWeight: 900, cursor: "pointer" }}>↓</button>
+                        <button type="button" title="Scroll comments up" onClick={() => commentsScrollRef.current?.scrollBy({ top: -260, behavior: "smooth" })} style={{ width: "32px", height: "30px", border: "1px solid #d5dae6", borderRadius: "9px", background: "#ffffff", color: "#22304f", fontWeight: 900, cursor: "pointer" }}>↑</button>
+                        <button type="button" title="Scroll comments down" onClick={() => commentsScrollRef.current?.scrollBy({ top: 260, behavior: "smooth" })} style={{ width: "32px", height: "30px", border: "1px solid #d5dae6", borderRadius: "9px", background: "#ecf0f8", color: "#22304f", fontWeight: 900, cursor: "pointer" }}>↓</button>
                       </div>
                     </div>
 
@@ -19377,12 +19378,12 @@ const removeNotification = async (notificationId) => {
                       style={{ marginTop: "8px", display: "grid", gap: "10px", maxHeight: "360px", overflowY: "auto", padding: "2px 7px 2px 2px", scrollBehavior: "smooth", scrollbarGutter: "stable" }}
                     >
                       {getCommentsForSelectedProduct().map((comment) => (
-                        <div key={comment.id} style={{ padding: "12px", border: "1px solid #edf1ee", borderRadius: "14px", background: "#fff" }}>
+                        <div key={comment.id} style={{ padding: "12px", border: "1px solid #ebedf3", borderRadius: "14px", background: "#fff" }}>
                           <div style={{ display: "flex", gap: "9px", alignItems: "flex-start" }}>
-                            <div style={{ width: "33px", height: "33px", flex: "0 0 33px", borderRadius: "50%", background: "#f1f5f2", display: "flex", alignItems: "center", justifyContent: "center" }}>👤</div>
+                            <div style={{ width: "33px", height: "33px", flex: "0 0 33px", borderRadius: "50%", background: "#eff1f7", display: "flex", alignItems: "center", justifyContent: "center" }}>👤</div>
                             <div style={{ minWidth: 0, flex: 1 }}>
                               <div style={{ display: "flex", alignItems: "baseline", gap: "7px", flexWrap: "wrap" }}>
-                                <strong style={{ color: "#24362d", fontSize: "12px" }}>{comment.name}</strong>
+                                <strong style={{ color: "#0d1a3a", fontSize: "12px" }}>{comment.name}</strong>
                                 <span style={{ color: "#94a3b8", fontSize: "10px" }}>{formatCommentTime(comment.created_at)}</span>
                               </div>
                               <div style={{ marginTop: "5px", color: "#475569", fontSize: "12px", lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{comment.text}</div>
@@ -19393,16 +19394,16 @@ const removeNotification = async (notificationId) => {
 
                               {replyingToCommentId === comment.id && (
                                 <div style={{ marginTop: "9px", display: "flex", gap: "7px" }}>
-                                  <input value={replyDraft} onChange={(event) => setReplyDraft(event.target.value)} placeholder="Write a reply…" style={{ minWidth: 0, flex: 1, border: "1px solid #d7e1da", borderRadius: "9px", padding: "8px 9px", fontFamily: "inherit", fontSize: "11px" }} />
-                                  <button type="button" onClick={() => submitCommentReply(comment.id)} style={{ border: 0, borderRadius: "9px", background: "#365947", color: "#fff", padding: "8px 10px", fontWeight: 900, cursor: "pointer" }}>Send</button>
+                                  <input value={replyDraft} onChange={(event) => setReplyDraft(event.target.value)} placeholder="Write a reply…" style={{ minWidth: 0, flex: 1, border: "1px solid #d4d9e4", borderRadius: "9px", padding: "8px 9px", fontFamily: "inherit", fontSize: "11px" }} />
+                                  <button type="button" onClick={() => submitCommentReply(comment.id)} style={{ border: 0, borderRadius: "9px", background: "#1f5af6", color: "#fff", padding: "8px 10px", fontWeight: 900, cursor: "pointer" }}>Send</button>
                                 </div>
                               )}
 
                               {Array.isArray(comment.replies) && comment.replies.length > 0 && (
-                                <div style={{ marginTop: "10px", paddingLeft: "10px", borderLeft: "2px solid #e5ece7", display: "grid", gap: "8px" }}>
+                                <div style={{ marginTop: "10px", paddingLeft: "10px", borderLeft: "2px solid #e2e6ef", display: "grid", gap: "8px" }}>
                                   {comment.replies.map((reply) => (
                                     <div key={reply.id} style={{ fontSize: "11px" }}>
-                                      <strong style={{ color: "#24362d" }}>{reply.name}</strong>
+                                      <strong style={{ color: "#0d1a3a" }}>{reply.name}</strong>
                                       <span style={{ color: "#64748b" }}> · {formatCommentTime(reply.created_at)}</span>
                                       <div style={{ marginTop: "3px", color: "#475569", lineHeight: 1.45 }}>{reply.text}</div>
                                     </div>
@@ -19418,7 +19419,7 @@ const removeNotification = async (notificationId) => {
                     <button
                       type="button"
                       onClick={() => commentsScrollRef.current?.scrollBy({ top: 320, behavior: "smooth" })}
-                      style={{ width: "100%", marginTop: "12px", minHeight: "42px", borderRadius: "999px", border: "1px solid #dbe5df", background: "linear-gradient(90deg,#ffffff,#f4f8f5)", color: "#365947", fontWeight: 900, cursor: "pointer" }}
+                      style={{ width: "100%", marginTop: "12px", minHeight: "42px", borderRadius: "999px", border: "1px solid #d8dde8", background: "linear-gradient(90deg,#ffffff,#f3f5f9)", color: "#22304f", fontWeight: 900, cursor: "pointer" }}
                     >
                       Load more comments  ↓
                     </button>
@@ -19431,44 +19432,44 @@ const removeNotification = async (notificationId) => {
                 <div>
                   <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", alignItems: "flex-start" }}>
                     <div>
-                      <div style={{ fontSize: "12px", fontWeight: 900, color: "#a36a2a", letterSpacing: ".08em" }}>{selectedProduct.category}</div>
+                      <div style={{ fontSize: "12px", fontWeight: 900, color: "#1f5af6", letterSpacing: ".08em" }}>{selectedProduct.category}</div>
                       <h2 style={{ margin: "8px 0 7px", fontSize: "34px", lineHeight: 1.08, letterSpacing: "-.02em", color: "#1f2f3b" }}>{selectedProduct.name}</h2>
                     </div>
                     <div style={{ display: "flex", gap: "7px" }}>
-                      <button type="button" onClick={() => toggleProductLike(selectedProduct)} aria-label={likedProducts.includes(selectedProduct.name) ? "Remove from wishlist" : "Add to wishlist"} style={{ minWidth: "74px", padding: "9px 10px", borderRadius: "14px", border: "1px solid #d9e1dc", background: likedProducts.includes(selectedProduct.name) ? "#fff0f3" : "#fff", color: likedProducts.includes(selectedProduct.name) ? "#e11d48" : "#475569", fontWeight: 900, cursor: "pointer" }}>
+                      <button type="button" onClick={() => toggleProductLike(selectedProduct)} aria-label={likedProducts.includes(selectedProduct.name) ? "Remove from wishlist" : "Add to wishlist"} style={{ minWidth: "74px", padding: "9px 10px", borderRadius: "14px", border: "1px solid #d6dae4", background: likedProducts.includes(selectedProduct.name) ? "#fff0f3" : "#fff", color: likedProducts.includes(selectedProduct.name) ? "#e11d48" : "#475569", fontWeight: 900, cursor: "pointer" }}>
                         {likedProducts.includes(selectedProduct.name) ? "♥" : "♡"} {Number(selectedProduct.likes || 0) + (likedProducts.includes(selectedProduct.name) ? 1 : 0)}
                       </button>
-                      <button type="button" onClick={shareSelectedProduct} aria-label="Share product" style={{ width: "42px", padding: "9px", borderRadius: "14px", border: "1px solid #d9e1dc", background: "#fff", color: "#365947", fontWeight: 900, cursor: "pointer" }}>↗</button>
+                      <button type="button" onClick={shareSelectedProduct} aria-label="Share product" style={{ width: "42px", padding: "9px", borderRadius: "14px", border: "1px solid #d6dae4", background: "#fff", color: "#22304f", fontWeight: 900, cursor: "pointer" }}>↗</button>
                     </div>
                   </div>
                   <div style={{ color: "#64748b", fontSize: "14px" }}>⭐ {selectedProduct.rating} ({selectedProduct.reviews} reviews) · {selectedProduct.shop}{selectedProduct.liveProduct&&selectedProduct.vendor?.verified?" · ✓ Verified HOWDI Vendor":""}</div>
                   <div style={{ marginTop: "7px", fontSize: "12px", color: "#64748b" }}>❤️ {Number(selectedProduct.likes || 0) + (likedProducts.includes(selectedProduct.name) ? 1 : 0)} people saved this · 🧶 Handmade by {selectedProduct.artisan}</div>
-                  {shareMessage && <div style={{ marginTop: "5px", fontSize: "11px", color: "#24613d", fontWeight: 800 }}>✓ {shareMessage}</div>}
+                  {shareMessage && <div style={{ marginTop: "5px", fontSize: "11px", color: "#22304f", fontWeight: 800 }}>✓ {shareMessage}</div>}
 
                   <div style={{ display: "flex", alignItems: "baseline", gap: "10px", marginTop: "15px" }}>
-                    <strong style={{ fontSize: "30px", color: "#153b2b" }}>{selectedDetailPrice}</strong>
+                    <strong style={{ fontSize: "30px", color: "#0d1a3a" }}>{selectedDetailPrice}</strong>
                     <del style={{ color: "#8b8b83" }}>{selectedDetailMrp}</del>
-                    <span style={{ padding: "5px 9px", borderRadius: "999px", background: "#e9f5eb", color: "#24613d", fontSize: "11px", fontWeight: 900 }}>SAVE ₹{Math.max(0,Math.round((Number(String(selectedDetailMrp).replace(/[^0-9.]/g,""))||0)-(Number(String(selectedDetailPrice).replace(/[^0-9.]/g,""))||0)))}</span>
+                    <span style={{ padding: "5px 9px", borderRadius: "999px", background: "#e7ecf7", color: "#22304f", fontSize: "11px", fontWeight: 900 }}>SAVE ₹{Math.max(0,Math.round((Number(String(selectedDetailMrp).replace(/[^0-9.]/g,""))||0)-(Number(String(selectedDetailPrice).replace(/[^0-9.]/g,""))||0)))}</span>
                   </div>
 
-                  <div style={{ marginTop: "14px", padding: "13px", borderRadius: "15px", background: "#fff6e8", border: "1px solid #f0dfbf" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: "10px", fontWeight: 900, color: "#7c511b" }}><span>🔥 {selectedProduct.offerText}</span><span>{productOfferTime ? formatOfferTime(productOfferTime) : "Offer ended"}</span></div>
+                  <div style={{ marginTop: "14px", padding: "13px", borderRadius: "15px", background: "#ecf1fb", border: "1px solid #f0dfbf" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: "10px", fontWeight: 900, color: "#1f5af6" }}><span>🔥 {selectedProduct.offerText}</span><span>{productOfferTime ? formatOfferTime(productOfferTime) : "Offer ended"}</span></div>
                     <div style={{ marginTop: "7px", fontSize: "12px", color: "#725e40" }}>Limited-time pricing — don't wait if you love a one-of-a-kind handmade piece.</div>
                   </div>
 
-                  <div style={{ marginTop: "14px", padding: "12px 14px", borderRadius: "14px", background: selectedDetailStock <= 5 ? "#fff1f2" : "#f1f8f2", color: selectedDetailStock <= 5 ? "#be123c" : "#24613d", fontWeight: 900 }}>
+                  <div style={{ marginTop: "14px", padding: "12px 14px", borderRadius: "14px", background: selectedDetailStock <= 5 ? "#fff1f2" : "#eff2fa", color: selectedDetailStock <= 5 ? "#be123c" : "#22304f", fontWeight: 900 }}>
                     {selectedDetailStock<=0?"Out of stock":selectedDetailStock<=5?`🔥 Only ${selectedDetailStock} left in this variant`:`✓ ${selectedDetailStock} pieces available`} · Handmade stock is limited.
                   </div>
 
-                  <div style={{ marginTop: "16px", padding: "14px", borderRadius: "18px", border: "1px solid #dfe8e1", background: "#fbfcfb" }}>
+                  <div style={{ marginTop: "16px", padding: "14px", borderRadius: "18px", border: "1px solid #dce1eb", background: "#fafbfd" }}>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "14px", alignItems: "start" }}>
                       <div>
                         <div style={{ display: "flex", justifyContent: "space-between", gap: "10px", alignItems: "center" }}>
-                          <strong style={{ color: "#24362d" }}>Choose size</strong>
-                          <button type="button" onClick={() => setSizeGuideOpen(true)} style={{ border: 0, background: "transparent", color: "#365947", fontWeight: 900, cursor: "pointer", fontSize: "11px" }}>📏 Size guide</button>
+                          <strong style={{ color: "#0d1a3a" }}>Choose size</strong>
+                          <button type="button" onClick={() => setSizeGuideOpen(true)} style={{ border: 0, background: "transparent", color: "#22304f", fontWeight: 900, cursor: "pointer", fontSize: "11px" }}>📏 Size guide</button>
                         </div>
                         <div style={{ display: "flex", flexWrap: "wrap", gap: "7px", marginTop: "9px" }}>
-                          {selectedProduct.sizes?.map((size) => <button key={size} type="button" onClick={() => setSelectedProductSize(size)} style={{ minWidth: "48px", padding: "9px 12px", borderRadius: "11px", border: selectedProductSize === size ? "2px solid #365947" : "1px solid #cfd8d1", background: selectedProductSize === size ? "#edf6ef" : "#fff", color: "#24362d", fontWeight: 900, cursor: "pointer" }}>{size}</button>)}
+                          {selectedProduct.sizes?.map((size) => <button key={size} type="button" onClick={() => setSelectedProductSize(size)} style={{ minWidth: "48px", padding: "9px 12px", borderRadius: "11px", border: selectedProductSize === size ? "2px solid #274086" : "1px solid #cbd0dc", background: selectedProductSize === size ? "#ebeff8" : "#fff", color: "#0d1a3a", fontWeight: 900, cursor: "pointer" }}>{size}</button>)}
                         </div>
                       </div>
                       <div style={{ minWidth: "108px", padding: "10px", borderRadius: "13px", background: "#f6eff8", border: "1px solid #e5d8ea", textAlign: "center" }}>
@@ -19477,18 +19478,18 @@ const removeNotification = async (notificationId) => {
                       </div>
                     </div>
 
-                    {selectedProductSize === "Custom" && <textarea value={customMeasurements} onChange={(event) => setCustomMeasurements(event.target.value)} placeholder={"Example: bust 38, waist 32, hip 40, height 5'4\""} rows={2} style={{ width: "100%", boxSizing: "border-box", marginTop: "10px", padding: "10px", borderRadius: "11px", border: "1px solid #cfd8d1", resize: "vertical" }} />}
+                    {selectedProductSize === "Custom" && <textarea value={customMeasurements} onChange={(event) => setCustomMeasurements(event.target.value)} placeholder={"Example: bust 38, waist 32, hip 40, height 5'4\""} rows={2} style={{ width: "100%", boxSizing: "border-box", marginTop: "10px", padding: "10px", borderRadius: "11px", border: "1px solid #cbd0dc", resize: "vertical" }} />}
 
                     <div style={{ marginTop: "14px" }}>
-                      <strong style={{ color: "#24362d" }}>Choose colour</strong>
+                      <strong style={{ color: "#0d1a3a" }}>Choose colour</strong>
                       <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginTop: "8px" }}>
-                        {selectedProduct.colors?.map((color) => <button key={color} type="button" onClick={() => setSelectedProductColor(color)} style={{ padding: "8px 11px", borderRadius: "999px", border: selectedProductColor === color ? "2px solid #365947" : "1px solid #d8e0da", background: selectedProductColor === color ? "#edf6ef" : "#fff", color: "#24362d", fontWeight: 800, cursor: "pointer" }}>● {color}</button>)}
+                        {selectedProduct.colors?.map((color) => <button key={color} type="button" onClick={() => setSelectedProductColor(color)} style={{ padding: "8px 11px", borderRadius: "999px", border: selectedProductColor === color ? "2px solid #274086" : "1px solid #d5d9e3", background: selectedProductColor === color ? "#ebeff8" : "#fff", color: "#0d1a3a", fontWeight: 800, cursor: "pointer" }}>● {color}</button>)}
                       </div>
                     </div>
 
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "12px", alignItems: "center", marginTop: "14px", paddingTop: "13px", borderTop: "1px solid #e7ece8" }}>
-                      <div><strong style={{ color: "#24362d" }}>Quantity</strong><div style={{ fontSize: "11px", color: "#64748b", marginTop: "2px" }}>Up to 10 per order</div></div>
-                      <div style={{ display: "flex", alignItems: "center", border: "1px solid #ccd8d0", borderRadius: "10px", overflow: "hidden", background: "#fff" }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "12px", alignItems: "center", marginTop: "14px", paddingTop: "13px", borderTop: "1px solid #e4e7ef" }}>
+                      <div><strong style={{ color: "#0d1a3a" }}>Quantity</strong><div style={{ fontSize: "11px", color: "#64748b", marginTop: "2px" }}>Up to 10 per order</div></div>
+                      <div style={{ display: "flex", alignItems: "center", border: "1px solid #c8cedc", borderRadius: "10px", overflow: "hidden", background: "#fff" }}>
                         <button type="button" onClick={() => setProductQuantityState((value) => Math.max(1, value - 1))} style={{ width: "36px", height: "36px", border: 0, background: "#fff", fontSize: "18px", cursor: "pointer" }}>−</button>
                         <span style={{ minWidth: "34px", textAlign: "center", fontWeight: 900 }}>{productQuantity}</span>
                         <button type="button" onClick={() => setProductQuantityState((value) => Math.min(10, value + 1, selectedDetailStock || 10))} style={{ width: "36px", height: "36px", border: 0, background: "#fff", fontSize: "18px", cursor: "pointer" }}>+</button>
@@ -19496,97 +19497,97 @@ const removeNotification = async (notificationId) => {
                     </div>
 
                     <div style={{ display: "grid", gap: "11px", marginTop: "16px" }}>
-                      <button type="button" onClick={addSelectedProductToCart} style={{ width: "100%", minHeight: "58px", border: 0, borderRadius: "15px", background: "linear-gradient(90deg,#214e37,#2f6a4a)", color: "#fff", fontWeight: 900, fontSize: "16px", cursor: "pointer", boxShadow: "0 10px 24px rgba(33,78,55,.18)" }}>🛒 Add to Cart</button>
+                      <button type="button" onClick={addSelectedProductToCart} style={{ width: "100%", minHeight: "58px", border: 0, borderRadius: "15px", background: "linear-gradient(90deg,#1f5af6,#1c397d)", color: "#fff", fontWeight: 900, fontSize: "16px", cursor: "pointer", boxShadow: "0 10px 24px rgba(39,64,134,.18)" }}>🛒 Add to Cart</button>
                       <button type="button" onClick={buySelectedProductNow} style={{ width: "100%", minHeight: "58px", border: 0, borderRadius: "15px", background: "linear-gradient(90deg,#111c31,#17263e)", color: "#fff", fontWeight: 900, fontSize: "16px", cursor: "pointer", boxShadow: "0 10px 24px rgba(17,28,49,.16)" }}>⚡ Buy Now</button>
                     </div>
                   </div>
 
-                  <div style={{ marginTop: "11px", padding: "12px", borderRadius: "14px", background: "#f7faf8", border: "1px solid #dce7df" }}>
-                    <div style={{ fontWeight: 900, color: "#24362d", marginBottom: "7px" }}>📍 Check delivery to your pincode</div>
+                  <div style={{ marginTop: "11px", padding: "12px", borderRadius: "14px", background: "#f6f8fb", border: "1px solid #d9deea" }}>
+                    <div style={{ fontWeight: 900, color: "#0d1a3a", marginBottom: "7px" }}>📍 Check delivery to your pincode</div>
                     <div style={{ display: "flex", gap: "8px" }}>
-                      <input value={deliveryPincode} onChange={(event) => { setDeliveryPincode(event.target.value.replace(/\D/g, "").slice(0, 6)); setDeliveryChecked(false); }} placeholder="Enter 6-digit pincode" inputMode="numeric" style={{ flex: 1, minWidth: 0, padding: "10px 12px", borderRadius: "10px", border: "1px solid #cfd8d1" }} />
-                      <button type="button" onClick={checkDelivery} style={{ padding: "10px 15px", borderRadius: "10px", border: 0, background: "#365947", color: "#fff", fontWeight: 900, cursor: "pointer" }}>Check</button>
+                      <input value={deliveryPincode} onChange={(event) => { setDeliveryPincode(event.target.value.replace(/\D/g, "").slice(0, 6)); setDeliveryChecked(false); }} placeholder="Enter 6-digit pincode" inputMode="numeric" style={{ flex: 1, minWidth: 0, padding: "10px 12px", borderRadius: "10px", border: "1px solid #cbd0dc" }} />
+                      <button type="button" onClick={checkDelivery} style={{ padding: "10px 15px", borderRadius: "10px", border: 0, background: "#1f5af6", color: "#fff", fontWeight: 900, cursor: "pointer" }}>Check</button>
                     </div>
-                    {deliveryChecked && <div style={{ marginTop: "7px", fontSize: "12px", color: "#24613d", fontWeight: 800 }}>✓ Delivery available · Estimated arrival in {selectedProduct.deliveryDays || "3–5 days"} · COD available</div>}
+                    {deliveryChecked && <div style={{ marginTop: "7px", fontSize: "12px", color: "#22304f", fontWeight: 800 }}>✓ Delivery available · Estimated arrival in {selectedProduct.deliveryDays || "3–5 days"} · COD available</div>}
                   </div>
 
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: "7px", marginTop: "10px" }}>
-                    <div style={{ padding: "9px", borderRadius: "12px", background: "#f7faf8", textAlign: "center", fontSize: "11px", color: "#365947", fontWeight: 900 }}>🔒 Secure checkout</div>
-                    <div style={{ padding: "9px", borderRadius: "12px", background: "#f7faf8", textAlign: "center", fontSize: "11px", color: "#365947", fontWeight: 900 }}>↩ Easy returns</div>
-                    <div style={{ padding: "9px", borderRadius: "12px", background: "#f7faf8", textAlign: "center", fontSize: "11px", color: "#365947", fontWeight: 900 }}>🧵 Handmade checked</div>
+                    <div style={{ padding: "9px", borderRadius: "12px", background: "#f6f8fb", textAlign: "center", fontSize: "11px", color: "#22304f", fontWeight: 900 }}>🔒 Secure checkout</div>
+                    <div style={{ padding: "9px", borderRadius: "12px", background: "#f6f8fb", textAlign: "center", fontSize: "11px", color: "#22304f", fontWeight: 900 }}>↩ Easy returns</div>
+                    <div style={{ padding: "9px", borderRadius: "12px", background: "#f6f8fb", textAlign: "center", fontSize: "11px", color: "#22304f", fontWeight: 900 }}>🧵 Handmade checked</div>
                   </div>
 
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: "9px", marginTop: "13px" }}>
-                    <div style={{ padding: "11px", borderRadius: "13px", background: "#f7f8f7" }}><strong>🧵 Material</strong><div style={{ fontSize: "12px", color: "#64748b", marginTop: "3px" }}>{selectedProduct.material}</div></div>
-                    <div style={{ padding: "11px", borderRadius: "13px", background: "#f7f8f7" }}><strong>📐 Details</strong><div style={{ fontSize: "12px", color: "#64748b", marginTop: "3px" }}>{selectedProduct.dimensions}</div></div>
-                    <div style={{ padding: "11px", borderRadius: "13px", background: "#f7f8f7" }}><strong>🪡 Making time</strong><div style={{ fontSize: "12px", color: "#64748b", marginTop: "3px" }}>{selectedProduct.makingTime}</div></div>
-                    <div style={{ padding: "11px", borderRadius: "13px", background: "#f7f8f7" }}><strong>🧼 Care</strong><div style={{ fontSize: "12px", color: "#64748b", marginTop: "3px" }}>{selectedProduct.careInstructions||"Gentle wash · Dry flat"}</div></div>
+                    <div style={{ padding: "11px", borderRadius: "13px", background: "#f6f7f9" }}><strong>🧵 Material</strong><div style={{ fontSize: "12px", color: "#64748b", marginTop: "3px" }}>{selectedProduct.material}</div></div>
+                    <div style={{ padding: "11px", borderRadius: "13px", background: "#f6f7f9" }}><strong>📐 Details</strong><div style={{ fontSize: "12px", color: "#64748b", marginTop: "3px" }}>{selectedProduct.dimensions}</div></div>
+                    <div style={{ padding: "11px", borderRadius: "13px", background: "#f6f7f9" }}><strong>🪡 Making time</strong><div style={{ fontSize: "12px", color: "#64748b", marginTop: "3px" }}>{selectedProduct.makingTime}</div></div>
+                    <div style={{ padding: "11px", borderRadius: "13px", background: "#f6f7f9" }}><strong>🧼 Care</strong><div style={{ fontSize: "12px", color: "#64748b", marginTop: "3px" }}>{selectedProduct.careInstructions||"Gentle wash · Dry flat"}</div></div>
                   </div>
 
                   {selectedProduct.liveProduct&&(selectedProduct.highlights?.length||Object.keys(selectedProduct.specifications||{}).length)>0&&
                     <div style={{marginTop:"13px",display:"grid",gridTemplateColumns:"1fr 1fr",gap:"9px"}}>
-                      {selectedProduct.highlights?.length>0&&<div style={{padding:"13px",border:"1px solid #e1e8e3",borderRadius:"14px",background:"#fff"}}>
-                        <strong style={{color:"#24362d"}}>✨ Product highlights</strong>
+                      {selectedProduct.highlights?.length>0&&<div style={{padding:"13px",border:"1px solid #dee2eb",borderRadius:"14px",background:"#fff"}}>
+                        <strong style={{color:"#0d1a3a"}}>✨ Product highlights</strong>
                         <div style={{marginTop:"7px",display:"grid",gap:"5px",fontSize:"12px",color:"#64748b"}}>{selectedProduct.highlights.filter(Boolean).map((h,i)=><span key={i}>• {h}</span>)}</div>
                       </div>}
-                      {Object.keys(selectedProduct.specifications||{}).length>0&&<div style={{padding:"13px",border:"1px solid #e1e8e3",borderRadius:"14px",background:"#fff"}}>
-                        <strong style={{color:"#24362d"}}>📋 Specifications</strong>
-                        <div style={{marginTop:"7px",display:"grid",gap:"5px",fontSize:"12px",color:"#64748b"}}>{Object.entries(selectedProduct.specifications||{}).slice(0,10).map(([k,v])=><span key={k}><b style={{color:"#365947"}}>{k}:</b> {String(v)}</span>)}</div>
+                      {Object.keys(selectedProduct.specifications||{}).length>0&&<div style={{padding:"13px",border:"1px solid #dee2eb",borderRadius:"14px",background:"#fff"}}>
+                        <strong style={{color:"#0d1a3a"}}>📋 Specifications</strong>
+                        <div style={{marginTop:"7px",display:"grid",gap:"5px",fontSize:"12px",color:"#64748b"}}>{Object.entries(selectedProduct.specifications||{}).slice(0,10).map(([k,v])=><span key={k}><b style={{color:"#22304f"}}>{k}:</b> {String(v)}</span>)}</div>
                       </div>}
                     </div>}
 
-                  <div style={{ marginTop: "14px", padding: "13px", borderRadius: "14px", border: "1px dashed #b9c9bd", color: "#52635a", fontSize: "13px", lineHeight: 1.5 }}>
+                  <div style={{ marginTop: "14px", padding: "13px", borderRadius: "14px", border: "1px dashed #b3bbcf", color: "#535864", fontSize: "13px", lineHeight: 1.5 }}>
                     🚚 <strong>Estimated delivery:</strong> ready-stock items usually leave quickly; made-to-order pieces need the stated making time before dispatch.<br />🎁 Gift wrapping and a personal message can be added at checkout.{selectedProduct.shippingNote ? ` ${selectedProduct.shippingNote}` : ""} {selectedProduct.returnPolicy || ""}
                   </div>
 
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "9px", marginTop: "12px" }}>
-                    <button type="button" onClick={() => setMakerStoryOpen(true)} style={{ padding: "12px", borderRadius: "13px", border: "1px solid #e4d7bb", background: "#fffaf0", color: "#7a531d", fontWeight: 900, cursor: "pointer" }}>👵 Meet the maker</button>
-                    <button type="button" onClick={() => setQuestionOpen((value) => !value)} style={{ padding: "12px", borderRadius: "13px", border: "1px solid #d8e2dc", background: "#f7faf8", color: "#365947", fontWeight: 900, cursor: "pointer" }}>❓ Product Q&A</button>
+                    <button type="button" onClick={() => setMakerStoryOpen(true)} style={{ padding: "12px", borderRadius: "13px", border: "1px solid #e4d7bb", background: "#f3f6fc", color: "#1f5af6", fontWeight: 900, cursor: "pointer" }}>👵 Meet the maker</button>
+                    <button type="button" onClick={() => setQuestionOpen((value) => !value)} style={{ padding: "12px", borderRadius: "13px", border: "1px solid #d5dae5", background: "#f6f8fb", color: "#22304f", fontWeight: 900, cursor: "pointer" }}>❓ Product Q&A</button>
                   </div>
 
                   {questionOpen && selectedProduct.questions?.length > 0 && (
-                    <div style={{ marginTop: "10px", padding: "13px", borderRadius: "14px", background: "#f8faf9", border: "1px solid #e0e8e2" }}>
+                    <div style={{ marginTop: "10px", padding: "13px", borderRadius: "14px", background: "#f7f8fb", border: "1px solid #dde1eb" }}>
                       {selectedProduct.questions.map((item) => (
                         <div key={item.q} style={{ marginBottom: "10px" }}>
-                          <div style={{ fontWeight: 900, color: "#24362d" }}>Q. {item.q}</div>
+                          <div style={{ fontWeight: 900, color: "#0d1a3a" }}>Q. {item.q}</div>
                           <div style={{ marginTop: "3px", fontSize: "12px", color: "#64748b", lineHeight: 1.5 }}>A. {item.a}</div>
                         </div>
                       ))}
-                      <div style={{ borderTop: "1px solid #e5ebe7", paddingTop: "10px" }}>
-                        <div style={{ fontWeight: 900, color: "#24362d", fontSize: "12px" }}>Ask about this product</div>
+                      <div style={{ borderTop: "1px solid #e2e5ee", paddingTop: "10px" }}>
+                        <div style={{ fontWeight: 900, color: "#0d1a3a", fontSize: "12px" }}>Ask about this product</div>
                         <div style={{ display: "flex", gap: "7px", marginTop: "6px" }}>
-                          <input value={questionText} onChange={(event) => { setQuestionText(event.target.value); setQuestionSubmitted(false); }} placeholder="Size, yarn, colour, delivery..." style={{ flex: 1, minWidth: 0, padding: "9px 10px", borderRadius: "10px", border: "1px solid #cfd8d1" }} />
-                          <button type="button" onClick={() => { if (questionText.trim()) setQuestionSubmitted(true); }} style={{ padding: "9px 11px", borderRadius: "10px", border: 0, background: "#365947", color: "#fff", fontWeight: 900, cursor: "pointer" }}>Ask</button>
+                          <input value={questionText} onChange={(event) => { setQuestionText(event.target.value); setQuestionSubmitted(false); }} placeholder="Size, yarn, colour, delivery..." style={{ flex: 1, minWidth: 0, padding: "9px 10px", borderRadius: "10px", border: "1px solid #cbd0dc" }} />
+                          <button type="button" onClick={() => { if (questionText.trim()) setQuestionSubmitted(true); }} style={{ padding: "9px 11px", borderRadius: "10px", border: 0, background: "#1f5af6", color: "#fff", fontWeight: 900, cursor: "pointer" }}>Ask</button>
                         </div>
-                        {questionSubmitted && <div style={{ marginTop: "5px", fontSize: "11px", color: "#24613d", fontWeight: 800 }}>✓ Question saved for the maker/support team.</div>}
+                        {questionSubmitted && <div style={{ marginTop: "5px", fontSize: "11px", color: "#22304f", fontWeight: 800 }}>✓ Question saved for the maker/support team.</div>}
                       </div>
                     </div>
                   )}
 
                   <div style={{ marginTop: "16px" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
-                      <div style={{ fontWeight: 900, color: "#24362d" }}>⭐ Recent reviews</div>
+                      <div style={{ fontWeight: 900, color: "#0d1a3a" }}>⭐ Recent reviews</div>
                       <div style={{ display: "flex", gap: "5px" }}>
                         {["recent", "helpful", "photos"].map((filter) => (
-                          <button key={filter} type="button" onClick={() => setReviewFilter(filter)} style={{ padding: "5px 8px", borderRadius: "999px", border: reviewFilter === filter ? "1px solid #365947" : "1px solid #dbe3dd", background: reviewFilter === filter ? "#edf6ef" : "#fff", color: "#365947", fontSize: "10px", fontWeight: 900, cursor: "pointer" }}>{filter === "recent" ? "Recent" : filter === "helpful" ? "Helpful" : "With photos"}</button>
+                          <button key={filter} type="button" onClick={() => setReviewFilter(filter)} style={{ padding: "5px 8px", borderRadius: "999px", border: reviewFilter === filter ? "1px solid #274086" : "1px solid #d8dce6", background: reviewFilter === filter ? "#ebeff8" : "#fff", color: "#22304f", fontSize: "10px", fontWeight: 900, cursor: "pointer" }}>{filter === "recent" ? "Recent" : filter === "helpful" ? "Helpful" : "With photos"}</button>
                         ))}
                       </div>
                     </div>
                     {getReviewList().slice(0, 3).map((review) => (
-                      <div key={`${review.name}-${review.time}`} style={{ padding: "11px", marginBottom: "7px", borderRadius: "13px", border: "1px solid #e2e8e4", background: "#fff" }}>
+                      <div key={`${review.name}-${review.time}`} style={{ padding: "11px", marginBottom: "7px", borderRadius: "13px", border: "1px solid #dfe3eb", background: "#fff" }}>
                         <div style={{ display: "flex", justifyContent: "space-between", gap: "8px" }}>
-                          <strong style={{ color: "#24362d" }}>{review.name} · {review.city}</strong>
+                          <strong style={{ color: "#0d1a3a" }}>{review.name} · {review.city}</strong>
                           <span style={{ fontSize: "11px", color: "#64748b" }}>{review.time}</span>
                         </div>
-                        <div style={{ marginTop: "3px", fontSize: "12px" }}>⭐ {"★".repeat(review.rating)} {review.verified && <span style={{ color: "#24613d", fontWeight: 800 }}>✓ Verified</span>}</div>
-                        <div style={{ marginTop: "4px", fontSize: "12px", color: "#52635a", lineHeight: 1.45 }}>{review.text}</div>
+                        <div style={{ marginTop: "3px", fontSize: "12px" }}>⭐ {"★".repeat(review.rating)} {review.verified && <span style={{ color: "#22304f", fontWeight: 800 }}>✓ Verified</span>}</div>
+                        <div style={{ marginTop: "4px", fontSize: "12px", color: "#535864", lineHeight: 1.45 }}>{review.text}</div>
                         <div style={{ marginTop: "5px", fontSize: "11px", color: "#64748b" }}>{review.photo} · 👍 {review.helpful} found this helpful</div>
                       </div>
                     ))}
                     {selectedProduct.customerPhotos?.length > 0 && (
-                      <div style={{ marginTop: "10px", padding: "11px", borderRadius: "13px", background: "#fffaf0", border: "1px solid #eee2c5" }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "7px" }}><strong style={{ color: "#7a531d" }}>📸 Loved by customers</strong><button type="button" onClick={(event) => { event.stopPropagation(); setCustomerPhotoOpen(true); }} style={{ border: 0, background: "transparent", color: "#365947", fontWeight: 900, cursor: "pointer", fontSize: "11px" }}>View all →</button></div>
-                        <div style={{ display: "flex", gap: "7px" }}>{selectedProduct.customerPhotos.map((photo, index) => <button key={`${photo}-${index}`} type="button" onClick={(event) => { event.stopPropagation(); setCustomerPhotoOpen(true); }} style={{ width: "58px", height: "58px", borderRadius: "11px", border: "1px solid #e4d7bb", background: index % 2 ? "#f4efe5" : "#eef6f0", fontSize: "24px", cursor: "pointer" }}>{photo}</button>)}</div>
+                      <div style={{ marginTop: "10px", padding: "11px", borderRadius: "13px", background: "#f3f6fc", border: "1px solid #eee2c5" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "7px" }}><strong style={{ color: "#1f5af6" }}>📸 Loved by customers</strong><button type="button" onClick={(event) => { event.stopPropagation(); setCustomerPhotoOpen(true); }} style={{ border: 0, background: "transparent", color: "#22304f", fontWeight: 900, cursor: "pointer", fontSize: "11px" }}>View all →</button></div>
+                        <div style={{ display: "flex", gap: "7px" }}>{selectedProduct.customerPhotos.map((photo, index) => <button key={`${photo}-${index}`} type="button" onClick={(event) => { event.stopPropagation(); setCustomerPhotoOpen(true); }} style={{ width: "58px", height: "58px", borderRadius: "11px", border: "1px solid #e4d7bb", background: index % 2 ? "#ecf1fb" : "#ecf0f8", fontSize: "24px", cursor: "pointer" }}>{photo}</button>)}</div>
                       </div>
                     )}
                   </div>
@@ -19594,16 +19595,16 @@ const removeNotification = async (notificationId) => {
               </div>
 
               {products.filter((product) => product.name !== selectedProduct.name && product.handmade).slice(0, 3).length > 0 && (
-                <div style={{ marginTop: "20px", paddingTop: "18px", borderTop: "1px solid #e5ebe7" }}>
+                <div style={{ marginTop: "20px", paddingTop: "18px", borderTop: "1px solid #e2e5ee" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px" }}>
-                    <div><div style={{ fontSize: "11px", fontWeight: 900, letterSpacing: ".08em", color: "#a36a2a" }}>HOWDI HANDMADE</div><h3 style={{ margin: "4px 0", color: "#24362d" }}>🧺 Complete the look</h3><div style={{ fontSize: "12px", color: "#64748b" }}>More pieces from our Grandma's Collection</div></div>
+                    <div><div style={{ fontSize: "11px", fontWeight: 900, letterSpacing: ".08em", color: "#1f5af6" }}>HOWDI HANDMADE</div><h3 style={{ margin: "4px 0", color: "#0d1a3a" }}>🧺 Complete the look</h3><div style={{ fontSize: "12px", color: "#64748b" }}>More pieces from our Grandma's Collection</div></div>
                   </div>
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: "10px", marginTop: "10px" }}>
                     {products.filter((product) => product.name !== selectedProduct.name && product.handmade).slice(0, 3).map((product) => (
-                      <button key={product.name} type="button" onClick={() => openProductDetails(product)} style={{ textAlign: "left", padding: "12px", borderRadius: "15px", border: "1px solid #e1e8e3", background: "#fff", cursor: "pointer" }}>
-                        <div style={{ height: "76px", borderRadius: "11px", background: "linear-gradient(145deg,#f8f5ed,#edf5ef)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "42px" }}>{product.icon}</div>
-                        <div style={{ marginTop: "7px", fontWeight: 900, color: "#24362d", fontSize: "12px" }}>{product.name}</div>
-                        <div style={{ marginTop: "3px", fontSize: "11px", color: "#365947", fontWeight: 900 }}>{product.price} · ⭐ {product.rating}</div>
+                      <button key={product.name} type="button" onClick={() => openProductDetails(product)} style={{ textAlign: "left", padding: "12px", borderRadius: "15px", border: "1px solid #dee2eb", background: "#fff", cursor: "pointer" }}>
+                        <div style={{ height: "76px", borderRadius: "11px", background: "linear-gradient(145deg,#ecf1fb,#ebeff7)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "42px" }}>{product.icon}</div>
+                        <div style={{ marginTop: "7px", fontWeight: 900, color: "#0d1a3a", fontSize: "12px" }}>{product.name}</div>
+                        <div style={{ marginTop: "3px", fontSize: "11px", color: "#22304f", fontWeight: 900 }}>{product.price} · ⭐ {product.rating}</div>
                       </button>
                     ))}
                   </div>
@@ -19616,10 +19617,10 @@ const removeNotification = async (notificationId) => {
         {customerPhotoOpen && selectedProduct && (
           <div role="dialog" aria-modal="true" className="howdi-product-detail-overlay" onClick={() => setCustomerPhotoOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 2147483500, background: "rgba(15,23,42,.58)", display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
             <div onClick={(event) => event.stopPropagation()} style={{ width: "min(620px,100%)", background: "#fff", borderRadius: "22px", padding: "22px", boxShadow: "0 25px 70px rgba(0,0,0,.25)" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}><div><div style={{ fontSize: "11px", fontWeight: 900, letterSpacing: ".1em", color: "#a36a2a" }}>CUSTOMER COMMUNITY</div><h3 style={{ margin: "5px 0", color: "#24362d" }}>📸 Customers with their HOWDI pieces</h3></div><button type="button" onClick={() => setCustomerPhotoOpen(false)} style={{ border: 0, background: "#f4f6f4", borderRadius: "50%", width: "36px", height: "36px", cursor: "pointer" }}>×</button></div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}><div><div style={{ fontSize: "11px", fontWeight: 900, letterSpacing: ".1em", color: "#1f5af6" }}>CUSTOMER COMMUNITY</div><h3 style={{ margin: "5px 0", color: "#0d1a3a" }}>📸 Customers with their HOWDI pieces</h3></div><button type="button" onClick={() => setCustomerPhotoOpen(false)} style={{ border: 0, background: "#f2f4f8", borderRadius: "50%", width: "36px", height: "36px", cursor: "pointer" }}>×</button></div>
               <p style={{ color: "#64748b", fontSize: "13px" }}>Real customer photos can be connected to verified reviews from the HOWDI backend.</p>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: "9px" }}>{(selectedProduct.customerPhotos || [selectedProduct.icon]).map((photo, index) => <div key={`${photo}-${index}`} style={{ minHeight: "105px", borderRadius: "14px", background: index % 2 ? "#eef6f0" : "#f8f5ed", border: "1px solid #e2e8e4", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "44px" }}>{photo}</div>)}</div>
-              <div style={{ marginTop: "12px", padding: "11px", borderRadius: "12px", background: "#fffaf0", color: "#7a531d", fontSize: "12px" }}>❤️ Love your piece? Customers will be able to upload a photo after a verified HOWDI purchase.</div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: "9px" }}>{(selectedProduct.customerPhotos || [selectedProduct.icon]).map((photo, index) => <div key={`${photo}-${index}`} style={{ minHeight: "105px", borderRadius: "14px", background: index % 2 ? "#ecf0f8" : "#ecf1fb", border: "1px solid #dfe3eb", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "44px" }}>{photo}</div>)}</div>
+              <div style={{ marginTop: "12px", padding: "11px", borderRadius: "12px", background: "#f3f6fc", color: "#1f5af6", fontSize: "12px" }}>❤️ Love your piece? Customers will be able to upload a photo after a verified HOWDI purchase.</div>
             </div>
           </div>
         )}
@@ -19627,10 +19628,10 @@ const removeNotification = async (notificationId) => {
         {sizeGuideOpen && selectedProduct && (
           <div role="dialog" aria-modal="true" onClick={() => setSizeGuideOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 2200, background: "rgba(15,23,42,.55)", display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
             <div onClick={(event) => event.stopPropagation()} style={{ width: "min(520px,100%)", background: "#fff", borderRadius: "20px", padding: "22px", boxShadow: "0 25px 70px rgba(0,0,0,.25)" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}><h3 style={{ margin: 0, color: "#24362d" }}>📏 Size guide</h3><button type="button" onClick={() => setSizeGuideOpen(false)} style={{ border: 0, background: "#f4f6f4", borderRadius: "50%", width: "36px", height: "36px", cursor: "pointer" }}>×</button></div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}><h3 style={{ margin: 0, color: "#0d1a3a" }}>📏 Size guide</h3><button type="button" onClick={() => setSizeGuideOpen(false)} style={{ border: 0, background: "#f2f4f8", borderRadius: "50%", width: "36px", height: "36px", cursor: "pointer" }}>×</button></div>
               <p style={{ color: "#64748b", fontSize: "13px" }}>For clothing, measure over a comfortable layer. Handmade sizing can vary slightly by design.</p>
-              <div style={{ overflowX: "auto" }}><table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px" }}><thead><tr><th style={{ textAlign: "left", padding: "8px", borderBottom: "1px solid #e2e8e4" }}>Size</th><th style={{ padding: "8px", borderBottom: "1px solid #e2e8e4" }}>Bust</th><th style={{ padding: "8px", borderBottom: "1px solid #e2e8e4" }}>Waist</th><th style={{ padding: "8px", borderBottom: "1px solid #e2e8e4" }}>Hip</th></tr></thead><tbody>{[["XS","32–34","26–28","34–36"],["S","34–36","28–30","36–38"],["M","36–38","30–32","38–40"],["L","38–40","32–34","40–42"],["XL","40–42","34–36","42–44"],["XXL","42–44","36–38","44–46"]].map((row) => <tr key={row[0]}>{row.map((cell,index)=><td key={cell} style={{ padding: "8px", textAlign: index === 0 ? "left" : "center", borderBottom: "1px solid #eef2ef", fontWeight: index === 0 ? 900 : 500 }}>{cell}{index > 0 ? ' in' : ''}</td>)}</tr>)}</tbody></table></div>
-              <div style={{ marginTop: "12px", padding: "10px", borderRadius: "12px", background: "#fffaf0", color: "#7a531d", fontSize: "12px" }}>✨ Custom size is available on eligible handmade clothing. Add your measurements before checkout.</div>
+              <div style={{ overflowX: "auto" }}><table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px" }}><thead><tr><th style={{ textAlign: "left", padding: "8px", borderBottom: "1px solid #dfe3eb" }}>Size</th><th style={{ padding: "8px", borderBottom: "1px solid #dfe3eb" }}>Bust</th><th style={{ padding: "8px", borderBottom: "1px solid #dfe3eb" }}>Waist</th><th style={{ padding: "8px", borderBottom: "1px solid #dfe3eb" }}>Hip</th></tr></thead><tbody>{[["XS","32–34","26–28","34–36"],["S","34–36","28–30","36–38"],["M","36–38","30–32","38–40"],["L","38–40","32–34","40–42"],["XL","40–42","34–36","42–44"],["XXL","42–44","36–38","44–46"]].map((row) => <tr key={row[0]}>{row.map((cell,index)=><td key={cell} style={{ padding: "8px", textAlign: index === 0 ? "left" : "center", borderBottom: "1px solid #eceef4", fontWeight: index === 0 ? 900 : 500 }}>{cell}{index > 0 ? ' in' : ''}</td>)}</tr>)}</tbody></table></div>
+              <div style={{ marginTop: "12px", padding: "10px", borderRadius: "12px", background: "#f3f6fc", color: "#1f5af6", fontSize: "12px" }}>✨ Custom size is available on eligible handmade clothing. Add your measurements before checkout.</div>
             </div>
           </div>
         )}
@@ -19638,12 +19639,12 @@ const removeNotification = async (notificationId) => {
         {makerStoryOpen && selectedProduct && (
           <div role="dialog" aria-modal="true" onClick={() => setMakerStoryOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 2200, background: "rgba(15,23,42,.55)", display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
             <div onClick={(event) => event.stopPropagation()} style={{ width: "min(560px,100%)", background: "#fff", borderRadius: "22px", padding: "24px", boxShadow: "0 25px 70px rgba(0,0,0,.25)" }}>
-              <div style={{ fontSize: "12px", letterSpacing: ".1em", fontWeight: 900, color: "#a36a2a" }}>HOWDI GRANDMA'S COLLECTION</div>
-              <h3 style={{ margin: "7px 0", color: "#24362d", fontSize: "28px" }}>👵 Meet {selectedProduct.artisan}</h3>
-              <p style={{ color: "#52635a", lineHeight: 1.6 }}>Every piece is made slowly, one stitch at a time. {selectedProduct.artisan} brings {selectedProduct.makerExperience || "years of handmade craft"} to each HOWDI creation.</p>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: "10px" }}><div style={{ padding: "13px", borderRadius: "14px", background: "#fffaf0" }}><strong>🧶 Experience</strong><div style={{ fontSize: "12px", color: "#64748b", marginTop: "3px" }}>{selectedProduct.makerExperience || "Traditional craft"}</div></div><div style={{ padding: "13px", borderRadius: "14px", background: "#f2f8f3" }}><strong>❤️ Crafted</strong><div style={{ fontSize: "12px", color: "#64748b", marginTop: "3px" }}>{selectedProduct.makerPieces || "Handmade pieces"}</div></div></div>
-              <div style={{ marginTop: "13px", padding: "14px", borderRadius: "15px", background: "#f8faf9", color: "#52635a", fontSize: "13px", lineHeight: 1.55 }}>“A handmade piece should feel like someone took time to make something just for you.”<br /><strong style={{ color: "#24362d" }}>— HOWDI Grandma's Collection</strong></div>
-              <button type="button" onClick={() => setMakerStoryOpen(false)} style={{ marginTop: "16px", width: "100%", minHeight: "46px", border: 0, borderRadius: "12px", background: "#365947", color: "#fff", fontWeight: 900, cursor: "pointer" }}>Back to product</button>
+              <div style={{ fontSize: "12px", letterSpacing: ".1em", fontWeight: 900, color: "#1f5af6" }}>HOWDI GRANDMA'S COLLECTION</div>
+              <h3 style={{ margin: "7px 0", color: "#0d1a3a", fontSize: "28px" }}>👵 Meet {selectedProduct.artisan}</h3>
+              <p style={{ color: "#535864", lineHeight: 1.6 }}>Every piece is made slowly, one stitch at a time. {selectedProduct.artisan} brings {selectedProduct.makerExperience || "years of handmade craft"} to each HOWDI creation.</p>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: "10px" }}><div style={{ padding: "13px", borderRadius: "14px", background: "#f3f6fc" }}><strong>🧶 Experience</strong><div style={{ fontSize: "12px", color: "#64748b", marginTop: "3px" }}>{selectedProduct.makerExperience || "Traditional craft"}</div></div><div style={{ padding: "13px", borderRadius: "14px", background: "#f0f3f9" }}><strong>❤️ Crafted</strong><div style={{ fontSize: "12px", color: "#64748b", marginTop: "3px" }}>{selectedProduct.makerPieces || "Handmade pieces"}</div></div></div>
+              <div style={{ marginTop: "13px", padding: "14px", borderRadius: "15px", background: "#f7f8fb", color: "#535864", fontSize: "13px", lineHeight: 1.55 }}>“A handmade piece should feel like someone took time to make something just for you.”<br /><strong style={{ color: "#0d1a3a" }}>— HOWDI Grandma's Collection</strong></div>
+              <button type="button" onClick={() => setMakerStoryOpen(false)} style={{ marginTop: "16px", width: "100%", minHeight: "46px", border: 0, borderRadius: "12px", background: "#1f5af6", color: "#fff", fontWeight: 900, cursor: "pointer" }}>Back to product</button>
             </div>
           </div>
         )}
@@ -19679,9 +19680,9 @@ const removeNotification = async (notificationId) => {
               id="howdi-for-you"
               style={{
                 padding: "38px 24px",
-                background: "linear-gradient(135deg,#f4faf6 0%,#fffdf8 100%)",
-                borderTop: "1px solid #e4eee7",
-                borderBottom: "1px solid #e4eee7",
+                background: "linear-gradient(135deg,#f3f5fb 0%,#f9fbfe 100%)",
+                borderTop: "1px solid #e1e6f1",
+                borderBottom: "1px solid #e1e6f1",
               }}
             >
               <div style={{ maxWidth: "1180px", margin: "0 auto" }}>
@@ -19701,7 +19702,7 @@ const removeNotification = async (notificationId) => {
                         fontSize: "11px",
                         fontWeight: 900,
                         letterSpacing: ".12em",
-                        color: "#a36a2a",
+                        color: "#1f5af6",
                       }}
                     >
                       🧠 HOWDI KNOWS YOUR TASTE
@@ -19709,7 +19710,7 @@ const removeNotification = async (notificationId) => {
                     <h2
                       style={{
                         margin: "6px 0 5px",
-                        color: "#24362d",
+                        color: "#0d1a3a",
                         fontSize: "28px",
                       }}
                     >
@@ -19731,8 +19732,8 @@ const removeNotification = async (notificationId) => {
                     style={{
                       padding: "8px 12px",
                       borderRadius: "999px",
-                      background: "#e7f3eb",
-                      color: "#365947",
+                      background: "#e4eaf6",
+                      color: "#22304f",
                       fontSize: "11px",
                       fontWeight: 900,
                     }}
@@ -19754,12 +19755,12 @@ const removeNotification = async (notificationId) => {
                       onClick={() => openProductDetails(product)}
                       style={{
                         position: "relative",
-                        border: "1px solid #dce9df",
+                        border: "1px solid #d9dfec",
                         borderRadius: "18px",
                         padding: "11px",
                         background: "rgba(255,255,255,.92)",
                         cursor: "pointer",
-                        boxShadow: "0 8px 22px rgba(36,54,45,.06)",
+                        boxShadow: "0 8px 22px rgba(39,64,134,.06)",
                       }}
                     >
                       <div
@@ -19770,7 +19771,7 @@ const removeNotification = async (notificationId) => {
                           zIndex: 2,
                           padding: "5px 8px",
                           borderRadius: "999px",
-                          background: "#365947",
+                          background: "#1f5af6",
                           color: "#fff",
                           fontSize: "9px",
                           fontWeight: 900,
@@ -19783,7 +19784,7 @@ const removeNotification = async (notificationId) => {
                         style={{
                           height: "112px",
                           borderRadius: "13px",
-                          background: "linear-gradient(145deg,#f8f5ed,#edf5ef)",
+                          background: "linear-gradient(145deg,#ecf1fb,#ebeff7)",
                           display: "flex",
                           alignItems: "center",
                           justifyContent: "center",
@@ -19797,7 +19798,7 @@ const removeNotification = async (notificationId) => {
                         style={{
                           marginTop: "9px",
                           fontWeight: 900,
-                          color: "#24362d",
+                          color: "#0d1a3a",
                           fontSize: "13px",
                           lineHeight: 1.3,
                         }}
@@ -19814,7 +19815,7 @@ const removeNotification = async (notificationId) => {
                           alignItems: "center",
                         }}
                       >
-                        <strong style={{ color: "#365947", fontSize: "13px" }}>
+                        <strong style={{ color: "#22304f", fontSize: "13px" }}>
                           {product.price}
                         </strong>
                         <span style={{ color: "#64748b", fontSize: "10px" }}>
@@ -19851,9 +19852,9 @@ const removeNotification = async (notificationId) => {
             id="most-purchased"
             style={{
               padding: "34px 24px",
-              background: "#f8faf9",
-              borderTop: "1px solid #edf1ee",
-              borderBottom: "1px solid #edf1ee",
+              background: "#f7f8fb",
+              borderTop: "1px solid #ebedf3",
+              borderBottom: "1px solid #ebedf3",
             }}
           >
             <div style={{ maxWidth: "1180px", margin: "0 auto" }}>
@@ -19868,17 +19869,17 @@ const removeNotification = async (notificationId) => {
                 }}
               >
                 <div>
-                  <div style={{ fontSize: "11px", fontWeight: 900, letterSpacing: ".1em", color: "#a36a2a" }}>
+                  <div style={{ fontSize: "11px", fontWeight: 900, letterSpacing: ".1em", color: "#1f5af6" }}>
                     LOVED BY HOWDI CUSTOMERS
                   </div>
-                  <h2 style={{ margin: "5px 0 4px", color: "#24362d", fontSize: "26px" }}>
+                  <h2 style={{ margin: "5px 0 4px", color: "#0d1a3a", fontSize: "26px" }}>
                     🔥 Most purchased
                   </h2>
                   <p style={{ margin: 0, color: "#64748b", fontSize: "13px" }}>
                     Popular products customers are buying again and again.
                   </p>
                 </div>
-                <span style={{ fontSize: "12px", fontWeight: 800, color: "#365947", padding: "8px 11px", borderRadius: "999px", background: "#e9f3ec" }}>
+                <span style={{ fontSize: "12px", fontWeight: 800, color: "#22304f", padding: "8px 11px", borderRadius: "999px", background: "#e6ebf6" }}>
                   Based on HOWDI orders
                 </span>
               </div>
@@ -19896,26 +19897,26 @@ const removeNotification = async (notificationId) => {
                     onClick={() => openProductDetails(product)}
                     style={{
                       position: "relative",
-                      border: "1px solid #e1e8e3",
+                      border: "1px solid #dee2eb",
                       borderRadius: "15px",
                       padding: "10px",
                       background: "#fff",
                       cursor: "pointer",
                       minWidth: 0,
-                      boxShadow: "0 4px 14px rgba(36,54,45,.05)",
+                      boxShadow: "0 4px 14px rgba(39,64,134,.05)",
                     }}
                   >
-                    <div style={{ position: "absolute", top: "9px", left: "9px", zIndex: 2, padding: "5px 8px", borderRadius: "999px", background: "#24362d", color: "#fff", fontSize: "10px", fontWeight: 900 }}>
+                    <div style={{ position: "absolute", top: "9px", left: "9px", zIndex: 2, padding: "5px 8px", borderRadius: "999px", background: "#1749d6", color: "#fff", fontSize: "10px", fontWeight: 900 }}>
                       #{index + 1}
                     </div>
-                    <div style={{ height: "108px", borderRadius: "11px", background: "linear-gradient(145deg,#f8f5ed,#edf5ef)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "48px" }}>
+                    <div style={{ height: "108px", borderRadius: "11px", background: "linear-gradient(145deg,#ecf1fb,#ebeff7)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "48px" }}>
                       {product.icon}
                     </div>
-                    <div style={{ marginTop: "8px", fontWeight: 900, color: "#24362d", fontSize: "12px", lineHeight: 1.3 }}>
+                    <div style={{ marginTop: "8px", fontWeight: 900, color: "#0d1a3a", fontSize: "12px", lineHeight: 1.3 }}>
                       {product.name}
                     </div>
                     <div style={{ marginTop: "4px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "5px" }}>
-                      <span style={{ color: "#365947", fontSize: "12px", fontWeight: 900 }}>{product.price}</span>
+                      <span style={{ color: "#22304f", fontSize: "12px", fontWeight: 900 }}>{product.price}</span>
                       <span style={{ color: "#64748b", fontSize: "10px", fontWeight: 800 }}>🛍️ {product.purchasedCount} sold</span>
                     </div>
                     <div style={{ marginTop: "4px", color: "#64748b", fontSize: "10px" }}>
@@ -19937,8 +19938,8 @@ const removeNotification = async (notificationId) => {
             style={{
               padding: "34px 24px",
               background: "#fff",
-              borderTop: "1px solid #edf1ee",
-              borderBottom: "1px solid #edf1ee",
+              borderTop: "1px solid #ebedf3",
+              borderBottom: "1px solid #ebedf3",
             }}
           >
             <div
@@ -19958,10 +19959,10 @@ const removeNotification = async (notificationId) => {
                 }}
               >
                 <div>
-                  <div style={{ fontSize: "11px", fontWeight: 900, letterSpacing: ".1em", color: "#a36a2a" }}>
+                  <div style={{ fontSize: "11px", fontWeight: 900, letterSpacing: ".1em", color: "#1f5af6" }}>
                     PICK UP WHERE YOU LEFT OFF
                   </div>
-                  <h2 style={{ margin: "5px 0 4px", color: "#24362d", fontSize: "26px" }}>
+                  <h2 style={{ margin: "5px 0 4px", color: "#0d1a3a", fontSize: "26px" }}>
                     👀 Recently viewed
                   </h2>
                   <p style={{ margin: 0, color: "#64748b", fontSize: "13px" }}>
@@ -19972,7 +19973,7 @@ const removeNotification = async (notificationId) => {
                   type="button"
                   onClick={() => setRecentlyViewed([])}
                   style={{
-                    border: "1px solid #dbe3dc",
+                    border: "1px solid #d8dce6",
                     borderRadius: "10px",
                     padding: "9px 12px",
                     background: "#fff",
@@ -20000,7 +20001,7 @@ const removeNotification = async (notificationId) => {
                       key={product.name}
                       onClick={() => openProductDetails(product)}
                       style={{
-                        border: "1px solid #e1e8e3",
+                        border: "1px solid #dee2eb",
                         borderRadius: "15px",
                         padding: "10px",
                         background: "#fff",
@@ -20012,7 +20013,7 @@ const removeNotification = async (notificationId) => {
                         style={{
                           height: "92px",
                           borderRadius: "11px",
-                          background: "linear-gradient(145deg,#f8f5ed,#edf5ef)",
+                          background: "linear-gradient(145deg,#ecf1fb,#ebeff7)",
                           display: "flex",
                           alignItems: "center",
                           justifyContent: "center",
@@ -20021,10 +20022,10 @@ const removeNotification = async (notificationId) => {
                       >
                         {product.icon}
                       </div>
-                      <div style={{ marginTop: "8px", fontWeight: 900, color: "#24362d", fontSize: "12px", lineHeight: 1.3 }}>
+                      <div style={{ marginTop: "8px", fontWeight: 900, color: "#0d1a3a", fontSize: "12px", lineHeight: 1.3 }}>
                         {product.name}
                       </div>
-                      <div style={{ marginTop: "4px", color: "#365947", fontSize: "12px", fontWeight: 900 }}>
+                      <div style={{ marginTop: "4px", color: "#22304f", fontSize: "12px", fontWeight: 900 }}>
                         {product.price}
                       </div>
                       <div style={{ marginTop: "3px", color: "#64748b", fontSize: "10px" }}>
@@ -20074,13 +20075,13 @@ const removeNotification = async (notificationId) => {
               <div style={{ display: "grid", gap: "10px", marginTop: "10px" }}>
                 {activeOfferProducts.slice(0, 3).map((product) => (
                   <button key={product.name} type="button" onClick={() => openProductDetails(product)}
-                    style={{ display: "grid", gridTemplateColumns: "42px minmax(0,1fr) auto", alignItems: "center", gap: "10px", width: "100%", textAlign: "left", padding: "9px 10px", border: "1px solid rgba(54,89,71,.18)", borderRadius: "12px", background: "#fff", color: "#24362d", cursor: "pointer" }}>
+                    style={{ display: "grid", gridTemplateColumns: "42px minmax(0,1fr) auto", alignItems: "center", gap: "10px", width: "100%", textAlign: "left", padding: "9px 10px", border: "1px solid rgba(39,64,134,.18)", borderRadius: "12px", background: "#fff", color: "#0d1a3a", cursor: "pointer" }}>
                     <span style={{ fontSize: "26px" }}>{product.icon}</span>
                     <span style={{ minWidth: 0 }}>
                       <strong style={{ display: "block", fontSize: "12px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{product.name}</strong>
                       <small style={{ display: "block", marginTop: "2px", color: "#64748b" }}>{product.offerText}</small>
                     </span>
-                    <strong style={{ color: "#365947", fontSize: "12px" }}>{product.price}</strong>
+                    <strong style={{ color: "#22304f", fontSize: "12px" }}>{product.price}</strong>
                   </button>
                 ))}
               </div>
@@ -20096,21 +20097,21 @@ const removeNotification = async (notificationId) => {
         <div className="howdi-os-workspace howdi-os-connect" aria-label="HOWDI Connect">
           <style>{`
             .howdi-connect-tool-overlay{font-family:inherit}
-            .howdi-connect-tool-overlay button{font-size:12px!important;color:#244d39}
+            .howdi-connect-tool-overlay button{font-size:12px!important;color:#22304f}
             .howdi-connect-tool-overlay header button,.howdi-connect-tool-overlay button.active{color:#fff}
             .howdi-connect-tool-overlay :is(p,small,label,article span){font-size:12px!important}
             .howdi-connect-tool-overlay input,.howdi-connect-tool-overlay select{font-size:13px!important}
-            .howdi-connect-access{margin:16px 24px 0;padding:12px;border:1px solid #dfe7e2;border-radius:13px;background:#fff;color:#244d39}
+            .howdi-connect-access{margin:16px 24px 0;padding:12px;border:1px solid #dce0ea;border-radius:13px;background:#fff;color:#22304f}
             .howdi-connect-access nav,.howdi-connect-tool-list{display:flex;flex-wrap:wrap;gap:8px}
-            .howdi-connect-access button,.howdi-connect-filters select{padding:9px 12px;border:1px solid #d8e3dc;border-radius:8px;background:#fff;color:#244d39;font:inherit;font-size:13px;cursor:pointer}
-            .howdi-connect-access button:hover,.howdi-connect-access button.active{background:#edf5ef;border-color:#92b5a0}
-            .howdi-connect-access details{margin-top:12px;border-top:1px solid #edf1ee;padding-top:10px}
+            .howdi-connect-access button,.howdi-connect-filters select{padding:9px 12px;border:1px solid #d5dae6;border-radius:8px;background:#fff;color:#22304f;font:inherit;font-size:13px;cursor:pointer}
+            .howdi-connect-access button:hover,.howdi-connect-access button.active{background:#ebeff7;border-color:#8999be}
+            .howdi-connect-access details{margin-top:12px;border-top:1px solid #ebedf3;padding-top:10px}
             .howdi-connect-access summary{cursor:pointer;font-weight:700;font-size:13px;padding:4px 0}
             .howdi-connect-filters{display:flex;flex-wrap:wrap;gap:10px;margin:14px 0}
             .howdi-connect-filters label{display:grid;gap:4px;font-size:12px;flex:1 1 155px}
             .howdi-connect-filters select{width:100%;min-width:0}
-            .howdi-connect-filters>button{align-self:end;background:#315f49;color:#fff}
-            .howdi-connect-status{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:16px 24px 0;padding:12px 15px;border:1px solid #d9e5dc;border-radius:12px;background:#f3f8f4;color:#244d39;font-size:14px}
+            .howdi-connect-filters>button{align-self:end;background:#1f5af6;color:#fff}
+            .howdi-connect-status{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:16px 24px 0;padding:12px 15px;border:1px solid #d6dbe8;border-radius:12px;background:#f2f4f9;color:#22304f;font-size:14px}
             .howdi-connect-status button{border:0;background:transparent;color:inherit;cursor:pointer;font-size:20px}
             @media(max-width:650px){.howdi-connect-access,.howdi-connect-status{margin-left:10px;margin-right:10px}.howdi-connect-access nav>button{flex:1 1 140px}.howdi-connect-tool-list>button{flex:1 1 155px}}
           `}</style>
@@ -20153,11 +20154,11 @@ const removeNotification = async (notificationId) => {
                 </div>
                 <div className="hc2-top-actions"><button type="button" title="Notifications" onClick={()=>{setConnectNotificationsOpen(v=>!v);loadConnectNotifications()}}>♢{Number(connectBootstrap.unread_notifications||0)>0&&<sup>{connectBootstrap.unread_notifications}</sup>}</button></div>
               </header>
-              {connectNotificationsOpen&&<div style={{position:"absolute",right:64,top:64,zIndex:50,width:340,maxHeight:430,overflow:"auto",background:"#fff",border:"1px solid #e4e8e5",borderRadius:16,boxShadow:"0 18px 50px rgba(20,45,30,.18)",padding:12}}>
+              {connectNotificationsOpen&&<div style={{position:"absolute",right:64,top:64,zIndex:50,width:340,maxHeight:430,overflow:"auto",background:"#fff",border:"1px solid #e0e4ec",borderRadius:16,boxShadow:"0 18px 50px rgba(39,64,134,.18)",padding:12}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}><b>Notifications</b><button type="button" onClick={()=>setConnectNotificationsOpen(false)}>×</button></div>
                 {!connectNotifications.length&&<p>No Connect notifications yet.</p>}
                 {connectNotifications.some(n=>!n.is_read)&&<button type="button" onClick={markAllConnectNotificationsRead} style={{margin:"6px 0",fontSize:12}}>Mark all read</button>}
-                {connectNotifications.slice(0,20).map(n=><article key={n.id} onClick={()=>openConnectNotification(n)} style={{padding:"10px 4px",borderTop:"1px solid #eef1ef",cursor:n.target?"pointer":"default",background:n.is_read?"transparent":"#f3faf5"}}><b>{n.actor_name||"HOWDI"}</b>{n.actor_public_username&&<small style={{marginLeft:6,color:"#6b7a70"}}>@{n.actor_public_username}</small>}<div>{n.message}</div><small>{formatConnectDate(n.created_at)}{n.target?" · Open":""}</small></article>)}
+                {connectNotifications.slice(0,20).map(n=><article key={n.id} onClick={()=>openConnectNotification(n)} style={{padding:"10px 4px",borderTop:"1px solid #eceef3",cursor:n.target?"pointer":"default",background:n.is_read?"transparent":"#f2f5fb"}}><b>{n.actor_name||"HOWDI"}</b>{n.actor_public_username&&<small style={{marginLeft:6,color:"#6b707a"}}>@{n.actor_public_username}</small>}<div>{n.message}</div><small>{formatConnectDate(n.created_at)}{n.target?" · Open":""}</small></article>)}
               </div>}
 
               <div className="hc2-scroll">
@@ -20262,7 +20263,7 @@ const removeNotification = async (notificationId) => {
                         <div className="hc9-poll-question"><b>{post.poll.question}</b><small>{Number(post.poll.total_votes||0)} votes</small></div>
                         <div className="hc9-poll-options">{(post.poll.options||[]).map(option=>{const total=Math.max(1,Number(post.poll.total_votes||0));const pct=Math.round((Number(option.votes||0)/total)*100);const selected=Number(post.poll.viewer_option_id)===Number(option.id);return <button type="button" key={option.id} className={selected?"selected":""} onClick={()=>voteConnectPoll(post,option.id)}><span className="hc9-poll-fill" style={{width:`${pct}%`}}></span><span className="hc9-poll-label">{option.text}</span><strong>{Number(post.poll.total_votes||0)>0?`${pct}%`:"Vote"}</strong></button>})}</div>
                       </div>}
-                      <div className="hc2-post-actions" id={`connect-post-${post.id}`}><button onClick={()=>toggleConnectReaction(post.id)}>{post.reacted_by_viewer?"♥":"♡"} <span>{Number(post.reaction_count||0)||"React"}</span></button><button disabled={post.allow_comments===false} onClick={()=>post.allow_comments!==false&&openConnectComments(post)}>💬 <span>{post.allow_comments===false?"Off":Number(post.comment_count||0)||"Reply"}</span></button><button disabled={post.allow_repost===false} onClick={()=>post.allow_repost!==false&&toggleConnectRepost(post)}>↻ <span>{post.allow_repost===false?"Off":Number(post.repost_count||0)||"Repost"}</span></button><button onClick={()=>{setConnectQuotePost(post);setConnectQuoteText("")}}>❝ <span>{Number(post.quote_count||0)||"Quote"}</span></button><button onClick={()=>shareConnectPost(post)}>↗ <span>{Number(post.share_count||0)||"Share"}</span></button><button onClick={()=>saveConnectPostToCollection(post)}>🗂 <span>Collect</span></button>{post.is_mine&&<button onClick={()=>pinConnectPostToProfile(post)}>📌 <span>Pin</span></button>}{post.is_mine&&<button onClick={()=>loadConnectPostAnalytics(post)}>📊 <span>Insights</span></button>}<button onClick={()=>toggleConnectSpark(post)}>{post.sparked_by_viewer?"💡":"✦"} <span>{Number(post.spark_count||0)||"Spark"}</span></button>{!post.is_mine&&<button onClick={()=>{setConnectTipPost(post);setConnectTipAmount("25")}}>₹ <span>{Number(post.tip_count||0)||"Tip"}</span></button>}<button onClick={()=>toggleConnectSave(post.id)}>{connectSavedPosts[String(post.id)]||post.saved_by_viewer?"▣":"⌑"}</button></div><div style={{display:"flex",gap:14,flexWrap:"wrap",fontSize:11,color:"#6a756f",marginTop:8}}><span>👁 {Number(post.view_count||0)} views</span><span>◎ {Number(post.reach_count||0)} reached</span><span>⚡ {Number(post.reaction_count||0)+Number(post.comment_count||0)+Number(post.repost_count||0)+Number(post.quote_count||0)+Number(post.share_count||0)+Number(post.spark_count||0)} engaged</span>{post.is_mine&&<button type="button" onClick={()=>loadConnectPostInsights(post)} style={{marginLeft:"auto",border:0,background:"transparent",fontWeight:800,cursor:"pointer"}}>Insights</button>}</div>
+                      <div className="hc2-post-actions" id={`connect-post-${post.id}`}><button onClick={()=>toggleConnectReaction(post.id)}>{post.reacted_by_viewer?"♥":"♡"} <span>{Number(post.reaction_count||0)||"React"}</span></button><button disabled={post.allow_comments===false} onClick={()=>post.allow_comments!==false&&openConnectComments(post)}>💬 <span>{post.allow_comments===false?"Off":Number(post.comment_count||0)||"Reply"}</span></button><button disabled={post.allow_repost===false} onClick={()=>post.allow_repost!==false&&toggleConnectRepost(post)}>↻ <span>{post.allow_repost===false?"Off":Number(post.repost_count||0)||"Repost"}</span></button><button onClick={()=>{setConnectQuotePost(post);setConnectQuoteText("")}}>❝ <span>{Number(post.quote_count||0)||"Quote"}</span></button><button onClick={()=>shareConnectPost(post)}>↗ <span>{Number(post.share_count||0)||"Share"}</span></button><button onClick={()=>saveConnectPostToCollection(post)}>🗂 <span>Collect</span></button>{post.is_mine&&<button onClick={()=>pinConnectPostToProfile(post)}>📌 <span>Pin</span></button>}{post.is_mine&&<button onClick={()=>loadConnectPostAnalytics(post)}>📊 <span>Insights</span></button>}<button onClick={()=>toggleConnectSpark(post)}>{post.sparked_by_viewer?"💡":"✦"} <span>{Number(post.spark_count||0)||"Spark"}</span></button>{!post.is_mine&&<button onClick={()=>{setConnectTipPost(post);setConnectTipAmount("25")}}>₹ <span>{Number(post.tip_count||0)||"Tip"}</span></button>}<button onClick={()=>toggleConnectSave(post.id)}>{connectSavedPosts[String(post.id)]||post.saved_by_viewer?"▣":"⌑"}</button></div><div style={{display:"flex",gap:14,flexWrap:"wrap",fontSize:11,color:"#6a6d75",marginTop:8}}><span>👁 {Number(post.view_count||0)} views</span><span>◎ {Number(post.reach_count||0)} reached</span><span>⚡ {Number(post.reaction_count||0)+Number(post.comment_count||0)+Number(post.repost_count||0)+Number(post.quote_count||0)+Number(post.share_count||0)+Number(post.spark_count||0)} engaged</span>{post.is_mine&&<button type="button" onClick={()=>loadConnectPostInsights(post)} style={{marginLeft:"auto",border:0,background:"transparent",fontWeight:800,cursor:"pointer"}}>Insights</button>}</div>
                     </article>)}
                     </>}
 
@@ -20305,7 +20306,7 @@ const removeNotification = async (notificationId) => {
                 </div>}
 
                 {connectView==="discover" && <section className="hc2-page">
-                  <div className="hc2-page-head"><div><small>EXPLORE</small><h2>Find your next interest</h2><p>Creators, conversations and communities selected around what you enjoy.</p></div></div><div className="hc112-discover-filter"><select value={connectDiscoverCategory} onChange={e=>setConnectDiscoverCategory(e.target.value)}><option value="">All categories</option>{["EDUCATION","STUDENT","INSTITUTE","SERVICE_JOB","BUSINESS","CREATOR","TECHNOLOGY","AI","QUANTUM_COMPUTING","PUBLIC_AFFAIRS","POLITICS","MUSIC","COMEDY","TRAVEL","SCIENCE"].map(x=><option key={x} value={x}>{connectProfileCategoryLabel(x)}</option>)}</select><select value={connectDiscoverProfileType} onChange={e=>setConnectDiscoverProfileType(e.target.value)}><option value="">All profile types</option>{["PERSONAL","PROFESSIONAL","CREATOR","INSTITUTION","STUDENT","ORGANIZATION"].map(x=><option key={x} value={x}>{connectProfileCategoryLabel(x)}</option>)}</select><select value={connectDiscoverPresence} onChange={e=>setConnectDiscoverPresence(e.target.value)}><option value="ALL">Any activity</option><option value="ONLINE">Active now</option><option value="LIVE">Live now</option></select><button onClick={loadConnectProfileRecommendations}>Refresh smart matches</button></div><div style={{display:"grid",gap:10,marginBottom:20}}><div className="hc2-section-head"><b>People you may know</b></div>{filteredConnectPeople().slice(0,12).map(person=><article key={person.public_username||person.full_name} style={{display:"grid",gridTemplateColumns:"auto 1fr auto auto",gap:10,alignItems:"center",padding:12,border:"1px solid #e6ebe7",borderRadius:14,background:"#fff"}}><div className="hc2-avatar">{String(person.full_name||"H")[0]}</div><span className="hc112-discover-person"><button className="hc110-person-name" onClick={()=>openConnectPublicProfile(person)}>{person.full_name||"HOWDI Member"} {person.verified&&<i className="hc5-verified" title="Verified HOWDI identity">✓</i>}</button><small>{person.profession_title||connectProfileCategoryLabel(person.professional_category||"GENERAL")} · {person.is_live_now?"🔴 Live":person.presence_status==="ONLINE"?"🟢 Active":person.public_username?`@${person.public_username}`:"HOWDI member"}</small></span>{/* K5B CLOSURE: Discover follow/message actions are now @public_username-addressed, never a raw numeric id. */}<button type="button" onClick={()=>toggleConnectFollowByUsername(person.public_username,person.full_name)}>{person.following?"Unfollow":person.follow_requested?"Requested":"Follow"}</button><button type="button" onClick={()=>startConnectConversation(person)}>Message</button></article>)}</div>
+                  <div className="hc2-page-head"><div><small>EXPLORE</small><h2>Find your next interest</h2><p>Creators, conversations and communities selected around what you enjoy.</p></div></div><div className="hc112-discover-filter"><select value={connectDiscoverCategory} onChange={e=>setConnectDiscoverCategory(e.target.value)}><option value="">All categories</option>{["EDUCATION","STUDENT","INSTITUTE","SERVICE_JOB","BUSINESS","CREATOR","TECHNOLOGY","AI","QUANTUM_COMPUTING","PUBLIC_AFFAIRS","POLITICS","MUSIC","COMEDY","TRAVEL","SCIENCE"].map(x=><option key={x} value={x}>{connectProfileCategoryLabel(x)}</option>)}</select><select value={connectDiscoverProfileType} onChange={e=>setConnectDiscoverProfileType(e.target.value)}><option value="">All profile types</option>{["PERSONAL","PROFESSIONAL","CREATOR","INSTITUTION","STUDENT","ORGANIZATION"].map(x=><option key={x} value={x}>{connectProfileCategoryLabel(x)}</option>)}</select><select value={connectDiscoverPresence} onChange={e=>setConnectDiscoverPresence(e.target.value)}><option value="ALL">Any activity</option><option value="ONLINE">Active now</option><option value="LIVE">Live now</option></select><button onClick={loadConnectProfileRecommendations}>Refresh smart matches</button></div><div style={{display:"grid",gap:10,marginBottom:20}}><div className="hc2-section-head"><b>People you may know</b></div>{filteredConnectPeople().slice(0,12).map(person=><article key={person.public_username||person.full_name} style={{display:"grid",gridTemplateColumns:"auto 1fr auto auto",gap:10,alignItems:"center",padding:12,border:"1px solid #e3e6ee",borderRadius:14,background:"#fff"}}><div className="hc2-avatar">{String(person.full_name||"H")[0]}</div><span className="hc112-discover-person"><button className="hc110-person-name" onClick={()=>openConnectPublicProfile(person)}>{person.full_name||"HOWDI Member"} {person.verified&&<i className="hc5-verified" title="Verified HOWDI identity">✓</i>}</button><small>{person.profession_title||connectProfileCategoryLabel(person.professional_category||"GENERAL")} · {person.is_live_now?"🔴 Live":person.presence_status==="ONLINE"?"🟢 Active":person.public_username?`@${person.public_username}`:"HOWDI member"}</small></span>{/* K5B CLOSURE: Discover follow/message actions are now @public_username-addressed, never a raw numeric id. */}<button type="button" onClick={()=>toggleConnectFollowByUsername(person.public_username,person.full_name)}>{person.following?"Unfollow":person.follow_requested?"Requested":"Follow"}</button><button type="button" onClick={()=>startConnectConversation(person)}>Message</button></article>)}</div>
                   <div className="hc2-explore-hero"><div><span>FEATURED TODAY</span><h3>Original ideas live here.</h3><p>Meet independent creators and the stories behind what they build.</p><button>Explore creators</button></div><div className="hc2-explore-art"><i>H</i></div></div>
                   <div className="hc2-section-head"><b>Explore by interest</b></div>
                   <div className="hc2-interest-grid">{[["Handmade","Craft, crochet & original work"],["Local","People and stories near you"],["Learning","Skills worth sharing"],["Design","Ideas, spaces & visual culture"],["Sustainable","Thoughtful ways to create"],["Community","Conversations that connect"]].map(([a,b])=><button key={a}><i>{a[0]}</i><span><b>{a}</b><small>{b}</small></span><em>→</em></button>)}</div>
@@ -20325,7 +20326,7 @@ const removeNotification = async (notificationId) => {
                     {!connectConversations.length&&<div className="hc2-empty">No chats yet. Find someone in Explore.</div>}
                     {connectConversations.map(c=><button className={Number(connectActiveConversation?.id)===Number(c.id)?"active":""} key={c.id} onClick={()=>openConnectConversation(c)}><div className="hc2-avatar">{String(c.full_name||"H")[0]}</div><span><b>{c.full_name||"HOWDI Member"}</b><small>{c.last_message||c.public_username||"Start chatting"}</small></span><em>{Number(c.unread_count||0)>0?c.unread_count:""}</em></button>)}
                   </aside>
-                  <div className="hc2-chat">{connectActiveConversation?<><header><div className="hc2-avatar">{String(connectActiveConversation.full_name||"H")[0]}</div><span><b>{connectActiveConversation.full_name||"HOWDI Member"}</b><small>{connectActiveConversation.public_username?`@${connectActiveConversation.public_username}`:"HOWDI Connect"}</small></span></header><div className="hc2-chat-body">{connectMessages.map(m=><div key={m.id} className={m.is_mine?"hc2-bubble mine":"hc2-bubble theirs"}>{m.deleted_at?<i>Message deleted</i>:<>{m.message_text}{renderConnectDMAttachment(m)}{m.edited_at&&<em style={{fontSize:9,opacity:.65,marginLeft:6}}>(edited)</em>}<div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:4}}>{Object.entries(m.reactions||{}).map(([uid,emoji])=><span key={uid}>{emoji}</span>)}</div><div style={{display:"flex",gap:4,marginTop:5}}>{["👍","❤️","😂"].map(e=><button key={e} type="button" onClick={()=>reactConnectMessage(m,e)} style={{border:0,background:"transparent",cursor:"pointer"}}>{e}</button>)}{m.is_mine&&<><button type="button" onClick={()=>{setConnectEditingMessage(m);setConnectMessageText(m.message_text)}} style={{border:0,background:"transparent",cursor:"pointer"}}>Edit</button><button type="button" onClick={()=>deleteConnectMessage(m)} style={{border:0,background:"transparent",cursor:"pointer"}}>Delete</button></>}</div></>}<small>{formatConnectDate(m.created_at)}{m.expires_at?` · expires ${formatConnectDate(m.expires_at)}`:""}</small></div>)}</div><footer style={{position:"relative",flexWrap:"wrap"}}>{connectAttachmentPickerRow()}<button type="button" onClick={()=>setConnectEmojiOpen(v=>!v)}>😊</button>{connectEmojiOpen&&<div style={{position:"absolute",bottom:"52px",left:8,display:"flex",gap:6,padding:8,background:"#fff",border:"1px solid #e5e9e6",borderRadius:12,zIndex:5}}>{["😀","😂","😍","👍","🙏","🔥","🎉","❤️"].map(e=><button type="button" key={e} onClick={()=>{setConnectMessageText(v=>v+e);setConnectEmojiOpen(false)}} style={{fontSize:20,border:0,background:"transparent"}}>{e}</button>)}</div>}<input value={connectMessageText} onChange={e=>setConnectMessageText(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")sendConnectMessage()}} placeholder={connectEditingMessage?"Edit message…":"Message…"}/>{connectEditingMessage&&<button type="button" onClick={()=>{setConnectEditingMessage(null);setConnectMessageText("")}}>×</button>}<button className="send" onClick={sendConnectMessage}>↑</button></footer></>:<div className="hc2-empty">Select a conversation.</div>}</div>
+                  <div className="hc2-chat">{connectActiveConversation?<><header><div className="hc2-avatar">{String(connectActiveConversation.full_name||"H")[0]}</div><span><b>{connectActiveConversation.full_name||"HOWDI Member"}</b><small>{connectActiveConversation.public_username?`@${connectActiveConversation.public_username}`:"HOWDI Connect"}</small></span></header><div className="hc2-chat-body">{connectMessages.map(m=><div key={m.id} className={m.is_mine?"hc2-bubble mine":"hc2-bubble theirs"}>{m.deleted_at?<i>Message deleted</i>:<>{m.message_text}{renderConnectDMAttachment(m)}{m.edited_at&&<em style={{fontSize:9,opacity:.65,marginLeft:6}}>(edited)</em>}<div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:4}}>{Object.entries(m.reactions||{}).map(([uid,emoji])=><span key={uid}>{emoji}</span>)}</div><div style={{display:"flex",gap:4,marginTop:5}}>{["👍","❤️","😂"].map(e=><button key={e} type="button" onClick={()=>reactConnectMessage(m,e)} style={{border:0,background:"transparent",cursor:"pointer"}}>{e}</button>)}{m.is_mine&&<><button type="button" onClick={()=>{setConnectEditingMessage(m);setConnectMessageText(m.message_text)}} style={{border:0,background:"transparent",cursor:"pointer"}}>Edit</button><button type="button" onClick={()=>deleteConnectMessage(m)} style={{border:0,background:"transparent",cursor:"pointer"}}>Delete</button></>}</div></>}<small>{formatConnectDate(m.created_at)}{m.expires_at?` · expires ${formatConnectDate(m.expires_at)}`:""}</small></div>)}</div><footer style={{position:"relative",flexWrap:"wrap"}}>{connectAttachmentPickerRow()}<button type="button" onClick={()=>setConnectEmojiOpen(v=>!v)}>😊</button>{connectEmojiOpen&&<div style={{position:"absolute",bottom:"52px",left:8,display:"flex",gap:6,padding:8,background:"#fff",border:"1px solid #e1e5ed",borderRadius:12,zIndex:5}}>{["😀","😂","😍","👍","🙏","🔥","🎉","❤️"].map(e=><button type="button" key={e} onClick={()=>{setConnectMessageText(v=>v+e);setConnectEmojiOpen(false)}} style={{fontSize:20,border:0,background:"transparent"}}>{e}</button>)}</div>}<input value={connectMessageText} onChange={e=>setConnectMessageText(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")sendConnectMessage()}} placeholder={connectEditingMessage?"Edit message…":"Message…"}/>{connectEditingMessage&&<button type="button" onClick={()=>{setConnectEditingMessage(null);setConnectMessageText("")}}>×</button>}<button className="send" onClick={sendConnectMessage}>↑</button></footer></>:<div className="hc2-empty">Select a conversation.</div>}</div>
                   <aside className="hc2-chat-info"><div className="hc2-avatar big">{String(connectActiveConversation?.full_name||"H")[0]}</div><b>{connectActiveConversation?.full_name||"HOWDI Connect"}</b><small>{connectActiveConversation?.public_username?`@${connectActiveConversation.public_username}`:"Select a chat"}</small><label><span><b>Message mode</b><small>Keep or auto-delete messages after 24 hours.</small></span><select value={connectMessageMode} onChange={e=>{setConnectMessageMode(e.target.value);saveConnectPreferences({messageMode:e.target.value})}}><option>Keep</option><option>After viewing</option><option>24 hours</option></select></label></aside>
                 </section>}
 
@@ -20596,7 +20597,7 @@ const removeNotification = async (notificationId) => {
                 </section>}
 
                 {connectView==="profile" && <section className="hc2-page">
-                  <div className="hc110-profile-hero"><div className="hc110-cover" style={connectBootstrap.profile?.cover_data?{backgroundImage:`linear-gradient(rgba(18,49,38,.22),rgba(18,49,38,.45)),url(${connectBootstrap.profile.cover_data})`,backgroundSize:"cover",backgroundPosition:"center"}:undefined}><div className="hc110-cover-chip">{connectBootstrap.profile?.creator_mode?"🎬 Creator":connectBootstrap.profile?.professional_mode?"💼 Professional":"HOWDI Profile"}</div></div><div className="hc110-profile-body"><div className="hc110-avatar-wrap"><div className="hc2-avatar profile">{connectBootstrap.profile?.avatar_data?<img src={connectBootstrap.profile.avatar_data} alt="Profile"/>:customerDisplayName.slice(0,1).toUpperCase()}</div><i className={connectBootstrap.profile?.is_live_now?"live":connectBootstrap.profile?.presence_status==="ONLINE"?"online":"offline"}></i></div><div className="hc110-profile-actions"><button onClick={openConnectProfileEditor}>Edit profile</button><button onClick={()=>loadConnectProfileStudio(true)}>Profile Studio</button><button onClick={shareConnectProfile}>Share</button><button onClick={openConnectProfileCode}>Profile code</button>{connectBootstrap.profile?.is_live_now&&<button className="live">● LIVE</button>}</div><h2>{customerDisplayName} {connectBootstrap.profile?.identity_verified&&<i className="hc5-verified large" title="Verified HOWDI identity">✓</i>} {connectBootstrap.membership?.plan_code==="HOWDI_PREMIUM"&&<span className="hc110-premium">PREMIUM</span>}</h2><div className="hc110-handle">{currentUser?.public_username?`@${currentUser.public_username}`:"HOWDI member"} · <span>{connectPresenceLabel(connectBootstrap.profile)}</span></div>{connectBootstrap.profile?.status_message&&<div className="hc110-status">“{connectBootstrap.profile.status_message}”</div>}<div className="hc110-identity-chips"><span>{connectProfileCategoryLabel(connectBootstrap.profile?.profile_type||"PERSONAL")}</span>{(connectBootstrap.profile?.profile_badges||[]).slice(0,3).map(b=><span key={b.id}>{b.badge_emoji} {b.badge_name}</span>)}<span>{connectProfileCategoryLabel(connectBootstrap.profile?.professional_category||"GENERAL")}</span>{connectBootstrap.profile?.availability_status&&<span>{connectProfileCategoryLabel(connectBootstrap.profile.availability_status)}</span>}</div><h3>{connectBootstrap.profile?.profession_title||connectBootstrap.profile?.headline||"Creating, discovering and connecting on HOWDI."}</h3>{connectBootstrap.profile?.organization_name&&<p className="hc110-org">🏢 {connectBootstrap.profile.organization_name}</p>}<p>{connectBootstrap.profile?.about||"Build your HOWDI identity and tell the community what you do."}</p><div className="hc2-profile-counts"><span><b>{Number(connectBootstrap.profile?.post_count||0)}</b> Posts</span><span><b>{Number(connectBootstrap.profile?.follower_count||0)}</b> Followers</span><span><b>{Number(connectBootstrap.profile?.following_count||0)}</b> Following</span></div></div></div>
+                  <div className="hc110-profile-hero"><div className="hc110-cover" style={connectBootstrap.profile?.cover_data?{backgroundImage:`linear-gradient(rgba(23,73,214,.22),rgba(23,73,214,.45)),url(${connectBootstrap.profile.cover_data})`,backgroundSize:"cover",backgroundPosition:"center"}:undefined}><div className="hc110-cover-chip">{connectBootstrap.profile?.creator_mode?"🎬 Creator":connectBootstrap.profile?.professional_mode?"💼 Professional":"HOWDI Profile"}</div></div><div className="hc110-profile-body"><div className="hc110-avatar-wrap"><div className="hc2-avatar profile">{connectBootstrap.profile?.avatar_data?<img src={connectBootstrap.profile.avatar_data} alt="Profile"/>:customerDisplayName.slice(0,1).toUpperCase()}</div><i className={connectBootstrap.profile?.is_live_now?"live":connectBootstrap.profile?.presence_status==="ONLINE"?"online":"offline"}></i></div><div className="hc110-profile-actions"><button onClick={openConnectProfileEditor}>Edit profile</button><button onClick={()=>loadConnectProfileStudio(true)}>Profile Studio</button><button onClick={shareConnectProfile}>Share</button><button onClick={openConnectProfileCode}>Profile code</button>{connectBootstrap.profile?.is_live_now&&<button className="live">● LIVE</button>}</div><h2>{customerDisplayName} {connectBootstrap.profile?.identity_verified&&<i className="hc5-verified large" title="Verified HOWDI identity">✓</i>} {connectBootstrap.membership?.plan_code==="HOWDI_PREMIUM"&&<span className="hc110-premium">PREMIUM</span>}</h2><div className="hc110-handle">{currentUser?.public_username?`@${currentUser.public_username}`:"HOWDI member"} · <span>{connectPresenceLabel(connectBootstrap.profile)}</span></div>{connectBootstrap.profile?.status_message&&<div className="hc110-status">“{connectBootstrap.profile.status_message}”</div>}<div className="hc110-identity-chips"><span>{connectProfileCategoryLabel(connectBootstrap.profile?.profile_type||"PERSONAL")}</span>{(connectBootstrap.profile?.profile_badges||[]).slice(0,3).map(b=><span key={b.id}>{b.badge_emoji} {b.badge_name}</span>)}<span>{connectProfileCategoryLabel(connectBootstrap.profile?.professional_category||"GENERAL")}</span>{connectBootstrap.profile?.availability_status&&<span>{connectProfileCategoryLabel(connectBootstrap.profile.availability_status)}</span>}</div><h3>{connectBootstrap.profile?.profession_title||connectBootstrap.profile?.headline||"Creating, discovering and connecting on HOWDI."}</h3>{connectBootstrap.profile?.organization_name&&<p className="hc110-org">🏢 {connectBootstrap.profile.organization_name}</p>}<p>{connectBootstrap.profile?.about||"Build your HOWDI identity and tell the community what you do."}</p><div className="hc2-profile-counts"><span><b>{Number(connectBootstrap.profile?.post_count||0)}</b> Posts</span><span><b>{Number(connectBootstrap.profile?.follower_count||0)}</b> Followers</span><span><b>{Number(connectBootstrap.profile?.following_count||0)}</b> Following</span></div></div></div>
                   <div className="hc110-profile-grid"><article><small>PROFILE</small><b>{connectProfilePrivate?"🔒 Private":"🌍 Public"}</b><span>{connectDiscoverable?"Discoverable":"Hidden from discovery"}</span></article><article><small>PRESENCE</small><b>{connectPresenceLabel(connectBootstrap.profile)}</b><span>{connectActivityVisible?"Activity visible":"Activity hidden"}</span></article><article><small>PROFESSIONAL</small><b>{connectProfileCategoryLabel(connectBootstrap.profile?.professional_category||"GENERAL")}</b><span>{connectBootstrap.profile?.profession_title||"Add your role"}</span></article><article><small>MODE</small><b>{connectBootstrap.profile?.creator_mode?"Creator":connectBootstrap.profile?.professional_mode?"Professional":"Personal"}</b><span>{connectBootstrap.profile?.contact_permission==="NO_ONE"?"Messages closed":`${connectProfileCategoryLabel(connectBootstrap.profile?.contact_permission||"EVERYONE")} can message`}</span></article></div><div className="hc112-profile-type-card">{(()=>{const x=connectProfileLayoutLabel(connectBootstrap.profile);return <><span>{x.icon}</span><div><b>{x.title}</b><small>{x.sub}</small></div></>})()}</div>{(connectBootstrap.profile?.expertise||connectBootstrap.profile?.interests||connectBootstrap.profile?.education_focus)&&<div className="hc110-detail-grid">{connectBootstrap.profile?.expertise&&<article><b>⚡ Expertise</b><p>{connectBootstrap.profile.expertise}</p></article>}{connectBootstrap.profile?.interests&&<article><b>✨ Interests</b><p>{connectBootstrap.profile.interests}</p></article>}{connectBootstrap.profile?.education_focus&&<article><b>🎓 Education focus</b><p>{connectBootstrap.profile.education_focus}</p></article>}{connectBootstrap.profile?.student_level&&<article><b>📘 Student level</b><p>{connectBootstrap.profile.student_level}</p></article>}{connectBootstrap.profile?.institution_type&&<article><b>🏫 Institution type</b><p>{connectBootstrap.profile.institution_type}</p></article>}{connectBootstrap.profile?.service_area&&<article><b>🧰 Service area</b><p>{connectBootstrap.profile.service_area}{connectBootstrap.profile?.service_rate_text?` · ${connectBootstrap.profile.service_rate_text}`:""}</p></article>}</div>}
                   <div className="hc2-profile-tabs">{[["posts","Posts"],["media","Media"],["saved","Saved"],["highlights","Highlights"]].map(([id,label])=><button key={id} className={connectProfileTab===id?"active":""} onClick={()=>{setConnectProfileTab(id);loadConnectProfileContent()}}>{label}</button>)}</div>
                   {connectProfileTab==="posts"&&<div style={{display:"grid",gap:14,margin:"18px 0"}}>{connectProfilePosts.map(post=><article key={post.id} style={{background:"#fff",borderRadius:16,padding:16}}><small>{formatConnectDate(post.created_at)} · {post.category}</small>{post.content&&<p>{post.content}</p>}{post.media_data&&<img src={post.media_data} alt="Your HOWDI post" style={{width:"100%",maxHeight:500,objectFit:"contain",borderRadius:14}}/>}</article>)}{!connectProfilePosts.length&&<div className="hc2-profile-empty"><span>✦</span><b>Your HOWDI story starts here</b><small>Share your first post with the community.</small><button onClick={()=>{setConnectCreateType("post");setConnectCreateOpen(true)}}>Create post</button></div>}</div>}
@@ -21010,25 +21011,25 @@ const removeNotification = async (notificationId) => {
               <header><div><small>SUPPORT SPACE</small><h3>Tip the host</h3></div><button onClick={()=>setConnectSpaceTipOpen(false)}>×</button></header>
               <div style={{padding:16}}>
                 <p style={{marginTop:0}}>Support <b>{connectRealtimeRoom.name}</b> and its host.</p>
-                <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{["10","25","50","100"].map(v=><button key={v} type="button" onClick={()=>setConnectSpaceTipAmount(v)} style={{padding:"10px 14px",borderRadius:999,border:"1px solid #d9dfda",background:connectSpaceTipAmount===v?"#174c39":"#fff",color:connectSpaceTipAmount===v?"#fff":"#173c2e",fontWeight:900}}>₹{v}</button>)}</div>
+                <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{["10","25","50","100"].map(v=><button key={v} type="button" onClick={()=>setConnectSpaceTipAmount(v)} style={{padding:"10px 14px",borderRadius:999,border:"1px solid #d5d9e3",background:connectSpaceTipAmount===v?"#1749d6":"#fff",color:connectSpaceTipAmount===v?"#fff":"#0d1a3a",fontWeight:900}}>₹{v}</button>)}</div>
                 <input value={connectSpaceTipAmount} onChange={e=>setConnectSpaceTipAmount(e.target.value.replace(/[^0-9.]/g,""))} placeholder="Custom amount" style={{width:"100%",marginTop:12,boxSizing:"border-box"}}/>
-                <small style={{display:"block",marginTop:8,color:"#6b766f"}}>The tip is created in HOWDI Connect and completed through HPay. It is not counted as paid until HPay confirms it.</small>
+                <small style={{display:"block",marginTop:8,color:"#6b6e76"}}>The tip is created in HOWDI Connect and completed through HPay. It is not counted as paid until HPay confirms it.</small>
               </div>
               <footer><button onClick={()=>setConnectSpaceTipOpen(false)}>Cancel</button><button className="hc2-primary" onClick={createConnectSpaceTip}>Continue to HPay</button></footer>
             </div>
           </div>}
 
-          {connectQuotePost&&<div className="hc2-create-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setConnectQuotePost(null)}}><div className="hc2-create-sheet"><header><div><small>QUOTE POST</small><h3>Add your take</h3></div><button onClick={()=>setConnectQuotePost(null)}>×</button></header><div style={{padding:16}}><textarea value={connectQuoteText} onChange={e=>setConnectQuoteText(e.target.value)} placeholder="Add your thoughts…" style={{width:"100%",minHeight:120}}/><div style={{marginTop:12,padding:12,border:"1px solid #e4e9e5",borderRadius:12}}><b>{connectQuotePost.full_name||"HOWDI Member"}</b><p>{connectQuotePost.content}</p></div></div><footer><button onClick={()=>setConnectQuotePost(null)}>Cancel</button><button className="hc2-primary" onClick={publishConnectQuote}>Quote</button></footer></div></div>}
+          {connectQuotePost&&<div className="hc2-create-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setConnectQuotePost(null)}}><div className="hc2-create-sheet"><header><div><small>QUOTE POST</small><h3>Add your take</h3></div><button onClick={()=>setConnectQuotePost(null)}>×</button></header><div style={{padding:16}}><textarea value={connectQuoteText} onChange={e=>setConnectQuoteText(e.target.value)} placeholder="Add your thoughts…" style={{width:"100%",minHeight:120}}/><div style={{marginTop:12,padding:12,border:"1px solid #e0e4ed",borderRadius:12}}><b>{connectQuotePost.full_name||"HOWDI Member"}</b><p>{connectQuotePost.content}</p></div></div><footer><button onClick={()=>setConnectQuotePost(null)}>Cancel</button><button className="hc2-primary" onClick={publishConnectQuote}>Quote</button></footer></div></div>}
 
           {connectTipPost&&<div className="hc2-create-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setConnectTipPost(null)}}><div className="hc2-create-sheet"><header><div><small>SUPPORT CREATOR</small><h3>Tip {connectTipPost.full_name||"Creator"}</h3></div><button onClick={()=>setConnectTipPost(null)}>×</button></header><div style={{padding:16}}><div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{["10","25","50","100"].map(v=><button key={v} onClick={()=>setConnectTipAmount(v)}>₹{v}</button>)}</div><input value={connectTipAmount} onChange={e=>setConnectTipAmount(e.target.value.replace(/[^0-9.]/g,""))} placeholder="Custom amount" style={{width:"100%",marginTop:12}}/><small style={{display:"block",marginTop:8}}>Tip completes through HPay.</small></div><footer><button onClick={()=>setConnectTipPost(null)}>Cancel</button><button className="hc2-primary" onClick={createConnectTip}>Continue to HPay</button></footer></div></div>}
 
-          {connectPostInsights&&<div className="hc2-create-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setConnectPostInsights(null)}}><div className="hc2-create-sheet"><header><div><small>POST INSIGHTS</small><h3>Creator growth</h3></div><button onClick={()=>setConnectPostInsights(null)}>×</button></header><div style={{padding:16,display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:10}}>{Object.entries(connectPostInsights.insights||{}).map(([k,v])=><article key={k} style={{padding:12,border:"1px solid #e5ebe7",borderRadius:12}}><small>{k.replaceAll("_"," ").toUpperCase()}</small><b style={{display:"block",fontSize:20,marginTop:4}}>{String(v)}</b></article>)}</div></div></div>}
+          {connectPostInsights&&<div className="hc2-create-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setConnectPostInsights(null)}}><div className="hc2-create-sheet"><header><div><small>POST INSIGHTS</small><h3>Creator growth</h3></div><button onClick={()=>setConnectPostInsights(null)}>×</button></header><div style={{padding:16,display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:10}}>{Object.entries(connectPostInsights.insights||{}).map(([k,v])=><article key={k} style={{padding:12,border:"1px solid #e2e5ee",borderRadius:12}}><small>{k.replaceAll("_"," ").toUpperCase()}</small><b style={{display:"block",fontSize:20,marginTop:4}}>{String(v)}</b></article>)}</div></div></div>}
 
           {connectCreateOpen && <div className="hc2-create-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setConnectCreateOpen(false)}}>
             <div className="hc2-create-sheet">
               <header><div><small>CREATE</small><h3>{connectCreateType==="story"?"New story":connectCreateType==="camera"?"HOWDI Camera":"New post"}</h3></div><button onClick={()=>setConnectCreateOpen(false)}>×</button></header>
               <div className="hc2-create-tabs"><button className={connectCreateType==="post"?"active":""} onClick={()=>{setConnectCreateType("post");setConnectPostMedia(null);setConnectPostMediaPreview("")}}>Post</button><button className={connectCreateType==="story"?"active":""} onClick={()=>{setConnectCreateType("story");setConnectPostMedia(null);setConnectPostMediaPreview("")}}>Story</button><button className={connectCreateType==="camera"?"active":""} onClick={()=>{setConnectCreateType("camera");setConnectPostMedia(null);setConnectPostMediaPreview("")}}>Camera</button></div>
-              {connectCreateType!=="camera"?<><div className="hc2-create-author"><div className="hc2-avatar">{customerDisplayName.slice(0,1).toUpperCase()}</div><span><b>{customerDisplayName}</b><small>{connectCreateType==="story"?connectStoryAudience:"Public"}</small></span></div><textarea value={connectComposer} onChange={e=>setConnectComposer(e.target.value)} placeholder={connectCreateType==="story"?"Add text to your story…":"What's happening in your world?"}/>{connectCreateType==="story"&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,padding:"0 16px 12px"}}><label><span style={{display:"block",fontSize:11,fontWeight:800}}>Music</span><select value={connectStoryMusic} onChange={e=>setConnectStoryMusic(e.target.value)}><option value="">No music</option><option>Soft acoustic</option><option>Happy beat</option><option>Calm ambient</option><option>Festival vibe</option></select></label><label><span style={{display:"block",fontSize:11,fontWeight:800}}>Filter</span><select value={connectStoryFilter} onChange={e=>setConnectStoryFilter(e.target.value)}><option>None</option><option>Warm</option><option>Cool</option><option>Mono</option><option>Vintage</option><option>Vivid</option></select></label></div>}<div className="hc2-media-drop"><span>▣</span><b>Add photo or video</b><small>Choose an image or short video from your device</small><label className="hc2-media-picker" style={{cursor:"pointer"}}><input type="file" accept="image/*,video/*" onChange={selectConnectPostMedia} style={{display:"none"}}/><span>Choose media</span></label></div>{connectPostMediaPreview&&<div style={{position:"relative",margin:"0 18px 12px"}}>{String(connectPostMedia?.type||"").startsWith("video/")?<video src={connectPostMediaPreview} controls playsInline style={{display:"block",width:"100%",maxHeight:360,borderRadius:14,background:"#111"}}/>:<img src={connectPostMediaPreview} alt="Selected post media" style={{display:"block",width:"100%",maxHeight:360,objectFit:"contain",borderRadius:14,background:"#f5f7f5",...connectStoryFilterStyle(connectCreateType==="story"?connectStoryFilter:"None")}}/>}<button type="button" onClick={()=>{setConnectPostMedia(null);setConnectPostMediaPreview("")}} style={{position:"absolute",right:10,top:10,border:0,borderRadius:999,width:32,height:32,background:"rgba(0,0,0,.7)",color:"#fff",cursor:"pointer"}}>×</button></div>}{connectCreateType==="post"&&<div className="hc9-intent-panel">
+              {connectCreateType!=="camera"?<><div className="hc2-create-author"><div className="hc2-avatar">{customerDisplayName.slice(0,1).toUpperCase()}</div><span><b>{customerDisplayName}</b><small>{connectCreateType==="story"?connectStoryAudience:"Public"}</small></span></div><textarea value={connectComposer} onChange={e=>setConnectComposer(e.target.value)} placeholder={connectCreateType==="story"?"Add text to your story…":"What's happening in your world?"}/>{connectCreateType==="story"&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,padding:"0 16px 12px"}}><label><span style={{display:"block",fontSize:11,fontWeight:800}}>Music</span><select value={connectStoryMusic} onChange={e=>setConnectStoryMusic(e.target.value)}><option value="">No music</option><option>Soft acoustic</option><option>Happy beat</option><option>Calm ambient</option><option>Festival vibe</option></select></label><label><span style={{display:"block",fontSize:11,fontWeight:800}}>Filter</span><select value={connectStoryFilter} onChange={e=>setConnectStoryFilter(e.target.value)}><option>None</option><option>Warm</option><option>Cool</option><option>Mono</option><option>Vintage</option><option>Vivid</option></select></label></div>}<div className="hc2-media-drop"><span>▣</span><b>Add photo or video</b><small>Choose an image or short video from your device</small><label className="hc2-media-picker" style={{cursor:"pointer"}}><input type="file" accept="image/*,video/*" onChange={selectConnectPostMedia} style={{display:"none"}}/><span>Choose media</span></label></div>{connectPostMediaPreview&&<div style={{position:"relative",margin:"0 18px 12px"}}>{String(connectPostMedia?.type||"").startsWith("video/")?<video src={connectPostMediaPreview} controls playsInline style={{display:"block",width:"100%",maxHeight:360,borderRadius:14,background:"#111"}}/>:<img src={connectPostMediaPreview} alt="Selected post media" style={{display:"block",width:"100%",maxHeight:360,objectFit:"contain",borderRadius:14,background:"#f4f5f8",...connectStoryFilterStyle(connectCreateType==="story"?connectStoryFilter:"None")}}/>}<button type="button" onClick={()=>{setConnectPostMedia(null);setConnectPostMediaPreview("")}} style={{position:"absolute",right:10,top:10,border:0,borderRadius:999,width:32,height:32,background:"rgba(0,0,0,.7)",color:"#fff",cursor:"pointer"}}>×</button></div>}{connectCreateType==="post"&&<div className="hc9-intent-panel">
                   <div className="hc9-intent-title"><b>What do you want from this post?</b><small>Turn a normal post into something people can act on.</small></div>
                   <div className="hc9-intent-chips">{[
                     ["SHARE","💬","Just share"],
@@ -21054,7 +21055,7 @@ const removeNotification = async (notificationId) => {
                       <div><b style={{display:"block"}}>Create HOWDI Vibe</b><small>Upload a short vertical video. It will appear in Videos and HOWDI Vibe.</small></div>
                     </div>
                     <textarea value={connectComposer} onChange={e=>setConnectComposer(e.target.value)} placeholder="Add a caption…" style={{minHeight:74,maxHeight:120,resize:"vertical"}}/>
-                    <label className="hc2-media-picker" style={{cursor:"pointer",display:"inline-flex",alignItems:"center",justifyContent:"center",padding:"10px 14px",border:"1px solid #d6dfd9",borderRadius:12,background:"#fff",fontWeight:800}}>
+                    <label className="hc2-media-picker" style={{cursor:"pointer",display:"inline-flex",alignItems:"center",justifyContent:"center",padding:"10px 14px",border:"1px solid #d2d7e3",borderRadius:12,background:"#fff",fontWeight:800}}>
                       <input type="file" accept="video/*" onChange={selectConnectPostMedia} style={{display:"none"}}/>
                       <span>{connectPostMedia?.data?"Change video":"Choose video"}</span>
                     </label>
@@ -21069,7 +21070,7 @@ const removeNotification = async (notificationId) => {
                   </div>
                 </div>
 
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,padding:"12px 18px",borderTop:"1px solid #e5ebe7",background:"#fff",flex:"0 0 auto",position:"sticky",bottom:0,zIndex:5}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,padding:"12px 18px",borderTop:"1px solid #e2e5ee",background:"#fff",flex:"0 0 auto",position:"sticky",bottom:0,zIndex:5}}>
                   <button type="button" onClick={()=>{setConnectPostMedia(null);setConnectPostMediaPreview("");setConnectComposer("")}}>Clear</button>
                   <button type="button" className="hc2-primary" disabled={connectPosting||!connectPostMedia?.data||!String(connectPostMedia?.type||"").startsWith("video/")} onClick={async()=>{const oldCategory=connectCategory;setConnectCategory("VIBE");try{const content=connectComposer.trim();if(!currentUser){setConnectNotice("Please login before publishing.");return;}setConnectPosting(true);const response=await fetch(`${SHOP_API_BASE}/api/connect/posts`,{method:"POST",headers:{"Content-Type":"application/json",...customerSessionHeaders()},body:JSON.stringify({content:content||"HOWDI Vibe",category:"VIBE",media_data:connectPostMedia?.data||"",media_type:connectPostMedia?.type||""})});const data=await response.json().catch(()=>({}));if(!response.ok||data.status!=="success")throw new Error(data.message||"Unable to publish Vibe.");setConnectComposer("");setConnectPostMedia(null);setConnectPostMediaPreview("");setConnectCreateOpen(false);setConnectContentMode("vibe");await loadConnectFeed();}catch(error){setConnectNotice(error.message||"Unable to publish Vibe.");}finally{setConnectPosting(false);setConnectCategory(oldCategory);}}}>{connectPosting?"Publishing…":"Publish Vibe"}</button>
                 </div>
@@ -22216,7 +22217,7 @@ const removeNotification = async (notificationId) => {
           <div onClick={(event) => event.stopPropagation()} style={{ width: "min(980px,100%)", maxHeight: "92vh", overflowY: "auto", background: "#fff", color: "#172033", borderRadius: 22, padding: 20, boxShadow: "0 28px 90px rgba(0,0,0,.28)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
               <div>
-                <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: ".08em", color: "#a36a2a" }}>HOWDI FIT STUDIO</div>
+                <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: ".08em", color: "#1f5af6" }}>HOWDI FIT STUDIO</div>
                 <h2 style={{ margin: "5px 0", color: "#172033", fontSize: 27, lineHeight: 1.2 }}>Custom fit for {selectedProduct.name}</h2>
                 <p style={{ margin: 0, color: "#64748b", fontSize: 13 }}>Capture a fitting reference, enter measurements and get a suggested size. 📏</p>
               </div>
@@ -22225,18 +22226,18 @@ const removeNotification = async (notificationId) => {
 
             <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 16, marginTop: 18 }}>
               <div>
-                <div style={{ borderRadius: 18, background: "#eef5ef", border: "1px solid #d9e6dc", padding: 12 }}>
-                  <video ref={fitVideoRef} autoPlay playsInline muted style={{ width: "100%", aspectRatio: "4/3", objectFit: "cover", borderRadius: 14, background: "#dfe9e1", display: fitPhoto ? "none" : "block" }} />
+                <div style={{ borderRadius: 18, background: "#eceff7", border: "1px solid #d6dce9", padding: 12 }}>
+                  <video ref={fitVideoRef} autoPlay playsInline muted style={{ width: "100%", aspectRatio: "4/3", objectFit: "cover", borderRadius: 14, background: "#dce1ec", display: fitPhoto ? "none" : "block" }} />
                   {fitPhoto ? <img src={fitPhoto} alt="Captured fitting reference" style={{ width: "100%", aspectRatio: "4/3", objectFit: "cover", borderRadius: 14 }} /> : <div style={{ marginTop: 8, fontSize: 11, color: "#64748b" }}>Stand in good light and keep the full body visible if you use the camera.</div>}
                   <canvas ref={fitCanvasRef} style={{ display: "none" }} />
                   <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-                    <button type="button" onClick={startFitCamera} style={{ flex: 1, minHeight: 42, border: "1px solid #365947", borderRadius: 11, background: "#fff", color: "#365947", fontWeight: 900, cursor: "pointer" }}>📷 Start camera</button>
-                    <button type="button" onClick={captureFitPhoto} style={{ flex: 1, minHeight: 42, border: 0, borderRadius: 11, background: "#365947", color: "#fff", fontWeight: 900, cursor: "pointer" }}>Capture photo</button>
+                    <button type="button" onClick={startFitCamera} style={{ flex: 1, minHeight: 42, border: "1px solid #274086", borderRadius: 11, background: "#fff", color: "#22304f", fontWeight: 900, cursor: "pointer" }}>📷 Start camera</button>
+                    <button type="button" onClick={captureFitPhoto} style={{ flex: 1, minHeight: 42, border: 0, borderRadius: 11, background: "#1f5af6", color: "#fff", fontWeight: 900, cursor: "pointer" }}>Capture photo</button>
                   </div>
                   {fitCameraMessage && <div style={{ marginTop: 8, fontSize: 11, color: "#475569", lineHeight: 1.45 }}>{fitCameraMessage}</div>}
                 </div>
 
-                <div style={{ marginTop: 12, padding: 14, borderRadius: 16, background: "#f0f7f2", border: "1px solid #cfe2d3", fontSize: 12, color: "#24583b", lineHeight: 1.5 }}>
+                <div style={{ marginTop: 12, padding: 14, borderRadius: 16, background: "#eef1f9", border: "1px solid #cbd3e6", fontSize: 12, color: "#22304f", lineHeight: 1.5 }}>
                   🔐 <strong>Privacy promise:</strong> photo capture is optional and requires your separate permission after you click “Capture photo”. This demo does not upload, sell, or share the captured image, and it is not saved to localStorage. The camera is stopped after capture.
                   <div style={{ marginTop: 7 }}>👤 <strong>Face privacy:</strong> the intended production flow converts the approved image into measurements/anonymous 3D fit data and does not use facial recognition.</div>
                   <div style={{ marginTop: 7 }}>🛡️ <strong>Safety:</strong> nudity, intimate imagery, or sexual content is strictly prohibited. A validated on-device nudity/modesty classifier must be integrated before HOWDI claims automatic detection or blocking.</div>
@@ -22244,7 +22245,7 @@ const removeNotification = async (notificationId) => {
               </div>
 
               <div>
-                <div style={{ padding: 14, borderRadius: 18, background: "#f8faf9", border: "1px solid #e1e9e4" }}>
+                <div style={{ padding: 14, borderRadius: 18, background: "#f7f8fb", border: "1px solid #dee2ec" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}><strong>📏 Your measurements</strong><span style={{ fontSize: 11, color: "#64748b" }}>inches</span></div>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 9, marginTop: 10 }}>
                     {[
@@ -22252,20 +22253,20 @@ const removeNotification = async (notificationId) => {
                     ].map(([key, label]) => (
                       <label key={key} style={{ fontSize: 11, color: "#64748b", fontWeight: 800 }}>
                         {label}
-                        <input value={fitMeasurements[key]} onChange={(event) => setFitMeasurements((current) => ({ ...current, [key]: event.target.value.replace(/[^0-9.]/g, "") }))} inputMode="decimal" placeholder={key === "height" ? "e.g. 64" : "e.g. 38"} style={{ width: "100%", boxSizing: "border-box", marginTop: 5, padding: "10px 11px", borderRadius: 10, border: "1px solid #cfd8d1", background: "#fff" }} />
+                        <input value={fitMeasurements[key]} onChange={(event) => setFitMeasurements((current) => ({ ...current, [key]: event.target.value.replace(/[^0-9.]/g, "") }))} inputMode="decimal" placeholder={key === "height" ? "e.g. 64" : "e.g. 38"} style={{ width: "100%", boxSizing: "border-box", marginTop: 5, padding: "10px 11px", borderRadius: 10, border: "1px solid #cbd0dc", background: "#fff" }} />
                       </label>
                     ))}
                   </div>
-                  <button type="button" onClick={calculateFitSize} style={{ width: "100%", marginTop: 11, minHeight: 44, border: 0, borderRadius: 11, background: "#24362d", color: "#fff", fontWeight: 900, cursor: "pointer" }}>✨ Calculate my size</button>
-                  {fitSizeResult && <div style={{ marginTop: 10, padding: 11, borderRadius: 11, background: "#edf6ef", color: "#24583b", fontSize: 12, fontWeight: 800, lineHeight: 1.45 }}>{fitSizeResult}</div>}
+                  <button type="button" onClick={calculateFitSize} style={{ width: "100%", marginTop: 11, minHeight: 44, border: 0, borderRadius: 11, background: "#1749d6", color: "#fff", fontWeight: 900, cursor: "pointer" }}>✨ Calculate my size</button>
+                  {fitSizeResult && <div style={{ marginTop: 10, padding: 11, borderRadius: 11, background: "#ebeff8", color: "#22304f", fontSize: 12, fontWeight: 800, lineHeight: 1.45 }}>{fitSizeResult}</div>}
                 </div>
 
-                <div style={{ marginTop: 12, padding: 14, borderRadius: 18, background: "linear-gradient(135deg,#f8f5ed,#f0f7f2)", border: "1px solid #e0e6df", overflow: "hidden" }}>
+                <div style={{ marginTop: 12, padding: 14, borderRadius: 18, background: "linear-gradient(135deg,#ecf1fb,#eef1f9)", border: "1px solid #dce0e9", overflow: "hidden" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}><strong>🧍 Live 3D fit preview</strong><span style={{ fontSize: 11, color: "#64748b" }}>{selectedProductColor || "Choose a colour"}</span></div>
                   <div style={{ height: 235, display: "flex", alignItems: "center", justifyContent: "center", perspective: 700 }}>
                     <div style={{ position: "relative", width: 130, height: 190, transformStyle: "preserve-3d", transform: `rotateY(${fitPreviewRotation}deg)`, transition: "transform .08s linear" }}>
                       <div style={{ position: "absolute", left: 48, top: 4, width: 34, height: 34, borderRadius: "50%", background: "#d9a889", boxShadow: "0 4px 8px rgba(0,0,0,.12)" }} />
-                      <div style={{ position: "absolute", left: 28, top: 38, width: 74, height: 88, borderRadius: "28px 28px 18px 18px", background: selectedProductColor === "Rose Pink" ? "#d889a4" : selectedProductColor === "Mint" ? "#9bcbb5" : selectedProductColor === "Sky Blue" ? "#86c9df" : selectedProductColor === "Maroon" ? "#7d3e52" : "#e8dfd0", transform: "translateZ(10px)", boxShadow: "0 14px 24px rgba(35,54,45,.16)" }} />
+                      <div style={{ position: "absolute", left: 28, top: 38, width: 74, height: 88, borderRadius: "28px 28px 18px 18px", background: selectedProductColor === "Rose Pink" ? "#d889a4" : selectedProductColor === "Mint" ? "#98a8ce" : selectedProductColor === "Sky Blue" ? "#86c9df" : selectedProductColor === "Maroon" ? "#7d3e52" : "#e8dfd0", transform: "translateZ(10px)", boxShadow: "0 14px 24px rgba(39,64,134,.16)" }} />
                       <div style={{ position: "absolute", left: 35, top: 122, width: 24, height: 62, borderRadius: 12, background: "#334155" }} />
                       <div style={{ position: "absolute", left: 71, top: 122, width: 24, height: 62, borderRadius: 12, background: "#334155" }} />
                     </div>
@@ -22307,11 +22308,11 @@ const removeNotification = async (notificationId) => {
               color: "#172033"
             }}
           >
-            <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: ".08em", color: "#a36a2a" }}>
+            <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: ".08em", color: "#1f5af6" }}>
               HOWDI • PRIVACY & PHOTO PERMISSION
             </div>
 
-            <h3 id="howdi-fit-capture-consent-title" style={{ margin: "7px 0 8px", color: "#183326" }}>
+            <h3 id="howdi-fit-capture-consent-title" style={{ margin: "7px 0 8px", color: "#0d1a3a" }}>
               Allow photo capture? 🔒
             </h3>
 
@@ -22319,7 +22320,7 @@ const removeNotification = async (notificationId) => {
               You clicked <strong>Capture photo</strong>. Before HOWDI captures anything, you must give separate permission.
             </p>
 
-            <div style={{ marginTop: 14, padding: 13, borderRadius: 14, background: "#edf7ef", border: "1px solid #cfe2d3", color: "#24583b", fontSize: 12, lineHeight: 1.55 }}>
+            <div style={{ marginTop: 14, padding: 13, borderRadius: 14, background: "#ebeff9", border: "1px solid #cbd3e6", color: "#22304f", fontSize: 12, lineHeight: 1.55 }}>
               <strong>🔐 What “Allow” means</strong>
               <ul style={{ margin: "7px 0 0 18px", padding: 0 }}>
                 <li>The image is used only for fitting assistance in this demo.</li>
@@ -22330,7 +22331,7 @@ const removeNotification = async (notificationId) => {
               </ul>
             </div>
 
-            <div style={{ marginTop: 10, padding: 13, borderRadius: 14, background: "#fff7ed", border: "1px solid #fed7aa", color: "#7c4a13", fontSize: 12, lineHeight: 1.55 }}>
+            <div style={{ marginTop: 10, padding: 13, borderRadius: 14, background: "#f0f4fc", border: "1px solid #fed7aa", color: "#1f5af6", fontSize: 12, lineHeight: 1.55 }}>
               <strong>🛡️ Strict clothing-safety rule</strong>
               <div style={{ marginTop: 5 }}>
                 Please remain fully clothed. Nudity, intimate imagery, and sexual content are strictly prohibited. This demo does <strong>not</strong> claim automated nudity detection; a validated safety classifier must be added before production.
@@ -22379,7 +22380,7 @@ const removeNotification = async (notificationId) => {
                   minHeight: 44,
                   border: 0,
                   borderRadius: 11,
-                  background: fitCaptureAllowed ? "#365947" : "#cbd5e1",
+                  background: fitCaptureAllowed ? "#1f5af6" : "#cbd5e1",
                   color: "#fff",
                   fontWeight: 900,
                   cursor: fitCaptureAllowed ? "pointer" : "not-allowed"
@@ -22418,7 +22419,7 @@ const removeNotification = async (notificationId) => {
     >
       <div style={{display:"flex",justifyContent:"space-between",gap:12}}>
         <div>
-          <div style={{fontSize:11,fontWeight:900,color:"#9a5b1f",letterSpacing:".08em"}}>CANCEL ORDER</div>
+          <div style={{fontSize:11,fontWeight:900,color:"#1f5af6",letterSpacing:".08em"}}>CANCEL ORDER</div>
           <h2 style={{margin:"5px 0",color:"#172033",fontSize:24,lineHeight:1.2}}>Why are you cancelling?</h2>
           <p style={{margin:0,color:"#64748b",fontSize:13}}>Order #{selectedCancellationOrder.id}</p>
         </div>
@@ -22427,8 +22428,8 @@ const removeNotification = async (notificationId) => {
         }}>×</button>
       </div>
 
-      <div style={{marginTop:18,padding:12,borderRadius:12,background:"#f0f8f3",border:"1px solid #d5e8db"}}>
-        <div style={{fontSize:12,fontWeight:900,color:"#365947"}}>👤 Cancellation requested by: Customer</div>
+      <div style={{marginTop:18,padding:12,borderRadius:12,background:"#eef2fa",border:"1px solid #d3daea"}}>
+        <div style={{fontSize:12,fontWeight:900,color:"#22304f"}}>👤 Cancellation requested by: Customer</div>
         <div style={{marginTop:4,fontSize:11.5,color:"#64748b",lineHeight:1.45}}>This customer-facing cancellation form records the person requesting cancellation. HOWDI/seller cancellations should be recorded separately by the authorised order team.</div>
       </div>
 
@@ -22453,7 +22454,7 @@ const removeNotification = async (notificationId) => {
         />
       </div>
 
-      <div style={{marginTop:16,padding:12,borderRadius:12,background:"#fff7ed",fontSize:12,color:"#7c2d12",lineHeight:1.5}}>
+      <div style={{marginTop:16,padding:12,borderRadius:12,background:"#f0f4fc",fontSize:12,color:"#7c2d12",lineHeight:1.5}}>
         HOWDI will keep the cancellation reason and order journey with this order so the customer can understand what happened later.
       </div>
 
@@ -22604,7 +22605,7 @@ const removeNotification = async (notificationId) => {
 
       {connectGCCreateOpen&&<div className="hc160b-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setConnectGCCreateOpen(false)}}><div className="hc160b-modal"><header><div><small>HOWDI CONNECT</small><h3>Create {connectCommunityView==="channels"?"channel":"group"}</h3></div><button onClick={()=>setConnectGCCreateOpen(false)}>×</button></header><label>Name<input value={connectGCCreate.name} onChange={e=>setConnectGCCreate(v=>({...v,name:e.target.value}))} placeholder="Community name"/></label><label>Description<textarea rows="3" value={connectGCCreate.description} onChange={e=>setConnectGCCreate(v=>({...v,description:e.target.value}))}/></label><div className="hc160b-form-row"><label>Privacy<select value={connectGCCreate.privacy} onChange={e=>setConnectGCCreate(v=>({...v,privacy:e.target.value}))}><option value="PUBLIC">Public</option><option value="PRIVATE">Private · approval</option><option value="INVITE_ONLY">Invite only</option></select></label><label>Category<input value={connectGCCreate.category} onChange={e=>setConnectGCCreate(v=>({...v,category:e.target.value.toUpperCase()}))}/></label></div><footer><button onClick={()=>setConnectGCCreateOpen(false)}>Cancel</button><button className="primary" onClick={createConnectGCSpace}>Create →</button></footer></div></div>}
 
-      {connectArticleEditor&&<div className="hc160d-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)resetConnectArticleEditor()}}><div className="hc160d-editor"><header><div><small>ARTICLE STUDIO</small><h2>{connectArticleEditingId?"Edit article":"Write on HOWDI"}</h2></div><button onClick={resetConnectArticleEditor}>×</button></header><input value={connectArticleTitle} onChange={e=>setConnectArticleTitle(e.target.value)} placeholder="Article title"/><textarea className="excerpt" value={connectArticleExcerpt} onChange={e=>setConnectArticleExcerpt(e.target.value)} placeholder="Short summary / excerpt"/><div className="row"><select value={connectArticleCategory} onChange={e=>setConnectArticleCategory(e.target.value)}><option>GENERAL</option><option>EDUCATION</option><option>TECHNOLOGY</option><option>BUSINESS</option><option>CREATIVITY</option><option>COMMUNITY</option><option>CAREER</option><option>TRAVEL</option></select><input value={connectArticleTopics} onChange={e=>setConnectArticleTopics(e.target.value)} placeholder="Topics: AI, crochet, learning"/></div><input value={connectArticleCover} onChange={e=>{setConnectArticleCover(e.target.value);if(e.target.value)setConnectArticleCoverData("");}} placeholder="Cover image URL (optional)"/><div className="row" style={{alignItems:"center",gap:10}}><label style={{cursor:"pointer",border:"1px solid #dbe3dc",borderRadius:8,padding:"7px 12px"}}>📷 Upload cover<input type="file" accept="image/*" style={{display:"none"}} onChange={e=>{pickConnectArticleCover(e.target.files?.[0]);e.target.value="";}}/></label>{connectArticleCoverBusy&&<small>Reading image…</small>}{(connectArticleCoverData||connectArticleCover)&&<><img src={connectArticleCoverData||connectArticleCover} alt="Cover preview" style={{height:52,width:78,objectFit:"cover",borderRadius:8}}/><button type="button" onClick={()=>{setConnectArticleCoverData("");setConnectArticleCover("");}}>Remove cover</button></>}</div><textarea className="body" value={connectArticleBody} onChange={e=>setConnectArticleBody(e.target.value)} placeholder="Tell the full story…"/><footer><button onClick={()=>setConnectArticlePreviewOpen(true)}>👁 Preview</button><button onClick={()=>publishConnectArticle("DRAFT")}>Save draft</button><button className="primary" onClick={()=>publishConnectArticle("PUBLISHED")}>{connectArticleEditingId?"Save & publish":"Publish article"}</button></footer></div></div>}
+      {connectArticleEditor&&<div className="hc160d-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)resetConnectArticleEditor()}}><div className="hc160d-editor"><header><div><small>ARTICLE STUDIO</small><h2>{connectArticleEditingId?"Edit article":"Write on HOWDI"}</h2></div><button onClick={resetConnectArticleEditor}>×</button></header><input value={connectArticleTitle} onChange={e=>setConnectArticleTitle(e.target.value)} placeholder="Article title"/><textarea className="excerpt" value={connectArticleExcerpt} onChange={e=>setConnectArticleExcerpt(e.target.value)} placeholder="Short summary / excerpt"/><div className="row"><select value={connectArticleCategory} onChange={e=>setConnectArticleCategory(e.target.value)}><option>GENERAL</option><option>EDUCATION</option><option>TECHNOLOGY</option><option>BUSINESS</option><option>CREATIVITY</option><option>COMMUNITY</option><option>CAREER</option><option>TRAVEL</option></select><input value={connectArticleTopics} onChange={e=>setConnectArticleTopics(e.target.value)} placeholder="Topics: AI, crochet, learning"/></div><input value={connectArticleCover} onChange={e=>{setConnectArticleCover(e.target.value);if(e.target.value)setConnectArticleCoverData("");}} placeholder="Cover image URL (optional)"/><div className="row" style={{alignItems:"center",gap:10}}><label style={{cursor:"pointer",border:"1px solid #d8dce6",borderRadius:8,padding:"7px 12px"}}>📷 Upload cover<input type="file" accept="image/*" style={{display:"none"}} onChange={e=>{pickConnectArticleCover(e.target.files?.[0]);e.target.value="";}}/></label>{connectArticleCoverBusy&&<small>Reading image…</small>}{(connectArticleCoverData||connectArticleCover)&&<><img src={connectArticleCoverData||connectArticleCover} alt="Cover preview" style={{height:52,width:78,objectFit:"cover",borderRadius:8}}/><button type="button" onClick={()=>{setConnectArticleCoverData("");setConnectArticleCover("");}}>Remove cover</button></>}</div><textarea className="body" value={connectArticleBody} onChange={e=>setConnectArticleBody(e.target.value)} placeholder="Tell the full story…"/><footer><button onClick={()=>setConnectArticlePreviewOpen(true)}>👁 Preview</button><button onClick={()=>publishConnectArticle("DRAFT")}>Save draft</button><button className="primary" onClick={()=>publishConnectArticle("PUBLISHED")}>{connectArticleEditingId?"Save & publish":"Publish article"}</button></footer></div></div>}
       {connectArticlePreviewOpen&&<div className="hc160d-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setConnectArticlePreviewOpen(false)}}><article className="hc160d-reader"><button className="close" onClick={()=>setConnectArticlePreviewOpen(false)}>×</button>{(connectArticleCoverData||connectArticleCover)&&<img src={connectArticleCoverData||connectArticleCover} alt=""/>}<small>{connectArticleCategory} · preview</small><h1>{connectArticleTitle||"Untitled article"}</h1><p className="lead">{connectArticleExcerpt}</p><div className="content">{String(connectArticleBody||"").split("\n").map((x,i)=><p key={i}>{x}</p>)}</div></article></div>}
       {/* K5A PHASE 1: post / article / story opened by public code (read-only; interactions stay in Connect). */}
       {homeItemViewer&&<div className="hc-home-viewer-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)closeHomeItem();}}>
@@ -22625,10 +22626,10 @@ const removeNotification = async (notificationId) => {
         </article>
       </div>}
       {connectArticleSelected&&<div className="hc160d-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setConnectArticleSelected(null)}}><article className="hc160d-reader"><button className="close" onClick={()=>setConnectArticleSelected(null)}>×</button>{(connectArticleSelected.article_cover_data||connectArticleSelected.article_cover_url)&&<img src={connectArticleSelected.article_cover_data||connectArticleSelected.article_cover_url} alt=""/>}<small>{connectArticleSelected.article_category} · {connectArticleSelected.article_read_minutes||1} min read</small><h1>{connectArticleSelected.article_title}</h1><div className="author"><b>{connectArticleSelected.full_name}</b><span>{connectArticleSelected.public_username?`@${connectArticleSelected.public_username}`:"HOWDI creator"}</span></div><p className="lead">{connectArticleSelected.article_excerpt}</p><div className="content">{String(connectArticleSelected.content||"").split("\n").map((x,i)=><p key={i}>{x}</p>)}</div><div style={{marginTop:16,paddingTop:12,borderTop:"1px solid #edf0f2",display:"flex",gap:9,flexWrap:"wrap"}}>
-        <button type="button" onClick={toggleConnectArticleReaction} style={{border:"1px solid #dbe3dc",borderRadius:999,padding:"8px 12px",background:connectArticleSelected.liked_by_viewer?"#eef7f0":"#fff",color:connectArticleSelected.liked_by_viewer?"#365947":"#475569",fontWeight:800,cursor:"pointer"}}>{connectArticleSelected.liked_by_viewer?"❤️ Liked":"🤍 Like"} {Number(connectArticleSelected.like_count||0)>0?`(${connectArticleSelected.like_count})`:""}</button>
-        <button type="button" onClick={()=>openConnectComments(connectArticleSelected)} style={{border:"1px solid #dbe3dc",borderRadius:999,padding:"8px 12px",background:"#fff",color:"#475569",fontWeight:800,cursor:"pointer"}}>💬 Comment {Number(connectArticleSelected.comment_count||0)>0?`(${connectArticleSelected.comment_count})`:""}</button>
-        <button type="button" onClick={()=>toggleConnectSave(connectArticleSelected.id)} style={{border:"1px solid #dbe3dc",borderRadius:999,padding:"8px 12px",background:connectSavedPosts[String(connectArticleSelected.id)]?"#eef7f0":"#fff",color:connectSavedPosts[String(connectArticleSelected.id)]?"#365947":"#475569",fontWeight:800,cursor:"pointer"}}>{connectSavedPosts[String(connectArticleSelected.id)]?"🔖 Saved":"📑 Save"}</button>
-        <button type="button" onClick={shareConnectArticle} style={{border:"1px solid #dbe3dc",borderRadius:999,padding:"8px 12px",background:"#fff",color:"#475569",fontWeight:800,cursor:"pointer"}}>↗ Share {Number(connectArticleSelected.share_count||0)>0?`(${connectArticleSelected.share_count})`:""}</button>
+        <button type="button" onClick={toggleConnectArticleReaction} style={{border:"1px solid #d8dce6",borderRadius:999,padding:"8px 12px",background:connectArticleSelected.liked_by_viewer?"#ecf0f9":"#fff",color:connectArticleSelected.liked_by_viewer?"#22304f":"#475569",fontWeight:800,cursor:"pointer"}}>{connectArticleSelected.liked_by_viewer?"❤️ Liked":"🤍 Like"} {Number(connectArticleSelected.like_count||0)>0?`(${connectArticleSelected.like_count})`:""}</button>
+        <button type="button" onClick={()=>openConnectComments(connectArticleSelected)} style={{border:"1px solid #d8dce6",borderRadius:999,padding:"8px 12px",background:"#fff",color:"#475569",fontWeight:800,cursor:"pointer"}}>💬 Comment {Number(connectArticleSelected.comment_count||0)>0?`(${connectArticleSelected.comment_count})`:""}</button>
+        <button type="button" onClick={()=>toggleConnectSave(connectArticleSelected.id)} style={{border:"1px solid #d8dce6",borderRadius:999,padding:"8px 12px",background:connectSavedPosts[String(connectArticleSelected.id)]?"#ecf0f9":"#fff",color:connectSavedPosts[String(connectArticleSelected.id)]?"#22304f":"#475569",fontWeight:800,cursor:"pointer"}}>{connectSavedPosts[String(connectArticleSelected.id)]?"🔖 Saved":"📑 Save"}</button>
+        <button type="button" onClick={shareConnectArticle} style={{border:"1px solid #d8dce6",borderRadius:999,padding:"8px 12px",background:"#fff",color:"#475569",fontWeight:800,cursor:"pointer"}}>↗ Share {Number(connectArticleSelected.share_count||0)>0?`(${connectArticleSelected.share_count})`:""}</button>
       </div></article></div>}
 
       {connectInvitePreview&&<div className="hc160b-overlay" onMouseDown={e=>{if(e.target===e.currentTarget){setConnectInvitePreview(null);setConnectInviteToken(null);setConnectInviteStatus("");}}}>
@@ -22640,7 +22641,7 @@ const removeNotification = async (notificationId) => {
             <button onClick={()=>{setConnectInvitePreview(null);setConnectInviteToken(null);setConnectInviteStatus("");}}>×</button>
           </header>
           {!connectInvitePreview.error&&<p style={{padding:"0 4px",color:"#475569"}}>{connectInvitePreview.description||`You've been invited by ${connectInvitePreview.ownerName||"a HOWDI member"} to join this ${connectInvitePreview.spaceType==="CHANNEL"?"channel":"group"}.`}</p>}
-          {connectInvitePreview.requiresApproval&&!connectInvitePreview.error&&<small style={{padding:"0 4px",display:"block",color:"#92620a"}}>Admin approval required to join.</small>}
+          {connectInvitePreview.requiresApproval&&!connectInvitePreview.error&&<small style={{padding:"0 4px",display:"block",color:"#1f5af6"}}>Admin approval required to join.</small>}
           {connectInviteStatus&&<em style={{padding:"0 4px",display:"block",color:"#b42318"}}>{connectInviteStatus}</em>}
           {!connectInvitePreview.error&&<footer className="hc160b-compose" style={{justifyContent:"flex-end"}}>
             <button disabled={connectInviteBusy} onClick={joinConnectInviteSpace}>{currentUser?(connectInviteBusy?"Joining…":"Join"):"Log in to join"}</button>

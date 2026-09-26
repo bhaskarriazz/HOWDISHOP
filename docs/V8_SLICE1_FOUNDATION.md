@@ -45,3 +45,14 @@
 - **Global search / Ask HOWDI (HOME-004):** the header search currently searches Shop products and says so. People, services and courses search is the K5B Global Search UI, which is not started.
 - **Legacy content:** Connect, Works and Learn & Earn content, the product detail page, the cart and checkout still use their legacy inner styling inside the V8 frame. They are later V8 slices (boards 06/07/08/09/10/11…).
 - **Dark mode:** board 12, not in this slice.
+
+## Slice 1b: V8 colours and typography on every legacy screen
+
+- **Colour migration:** `tools/v8/v8_recolor.py` is a deterministic, property-aware migration. It changed 5,904 colour values in `App.css`, `ux-recovery.css`, `App.jsx`, Learn, HOWDI-for, the Shop CSS and the auth portal. Every change is listed in `docs/V8_COLOR_MIGRATION_MAP.csv`. The mapping works like this:
+  - **Forest-green brand colours:** used as text they become navy / slate ink; used as surfaces or buttons they become cobalt; used as borders they become cool blue-grey.
+  - **Gold kickers:** become cobalt.
+  - **Cream / ivory backgrounds:** become the blue-white base.
+  - **Semantic colours are kept:** success greens, emerald, teal, red, amber, stars and violet.
+- **Typography:** Inter is used everywhere. The legacy Georgia / Playfair serif headings are replaced.
+- **Pillar accents:** HPay uses a teal balance card (board 11). Learn & Earn uses violet kickers (board 10). The Connect Home "Special" and "Media of the Day" banners are soft blue-white cards, no longer large saturated blocks.
+- **Rail selection:** HPay is a header utility, so no rail item is selected while it is open.

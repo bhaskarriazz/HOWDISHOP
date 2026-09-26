@@ -1,5 +1,5 @@
 /* HOWDI Shop S1 — catalogue. Every selector is prefixed .sc- so nothing leaks into the rest of the app. */
-.sc-root{--sc-ink:var(--howdi-ink,#183528);--sc-forest:var(--howdi-forest,#123f2d);--sc-gold:var(--howdi-gold,#e0aa4a);--sc-line:#dce5dd;--sc-soft:#f4f8f4;--sc-muted:#5b6d62;
+.sc-root{--sc-ink:var(--howdi-ink,#1749d6);--sc-forest:var(--howdi-forest,#123f2d);--sc-gold:var(--howdi-gold,#3b6bef);--sc-line:#d9dde8;--sc-soft:#f3f5f9;--sc-muted:#425686;
   max-width:1240px;margin:0 auto;padding:20px 16px 48px;color:var(--sc-ink);font-family:inherit;box-sizing:border-box}
 .sc-root *,.sc-root *::before,.sc-root *::after{box-sizing:border-box}
 .sc-sr{position:absolute!important;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
@@ -60,10 +60,10 @@
 .sc-price strong{font-size:17px}
 .sc-price s{color:var(--sc-muted);font-size:14px}
 .sc-price-large strong{font-size:26px}
-.sc-sale-badge{padding:2px 8px;border-radius:999px;background:#fff1d6;color:#7a4b00;font-size:12px;font-weight:700}
+.sc-sale-badge{padding:2px 8px;border-radius:999px;background:#ecf1fb;color:#7a4b00;font-size:12px;font-weight:700}
 .sc-stock{font-weight:600}
 .sc-stock-in_stock{color:#1d6b3a}
-.sc-stock-low_stock{color:#9a5b00}
+.sc-stock-low_stock{color:#1f5af6}
 .sc-stock-out_of_stock{color:#a32d2d}
 .sc-reviews{color:var(--sc-muted)}
 .sc-creator{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}
