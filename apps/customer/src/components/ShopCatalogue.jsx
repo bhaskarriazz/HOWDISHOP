@@ -59,6 +59,12 @@ function ProductImage({ src, alt, className = "" }) {
   return <img className={`sc-img ${className}`} src={src} alt={alt || ""} loading="lazy" onError={() => setBroken(true)} />;
 }
 
+function V8ProductImg({ src }) {
+  const [broken, setBroken] = useState(false);
+  useEffect(() => setBroken(false), [src]);
+  return src && !broken ? <img className="v8-pcard-img" src={src} alt="" loading="lazy" onError={() => setBroken(true)} /> : <div className="v8-pcard-img v8-noimg">No photo yet</div>;
+}
+
 function Price({ price, large = false }) {
   if (!price) return null;
   return (
@@ -305,12 +311,22 @@ function ProductDetail({ apiBase, productId, onBack, onOpenRelated, onCreator })
   );
 }
 
-export default function ShopCatalogue({ apiBase, onExit, signedIn = false, getAuthHeaders, onRequireLogin, onAddToCart, onBuyNow, openProductId, onOpenProductHandled }) {
+export default function ShopCatalogue({ apiBase, onExit, signedIn = false, getAuthHeaders, onRequireLogin, onAddToCart, onBuyNow, openProductId, onOpenProductHandled,
+  v8 = false, collection = "", onCollectionChange, initialQuery = "", notice = "", onQueryCleared, cartSummary = null, onOpenCart, onCheckout }) {
   const base = String(apiBase || "").replace(/\/+$/, "");
   const actions = useShopWishlistActions({ apiBase: base, signedIn, getAuthHeaders, onRequireLogin, onAddToCart, onBuyNow });
   const [view, setView] = useState("browse");
-  const [filters, setFilters] = useState(EMPTY_FILTERS);
-  const [searchText, setSearchText] = useState("");
+  const [filters, setFilters] = useState(() => ({ ...EMPTY_FILTERS, q: String(initialQuery || "").trim(), sort: String(initialQuery || "").trim() ? "relevance" : "newest" }));
+  const [searchText, setSearchText] = useState(String(initialQuery || ""));
+  // V8: a collection (e.g. Handmade Crochet) is a saved query inside the one Shop, never a separate page.
+  const collectionTerm = v8 && collection === "crochet" ? "crochet" : "";
+  const effective = useMemo(() => (collectionTerm ? { ...filters, q: [collectionTerm, filters.q].filter(Boolean).join(" ") } : filters), [filters, collectionTerm]);
+  useEffect(() => {
+    if (!v8) return;
+    const q = String(initialQuery || "").trim();
+    setSearchText(q);
+    setFilters((prev) => ({ ...prev, q, sort: q ? "relevance" : prev.sort === "relevance" ? "newest" : prev.sort }));
+  }, [initialQuery]); // eslint-disable-line react-hooks/exhaustive-deps
   const [priceDraft, setPriceDraft] = useState({ minPrice: "", maxPrice: "" });
   const [list, setList] = useState({ status: "loading", products: [], total: 0, hasMore: false, facets: null, message: "" });
   const [loadingMore, setLoadingMore] = useState(false);
@@ -336,11 +352,11 @@ export default function ShopCatalogue({ apiBase, onExit, signedIn = false, getAu
     const controller = new AbortController();
     setList((prev) => ({ ...prev, status: "loading", message: "" }));
     setMoreError("");
-    fetchJson(`${base}/api/shop/catalogue/products?${buildQuery(filters, 0)}`, controller.signal)
+    fetchJson(`${base}/api/shop/catalogue/products?${buildQuery(effective, 0)}`, controller.signal)
       .then((body) => setList({ status: "ready", products: body.products || [], total: body.total || 0, hasMore: Boolean(body.hasMore), facets: body.facets || null, message: "" }))
       .catch((error) => { if (error.name !== "AbortError") setList({ status: "error", products: [], total: 0, hasMore: false, facets: null, message: error.message }); });
     return () => controller.abort();
-  }, [base, filters, reloadKey]);
+  }, [base, effective, reloadKey]);
 
   // Coming back from a product: restore scroll position and return focus to the card that was opened.
   useEffect(() => {
@@ -354,14 +370,14 @@ export default function ShopCatalogue({ apiBase, onExit, signedIn = false, getAu
   const loadMore = useCallback(async () => {
     setLoadingMore(true); setMoreError("");
     try {
-      const body = await fetchJson(`${base}/api/shop/catalogue/products?${buildQuery(filters, list.products.length)}`);
+      const body = await fetchJson(`${base}/api/shop/catalogue/products?${buildQuery(effective, list.products.length)}`);
       setList((prev) => {
         const seen = new Set(prev.products.map((p) => p.id));
         return { ...prev, products: [...prev.products, ...(body.products || []).filter((p) => !seen.has(p.id))], total: body.total || prev.total, hasMore: Boolean(body.hasMore) };
       });
     } catch (error) { setMoreError(error.message || "Couldn't load more products"); }
     setLoadingMore(false);
-  }, [base, filters, list.products.length]);
+  }, [base, effective, list.products.length]);
 
   const patch = (changes) => setFilters((prev) => ({ ...prev, ...changes }));
   const submitSearch = (event) => {
@@ -369,7 +385,7 @@ export default function ShopCatalogue({ apiBase, onExit, signedIn = false, getAu
     const q = searchText.trim();
     setFilters((prev) => ({ ...prev, q, sort: q ? "relevance" : prev.sort === "relevance" ? "newest" : prev.sort }));
   };
-  const clearAll = () => { setFilters(EMPTY_FILTERS); setSearchText(""); setPriceDraft({ minPrice: "", maxPrice: "" }); setPriceError(""); };
+  const clearAll = () => { if (onQueryCleared) onQueryCleared(); setFilters(EMPTY_FILTERS); setSearchText(""); setPriceDraft({ minPrice: "", maxPrice: "" }); setPriceError(""); };
   const applyPrice = (event) => {
     event.preventDefault();
     const { minPrice, maxPrice } = priceDraft;
@@ -395,7 +411,7 @@ export default function ShopCatalogue({ apiBase, onExit, signedIn = false, getAu
     filters.inStock && ["inStock", "In stock"],
   ].filter(Boolean);
   const removeChip = (key) => {
-    if (key === "q") { setSearchText(""); setFilters((p) => ({ ...p, q: "", sort: p.sort === "relevance" ? "newest" : p.sort })); }
+    if (key === "q") { if (onQueryCleared) onQueryCleared(); setSearchText(""); setFilters((p) => ({ ...p, q: "", sort: p.sort === "relevance" ? "newest" : p.sort })); }
     else if (key === "category") patch({ category: "", subcategory: "" });
     else if (key === "price") { setPriceDraft({ minPrice: "", maxPrice: "" }); patch({ minPrice: "", maxPrice: "" }); }
     else if (key === "inStock") patch({ inStock: false });
@@ -417,6 +433,183 @@ export default function ShopCatalogue({ apiBase, onExit, signedIn = false, getAu
       <ShopActionsContext.Provider value={actions}>
         <div className="sc-root" data-shop-catalogue="wishlist">
           <WishlistPanel onBack={() => setView("browse")} renderCard={(p) => <ProductCard key={p.id} product={p} onOpen={openDetail} onCreator={showCreator} />} />
+        </div>
+      </ShopActionsContext.Provider>
+    );
+  }
+
+  // ================= V8 browse (SHP-001, board 16): one canonical Shop; Handmade Crochet is a collection chip =================
+  if (v8) {
+    const crochetOn = collection === "crochet";
+    const setCollection = (next) => { if (onCollectionChange) onCollectionChange(next); };
+    const makers = new Set(list.products.map((p) => p.creator && p.creator.public_username).filter(Boolean)).size;
+    const cartItems = (cartSummary && cartSummary.items) || [];
+    const cartUnits = cartItems.reduce((n, it) => n + Math.max(1, Number(it.quantity) || 1), 0);
+    const lastLine = cartItems[cartItems.length - 1];
+    const heroImage = (list.products.find((p) => p.image) || {}).image || "";
+    const stockClass = (a) => (!a ? "" : a.state === "out_of_stock" ? "out" : a.lowStock ? "low" : "");
+    const renderV8Card = (product) => (
+      <li key={product.id}>
+        <article className="v8-card v8-pcard" data-product-id={product.id}>
+          <button type="button" className="v8-pcard-open" data-card-id={product.id} onClick={() => openDetail(product.id)} aria-label={`View ${product.name}, ${money(product.price.current)}, ${product.availability.label}`}>
+            <V8ProductImg src={product.image} />
+            <span className="v8-pcard-body">
+              <b>{product.name}</b>
+              <span className="v8-pcard-line">
+                <span className="v8-price">{money(product.price.current)}</span>
+                {product.price.onSale && product.price.discountPercent ? <span className="v8-sale">{product.price.discountPercent}% off</span> : null}
+                <span className={`v8-stock ${stockClass(product.availability)}`}>{product.availability.label}</span>
+              </span>
+              <span className="v8-pcard-line v8-muted">{product.reviews && product.reviews.count > 0 && product.reviews.average != null ? `★ ${Number(product.reviews.average).toFixed(1)} (${product.reviews.count})` : (product.reviews && product.reviews.label) || "No reviews yet"}</span>
+            </span>
+          </button>
+          <div className="v8-heart-btn"><WishlistHeart productId={product.id} name={product.name} /></div>
+          {product.creator && product.creator.public_username ? (
+            <div className="v8-pcard-foot">
+              <span className="v8-ava">{product.creator.avatar ? <img src={product.creator.avatar} alt="" /> : String(product.creator.display_name || product.creator.public_username).charAt(0).toUpperCase()}</span>
+              <button type="button" className="v8-handle" onClick={() => showCreator(product.creator.public_username)} aria-label={`Show all products by @${product.creator.public_username}`}>@{product.creator.public_username}</button>
+            </div>
+          ) : null}
+        </article>
+      </li>
+    );
+    return (
+      <ShopActionsContext.Provider value={actions}>
+        <div className="v8-shop" data-shop-catalogue="browse" data-collection={crochetOn ? "crochet" : "all"}>
+          <div className="v8-shop-main">
+            <section className="v8-collection-hero" aria-labelledby="v8-shop-title" style={heroImage ? { "--v8-hero-img": `url("${heroImage.replace(/["\\]/g, "")}")` } : undefined}>
+              <span className="v8-pill">Shop</span>
+              <h1 id="v8-shop-title">{crochetOn ? "Handmade Crochet" : "HOWDI Shop"}</h1>
+              <p>{crochetOn ? "Cozy creations from our maker community" : "Handmade pieces from independent makers"}</p>
+              <div className="v8-collection-facts">
+                <span><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M4 7l8-4 8 4v10l-8 4-8-4ZM4 7l8 4 8-4M12 11v10" /></svg>{list.status === "ready" ? `${list.total} ${list.total === 1 ? "product" : "products"}` : "Loading…"}</span>
+                {list.status === "ready" && !list.hasMore && makers ? <span><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm-7 9c.5-3.6 3.4-6 7-6s6.5 2.4 7 6" /></svg>{makers} independent {makers === 1 ? "maker" : "makers"}</span> : null}
+                <span><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10Z" /></svg>Supports independent makers</span>
+              </div>
+            </section>
+
+            {notice ? <p className="v8-shop-note" role="status">{notice}</p> : null}
+            <ActionNotice />
+
+            <nav className="v8-chips" aria-label="Shop collections and categories">
+              <button type="button" className="v8-chip" aria-pressed={!crochetOn && !filters.category} onClick={() => { setCollection(""); patch({ category: "", subcategory: "" }); }}>All</button>
+              <button type="button" className="v8-chip" aria-pressed={crochetOn} onClick={() => setCollection(crochetOn ? "" : "crochet")}>Handmade Crochet</button>
+              {facets.categories.map((c) => (
+                <button key={c.name} type="button" className="v8-chip" aria-pressed={filters.category.toLowerCase() === c.name.toLowerCase()} onClick={() => patch({ category: filters.category.toLowerCase() === c.name.toLowerCase() ? "" : c.name, subcategory: "" })}>{c.name} <span className="v8-count">{c.count}</span></button>
+              ))}
+            </nav>
+
+            <div className="v8-toolbar">
+              <form className="v8-inline-search" role="search" onSubmit={submitSearch}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14Zm9 16-4.2-4.2" /></svg>
+                <label className="v8-sr" htmlFor="v8-shop-search">{crochetOn ? "Search in Handmade Crochet" : "Search the Shop"}</label>
+                <input id="v8-shop-search" type="search" value={searchText} maxLength={80} placeholder={crochetOn ? "Search in Handmade Crochet…" : "Search handmade bags, home decor…"} onChange={(e) => setSearchText(e.target.value)} />
+              </form>
+              <button type="button" className="v8-tool" aria-expanded={filtersOpen} aria-controls="v8-shop-filters" onClick={() => setFiltersOpen((v) => !v)}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4" /></svg>Filters{chips.length ? ` (${chips.length})` : ""}
+              </button>
+              <button type="button" className="v8-tool" aria-pressed={filters.inStock} onClick={() => patch({ inStock: !filters.inStock })}>In stock</button>
+              <label className="v8-sort"><span>Sort by</span>
+                <select value={filters.sort === "relevance" && !filters.q ? "newest" : filters.sort} onChange={(e) => patch({ sort: e.target.value })}>
+                  {SORT_OPTIONS.map(([value, label]) => <option key={value} value={value} disabled={value === "relevance" && !filters.q}>{label}</option>)}
+                </select>
+              </label>
+            </div>
+
+            {filtersOpen ? (
+              <div id="v8-shop-filters" className="v8-card v8-filter-panel" role="group" aria-label="Filters">
+                <form onSubmit={applyPrice}>
+                  <label><span>Price (₹)</span>
+                    <span className="v8-price-pair">
+                      <input inputMode="decimal" aria-label="Minimum price" placeholder="Min" value={priceDraft.minPrice} onChange={(e) => setPriceDraft((d) => ({ ...d, minPrice: e.target.value }))} />
+                      <span aria-hidden="true">–</span>
+                      <input inputMode="decimal" aria-label="Maximum price" placeholder="Max" value={priceDraft.maxPrice} onChange={(e) => setPriceDraft((d) => ({ ...d, maxPrice: e.target.value }))} />
+                      <button type="submit" className="v8-btn">Apply</button>
+                    </span>
+                  </label>
+                  {priceError ? <p className="sc-field-error" role="alert">{priceError}</p> : null}
+                </form>
+                <label><span>Colour</span>
+                  <select value={filters.colour} onChange={(e) => patch({ colour: e.target.value })}>
+                    <option value="">Any colour</option>
+                    {facets.colours.map((c) => <option key={c.name} value={c.name}>{c.name} ({c.count})</option>)}
+                  </select>
+                </label>
+                <label><span>Material</span>
+                  <select value={filters.material} onChange={(e) => patch({ material: e.target.value })}>
+                    <option value="">Any material</option>
+                    {facets.materials.map((m) => <option key={m.name} value={m.name}>{m.name} ({m.count})</option>)}
+                  </select>
+                </label>
+              </div>
+            ) : null}
+
+            <div className="v8-mobile-title"><h1>{crochetOn ? "Handmade Crochet" : "HOWDI Shop"}</h1><small>{list.status === "ready" ? `${list.total} ${list.total === 1 ? "product" : "products"}` : "Loading…"}</small></div>
+
+            {chips.length ? (
+              <ul className="v8-active-filters" aria-label="Active filters">
+                {chips.map(([key, label]) => <li key={key}><button type="button" className="v8-chip" aria-pressed="true" onClick={() => removeChip(key)} aria-label={`Remove filter ${label}`}>{label} ×</button></li>)}
+                <li><button type="button" className="v8-link" onClick={clearAll}>Clear all</button></li>
+              </ul>
+            ) : null}
+
+            <div ref={resultsRef}>
+              {list.status === "loading" ? (
+                <div role="status" aria-busy="true"><span className="v8-sr">Loading products…</span>
+                  <ul className="v8-grid" aria-hidden="true">{Array.from({ length: 8 }).map((_, i) => <li key={i}><div className="v8-card v8-pcard"><div className="v8-skel" style={{ aspectRatio: "1 / .82", borderRadius: 0 }} /><div style={{ padding: 12, display: "grid", gap: 8 }}><div className="v8-skel" style={{ height: 12, width: "80%" }} /><div className="v8-skel" style={{ height: 12, width: "50%" }} /></div></div></li>)}</ul>
+                </div>
+              ) : null}
+              {list.status === "error" ? (
+                <div className="v8-card v8-state v8-error" role="alert">
+                  <b>We couldn’t load products</b><p>Please check your connection and try again.</p>
+                  <button type="button" className="v8-btn v8-btn-soft" onClick={() => setReloadKey((k) => k + 1)}>Try again</button>
+                </div>
+              ) : null}
+              {list.status === "ready" && !list.products.length ? (
+                <div className="v8-card v8-state" role="status">
+                  <span className="v8-state-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14Zm9 16-4.2-4.2" /></svg></span>
+                  <b>{chips.length || crochetOn ? "No results found" : "No products are listed yet"}</b>
+                  <p>{filters.q ? `We couldn’t find any products matching “${filters.q}”. Try different keywords or clear some filters.` : chips.length || crochetOn ? "Try removing a filter or browsing all of the Shop." : "New handmade pieces from our makers will appear here soon."}</p>
+                  {chips.length || crochetOn ? <button type="button" className="v8-btn v8-btn-primary" onClick={() => { clearAll(); setCollection(""); }}>Clear filters</button> : null}
+                </div>
+              ) : null}
+              {list.status === "ready" && list.products.length ? (
+                <>
+                  <ul className="v8-grid">{list.products.map((p) => renderV8Card(p))}</ul>
+                  {moreError ? <p className="sc-field-error" role="alert">{moreError}</p> : null}
+                  {list.hasMore ? <div style={{ textAlign: "center", marginTop: 18 }}><button type="button" className="v8-btn v8-btn-primary" onClick={loadMore} disabled={loadingMore}>{loadingMore ? "Loading…" : "Load more"}</button></div> : null}
+                </>
+              ) : null}
+            </div>
+          </div>
+
+          <aside className="v8-shop-rail" aria-label="Shop side panel">
+            <section className="v8-card v8-rail-card v8-collection-card">
+              <h2>{crochetOn ? "Handmade Crochet" : "Handmade on HOWDI"}</h2>
+              <p>{crochetOn ? "From cozy wearables to home decor — handmade crochet pieces made by independent makers." : "Every piece is listed by an independent maker with a public @handle."}</p>
+              <div className="v8-trust">
+                <span><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10Z" /></svg>Handmade</span>
+                <span><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M4 9l1.5-5h13L20 9M4 9h16v11H4Z" /></svg>Small makers</span>
+                <span><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6Z" /></svg>Public @handles</span>
+              </div>
+              {!crochetOn ? <button type="button" className="v8-btn v8-btn-soft v8-btn-block" style={{ marginTop: 14 }} onClick={() => setCollection("crochet")}>Explore Handmade Crochet</button> : null}
+            </section>
+
+            <section className={`v8-card v8-rail-card v8-cart-card ${cartItems.length ? "" : "v8-cart-empty"}`} aria-label="Your cart">
+              <h2><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M3 4h2l2.4 11h10.2L20 7H6.2" /></svg>Your cart ({cartUnits}){cartItems.length ? <button type="button" className="v8-link" onClick={onOpenCart}>View cart</button> : null}</h2>
+              {cartItems.length ? (
+                <>
+                  <div className="v8-cart-line">
+                    {lastLine && lastLine.image ? <img src={lastLine.image} alt="" /> : <span className="v8-cart-noimg" />}
+                    <span><b>{lastLine.name}</b><small>{lastLine.price} · Qty {Math.max(1, Number(lastLine.quantity) || 1)}</small></span>
+                  </div>
+                  {cartItems.length > 1 ? <p style={{ marginTop: 8 }}>+ {cartItems.length - 1} more {cartItems.length - 1 === 1 ? "item" : "items"}</p> : null}
+                  <div className="v8-cart-total"><span>Subtotal</span><b>{money(cartSummary.subtotal)}</b></div>
+                  <button type="button" className="v8-btn v8-btn-primary v8-btn-block" onClick={onCheckout}>Go to checkout · {money(cartSummary.subtotal)}</button>
+                </>
+              ) : <p>Your cart is empty. Items you add will show here.</p>}
+            </section>
+          </aside>
         </div>
       </ShopActionsContext.Provider>
     );

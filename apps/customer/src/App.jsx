@@ -3,6 +3,9 @@ import { createPortal } from "react-dom";
 import "./App.css";
 import HowdiAuthPortal from "./components/HowdiAuthPortal";
 import ShopCatalogue from "./components/ShopCatalogue";
+import "./v8/v8.css";
+import { V8Rail, V8Header, V8BottomBar, V8BuildLabel } from "./v8/V8Shell";
+import V8Home from "./v8/V8Home";
 import HowdiFor from "./howdi-for/HowdiFor";
 import { HowdiForMenuRow, HowdiForFeedCard, HowdiForEmptyStateLink, insertFeedCard } from "./howdi-for/HowdiForEntryPoints";
 import { parseForPath } from "./howdi-for/routes";
@@ -1851,6 +1854,9 @@ function HowdiVibeCore({legacyPosts=[],onCreate,onAddToCart,onBuyNow,onDirectChe
 
 
 
+// V8 foundation: legacy landing/marketing blocks stay in source for reference but are never mounted.
+const V8_RETIRED_LEGACY_HOME = false;
+
 function App() {
   // ==========================================================
   // HOWDI CUSTOMER SHOP V12 — LIVE VENDOR PRODUCT BRIDGE
@@ -2638,13 +2644,21 @@ function App() {
   // ==============================
 
   const [activeSection, setActiveSection] = useState("home");
-  const [navigationOSArea,setNavigationOSArea]=useState("connect");
+  // V8 Gate — Home / Connect entry: guests land on the mixed Home; a signed-in session lands on Connect
+  // unless the person chose Home (or opened a deep link, which is handled by its own route effect).
+  const [navigationOSArea,setNavigationOSArea]=useState(()=>{try{return localStorage.getItem("howdiSessionToken")&&localStorage.getItem("howdiUser")?"connect":"home";}catch{return "home";}});
+  const v8HomeChosenRef=useRef(false);
   // MP-56 — public segment landing pages. This is deliberately not a pillar:
   // the existing shell remains the navigation owner and destinations resolve
   // back into its current pillar/view state.
   const [howdiForRoute,setHowdiForRoute]=useState(()=>typeof window!=="undefined"?parseForPath(window.location.pathname):null);
   const [howdiForPendingTarget,setHowdiForPendingTarget]=useState(null);
-  const [shopOSView,setShopOSView]=useState("home");
+  const [shopOSView,setShopOSView]=useState("catalogue");
+  // V8 SHP-001: Handmade Crochet is a collection inside the one Shop (never a separate home page).
+  const [shopCollection,setShopCollection]=useState("");
+  const [shopCatalogueQuery,setShopCatalogueQuery]=useState("");
+  const [shopCatalogueNotice,setShopCatalogueNotice]=useState("");
+  const [v8AskMode,setV8AskMode]=useState(false);
   const [slideIndex, setSlideIndex] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
   const [navDropdown, setNavDropdown] = useState(null);
@@ -9833,13 +9847,18 @@ return () => window.clearInterval(timer);
     searchInputRef.current?.focus({ preventScroll: true });
   };
 
+  const v8PrevUserRef=useRef(currentUser);
+  useEffect(()=>{
+    const was=v8PrevUserRef.current; v8PrevUserRef.current=currentUser;
+    if(!was&&currentUser&&navigationOSArea==="home"&&!v8HomeChosenRef.current)openNavigationOSArea("connect","home");
+  },[currentUser]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const openNavigationOSArea=(area,subview="home")=>{
     const next=String(area||"connect").toLowerCase();
     const view=String(subview||"home").toLowerCase();
-    // K5A PHASE 1: "Home" (logo, bottom nav, sidebar, header) always opens Connect Home. The former Crochet
-    // marketing landing is now a Shop entry ("Handmade Crochet") and is only reached through Shop.
-    if(next==="home"&&view!=="crochet")return openNavigationOSArea("connect","home");
-    if(next==="shop"&&view==="crochet")return openNavigationOSArea("home","crochet");
+    // V8 Gate: Home is the one mixed ecosystem Home; Connect opens Connect Home; Shop is the one canonical Shop.
+    // The retired Crochet landing and "Shop Home" pages are no longer reachable: crochet is a Shop collection.
+    if(next==="home"&&view==="crochet")return openNavigationOSArea("shop","crochet");
 
     closeHeaderPanels();
     setMenuOpen(false);
@@ -9869,9 +9888,12 @@ return () => window.clearInterval(timer);
     }
     if(next==="shop"){
       setActiveSection("shop");
-      // Shop S1: categories / product discovery are now the Catalogue workspace.
-      const shopView=view==="categories"||view==="discovery"?"catalogue":view;
-      setShopOSView(shopView==="home"?"home":shopView);
+      // V8 SHP-001: one Shop. Legacy "home", "categories", "discovery" and "crochet" entries all land on the catalogue.
+      if(view==="crochet")setShopCollection("crochet");
+      else if(view==="catalogue"||view==="home")setShopCollection("");
+      if(view!=="catalogue"){setShopCatalogueNotice("");}
+      const shopView=["categories","discovery","home","crochet"].includes(view)?"catalogue":view;
+      setShopOSView(shopView);
       if(shopView==="catalogue"){
         window.setTimeout(()=>window.scrollTo({top:0,behavior:"smooth"}),40);
       }else if(view==="cart"){
@@ -12571,8 +12593,8 @@ const removeNotification = async (notificationId) => {
       active: id === "vibe" ? (connectView === "feed" && connectContentMode === "vibe") : id === "feed" ? connectView === "dashboard" : id === "explore" ? connectView === "discover" : connectView === id,
       onClick: () => openNavigationOSArea("connect", id === "feed" ? "home" : id),
     })),
-    shop: [["catalogue", "Catalogue"], ["home", "Shop Home"], ["crochet", "Handmade Crochet"], ["cart", "Cart"], ["vendor", "Vendor / Creator"]].map(([id, label]) => ({
-      id, label, badge: id === "cart" ? cart.length : 0, active: id === "crochet" ? navigationOSArea === "home" : (navigationOSArea === "shop" && shopOSView === id), onClick: () => openNavigationOSArea("shop", id),
+    shop: [["catalogue", "Catalogue"], ["cart", "Cart"], ["vendor", "Vendor / Creator"]].map(([id, label]) => ({
+      id, label, badge: id === "cart" ? cart.length : 0, active: navigationOSArea === "shop" && shopOSView === id, onClick: () => openNavigationOSArea("shop", id),
     })),
     works: [["find", "Find Worker"], ["bookings", "My Bookings"], ["saved", "Saved Workers"], ["safety", "Safety"], ["become", "Become a Worker"]].map(([id, label]) => ({
       id, label, active: worksExperienceTab === id,
@@ -12583,11 +12605,27 @@ const removeNotification = async (notificationId) => {
     })),
   };
 
-  const homeIsConnectHome = navigationOSArea === "connect" && connectView === "dashboard";
-  const pillarActive = (area) => area === "home" ? homeIsConnectHome
-    : area === "connect" ? (navigationOSArea === "connect" && !homeIsConnectHome)
-    : area === "shop" ? (navigationOSArea === "shop" || navigationOSArea === "home")
-    : navigationOSArea === area;
+  // V8: exactly one selected destination — Home, Connect, Shop, Works or Learn & Earn.
+  const pillarActive = (area) => navigationOSArea === area;
+  const v8ActivePillar = ["home", "connect", "shop", "works", "learn"].includes(navigationOSArea) ? navigationOSArea : "";
+  const V8_DEFAULT_VIEW = { home: "home", connect: "home", shop: "catalogue", works: "find", learn: "discover" };
+  const v8Navigate = (area) => {
+    if (area === "home") v8HomeChosenRef.current = true;
+    if (area === "shop") { setShopCatalogueQuery(""); setShopCatalogueNotice(""); }
+    setV8AskMode(false);
+    // Board 16: the Shop opens on the Handmade Crochet collection; "All" is one tap away.
+    openNavigationOSArea(area, area === "shop" ? "crochet" : (V8_DEFAULT_VIEW[area] || "home"));
+  };
+  // Header search (Slice 1): Shop products are searchable today. People / services / courses search is the
+  // K5B Global Search UI, which is not built yet — the notice says so instead of pretending.
+  const v8SubmitSearch = (event) => {
+    event?.preventDefault();
+    const q = homeSearch.trim().slice(0, 80);
+    if (!q) { searchInputRef.current?.focus(); return; }
+    setShopCatalogueQuery(q);
+    setShopCatalogueNotice(`Showing Shop products for “${q}”. Searching people, services and courses comes with the HOWDI Search update.`);
+    openNavigationOSArea("shop", "catalogue");
+  };
 
   const renderConnectHomeFeed = () => {
                   const S=connectHomeSections;
@@ -12881,229 +12919,39 @@ const removeNotification = async (notificationId) => {
   };
 
   return (
-    <div className="howdi-app" data-active-pillar={navigationOSArea} style={{ "--howdi-header-bottom": `${headerBottom}px`, "--howdi-location-right": `${locationRight}px` }}>
-      <button
-        type="button"
-        className="howdi-sticky-home-logo"
-        aria-label="Go to HOWDI home"
-        title="HOWDI Home"
-        onClick={() => openNavigationOSArea("connect","home")}
-      >
-        <span className="howdi-sticky-home-mark">H</span>
-        <span className="howdi-sticky-home-word">
-          <strong>HOWDI</strong>
-          <small>HOME</small>
-        </span>
-      </button>
-
-
+    <div className="howdi-app v8" data-active-pillar={navigationOSArea} style={{ "--howdi-header-bottom": `${headerBottom}px`, "--howdi-location-right": `${locationRight}px` }}>
       {/* ======================================
-          TOP ANNOUNCEMENT
+          V8 SHELL — NAV-001 rail · NAV-002 header · NAV-003 floating bar · build label
+          (replaces the legacy announcement bar, header, master sidebar and mobile nav)
       ====================================== */}
-
-      <div className="announcement">
-        <div className="announcement-main"><span>📌</span><strong>HOWDI SPECIAL:</strong><span>Handmade crochet, real creators and beautiful stories — all in one place.</span><button onClick={() => openNavigationOSArea("shop","home")}>Explore now →</button></div>
-        <div className="announcement-features"><button type="button" onClick={() => openNavigationOSArea("shop","home")}>♥ Support Creators</button><button type="button" onClick={() => openHowdiAccount("rewards")}>🎁 Earn Rewards</button><button type="button" onClick={() => document.getElementById("featured")?.scrollIntoView({ behavior: "smooth" })}>🌿 Sustainable</button><button type="button" onClick={() => openHowdiAccount("connect")}>👥 Community</button></div>
-      </div>
-
-
-      {/* ======================================
-          HEADER
-      ====================================== */}
-
-      <header className="header" ref={headerRef}>
-
-        <div className="header-inner">
-
-          <button
-            className="brand"
-            onClick={() => {
-              openNavigationOSArea("connect","home");
-            }}
-          >
-
-            <div className="brand-mark">
-              H
-            </div>
-
-            <div>
-              <div className="brand-name">
-                HOWDI
-              </div>
-
-              <div className="brand-tagline">
-                Made by hand. Made with heart.
-              </div>
-            </div>
-
-          </button>
-
-
-          {/* NAVIGATION */}
-          <nav id="howdi-main-nav" aria-label="HOWDI Navigation OS" className={`main-nav howdi-simple-ecosystem-nav ${menuOpen ? "mobile-open" : ""}`}>
-            <button type="button" className={pillarActive("home")?"active":""} onClick={()=>openNavigationOSArea("home")}>⌂ Home</button>
-            <button type="button" className={pillarActive("connect")?"active":""} onClick={()=>openNavigationOSArea("connect","home")}>◉ Connect</button>
-            <button type="button" className={pillarActive("shop")?"active":""} onClick={()=>openNavigationOSArea("shop","catalogue")}>🛍 Shop</button>
-            <button type="button" className={pillarActive("works")?"active":""} onClick={()=>openNavigationOSArea("works","find")}>🛠 Works</button>
-            <button type="button" className={pillarActive("learn")?"active":""} onClick={()=>openNavigationOSArea("learn","discover")}>🎓 Learn & Earn</button>
-          </nav>
-
-          <form className="howdi-ai-header-search" onSubmit={submitHomeSearch}>
-            <span className="howdi-ai-spark">✦</span>
-            <input ref={searchInputRef} aria-label="Search HOWDI people, products, services and learning" value={homeSearch} onChange={(event) => setHomeSearch(event.target.value)} placeholder="Search people, products, services, courses…" />
-            <button type="submit" aria-label="Search HOWDI" title="Search HOWDI">↗</button>
-          </form>
-
-          {/* HEADER ACTIONS */}
-
-          <div className="header-actions howdi-header-actions-minimal">
-
-            <button
-              type="button"
-              className="location-button"
-              style={{order: 20}}
-              onClick={() => toggleHeaderPanel("location")}
-              aria-expanded={locationPickerOpen}
-              aria-controls="howdi-location-panel"
-              title="Choose your HOWDI location"
-            >
-              📍
-              <span>
-                {customerLocation}
-              </span>
-              <small>
-                ⌄
-              </small>
-            </button>
-
-            <button
-              type="button"
-              className={connectVoiceListening ? "howdi-global-voice listening" : "howdi-global-voice"}
-              style={{order: 10}}
-              aria-pressed={connectVoiceListening}
-              title="HOWDI AI Voice"
-              onClick={() => {
-                setConnectVoiceListening(v => !v);
-                setTimeout(() => setConnectVoiceListening(false), 2500);
-                searchInputRef.current?.focus();
-              }}
-            >
-              <span>🎙</span><b>{connectVoiceListening ? "Listening…" : "AI Voice"}</b>
-            </button>
-
-            <button
-              type="button"
-              className="howdi-global-icon"
-              style={{order: 30}}
-              aria-label="Notifications"
-              title="Notifications"
-              onClick={() => { setAccountMenuOpen(false); loadNotifications(); loadWorksNotifications(); setNotificationOpen(true); }}
-            >
-              <span>🔔</span>
-              {(unreadNotificationCount+worksNotificationUnread)>0 && <em>{unreadNotificationCount+worksNotificationUnread}</em>}
-            </button>
-
-            {navigationOSArea === "shop" && (
-              <button
-                type="button"
-                className="howdi-global-hpay howdi-global-cart-context"
-                style={{order: 40}}
-                title="Shop Cart"
-                aria-label={`Shop Cart${cart.length ? `, ${cart.length} item${cart.length === 1 ? "" : "s"}` : ""}`}
-                onClick={() => openNavigationOSArea("shop", "cart")}
-              >
-                <span>🛒</span><b>Cart</b>{cart.length > 0 && <em>{cart.length}</em>}
-              </button>
-            )}
-
-            <button
-              type="button"
-              className={navigationOSArea === "connect" && connectView === "hpay" ? "howdi-global-hpay active" : "howdi-global-hpay"}
-              style={{order: 50}}
-              title="HPay"
-              aria-label="Open HPay"
-              onClick={() => openNavigationOSArea("hpay", "home")}
-            >
-              <span>▰</span><b>HPay</b>
-            </button>
-
-            <button
-              type="button"
-              className={accountMenuOpen || myHowdiDrawer ? "howdi-global-account active" : "howdi-global-account"}
-              style={{order: 60}}
-              title="My HOWDI"
-              aria-label={`My HOWDI, ${currentUser?.full_name||currentUser?.name||"Account"}`}
-              aria-expanded={accountMenuOpen}
-              onClick={openMyHowdiMenu}
-            >
-              <span className="howdi-global-avatar">{String(currentUser?.full_name||currentUser?.name||"A").trim().charAt(0).toUpperCase()||"A"}</span>
-              <span><small>MY HOWDI</small><b>{currentUser?.full_name||currentUser?.name||"Account"}</b></span>
-              <i>⌄</i>
-            </button>
-
-            <button
-              className="menu-button"
-              style={{order: 70}}
-              type="button"
-              aria-label={menuOpen ? "Close navigation" : "Open navigation"}
-              aria-expanded={menuOpen}
-              aria-controls="howdi-main-nav"
-              onClick={() => { closeHeaderPanels(); setMenuOpen(!menuOpen); headerTriggerRef.current = document.activeElement; }}
-            >
-              ☰
-            </button>
-
-          </div>
-
-        </div>
-
-        {osSubNav[navigationOSArea]?.length > 0 && (
-          <nav className="howdi-mobile-subnav" aria-label={`${OS_PILLARS.find((p) => p.area === navigationOSArea)?.label || "HOWDI"} sections`}>
-            {osSubNav[navigationOSArea].map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                className={item.active ? "active" : ""}
-                aria-current={item.active ? "page" : undefined}
-                ref={(el) => { if (el && item.active && el.parentElement) { const box = el.parentElement; const left = el.offsetLeft - (box.clientWidth - el.offsetWidth) / 2; if (Math.abs(box.scrollLeft - left) > 4) box.scrollLeft = Math.max(0, left); } }}
-                onClick={item.onClick}
-              >{item.label}{item.badge > 0 && <em className="howdi-mobile-badge" aria-label={`${item.badge} item${item.badge === 1 ? "" : "s"}`}>{item.badge}</em>}</button>
-            ))}
-          </nav>
-        )}
-
-      </header>
-
-      {/* HOWDI APPROVED PERSISTENT ECOSYSTEM SIDEBAR */}
-      <aside className="howdi-master-sidebar" aria-label="HOWDI ecosystem">
-        <div className="howdi-master-sidebar-head">
-          <span className="howdi-master-sidebar-mark">H</span>
-          <div><strong>HOWDI</strong><small>{navigationOSArea === "home" ? "HOME" : navigationOSArea === "connect" ? "CONNECT" : navigationOSArea === "shop" ? "SHOP" : navigationOSArea === "works" ? "WORKS" : navigationOSArea === "learn" ? "LEARN & EARN" : navigationOSArea === "myhowdi" ? "MY HOWDI" : "HPAY"}</small></div>
-        </div>
-
-        <div className="howdi-master-nav-group">
-          {OS_PILLARS.map((pillar)=>(
-            <Fragment key={pillar.area}>
-              <button type="button" className={pillarActive(pillar.area)?"pillar active":"pillar"} aria-current={pillarActive(pillar.area)?"page":undefined} onClick={()=>openNavigationOSArea(pillar.area,pillar.view)}><span aria-hidden="true"><NavIcon name={pillar.area}/></span><b>{pillar.label}</b></button>
-              {pillar.area!=="home" && (navigationOSArea===pillar.area || (pillar.area==="shop" && navigationOSArea==="home")) && osSubNav[pillar.area]?.length>0 && <div className="howdi-master-subnav">
-                {osSubNav[pillar.area].map((item)=><button key={item.id} type="button" className={item.active?"active":""} aria-current={item.active?"page":undefined} onClick={item.onClick}>{item.icon?<span aria-hidden="true">{item.icon}</span>:null}{item.label}</button>)}
-              </div>}
-            </Fragment>
-          ))}
-        </div>
-
-        <div className="howdi-master-motto"><b>A kinder<br/>brighter community<br/>with HOWDI</b><span>→</span></div>
-      </aside>
-
-      {/* Mobile / tablet: the same five areas as the desktop rail, always reachable with the thumb. */}
-      <nav className="howdi-mobile-nav" aria-label="HOWDI sections">
-        {OS_PILLARS.map((pillar) => (
-          <button key={pillar.area} type="button" className={pillarActive(pillar.area) ? "active" : ""} aria-current={pillarActive(pillar.area) ? "page" : undefined} onClick={() => openNavigationOSArea(pillar.area, pillar.view)}>
-            <NavIcon name={pillar.area} /><span>{pillar.short}</span>
-            {pillar.area === "shop" && cart.length > 0 && <em className="howdi-mobile-badge" aria-label={`${cart.length} item${cart.length === 1 ? "" : "s"} in cart`}>{cart.length}</em>}
-          </button>
-        ))}
-      </nav>
+      <V8Rail active={v8ActivePillar} onNavigate={v8Navigate} />
+      <V8Header
+        ref={headerRef}
+        user={currentUser}
+        avatar={profileAvatar}
+        search={homeSearch}
+        onSearchChange={setHomeSearch}
+        onSearchSubmit={v8SubmitSearch}
+        searchRef={searchInputRef}
+        searchPlaceholder={v8AskMode ? "Ask HOWDI — try “crochet tote” or “yarn”" : navigationOSArea === "shop" ? "Search handmade crochet, bags, home decor…" : "Search people, products, services, skills…"}
+        askActive={v8AskMode}
+        onAsk={() => { setV8AskMode((v) => !v); window.setTimeout(() => searchInputRef.current?.focus(), 0); }}
+        location={customerLocation}
+        onLocation={() => toggleHeaderPanel("location")}
+        locationOpen={locationPickerOpen}
+        unread={currentUser ? (unreadNotificationCount + worksNotificationUnread) : 0}
+        onNotifications={() => { if (!currentUser) { openLogin(); return; } setAccountMenuOpen(false); loadNotifications(); loadWorksNotifications(); setNotificationOpen(true); }}
+        showCart={navigationOSArea === "shop"}
+        cartCount={cart.reduce((n, it) => n + Math.max(1, Number(it?.quantity) || 1), 0)}
+        onCart={() => openNavigationOSArea("shop", "cart")}
+        onHPay={() => openNavigationOSArea("hpay", "home")}
+        onProfile={openMyHowdiMenu}
+        profileOpen={accountMenuOpen}
+        onSignIn={openLogin}
+        onHome={() => v8Navigate("home")}
+      />
+      <V8BottomBar active={v8ActivePillar} onNavigate={v8Navigate} />
+      <V8BuildLabel />
 
       {locationPickerOpen && (
         <div id="howdi-location-panel" data-howdi-header-panel className="howdi-location-popover" role="dialog" aria-label="Choose your location">
@@ -13226,6 +13074,16 @@ const removeNotification = async (notificationId) => {
           </div>
 
           <div className="mh-body">
+            {/* V8 NAV-004: Vibe, Create, Messages and My HOWDI are profile actions — never a second bottom bar. */}
+            <section className="v8-quick" aria-label="Quick actions" style={{marginBottom:14}}>
+              <div className="mh-label"><b>Quick actions</b></div>
+              <div className="mh-grid">
+                <button type="button" onClick={() => { setAccountMenuOpen(false); openNavigationOSArea("connect", "vibe"); }}><i>▷</i><b>Vibe</b></button>
+                <button type="button" onClick={() => { setAccountMenuOpen(false); openNavigationOSArea("connect", "home"); setConnectCreateOpen(true); }}><i>＋</i><b>Create</b></button>
+                <button type="button" onClick={() => { setAccountMenuOpen(false); openNavigationOSArea("connect", "messages"); }}><i>✉</i><b>Messages</b></button>
+                <button type="button" onClick={() => { setAccountMenuOpen(false); openMyHowdiProfileDrawer(); }}><i>◎</i><b>My HOWDI</b></button>
+              </div>
+            </section>
             {Object.entries(howdiWorkspaceNav).map(([group, items]) => <section key={group} style={{marginBottom:14}} aria-label={howdiWorkspaceTitles[group][0]}>
               <div className="mh-label"><b>{howdiWorkspaceTitles[group][0]}</b></div>
               <div className="mh-grid">{items.map(([target, icon, label]) => <button type="button" key={target} onClick={() => openHowdiAccount(target)}><i>{icon}</i><b>{label}</b></button>)}</div>
@@ -18004,9 +17862,22 @@ const removeNotification = async (notificationId) => {
           MAIN
       ====================================== */}
 
-      <main className={navigationOSArea === "home" ? "howdi-os-workspace howdi-os-home" : undefined}>
-        <style>{`.howdi-os-home{display:block!important;overflow-y:auto!important;overscroll-behavior:contain}`}</style>
+      <main>
+        {/* V8 HOME-001: the one Common Home (board 04/15). */}
+        {navigationOSArea === "home" && (
+          <V8Home
+            apiBase={SHOP_API_BASE}
+            getAuthHeaders={customerSessionHeaders}
+            user={currentUser}
+            displayName={customerDisplayName}
+            onOpen={(area, view) => openNavigationOSArea(area, view)}
+            onOpenProduct={(id) => { setShopCatalogueQuery(""); setShopCatalogueNotice(""); setShopCatalogueProductId(String(id)); openNavigationOSArea("shop", "crochet"); }}
+            onCreatePost={() => { if (!currentUser) { openLogin(); return; } openNavigationOSArea("connect", "home"); setConnectCreateOpen(true); }}
+          />
+        )}
 
+        {/* V8: the legacy crochet landing, dashboard, search and quick-navigation blocks are retired (never mounted). */}
+        {V8_RETIRED_LEGACY_HOME && (<>
         {/* ====================================
             HERO
         ==================================== */}
@@ -18455,6 +18326,8 @@ const removeNotification = async (notificationId) => {
         {/* ====================================
             WORK
         ==================================== */}
+
+        </>)}
 
         {navigationOSArea==="works"&&(
           <div className="howdi-os-workspace howdi-os-works" aria-label="HOWDI Works">
@@ -19088,6 +18961,26 @@ const removeNotification = async (notificationId) => {
         </div>}
 
         {/* ====================================
+            SHOP — V8 SHP-001: the one canonical Shop (board 16). Handmade Crochet is a collection chip;
+            the legacy "Shop Home" (hs2) page is retired. Cart and vendor open on top of this page.
+        ==================================== */}
+        {navigationOSArea==="shop" && (
+          <div className="v8-page" data-v8-page="shop">
+            <div className="v8-page-inner">
+              <ShopCatalogue apiBase={SHOP_API_BASE} v8
+                signedIn={Boolean(currentUser)} getAuthHeaders={customerSessionHeaders} onRequireLogin={openLogin}
+                onAddToCart={addCatalogueLineToCart} onBuyNow={buyCatalogueLine}
+                openProductId={shopCatalogueProductId} onOpenProductHandled={()=>setShopCatalogueProductId("")}
+                collection={shopCollection} onCollectionChange={setShopCollection}
+                initialQuery={shopCatalogueQuery} notice={shopCatalogueNotice} onQueryCleared={()=>{setShopCatalogueQuery("");setShopCatalogueNotice("");}}
+                cartSummary={{ items: cart, subtotal: cartSubtotal }}
+                onOpenCart={()=>openNavigationOSArea("shop","cart")}
+                onCheckout={openCheckout} />
+            </div>
+          </div>
+        )}
+        {V8_RETIRED_LEGACY_HOME && (<>
+        {/* ====================================
             SHOP
         ==================================== */}
 
@@ -19266,6 +19159,8 @@ const removeNotification = async (notificationId) => {
             </aside>
           </div>
         </section>
+
+        </>)}
 
         {productDetailOpen && selectedProduct && (
           <div
@@ -19756,6 +19651,7 @@ const removeNotification = async (notificationId) => {
         {/* ====================================
             HOWDI KNOWS YOUR TASTE
         ==================================== */}
+        {V8_RETIRED_LEGACY_HOME && (<>
         {(() => {
           const personalized = getPersonalizedProducts(products, {
             customerId: (currentUser?.public_username||currentUser?.username||""),
@@ -20193,6 +20089,8 @@ const removeNotification = async (notificationId) => {
           </div>
         </section>
 
+
+        </>)}
 
       {navigationOSArea==="connect" && (
         <div className="howdi-os-workspace howdi-os-connect" aria-label="HOWDI Connect">
@@ -21181,6 +21079,7 @@ const removeNotification = async (notificationId) => {
         </div>
       )}
 
+        {V8_RETIRED_LEGACY_HOME && (<>
         {!showLogin && !accountMenuOpen && !myHowdiDrawer && !notificationOpen && !locationPickerOpen && navigationOSArea === "home" && !connectModalOpen && activeSection === "home" && typeof document !== "undefined" && createPortal(
           <aside className={`howdi-connect-vibe ${connectExpanded ? "is-expanded" : ""}`} aria-label="HOWDI Connect">
             <button type="button" className="howdi-connect-mobile-toggle" aria-expanded={connectExpanded} aria-label={connectExpanded ? "Close HOWDI Connect actions" : "Open HOWDI Connect actions"} onClick={() => setConnectExpanded(!connectExpanded)}>✦ <span>HOWDI</span> {connectExpanded ? "×" : "+"}</button>
@@ -21336,6 +21235,7 @@ const removeNotification = async (notificationId) => {
           </div>
 
         </footer>
+        </>)}
 
 
 
