@@ -21331,6 +21331,12 @@ async function ensureVibeReleaseReadinessV140LSchema(){
     // GET /api/search only: session-only viewer, strict parameters, four public result types,
     // allow-listed DTOs, PRD-/CRS- codes from the K5A howdi_public_refs registry. Does not use /api/users/search.
     // =====================================================
+    // V8 S3 Access: password reset, @handle availability, onboarding profile, login throttle, preview sandbox outbox
+    // (see ./access-v8.cjs; the sandbox is inert unless HOWDI_PREVIEW_SANDBOX=1 on a *_preview database).
+    const accessV8 = require("./access-v8.cjs").createAccessV8({
+      pool, sendJSON, getBody, getSessionUserFromRequest, hashPassword,
+      clientIp: howdiRateLimitClientIp, rateLimit: vibeRateLimitV151B,
+    });
     const searchK5B = require("./search-k5b.cjs").createSearchK5B({
       pool, getSessionUserFromRequest, sendJSON, k5ePrivateProfileOkSql,
       issuePublicRefs: connectHomeK5A._internal.issueRefs,
@@ -21389,6 +21395,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
           if (await connectHomeK5A.handle(req, res, url)) return;
           // K5B Part 1: Global Search foundation. Dispatched before the request logger so search terms are never logged.
           if (await searchK5B.handle(req, res, url)) return;
+          // V8 S3: dispatched before the request logger so reset tokens / e-mail addresses are never logged.
+          if (await accessV8.handle(req, res, url)) return;
 
           const pathname =
             url.pathname;
@@ -33095,6 +33103,19 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               -10
             );
 
+        // V8 S3: repeated wrong passwords for the same identifier from the same client are throttled (429).
+
+        const loginRetryAfter = accessV8.loginBlocked(req, identifier);
+
+        if (loginRetryAfter) {
+
+          res.setHeader("Retry-After", String(loginRetryAfter));
+
+          return sendJSON(res, 429, { status: "error", code: "LOGIN_RATE_LIMITED", message: "Too many sign-in attempts. Please wait a few minutes or reset your password." });
+
+        }
+
+
         // -------------------------------
         // FIND CUSTOMER FROM POSTGRESQL
         // -------------------------------
@@ -33139,7 +33160,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
         if (
           !user
-        ) {
+        ) { accessV8.loginFailed(req, identifier);
           return sendJSON(
             res,
             401,
@@ -33181,7 +33202,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
           hashPassword(
             password
           )
-        ) {
+        ) { accessV8.loginFailed(req, identifier);
           return sendJSON(
             res,
             401,
@@ -33199,6 +33220,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
         // SUCCESS RESPONSE
         // -------------------------------
 
+        accessV8.loginSucceeded(req, identifier);
         const publicUsername = (await pool.query(`SELECT public_username FROM howdi_connect_profiles WHERE user_id=$1 LIMIT 1`,[user.id])).rows[0]?.public_username || null;
 
         await logSecurityEvent({
@@ -33324,6 +33346,9 @@ async function ensureVibeReleaseReadinessV140LSchema(){
         // No SMS gateway is wired up in this environment, so for local development only, the
         // generated code is written to a server-side-only fixture file (never sent over HTTP)
         // that a developer or a test runner can read directly off disk.
+        // V8 S3 PREVIEW SANDBOX: with HOWDI_PREVIEW_SANDBOX=1 on a *_preview database the SMS is captured in the local
+        // preview outbox (loopback-only reader) instead of being sent. Inert everywhere else. Never part of this response.
+        await accessV8.outbox("sms", phone, null, `Your HOWDI code is ${code}. It expires in 5 minutes. Never share it.`).catch(() => false);
         if (process.env.NODE_ENV !== "production") {
           try {
             const devOtpLogPath = path.join(__dirname, ".dev-otp-log.jsonl");
@@ -47840,9 +47865,20 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   ORDER BY c.created_at DESC LIMIT 12
                 `,[target,viewer])).rows;
               }catch(e){communities=[];}
+              // V8 ID-003: Premium = a creator with an active paid creator plan (separate from Verified, ID-002).
+              // Public plan facts only (name, price, billing period) plus whether THIS viewer is subscribed.
+              let premium=null;
+              try{
+                const plan=(await pool.query(`SELECT plan_name,price,billing_period FROM howdi_connect_creator_plans
+                  WHERE creator_user_id=$1 AND COALESCE(is_active,TRUE)=TRUE AND COALESCE(price,0)>0 ORDER BY price ASC LIMIT 1`,[target])).rows[0];
+                if(plan&&profile.creator_mode){
+                  const sub=viewer>0&&viewer!==target?(await pool.query(`SELECT 1 FROM howdi_connect_creator_subscriptions WHERE creator_user_id=$1 AND subscriber_user_id=$2 AND status='ACTIVE' AND (current_period_end IS NULL OR current_period_end>NOW()) LIMIT 1`,[target,viewer])).rowCount>0:false;
+                  premium={plan_name:String(plan.plan_name||'Premium').slice(0,80),price:Number(plan.price)||0,billing_period:String(plan.billing_period||'MONTHLY').slice(0,20),viewer_subscribed:sub};
+                }
+              }catch(e){premium=null;}
               // K5B: never expose the raw numeric users.id in the profile payload.
               delete profile.user_id;
-              return sendJSON(res,200,{status:"success",profile,private:false,completion,completionChecklist,profileStrength,canSeeFollowerList,canMessage,recent_posts:recentPosts,featured:resolvedFeatured,projects,experience,education,skills,badges,verification,vibes,articles,communities});
+              return sendJSON(res,200,{status:"success",profile,premium,private:false,completion,completionChecklist,profileStrength,canSeeFollowerList,canMessage,recent_posts:recentPosts,featured:resolvedFeatured,projects,experience,education,skills,badges,verification,vibes,articles,communities});
             }
             if(req.method==="GET"&&/^\/api\/connect\/public-profile\/\d+\/?$/.test(pathname)){
               const target=Number(pathname.match(/public-profile\/(\d+)/)?.[1]);
@@ -57120,6 +57156,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
         await ensureVibeCommerceV153YSchema();
         await ensureConnectHomeV166K5ASchema();
         await connectHomeK5A.ensureSchema();
+        await accessV8.ensureSchema();
         await backfillMissingOrderShipments();
         console.log("✅ HOWDI database initialization completed before accepting requests");
       console.log("✅ HOWDI Works Customer + Admin Separation V31 loaded");

@@ -1,11 +1,14 @@
 import { Component, Fragment, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import "./App.css";
-import HowdiAuthPortal from "./components/HowdiAuthPortal";
 import ShopCatalogue from "./components/ShopCatalogue";
 import "./v8/v8.css";
 import { V8Rail, V8Header, V8BottomBar, V8BuildLabel } from "./v8/V8Shell";
 import V8Home from "./v8/V8Home";
+import V8Profile from "./v8/V8Profile";
+import V8Access from "./v8/V8Access";
+import { V8Appearance, V8Permissions, V8IdentityBadges } from "./v8/V8Settings";
+import { V8Confirm, V8OfflineBanner, V8SessionExpired, loadV8Prefs, applyV8Prefs, useV8Ui } from "./v8/V8System";
 import HowdiFor from "./howdi-for/HowdiFor";
 import { HowdiForMenuRow, HowdiForFeedCard, HowdiForEmptyStateLink, insertFeedCard } from "./howdi-for/HowdiForEntryPoints";
 import { parseForPath } from "./howdi-for/routes";
@@ -2659,6 +2662,14 @@ function App() {
   const [shopCatalogueQuery,setShopCatalogueQuery]=useState("");
   const [shopCatalogueNotice,setShopCatalogueNotice]=useState("");
   const [v8AskMode,setV8AskMode]=useState(false);
+  // V8 S2: settings pages (profile hub), public profile route, appearance prefs, session-expiry dialog
+  const [v8MeView,setV8MeView]=useState("appearance");
+  const [v8ProfileHandle,setV8ProfileHandle]=useState("");
+  const [v8Prefs,setV8Prefs]=useState(()=>loadV8Prefs());
+  const [v8SessionExpired,setV8SessionExpired]=useState(false);
+  // AUTH-007: /reset-password#token=… opens the reset screen (token stays in the fragment: never sent to the server log)
+  const [v8ResetToken,setV8ResetToken]=useState(()=>{try{if(window.location.pathname.replace(/\/+$/,"")==="/reset-password"){const t=new URLSearchParams(String(window.location.hash||"").replace(/^#/,"")).get("token")||"";return /^[A-Za-z0-9_-]{40,60}$/.test(t)?t:"";}}catch{/* ignore */}return "";});
+  const v8Ui=useV8Ui();
   const [slideIndex, setSlideIndex] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
   const [navDropdown, setNavDropdown] = useState(null);
@@ -9863,6 +9874,14 @@ return () => window.clearInterval(timer);
     // V8 Gate: Home is the one mixed ecosystem Home; Connect opens Connect Home; Shop is the one canonical Shop.
     // The retired Crochet landing and "Shop Home" pages are no longer reachable: crochet is a Shop collection.
     if(next==="home"&&view==="crochet")return openNavigationOSArea("shop","crochet");
+    // V8 S2: profile-hub settings pages (/me/*) and public profiles (/@handle) are full V8 pages, not pillars.
+    if(next==="me"||next==="profile"){
+      closeHeaderPanels();setMenuOpen(false);setNavDropdown(null);setMyHowdiDrawer(null);setAccountMenuOpen(false);
+      setConnectModalOpen(false);setWorksExperienceOpen(false);setLearningBrowseOpen(false);
+      if(next==="profile")setV8ProfileHandle(String(subview||"").replace(/^@/,"").slice(0,30));else setV8MeView(view);
+      setNavigationOSArea(next);
+      return;
+    }
 
     closeHeaderPanels();
     setMenuOpen(false);
@@ -12631,6 +12650,112 @@ const removeNotification = async (notificationId) => {
     setShopCatalogueNotice(`Showing Shop products for “${q}”. Searching people, services and courses comes with the HOWDI Search update.`);
     openNavigationOSArea("shop", "catalogue");
   };
+  // ============================================================
+  // V8 NAV-005 — URL routing: selected destination, browser back/forward, preserved scroll, deep-link return.
+  // Only V8 routes are claimed here; /posts|/articles|/stories (K5A viewer) and /for/* (HOWDI FOR) keep their handlers.
+  // ============================================================
+  const v8OwnHandle=String((currentUser&&currentUser.public_username)||"");
+  const V8_CONNECT_VIEWS={vibe:"vibe",messages:"messages",explore:"explore",stories:"stories",communities:"communities"};
+  const v8PathForState=()=>{
+    if(navigationOSArea==="home")return "/";
+    if(navigationOSArea==="profile")return v8ProfileHandle?`/@${v8ProfileHandle}`:"/";
+    if(navigationOSArea==="me")return `/me/${v8MeView}`;
+    if(navigationOSArea==="connect"){
+      if(connectView==="hpay")return "/hpay";
+      if(connectView==="feed"&&connectContentMode==="vibe")return "/connect/vibe";
+      if(connectView==="messages")return "/connect/messages";
+      if(connectView==="discover")return "/connect/explore";
+      if(connectView==="stories")return "/connect/stories";
+      if(connectView==="communities")return "/connect/communities";
+      return "/connect";
+    }
+    if(navigationOSArea==="shop"){
+      if(shopOSView==="cart")return "/shop/cart";
+      return shopCollection==="crochet"?"/shop/crochet":"/shop";
+    }
+    if(navigationOSArea==="works")return worksExperienceTab&&!["find","home"].includes(worksExperienceTab)?`/works/${worksExperienceTab}`:"/works";
+    if(navigationOSArea==="learn")return learningPortalView&&!["discover","home"].includes(learningPortalView)?`/learn/${learningPortalView}`:"/learn";
+    return null;
+  };
+  const v8ApplyPath=(pathname)=>{
+    const p=String(pathname||"/").replace(/\/+$/,"")||"/";
+    let m;
+    if(p==="/"){openNavigationOSArea("home");return true;}
+    if(p==="/hpay"){openNavigationOSArea("hpay","home");return true;}
+    if((m=p.match(/^\/connect(?:\/([a-z]+))?$/))){const v=m[1];if(v&&!V8_CONNECT_VIEWS[v])return false;openNavigationOSArea("connect",v?V8_CONNECT_VIEWS[v]:"home");return true;}
+    if(p==="/shop"){openNavigationOSArea("shop","catalogue");return true;}
+    if(p==="/shop/crochet"){openNavigationOSArea("shop","crochet");return true;}
+    if(p==="/shop/cart"){openNavigationOSArea("shop","cart");return true;}
+    if((m=p.match(/^\/works(?:\/(find|bookings|saved|safety|become))?$/))){openNavigationOSArea("works",m[1]||"find");return true;}
+    if((m=p.match(/^\/learn(?:\/([a-z-]{2,24}))?$/))){openNavigationOSArea("learn",m[1]||"discover");return true;}
+    if((m=p.match(/^\/me\/(appearance|privacy|badges)$/))){openNavigationOSArea("me",m[1]);return true;}
+    if((m=p.match(/^\/@([a-z0-9._]{3,30})$/i))){openNavigationOSArea("profile",m[1].toLowerCase());return true;}
+    return false;
+  };
+  const v8RouterReady=useRef(false);
+  const [v8RouterOn,setV8RouterOn]=useState(false);
+  const v8FirstSync=useRef(true);
+  const v8FromPop=useRef(false);
+  const v8ScrollMemo=useRef({});
+  const v8LastPath=useRef(typeof window!=="undefined"?window.location.pathname:"/");
+  useEffect(()=>{
+    // deep link on first load (e.g. /@meera_makes, /shop/crochet, /me/appearance)
+    try{const p=window.location.pathname;if(p!=="/"&&!HOME_ITEM_ROUTE_RE.test(p)&&!parseForPath(p))v8ApplyPath(p);}catch{/* ignore */}
+    const t=window.setTimeout(()=>{v8RouterReady.current=true;setV8RouterOn(true);},0);
+    const onScroll=(e)=>{const el=e.target;if(el&&el.classList&&(el.classList.contains("v8-page")||el.classList.contains("howdi-os-workspace")))v8ScrollMemo.current[v8LastPath.current]=el.scrollTop;};
+    document.addEventListener("scroll",onScroll,true);
+    const onPop=(ev)=>{
+      if(ev.state&&ev.state.howdiHomeItem)return;
+      const p=window.location.pathname;
+      if(HOME_ITEM_ROUTE_RE.test(p)||parseForPath(p))return;
+      v8FromPop.current=true;
+      if(!v8ApplyPath(p))v8FromPop.current=false;
+    };
+    window.addEventListener("popstate",onPop);
+    return()=>{window.clearTimeout(t);document.removeEventListener("scroll",onScroll,true);window.removeEventListener("popstate",onPop);};
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[]);
+  useEffect(()=>{
+    if(!v8RouterReady.current||homeItemViewer||howdiForRoute)return;
+    const path=v8PathForState();
+    if(!path)return;
+    const fromPop=v8FromPop.current;v8FromPop.current=false;
+    const first=v8FirstSync.current;v8FirstSync.current=false;
+    // the first sync only corrects the address bar (e.g. "/" while a signed-in session lands on Connect): no extra history entry
+    if(path!==window.location.pathname&&!fromPop){try{window.history[first?"replaceState":"pushState"]({howdiV8:path},"",path);}catch{/* ignore */}}
+    else if(first){try{window.history.replaceState({howdiV8:path},"",path);}catch{/* ignore */}}
+    v8LastPath.current=path;
+    const restore=fromPop?(v8ScrollMemo.current[path]||0):0;
+    // content may still be loading: retry the restore a few times until the page is tall enough
+    [60,300,800,1500].forEach((ms)=>window.setTimeout(()=>{const el=document.querySelector(".v8-page")||document.querySelector(".howdi-os-workspace");if(el&&v8LastPath.current===path&&Math.abs(el.scrollTop-restore)>2)el.scrollTop=restore;},ms));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[v8RouterOn,navigationOSArea,connectView,connectContentMode,shopOSView,shopCollection,worksExperienceTab,learningPortalView,v8MeView,v8ProfileHandle]);
+  useEffect(()=>{
+    // "System" theme follows the device setting live
+    applyV8Prefs(v8Prefs);
+    if(v8Prefs.theme!=="system"||!window.matchMedia)return undefined;
+    const mq=window.matchMedia("(prefers-color-scheme: dark)");const on=()=>applyV8Prefs(v8Prefs);
+    mq.addEventListener?.("change",on);return()=>mq.removeEventListener?.("change",on);
+  },[v8Prefs]);
+  useEffect(()=>{
+    // AUTH-010 / SYS: a request that carried a session token and came back 401 means the session ended (expired, revoked
+    // or signed out elsewhere). Show one calm dialog instead of scattered errors; work on the page is kept.
+    if(typeof window==="undefined"||window.__howdiV8FetchWrapped)return;
+    const orig=window.fetch.bind(window);window.__howdiV8FetchWrapped=true;
+    window.fetch=async(input,init)=>{
+      const res=await orig(input,init);
+      try{
+        const h=init&&init.headers;const auth=h&&(typeof h.get==="function"?h.get("Authorization"):(h.Authorization||h.authorization));
+        const url=typeof input==="string"?input:(input&&input.url)||"";
+        if(res.status===401&&auth&&/\/api\//.test(url)&&!/\/api\/auth\/(login|logout|otp)/.test(url))window.dispatchEvent(new Event("howdi:v8-session-expired"));
+      }catch{/* ignore */}
+      return res;
+    };
+  },[]);
+  useEffect(()=>{
+    const on=()=>{if(localStorage.getItem("howdiSessionToken"))setV8SessionExpired(true);};
+    window.addEventListener("howdi:v8-session-expired",on);return()=>window.removeEventListener("howdi:v8-session-expired",on);
+  },[]);
 
   const renderConnectHomeFeed = () => {
                   const S=connectHomeSections;
@@ -12955,8 +13080,12 @@ const removeNotification = async (notificationId) => {
         onSignIn={openLogin}
         onHome={() => v8Navigate("home")}
       />
+      <a className="v8-skip" href="#v8-main" onClick={(e) => { e.preventDefault(); const m = document.querySelector(".v8-page") || document.getElementById("v8-main"); if (m) { m.setAttribute("tabindex", "-1"); m.focus(); } }}>Skip to content</a>
       <V8BottomBar active={v8ActivePillar} onNavigate={v8Navigate} />
       <V8BuildLabel />
+      <V8OfflineBanner onRetry={() => window.dispatchEvent(new Event("online"))} />
+      <V8SessionExpired open={v8SessionExpired} onCancel={() => setV8SessionExpired(false)}
+        onSignIn={() => { setV8SessionExpired(false); try { localStorage.removeItem("howdiSessionToken"); } catch { /* ignore */ } setCurrentUser(null); openLogin(); }} />
 
       {locationPickerOpen && (
         <div id="howdi-location-panel" data-howdi-header-panel className="howdi-location-popover" role="dialog" aria-label="Choose your location">
@@ -13089,6 +13218,15 @@ const removeNotification = async (notificationId) => {
                 <button type="button" onClick={() => { setAccountMenuOpen(false); openMyHowdiProfileDrawer(); }}><i>◎</i><b>My HOWDI</b></button>
               </div>
             </section>
+            <section className="v8-quick" aria-label="Profile and settings" style={{marginBottom:14}}>
+              <div className="mh-label"><b>Profile & settings</b></div>
+              <div className="mh-grid">
+                {v8OwnHandle ? <button type="button" onClick={() => openNavigationOSArea("profile", v8OwnHandle)}><i>◉</i><b>View profile</b></button> : null}
+                <button type="button" onClick={() => openNavigationOSArea("me", "badges")}><i>✓</i><b>Identity & badges</b></button>
+                <button type="button" onClick={() => openNavigationOSArea("me", "appearance")}><i>◐</i><b>Appearance</b></button>
+                <button type="button" onClick={() => openNavigationOSArea("me", "privacy")}><i>⚿</i><b>Privacy & permissions</b></button>
+              </div>
+            </section>
             {Object.entries(howdiWorkspaceNav).map(([group, items]) => <section key={group} style={{marginBottom:14}} aria-label={howdiWorkspaceTitles[group][0]}>
               <div className="mh-label"><b>{howdiWorkspaceTitles[group][0]}</b></div>
               <div className="mh-grid">{items.map(([target, icon, label]) => <button type="button" key={target} onClick={() => openHowdiAccount(target)}><i>{icon}</i><b>{label}</b></button>)}</div>
@@ -13110,27 +13248,10 @@ const removeNotification = async (notificationId) => {
 
       {/* Stage 2 — logout requires explicit confirmation before the session
           is actually destroyed; confirming lands on the dedicated auth page. */}
-      {logoutConfirmOpen && (
-        <div
-          role="dialog" aria-modal="true" aria-label="Log out of HOWDI"
-          style={{ position: "fixed", inset: 0, zIndex: 2147483650, background: "rgba(15,30,80,.5)", backdropFilter: "blur(4px)", display: "grid", placeItems: "center", padding: 20 }}
-          onClick={() => !logoutBusy && setLogoutConfirmOpen(false)}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{ width: "min(400px,100%)", borderRadius: 20, background: "#fff", boxShadow: "0 30px 80px rgba(39,64,134,.32)", padding: "28px 26px", textAlign: "center", fontFamily: "inherit" }}
-          >
-            <div style={{ width: 52, height: 52, margin: "0 auto 14px", borderRadius: 16, background: "#fbe9e9", display: "grid", placeItems: "center", fontSize: 24 }}>🚪</div>
-            <h3 style={{ margin: "0 0 8px", fontSize: 19, color: "#0d1a3a" }}>Log out of HOWDI?</h3>
-            <p style={{ margin: "0 0 20px", fontSize: 13.5, lineHeight: 1.5, color: "#6b707a" }}>You'll be signed out of this device, but don't worry — none of your data, orders, bookings or profile information will be deleted.</p>
-            {logoutNotice && <div className="mh-notice" role="alert" style={{ marginBottom: 14 }}>{logoutNotice}</div>}
-            <div style={{ display: "flex", gap: 10 }}>
-              <button type="button" onClick={() => setLogoutConfirmOpen(false)} disabled={logoutBusy} style={{ flex: 1, minHeight: 46, border: "1px solid #d1d7e5", borderRadius: 12, background: "#fff", color: "#0d1a3a", fontWeight: 800, fontSize: 13.5, cursor: "pointer" }}>Cancel</button>
-              <button type="button" onClick={handleLogout} disabled={logoutBusy} style={{ flex: 1, minHeight: 46, border: 0, borderRadius: 12, background: "#c23d3d", color: "#fff", fontWeight: 800, fontSize: 13.5, cursor: "pointer" }}>{logoutBusy ? "Signing out…" : "Log out"}</button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* V8 AUTH-011 / SYS-005: logout confirmation (focus contained, Escape = cancel, duplicate-safe) */}
+      <V8Confirm open={logoutConfirmOpen} danger icon="lock" title="Log out of HOWDI?"
+        body="You’ll be signed out of this device. None of your data, orders, bookings or profile information will be deleted."
+        confirmLabel="Log out" cancelLabel="Cancel" busy={logoutBusy} onConfirm={handleLogout} onCancel={() => setLogoutConfirmOpen(false)} />
 
       {myHowdiDrawer === "profile" && currentUser && (
         <>
@@ -17867,7 +17988,20 @@ const removeNotification = async (notificationId) => {
           MAIN
       ====================================== */}
 
-      <main>
+      <main id="v8-main" tabIndex={-1}>
+        {/* V8 S2: public profile (ID-001..003) and profile-hub settings pages (MY-011, TRU-003, ID settings) */}
+        {navigationOSArea === "profile" && (
+          <V8Profile apiBase={SHOP_API_BASE} handle={v8ProfileHandle} getAuthHeaders={customerSessionHeaders} signedIn={Boolean(currentUser)}
+            isMe={Boolean(currentUser?.public_username) && String(currentUser.public_username).toLowerCase() === v8ProfileHandle}
+            onRequireLogin={openLogin} onBack={() => { try { if (window.history.length > 1) { window.history.back(); return; } } catch { /* ignore */ } v8Navigate("home"); }}
+            onMessage={() => openNavigationOSArea("connect", "messages")} onEdit={openMyHowdiProfileDrawer} />
+        )}
+        {navigationOSArea === "me" && v8MeView === "appearance" && <V8Appearance prefs={v8Prefs} setPrefs={setV8Prefs} onBack={() => { try { window.history.back(); } catch { v8Navigate("home"); } }} />}
+        {navigationOSArea === "me" && v8MeView === "privacy" && <V8Permissions onBack={() => { try { window.history.back(); } catch { v8Navigate("home"); } }} onOpenPrivacy={() => { openNavigationOSArea("connect", "home"); window.setTimeout(() => openConnectSocial(), 0); }} />}
+        {navigationOSArea === "me" && v8MeView === "badges" && (
+          <V8IdentityBadges apiBase={SHOP_API_BASE} getAuthHeaders={customerSessionHeaders} handle={String(currentUser?.public_username || v8OwnHandle || "")}
+            onBack={() => { try { window.history.back(); } catch { v8Navigate("home"); } }} onViewProfile={() => openNavigationOSArea("profile", String(currentUser?.public_username || v8OwnHandle || ""))} />
+        )}
         {/* V8 HOME-001: the one Common Home (board 04/15). */}
         {navigationOSArea === "home" && (
           <V8Home
@@ -22185,24 +22319,30 @@ const removeNotification = async (notificationId) => {
             LOGIN / SIGNUP MODAL
         ==================================== */}
 
-        <HowdiAuthPortal
-          open={showLogin || howdiOnboardingPending}
-          onClose={closeAuth}
-          authMode={authMode}
-          setAuthMode={setAuthMode}
-          loginName={loginName}
-          setLoginName={setLoginName}
-          loginPhone={loginPhone}
-          setLoginPhone={setLoginPhone}
-          loginPassword={loginPassword}
-          setLoginPassword={setLoginPassword}
-          loginLoading={loginLoading}
-          loginMessage={loginMessage}
-          onLogin={handleLogin}
-          onRegister={handleRegister}
-          onOtpSuccess={handleOtpSuccess}
-          onboardingPending={howdiOnboardingPending}
-          onCloseOnboarding={closeHowdiOnboarding}
+        {/* V8 S3 Access (board 05, AUTH-001…011). Replaces the legacy auth portal. */}
+        <V8Access
+          open={showLogin || howdiOnboardingPending || Boolean(v8ResetToken)}
+          apiBase={SHOP_API_BASE}
+          initialMode={v8ResetToken ? "reset" : authMode === "register" ? "create" : "welcome"}
+          resetToken={v8ResetToken}
+          onboardingOnly={howdiOnboardingPending}
+          currentUserName={currentUser?.full_name || ""}
+          sessionToken={(() => { try { return localStorage.getItem("howdiSessionToken") || ""; } catch { return ""; } })()}
+          onClose={() => { setV8ResetToken(""); closeAuth(); }}
+          onAuthenticated={(data, isNew) => {
+            try { localStorage.setItem("howdiUser", JSON.stringify(data.user)); if (data.token) localStorage.setItem("howdiSessionToken", data.token); } catch { /* ignore */ }
+            setCurrentUser(data.user);
+            setShowLogin(false); setV8ResetToken(""); setLoginMessage("");
+            if (isNew || !data.user?.public_username) { setHowdiOnboardingPending(true); return; }
+            v8Ui?.toast({ title: "You’re signed in!", message: `Welcome back${data.user?.full_name ? `, ${String(data.user.full_name).split(" ")[0]}` : ""}.` });
+          }}
+          onOnboarded={(profile) => {
+            setCurrentUser((u) => { const next = { ...(u || {}), full_name: profile?.display_name || u?.full_name, public_username: profile?.public_username || u?.public_username }; try { localStorage.setItem("howdiUser", JSON.stringify(next)); } catch { /* ignore */ } return next; });
+            setHowdiOnboardingPending(false);
+            v8HomeChosenRef.current = true;
+            openNavigationOSArea("home");
+            v8Ui?.toast({ title: "Welcome to HOWDI!", message: `Your profile @${profile?.public_username || ""} is ready.` });
+          }}
         />
 
       </main>
