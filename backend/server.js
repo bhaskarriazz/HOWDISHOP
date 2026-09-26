@@ -28224,64 +28224,76 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 pathname === "/api/users/mention-search/"
               )
             ) {
-              const query = String(
-                url.searchParams.get("q") || ""
-              )
-                .trim()
-                .toLowerCase()
-                .slice(0, 60);
-
-              const result = await pool.query(
-                `
-                  SELECT
-                    id,
-                    full_name,
-                    email,
-                    phone,
-                    howdi_id,
-                    role
-                  FROM users
-                  WHERE
-                    COALESCE(is_active, TRUE) = TRUE
-                    AND (
-                      $1 = ''
-                      OR LOWER(COALESCE(full_name, '')) LIKE $2
-                      OR LOWER(COALESCE(howdi_id, '')) LIKE $2
-                      OR LOWER(COALESCE(email, '')) LIKE $2
-                      OR COALESCE(phone, '') LIKE $2
-                    )
-                  ORDER BY
-                    CASE
-                      WHEN LOWER(COALESCE(howdi_id, '')) = $1 THEN 0
-                      WHEN LOWER(COALESCE(full_name, '')) = $1 THEN 1
-                      WHEN LOWER(COALESCE(email, '')) = $1 THEN 2
-                      WHEN LOWER(COALESCE(howdi_id, '')) LIKE $3 THEN 3
-                      WHEN LOWER(COALESCE(full_name, '')) LIKE $3 THEN 4
-                      ELSE 5
-                    END,
-                    full_name ASC
-                  LIMIT 20
-                `,
-                [
-                  query,
-                  `%${query}%`,
-                  `${query}%`,
-                ]
-              );
-
-              return sendJSON(
-                res,
-                200,
-                {
-                  status: "success",
-                  users: result.rows.map((user) => ({
-                    id: user.id,
-                    full_name: user.full_name || "HOWDI user",
-                    howdi_id: user.howdi_id || "",
-                    role: user.role || "customer",
-                  })),
+              // SECURITY CLOSURE (legacy P0 / K5B verification observation 3):
+              // this endpoint used to return users.id and howdi_id to guests and matched on email / phone,
+              // which allowed account enumeration. It is now a signed-in-only @mention lookup that
+              //   - never reads or matches email, phone, howdi_id or internal ids,
+              //   - matches public @handle (prefix) or display name only, on discoverable public profiles,
+              //   - excludes the viewer, inactive accounts and anyone blocked in either direction,
+              //   - returns only { public_username, display_name, avatar_url } and is rate limited per user.
+              res.setHeader("Cache-Control", "no-store");
+              res.setHeader("Pragma", "no-cache");
+              const mentionViewer = await getSessionUserFromRequest(req);
+              const mentionViewerId = Number(mentionViewer && mentionViewer.id);
+              if (!mentionViewer || mentionViewer.is_active === false || String(mentionViewer.account_status || "ACTIVE").toUpperCase() !== "ACTIVE" || !Number.isSafeInteger(mentionViewerId) || mentionViewerId <= 0) {
+                return sendJSON(res, 401, { status: "error", code: "SIGN_IN_REQUIRED", message: "Please sign in to tag people." });
+              }
+              const allowedMentionParams = new Set(["q"]);
+              for (const key of url.searchParams.keys()) {
+                if (!allowedMentionParams.has(key) || url.searchParams.getAll(key).length > 1) {
+                  return sendJSON(res, 400, { status: "error", code: "INVALID_PARAMETER", message: "Unsupported parameter." });
                 }
+              }
+              const mentionRate = vibeRateLimitV151B(`mention-search:user:${mentionViewerId}`, 60, 60 * 1000);
+              if (mentionRate && mentionRate.allowed === false) {
+                res.setHeader("Retry-After", String(Math.ceil((mentionRate.retryAfterMs || 60000) / 1000)));
+                return sendJSON(res, 429, { status: "error", code: "RATE_LIMITED", message: "Too many searches. Please try again shortly." });
+              }
+              const mentionTerm = String(url.searchParams.get("q") || "").normalize("NFKC").replace(/^@+/, "").trim().toLowerCase().slice(0, 30);
+              if (/[\u0000-\u001f\u007f]/.test(mentionTerm)) {
+                return sendJSON(res, 400, { status: "error", code: "INVALID_PARAMETER", message: "Invalid search text." });
+              }
+              if (!mentionTerm) {
+                return sendJSON(res, 200, { status: "success", users: [] });
+              }
+              const mentionLike = mentionTerm.replace(/[\\%_]/g, (c) => "\\" + c);
+              const result = await pool.query(
+                `SELECT cp.public_username, u.full_name AS display_name,
+                        COALESCE(NULLIF(cp.avatar_data,''),NULLIF(ps.profile_image,''),'') AS avatar
+                   FROM users u
+                   JOIN howdi_connect_profiles cp ON cp.user_id=u.id
+                   LEFT JOIN user_profile_settings ps ON ps.user_id=u.id
+                  WHERE u.id<>$1::bigint
+                    AND cp.public_username IS NOT NULL AND cp.public_username<>''
+                    AND COALESCE(cp.discoverable,TRUE)=TRUE AND COALESCE(cp.private_profile,FALSE)=FALSE
+                    AND COALESCE(u.is_active,TRUE)=TRUE AND UPPER(COALESCE(u.account_status,'ACTIVE'))='ACTIVE'
+                    AND NOT EXISTS(SELECT 1 FROM howdi_connect_profile_blocks kb
+                                    WHERE (kb.blocker_user_id=$1::bigint AND kb.blocked_user_id=u.id)
+                                       OR (kb.blocker_user_id=u.id AND kb.blocked_user_id=$1::bigint))
+                    AND (LOWER(cp.public_username) LIKE $2 ESCAPE '\\' OR LOWER(COALESCE(u.full_name,'')) LIKE $3 ESCAPE '\\')
+                  ORDER BY CASE WHEN LOWER(cp.public_username)=$4 THEN 0
+                                WHEN LOWER(cp.public_username) LIKE $2 ESCAPE '\\' THEN 1 ELSE 2 END,
+                           LOWER(cp.public_username)
+                  LIMIT 8`,
+                [mentionViewerId, `${mentionLike}%`, `%${mentionLike}%`, mentionTerm]
               );
+              const mentionHandleOk = (h) => /^[a-z0-9._]{3,30}$/.test(String(h || ""));
+              const mentionAvatar = (a) => {
+                const v = String(a || "");
+                if (/^https?:\/\//i.test(v) && v.length <= 2000) return v;
+                if (/^data:image\/(png|jpe?g|webp|gif);base64,[a-z0-9+/=]+$/i.test(v) && v.length <= 60000) return v;
+                return null;
+              };
+              return sendJSON(res, 200, {
+                status: "success",
+                users: result.rows
+                  .filter((row) => mentionHandleOk(row.public_username))
+                  .map((row) => ({
+                    public_username: row.public_username,
+                    display_name: String(row.display_name || row.public_username).slice(0, 80),
+                    avatar_url: mentionAvatar(row.avatar),
+                  })),
+              });
             }
 
 

@@ -273,8 +273,14 @@ function createConnectHomeK5A(deps) {
       WHERE LOWER(TRIM(w.kyc_status))='verified' AND LOWER(TRIM(w.skill_status))='verified' AND LOWER(TRIM(w.account_status))='active' AND COALESCE(w.active,TRUE)=TRUE
         AND w.worker_code IS NOT NULL AND (w.user_id IS NULL OR (${ACTIVE_USER('u')} AND ${NOT_BLOCKED('w.user_id')}))
       ORDER BY w.rating DESC NULLS LAST, w.completed_jobs DESC NULLS LAST, w.worker_code LIMIT 8`,
+    // Same teacher rule as K5B Search: a course whose active, approved teacher is blocked either way (or is no longer an
+    // active account) is hidden from that viewer. Teacher identity is never returned.
     learn: `SELECT c.id::text AS internal_key, c.title, c.category, c.level, c.duration_minutes, c.thumbnail_url
       FROM learning_courses c WHERE c.is_active=TRUE AND c.publish_status='PUBLISHED' AND $1::bigint>=0
+        AND NOT EXISTS(SELECT 1 FROM learning_teacher_course_assignments a JOIN learning_teacher_profiles tp ON tp.id=a.teacher_profile_id
+              JOIN users tu ON tu.id=tp.user_id
+            WHERE a.course_id=c.id AND a.status='ACTIVE' AND tp.application_status='APPROVED'
+              AND (NOT ${ACTIVE_USER('tu')} OR NOT ${NOT_BLOCKED('tp.user_id')}))
       ORDER BY c.updated_at DESC, c.title LIMIT 8`,
     recentActivity: `SELECT n.notification_type, n.message, n.is_read, n.created_at,
         CASE WHEN au.id IS NOT NULL AND ${AUTHOR_FLOOR('au', 'acp', 'au.id')} THEN acp.public_username END AS actor_public_username,
