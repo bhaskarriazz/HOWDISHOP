@@ -13054,6 +13054,7 @@ const removeNotification = async (notificationId) => {
           V8 SHELL — NAV-001 rail · NAV-002 header · NAV-003 floating bar · build label
           (replaces the legacy announcement bar, header, master sidebar and mobile nav)
       ====================================== */}
+      <a className="v8-skip" href="#v8-main" onClick={(e) => { e.preventDefault(); const m = document.querySelector(".v8-page") || document.getElementById("v8-main"); if (m) { m.setAttribute("tabindex", "-1"); m.focus(); } }}>Skip to content</a>
       <V8Rail active={v8ActivePillar} onNavigate={v8Navigate} />
       <V8Header
         ref={headerRef}
@@ -13080,7 +13081,6 @@ const removeNotification = async (notificationId) => {
         onSignIn={openLogin}
         onHome={() => v8Navigate("home")}
       />
-      <a className="v8-skip" href="#v8-main" onClick={(e) => { e.preventDefault(); const m = document.querySelector(".v8-page") || document.getElementById("v8-main"); if (m) { m.setAttribute("tabindex", "-1"); m.focus(); } }}>Skip to content</a>
       <V8BottomBar active={v8ActivePillar} onNavigate={v8Navigate} />
       <V8BuildLabel />
       <V8OfflineBanner onRetry={() => window.dispatchEvent(new Event("online"))} />
