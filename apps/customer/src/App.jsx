@@ -8482,13 +8482,17 @@ return () => window.clearInterval(timer);
         `${SHOP_API_BASE}/api/users/mention-search?q=${encodeURIComponent(term)}`,
       ]) {
         try {
-          const response = await fetch(endpoint, { cache: "no-store" });
+          // Signed-in only; the API returns public @handles only (no ids, howdi_id, email or phone).
+          const response = await fetch(endpoint, { cache: "no-store", headers: customerSessionHeaders() });
           const data = await response.json().catch(() => ({}));
 
           if (response.ok && data.status === "success") {
-            backendUsers = Array.isArray(data.users) ? data.users : [];
+            backendUsers = (Array.isArray(data.users) ? data.users : [])
+              .filter((u) => u && /^[a-z0-9._]{3,30}$/.test(String(u.public_username || "")))
+              .map((u) => ({ id: `handle:${u.public_username}`, full_name: u.display_name || `@${u.public_username}`, howdi_id: `@${u.public_username}`, role: "member" }));
             break;
           }
+          if (response.status === 401) { lastError = "Sign in to tag people."; break; }
 
           lastError = data.message || `User search returned ${response.status}`;
         } catch (error) {
