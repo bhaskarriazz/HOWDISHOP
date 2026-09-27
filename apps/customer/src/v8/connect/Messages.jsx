@@ -7,17 +7,19 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { V8Icon, V8State } from "../V8Shell";
 import { V8Badges, V8Confirm, useV8Ui } from "../V8System";
 import { Ava, Sheet, ReportSheet, Skel, Tabs, since, safeImg, readFileAsDataUrl, SignInCard } from "./common";
+import { AttachDrawer, CardPicker, CardBubble, ViewOnceSend, ViewOnceBubble, ViewOnceViewer } from "./ChatExtras";
+import { UtilitySheet, PayUtilityRequest, UtilityCard, QRPay, HPayHistory } from "./HPayUtilities";
 
 const newKey = () => (globalThis.crypto?.randomUUID?.() || `k${Date.now()}${Math.random().toString(36).slice(2)}`).replace(/[^A-Za-z0-9_-]/g, "").slice(0, 48);
 const inr = (n) => `₹${Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
 const clock = (iso) => { const t = Date.parse(iso || ""); return Number.isFinite(t) ? new Date(t).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }) : ""; };
 
-export default function MessagesScreen({ api, user, focus, to, onNav, onRequireLogin, onOpenProfile }) {
+export default function MessagesScreen({ api, user, focus, to, onNav, onRequireLogin, onOpenProfile, onRoute }) {
   if (!user) return <SignInCard title="Sign in to use Messages" message="Chat, send money and request payments with people you know." onSignIn={onRequireLogin} />;
-  return <Messages api={api} user={user} focus={/^CNV-[0-9A-F]{12}$/.test(focus || "") ? focus : ""} to={/^[a-z0-9._]{3,30}$/i.test(to || "") ? to : ""} onNav={onNav} onOpenProfile={onOpenProfile} />;
+  return <Messages api={api} user={user} focus={/^CNV-[0-9A-F]{12}$/.test(focus || "") ? focus : ""} to={/^[a-z0-9._]{3,30}$/i.test(to || "") ? to : ""} onNav={onNav} onOpenProfile={onOpenProfile} onRoute={onRoute} />;
 }
 
-function Messages({ api, user, focus, to, onNav, onOpenProfile }) {
+function Messages({ api, user, focus, to, onNav, onOpenProfile, onRoute }) {
   const [tab, setTab] = useState("all"); const [filter, setFilter] = useState("all"); const [q, setQ] = useState(""); const [list, setList] = useState({ status: "loading", items: [], requests: 0 });
   const [sheet, setSheet] = useState(to ? "new" : ""); const [rev, setRev] = useState(0);
   const load = useCallback(async () => {
@@ -47,7 +49,7 @@ function Messages({ api, user, focus, to, onNav, onOpenProfile }) {
           </button></li>))}</ul>
       </aside>
       <section className="v8msg-main">
-        {focus ? <Chat key={focus} api={api} user={user} code={focus} onBack={() => onNav("messages")} onChanged={() => setRev((n) => n + 1)} onOpenProfile={onOpenProfile} />
+        {focus ? <Chat key={focus} api={api} user={user} code={focus} onBack={() => onNav("messages")} onChanged={() => setRev((n) => n + 1)} onOpenProfile={onOpenProfile} onNav={onNav} onRoute={onRoute} />
           : <div className="v8-card v8msg-placeholder"><V8Icon name="send" size={36} /><h2>Your messages</h2><p className="v8c-muted">Chat, share photos, send money or request a payment with HPay. Messages are encrypted in transit.</p><button type="button" className="v8-btn v8-btn-primary" onClick={() => setSheet("new")}>New message</button></div>}
       </section>
       {sheet === "new" ? <NewMessage api={api} to={to} onClose={() => setSheet("")} onOpen={(k) => { setSheet(""); setRev((n) => n + 1); onNav(`messages/${k}`); }} /> : null}
@@ -134,11 +136,12 @@ function NewGroup({ api, onClose, onOpen }) {
   );
 }
 
-function Chat({ api, user, code, onBack, onChanged, onOpenProfile }) {
+function Chat({ api, user, code, onBack, onChanged, onOpenProfile, onNav, onRoute }) {
   const ui = useV8Ui();
   const [conv, setConv] = useState({ status: "loading" }); const [msgs, setMsgs] = useState([]); const [more, setMore] = useState(false);
   const [text, setText] = useState(""); const [img, setImg] = useState(null); const [sending, setSending] = useState(false); const [err, setErr] = useState("");
   const [sheet, setSheet] = useState(""); const [edit, setEdit] = useState(null); const [target, setTarget] = useState(null); const [pay, setPay] = useState(null);
+  const [extra, setExtra] = useState(null); // drawer · card:{type} · vo · voView:{media, author} · util:{kind} · utilPay:{order} · qr · history
   const endRef = useRef(null); const fileRef = useRef(null); const sendKey = useRef(newKey());
   const loadConv = useCallback(async () => { const r = await api("GET", `/api/v8/conversations/${code}`); setConv(r.ok ? { status: "ready", ...r.json.conversation, hpay: r.json.hpay } : { status: r.status === 404 ? "gone" : "error", message: r.json.message }); }, [api, code]);
   const loadMsgs = useCallback(async (scroll) => {
@@ -161,6 +164,25 @@ function Chat({ api, user, code, onBack, onChanged, onOpenProfile }) {
     if (!r.ok) { setErr(r.json.message || "Message not sent."); return; } // key kept: Retry can't duplicate
     sendKey.current = newKey(); setText(""); setImg(null); await loadMsgs(true); onChanged();
   };
+  // cards and view-once go through the same send route (one idempotency key per attempt)
+  const sendExtra = async (body) => { const r = await api("POST", `/api/v8/conversations/${code}/messages`, { ...body, idempotency_key: newKey() }); if (!r.ok) return r.json.message || "Couldn’t send."; setExtra(null); await loadMsgs(true); onChanged(); return null; };
+  const pickExtra = (k) => {
+    if (k === "photo") { setExtra(null); fileRef.current?.click(); return; }
+    if (k.startsWith("pay:")) { setExtra(null); setPay({ mode: k.slice(4) }); return; }
+    if (k.startsWith("card:")) { setExtra({ card: k.slice(5) }); return; }
+    if (k.startsWith("util:")) { setExtra({ util: k.slice(5) }); return; }
+    setExtra({ [k]: true });
+  };
+  const cardAct = async (a, card) => {
+    if (card.type === "product") { onRoute?.(card.route); return; }
+    if (card.type === "worker") { window.dispatchEvent(new CustomEvent("howdi:v8-open", { detail: { area: "works", view: "find" } })); return; }
+    if (a === "open") { onNav?.(card.route.replace(/^\/connect\//, "")); return; }
+    const inv = card.route.match(/\/invite\/([A-Z0-9]{10})$/);
+    const r = await api("POST", inv ? `/api/v8/communities/invite/${inv[1]}` : `/api/v8/communities/${card.ref.split("#")[0]}/join`);
+    ui?.toast(r.ok ? { title: r.json.message || "Joined" } : { kind: "error", title: r.json.message || "Couldn’t join." }); if (r.ok) loadMsgs(false);
+  };
+  const utilAct = (a, u) => { if (a === "pay") { setExtra({ utilPay: u }); return; } act("POST", `/api/v8/hpay/utilities/orders/${u.public_key}/${a}`, {}, a === "redeem" ? "Added to your HPay balance" : a === "decline" ? "Request declined" : "Request cancelled"); };
+  const openOnce = async (m) => { const r = await api("POST", `/api/v8/chat-messages/${m.public_key}/open`); if (!r.ok) { ui?.toast({ kind: "error", title: r.json.message }); loadMsgs(false); return; } setExtra({ voView: { media: r.json.media, author: m.author } }); };
   const pickImg = async (f) => { if (!f) return; if (!/^image\/(jpeg|png|webp)$/.test(f.type) || f.size > 5 * 1024 * 1024) { setErr("Photos: JPG, PNG or WebP up to 5 MB."); return; } setImg(await readFileAsDataUrl(f)); };
   const answer = async (a) => { const r = await api("POST", `/api/v8/conversations/${code}/request/${a}`); if (r.ok) { ui?.toast({ title: r.json.message }); onChanged(); if (a === "accept") loadConv(); else onBack(); } else ui?.toast({ kind: "error", title: r.json.message }); };
   const startCall = (type) => window.dispatchEvent(new CustomEvent("howdi:v8-call", { detail: { handle: other.public_username, name: c.title, avatar: other.avatar_url, type, conversation: code } }));
@@ -173,6 +195,7 @@ function Chat({ api, user, code, onBack, onChanged, onOpenProfile }) {
           {c.kind === "group" ? <span className="v8msg-group-ava"><V8Icon name="users" size={20} /></span> : <Ava src={other?.avatar_url} name={c.title} size={40} />}
           <span><b>{c.title}{other && c.kind !== "group" ? <V8Badges verified={other.verified} premium={other.premium} size="sm" /> : null}</b><small>{c.kind === "group" ? `${c.member_count} members` : `@${other?.public_username}`}{c.muted ? " · muted" : ""}</small></span>
         </button>
+        {c.auto_erase ? <button type="button" className="v8msg-erase" onClick={() => setSheet("erase")} aria-label="Auto-erase is on: 24 hours"><V8Icon name="timer" size={16} />24h</button> : null}
         {c.kind !== "group" && c.can_send && !c.request && other ? (<>
           <button type="button" className="v8-icon-btn" aria-label={`Voice call @${other.public_username}`} onClick={() => startCall("VOICE")}><V8Icon name="call" size={20} /></button>
           <button type="button" className="v8-icon-btn" aria-label={`Video call @${other.public_username}`} onClick={() => startCall("VIDEO")}><V8Icon name="video" size={20} /></button>
@@ -191,18 +214,21 @@ function Chat({ api, user, code, onBack, onChanged, onOpenProfile }) {
       <div className="v8msg-thread" role="log" aria-live="polite" aria-label="Messages">
         {more ? <button type="button" className="v8-link v8msg-earlier" onClick={earlier}>Load earlier messages</button> : null}
         {msgs.map((m) => m.kind === "system" ? <p key={m.public_key} className="v8msg-sys">{m.text}</p>
+          : m.kind === "utility" && m.utility ? <div key={m.public_key} className={`v8msg-b ${m.mine ? "mine" : ""} pay`}><UtilityCard u={m.utility} onAct={utilAct} /><span className="v8msg-b-meta">{clock(m.created_at)}</span></div>
           : m.kind === "call" ? <p key={m.public_key} className={`v8msg-sys call ${/Missed|declined|No answer/i.test(m.text || "") ? "bad" : ""}`}><V8Icon name={/video/i.test(m.text || "") ? "video" : "call"} size={14} /> {m.mine ? "" : `@${m.author?.public_username} · `}{m.text} · {clock(m.created_at)}{c.kind !== "group" && c.can_send && !c.request && other ? <button type="button" className="v8-link" onClick={() => startCall(/video/i.test(m.text || "") ? "VIDEO" : "VOICE")}>Call back</button> : null}</p>
           // paying a request: the request card above updates to "Paid"; the payment itself shows as one receipt line
           : m.kind === "payment" && m.payment && m.payment.kind === "request" ? <p key={m.public_key} className="v8msg-sys ok"><V8Icon name="check" size={14} /> {m.mine ? "You" : `@${m.author?.public_username}`} paid {inr(m.payment.amount)}{m.payment.reference ? ` · Ref ${m.payment.reference}` : ""} · {clock(m.created_at)}</p> : (
-          <div key={m.public_key} className={`v8msg-b ${m.mine ? "mine" : ""} ${m.payment ? "pay" : ""}`}>
+          <div key={m.public_key} className={`v8msg-b ${m.mine ? "mine" : ""} ${m.payment ? "pay" : ""} ${m.kind === "card" ? "card" : ""}`}>
             {!m.mine && c.kind === "group" ? <small className="v8msg-b-author">@{m.author?.public_username}</small> : null}
             {m.payment ? <PayCard p={m.payment} c={c} onAct={(a) => (a === "pay" ? setPay({ mode: "pay", request: m.payment }) : act("POST", `/api/v8/payments/${m.payment.public_key}/${a}`, {}, (j) => j.message || (a === "decline" ? "Request declined" : a === "cancel" ? "Request cancelled" : "Done")))} />
-              : m.kind === "deleted" ? <p className="v8msg-deleted">Message deleted</p> : (<>
+              : m.kind === "deleted" ? <p className="v8msg-deleted">Message deleted</p>
+              : m.kind === "viewonce" && m.view_once ? <ViewOnceBubble m={m} onOpen={openOnce} />
+              : m.kind === "card" ? (<><CardBubble card={m.card} onAct={cardAct} />{m.text ? <p>{m.text}</p> : null}</>) : (<>
                 {m.image_url ? <img src={m.image_url} alt="Shared photo" className="v8msg-img" /> : null}
                 {m.text ? <p>{m.text}</p> : null}
               </>)}
-            <span className="v8msg-b-meta">{clock(m.created_at)}{m.edited ? " · Edited" : ""}{m.mine && m.status ? <span className={`v8msg-tick ${m.status}`} aria-label={m.status === "read" ? "Read" : "Delivered"}>{m.status === "read" ? "✓✓" : "✓"}</span> : null}
-              {m.kind === "text" || m.kind === "image" ? <button type="button" className="v8msg-b-more" aria-label="Message options" onClick={() => { setTarget(m); setSheet("msg"); }}><V8Icon name="more" size={14} /></button> : null}</span>
+            <span className="v8msg-b-meta">{clock(m.created_at)}{m.edited ? " · Edited" : ""}{m.expires_at ? <V8Icon name="timer" size={11} /> : null}{m.mine && m.status ? <span className={`v8msg-tick ${m.status}`} aria-label={m.status === "read" ? "Read" : "Delivered"}>{m.status === "read" ? "✓✓" : "✓"}</span> : null}
+              {["text", "image", "card", "viewonce"].includes(m.kind) ? <button type="button" className="v8msg-b-more" aria-label="Message options" onClick={() => { setTarget(m); setSheet("msg"); }}><V8Icon name="more" size={14} /></button> : null}</span>
           </div>))}
         <div ref={endRef} />
       </div>
@@ -212,20 +238,30 @@ function Chat({ api, user, code, onBack, onChanged, onOpenProfile }) {
           {c.can_pay ? <div className="v8msg-hpay"><button type="button" className="v8msg-pill" onClick={() => setPay({ mode: "send" })}><V8Icon name="wallet" size={16} />HPay payment</button><button type="button" className="v8msg-pill" onClick={() => setPay({ mode: "request" })}><V8Icon name="rupee" size={16} />HPay request</button></div> : null}
           <div className="v8msg-compose-row">
             <input ref={fileRef} type="file" hidden accept="image/jpeg,image/png,image/webp" onChange={(e) => { pickImg(e.target.files[0]); e.target.value = ""; }} data-testid="chat-photo" />
-            <button type="button" className="v8-icon-btn" aria-label="Add photo" onClick={() => fileRef.current?.click()}><V8Icon name="image" size={20} /></button>
+            <button type="button" className="v8-icon-btn v8msg-plus" aria-label="Share: photo, view once, product, group, worker, HPay" aria-haspopup="dialog" onClick={() => setExtra({ drawer: true })}><V8Icon name="plus" size={22} /></button>
             <label className="v8msg-input"><span className="v8-sr">Message</span><textarea rows={1} maxLength={2000} value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} placeholder={c.request === "sent" ? "Add to your request…" : "Message…"} /></label>
             <button type="button" className="v8-btn v8-btn-primary v8msg-send" disabled={sending || (!text.trim() && !img)} onClick={send} aria-label="Send"><V8Icon name="send" size={18} /></button>
           </div>
           {err ? <p className="v8c-err" role="alert">{err} <button type="button" className="v8-link" onClick={send}>Retry</button></p> : null}
+          {c.auto_erase ? <p className="v8msg-erase-note"><V8Icon name="timer" size={12} /> New messages disappear after 24 hours.</p> : null}
         </div>
       ) : c.request !== "received" ? <p className="v8msg-closed">{c.blocked ? "You can’t message this person." : "You can’t send messages in this chat."}</p> : null}
 
       <Sheet open={sheet === "menu"} title={c.title} onClose={() => setSheet("")}>
         <button type="button" className="v8c-row" onClick={() => { setSheet(""); act("POST", `/api/v8/conversations/${code}/mute`, { on: !c.muted }, c.muted ? "Notifications on" : "Chat muted"); }}><span className="v8c-row-ico"><V8Icon name={c.muted ? "bell" : "mute"} size={20} /></span><span className="v8c-row-text"><b>{c.muted ? "Unmute" : "Mute notifications"}</b></span></button>
+        {c.can_auto_erase && !c.request && !c.blocked ? <button type="button" className="v8c-row" onClick={() => setSheet("erase")}><span className="v8c-row-ico"><V8Icon name="timer" size={20} /></span><span className="v8c-row-text"><b>Auto-erase</b><small>{c.auto_erase ? `On · 24 hours${c.auto_erase.set_by ? ` · turned on by ${c.auto_erase.by_me ? "you" : `@${c.auto_erase.set_by}`}` : ""}` : "Off"}</small></span></button> : null}
         {c.kind === "group" ? <button type="button" className="v8c-row" onClick={() => setSheet("info")}><span className="v8c-row-ico"><V8Icon name="users" size={20} /></span><span className="v8c-row-text"><b>Group info</b><small>{c.member_count} members</small></span></button> : null}
         <button type="button" className="v8c-row" onClick={() => setSheet("report")}><span className="v8c-row-ico danger"><V8Icon name="flag" size={20} /></span><span className="v8c-row-text"><b>Report {c.kind === "group" ? "group" : "chat"}</b><small>HOWDI sees the reported messages, including earlier versions of edited ones</small></span></button>
         {c.kind !== "group" && !c.blocked ? <button type="button" className="v8c-row danger" onClick={() => setSheet("block")}><span className="v8c-row-ico danger"><V8Icon name="ban" size={20} /></span><span className="v8c-row-text"><b>Block @{other?.public_username}</b></span></button> : null}
         {c.kind === "group" ? <button type="button" className="v8c-row danger" onClick={() => setSheet("leave")}><span className="v8c-row-ico danger"><V8Icon name="x" size={20} /></span><span className="v8c-row-text"><b>Leave group</b></span></button> : null}
+      </Sheet>
+      <Sheet open={sheet === "erase"} title="Auto-erase" onClose={() => setSheet("")}>
+        <p>When auto-erase is on, new messages, photos and cards in this chat disappear for everyone 24 hours after they’re sent. Earlier messages aren’t affected. Payments and receipts always stay in HPay activity.</p>
+        <p className="v8c-muted">{c.kind === "group" ? "Group admins can change this. Everyone in the group sees when it changes." : `@${other?.public_username} sees when you change this.`} People can still screenshot messages.</p>
+        {c.can_auto_erase ? <div className="v8c-seg" role="radiogroup" aria-label="Auto-erase">
+          <button type="button" role="radio" aria-checked={!c.auto_erase} className={!c.auto_erase ? "on" : ""} onClick={async () => { setSheet(""); if (c.auto_erase) await act("POST", `/api/v8/conversations/${code}/auto-erase`, { hours: 0 }, "Auto-erase off"); }}>Off</button>
+          <button type="button" role="radio" aria-checked={Boolean(c.auto_erase)} className={c.auto_erase ? "on" : ""} onClick={async () => { setSheet(""); if (!c.auto_erase) await act("POST", `/api/v8/conversations/${code}/auto-erase`, { hours: 24 }, "Auto-erase on · 24 hours"); }}>24 hours</button>
+        </div> : <p className="v8c-muted">Only group admins can change auto-erase.</p>}
       </Sheet>
       <Sheet open={sheet === "safety"} title="Privacy & safety" onClose={() => setSheet("")}>
         <p><b>{c.safety.encryption}.</b> Messages are protected while they travel between your device and HOWDI.</p>
@@ -249,6 +285,14 @@ function Chat({ api, user, code, onBack, onChanged, onOpenProfile }) {
       <V8Confirm open={sheet === "leave"} danger title={`Leave “${c.title}”?`} body="You won’t get new messages from this group." confirmLabel="Leave" onCancel={() => setSheet("")} onConfirm={async () => { setSheet(""); const r = await api("DELETE", `/api/v8/conversations/${code}/members/${user.public_username}`); if (r.ok) { ui?.toast({ title: "You left the group" }); onChanged(); onBack(); } }} />
       <ReportSheet open={sheet === "report"} what={c.kind === "group" ? "group" : "chat"} onClose={() => setSheet("")} onSubmit={(reason, details) => api("POST", `/api/v8/conversations/${code}/report`, { reason, details, message: target && !target.mine ? target.public_key : undefined })} />
       {sheet === "info" ? <GroupInfo api={api} c={c} code={code} user={user} onClose={() => setSheet("")} onChanged={() => { loadConv(); loadMsgs(false); onChanged(); }} onOpenProfile={onOpenProfile} /> : null}
+      <AttachDrawer open={Boolean(extra?.drawer)} canPay={c.can_pay} onPick={pickExtra} onClose={() => setExtra(null)} />
+      {extra?.card ? <CardPicker api={api} type={extra.card} onSend={(card, t) => sendExtra({ card, text: t })} onClose={() => setExtra(null)} /> : null}
+      {extra?.viewonce ? <ViewOnceSend onSend={(data) => sendExtra({ imageData: data, viewOnce: true })} onClose={() => setExtra(null)} /> : null}
+      {extra?.voView ? <ViewOnceViewer media={extra.voView.media} author={extra.voView.author} onClose={() => { setExtra(null); loadMsgs(false); }} /> : null}
+      {extra?.util ? <UtilitySheet api={api} kind={extra.util} code={code} other={other} onClose={() => setExtra(null)} onDone={() => { loadMsgs(true); onChanged(); }} /> : null}
+      {extra?.utilPay ? <PayUtilityRequest api={api} order={extra.utilPay} onClose={() => setExtra(null)} onDone={() => { loadMsgs(true); onChanged(); }} /> : null}
+      {extra?.qr ? <QRPay api={api} onClose={() => setExtra(null)} onDone={() => { loadMsgs(true); onChanged(); }} /> : null}
+      {extra?.history ? <HPayHistory api={api} onClose={() => setExtra(null)} /> : null}
       {pay ? <PaySheet api={api} c={c} code={code} other={other} mode={pay.mode} request={pay.request} onClose={() => setPay(null)} onDone={() => { loadMsgs(true); loadConv(); onChanged(); }} /> : null}
     </div>
   );
