@@ -12697,7 +12697,6 @@ const removeNotification = async (notificationId) => {
     let m;
     if(p==="/"){openNavigationOSArea("home");return true;}
     if(p==="/hpay"){openNavigationOSArea("hpay","home");return true;}
-    if(p==="/connect/messages"){openNavigationOSArea("connect","messages");return true;}
     if((m=p.match(/^\/connect(?:\/([A-Za-z0-9/_.-]{1,160}))?$/))){openNavigationOSArea("connect","p:"+(m[1]||"")+(window.location.search||""));return true;}
     if(p==="/shop"){openNavigationOSArea("shop","catalogue");return true;}
     if(p==="/shop/crochet"){openNavigationOSArea("shop","crochet");return true;}
@@ -13240,7 +13239,7 @@ const removeNotification = async (notificationId) => {
               <div className="mh-grid">
                 <button type="button" onClick={() => { setAccountMenuOpen(false); openNavigationOSArea("connect", "vibe"); }}><i>▷</i><b>Vibe</b></button>
                 <button type="button" onClick={() => { setAccountMenuOpen(false); openNavigationOSArea("connect", "home"); setConnectCreateOpen(true); }}><i>＋</i><b>Create</b></button>
-                <button type="button" onClick={() => { setAccountMenuOpen(false); openNavigationOSArea("connect", "messages"); }}><i>✉</i><b>Messages</b></button>
+                <button type="button" onClick={() => { setAccountMenuOpen(false); openNavigationOSArea("connect", "p:messages"); }}><i>✉</i><b>Messages</b></button>
                 <button type="button" onClick={() => { setAccountMenuOpen(false); openMyHowdiProfileDrawer(); }}><i>◎</i><b>My HOWDI</b></button>
               </div>
             </section>
@@ -18020,7 +18019,7 @@ const removeNotification = async (notificationId) => {
           <V8Profile apiBase={SHOP_API_BASE} handle={v8ProfileHandle} getAuthHeaders={customerSessionHeaders} signedIn={Boolean(currentUser)}
             isMe={Boolean(currentUser?.public_username) && String(currentUser.public_username).toLowerCase() === v8ProfileHandle}
             onRequireLogin={openLogin} onBack={() => { try { if (window.history.length > 1) { window.history.back(); return; } } catch { /* ignore */ } v8Navigate("home"); }}
-            onMessage={() => openNavigationOSArea("connect", "messages")} onEdit={openMyHowdiProfileDrawer} />
+            onMessage={(h) => openNavigationOSArea("connect", `p:messages${h ? `?to=${encodeURIComponent(h)}` : ""}`)} onEdit={openMyHowdiProfileDrawer} />
         )}
         {navigationOSArea === "me" && v8MeView === "appearance" && <V8Appearance prefs={v8Prefs} setPrefs={setV8Prefs} onBack={() => { try { window.history.back(); } catch { v8Navigate("home"); } }} />}
         {navigationOSArea === "me" && v8MeView === "privacy" && <V8Permissions onBack={() => { try { window.history.back(); } catch { v8Navigate("home"); } }} onOpenPrivacy={() => { openNavigationOSArea("connect", "home"); window.setTimeout(() => openConnectSocial(), 0); }} />}

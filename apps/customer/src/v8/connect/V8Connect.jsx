@@ -7,6 +7,7 @@
 //   /connect/memberships        My memberships       /connect/posts|hype|tips/PST-…       Post / Hype / Tip detail
 //   /connect/hype · tips · explore · creators · ask   Discover (Hype, Tips, Explore, Creators, Ask HOWDI)
 //   /connect/stories            All stories + muted stories (Unmute)
+//   /connect/messages[/CNV-…]   Messages with in-chat HPay
 import { lazy, Suspense, useCallback, useState } from "react";
 import "./connect.css";
 import { useApi } from "./common";
@@ -27,6 +28,7 @@ const PostDetail = lazy(() => import("./Post").then((m) => ({ default: m.PostDet
 const Explore = lazy(() => import("./Discover").then((m) => ({ default: m.Explore })));
 const KindFeed = lazy(() => import("./Discover").then((m) => ({ default: m.KindFeed })));
 const Creators = lazy(() => import("./Discover").then((m) => ({ default: m.Creators })));
+const MessagesScreen = lazy(() => import("./Messages"));
 const AskHowdi = lazy(() => import("./Discover").then((m) => ({ default: m.AskHowdi })));
 
 export function parseConnectPath(path) {
@@ -63,6 +65,7 @@ export default function V8Connect({ apiBase, getAuthHeaders, user, path, onNavig
   else if (section === "communities") body = <CommunitiesScreen {...common} focus={id} type={query.get("type") || ""} code={query.get("code") || ""} />;
   else if (section === "creator") body = <CreatorWorkspace {...common} tab={query.get("tab") || ""} />;
   else if (section === "create") body = <Studio {...common} query={query} onCreateStory={() => setStoryCreate(true)} />;
+  else if (section === "messages") body = <MessagesScreen {...common} focus={id} to={query.get("to") || ""} />;
   else if (section === "stories") body = <StoriesPage {...common} onOpenStory={(groups, index) => setStory({ groups, index })} onCreateStory={() => setStoryCreate(true)} />;
   else if (section === "memberships") body = <MyMemberships {...common} />;
   else if ((section === "posts" || section === "hype" || section === "tips") && pst) body = <PostDetail {...common} code={pst} kind={section === "tips" ? "tip" : section === "hype" ? "hype" : "post"} />;

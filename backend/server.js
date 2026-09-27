@@ -21389,6 +21389,11 @@ async function ensureVibeReleaseReadinessV140LSchema(){
       wallet: connectV8Rooms._internal.wallet, sandboxEnabled: () => accessV8.sandboxEnabled(), auditAdmin: auditAdminSecurity,
       issueK5ARefs: connectHomeK5A._internal.issueRefs, resolveK5ARef: connectHomeK5A._internal.resolveRef,
     });
+    // V8 Messages with in-chat HPay (./connect-v8-messages.cjs): inbox, requests, groups, send money / payment requests.
+    const connectV8Messages = require("./connect-v8-messages.cjs").createConnectV8Messages({
+      pool, getBody, clientIp: howdiRateLimitClientIp, helpers: connectV8._internal, notify: connectV8Community._internal.notify,
+      wallet: connectV8Rooms._internal.wallet, sandboxEnabled: () => accessV8.sandboxEnabled(),
+    });
     const v8SafeHandle = async (mod, req, res, url) => {
       try { return await mod.handle(req, res, url); }
       catch (e) { console.error("[V8 API]", e && e.message); if (!res.headersSent) sendJSON(res, 500, { status: "error", code: "SERVER_ERROR", message: "Something went wrong. Please try again." }); return true; }
@@ -21462,6 +21467,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
           if (await v8SafeHandle(connectV8Rooms, req, res, url)) return;
           if (await v8SafeHandle(connectV8Community, req, res, url)) return;
           if (await v8SafeHandle(connectV8Creator, req, res, url)) return;
+          if (await v8SafeHandle(connectV8Messages, req, res, url)) return;
 
           const pathname =
             url.pathname;
@@ -57239,6 +57245,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
         await connectV8Rooms.ensureSchema();
         await connectV8Community.ensureSchema();
         await connectV8Creator.ensureSchema();
+        await connectV8Messages.ensureSchema();
         await backfillMissingOrderShipments();
         console.log("✅ HOWDI database initialization completed before accepting requests");
       console.log("✅ HOWDI Works Customer + Admin Separation V31 loaded");

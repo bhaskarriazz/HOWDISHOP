@@ -160,7 +160,7 @@ export function ShareSheet({ open, title, link, onClose, onShared }) {
       <div className="v8c-share-link"><V8Icon name="link" size={18} /><span>{abs}</span></div>
       <div className="v8c-share-grid">
         <button type="button" onClick={copy}><span><V8Icon name="link" size={22} /></span>Copy link</button>
-        <button type="button" onClick={() => { onShared?.("messages"); onClose(); ui?.toast({ title: "Choose a chat to send it to", message: "Opening Messages" }); window.dispatchEvent(new CustomEvent("howdi:v8-open", { detail: { area: "connect", view: "messages" } })); }}><span><V8Icon name="send" size={22} /></span>Messages</button>
+        <button type="button" onClick={() => { onShared?.("messages"); onClose(); ui?.toast({ title: "Choose a chat to send it to", message: "Opening Messages" }); window.dispatchEvent(new CustomEvent("howdi:v8-open", { detail: { area: "connect", view: "p:messages" } })); }}><span><V8Icon name="send" size={22} /></span>Messages</button>
         {typeof navigator !== "undefined" && navigator.share ? <button type="button" onClick={native}><span><V8Icon name="share" size={22} /></span>More apps</button> : null}
       </div>
       <h3 className="v8c-sheet-h">Share to other apps</h3>

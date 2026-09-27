@@ -102,7 +102,7 @@ export default function V8Profile({ apiBase, handle, getAuthHeaders, signedIn, i
                     ) : (
                       <div className="v8-profile-actions">
                         <button type="button" className={`v8-btn ${p.viewer_following ? "" : "v8-btn-primary"}`} onClick={follow} disabled={busy} aria-pressed={Boolean(p.viewer_following)}>{busy ? "Saving…" : p.viewer_following ? "Following" : "Follow"}</button>
-                        <button type="button" className="v8-btn" onClick={() => (signedIn ? onMessage?.(handle) : onRequireLogin?.())} disabled={signedIn && d.canMessage === false} title={signedIn && d.canMessage === false ? "This person only accepts messages from people they follow" : undefined}>Message</button>
+                        <button type="button" className="v8-btn" onClick={() => (signedIn ? onMessage?.(handle) : onRequireLogin?.())} title={signedIn && d.canMessage === false ? "Your first message will arrive as a request" : undefined}>Message</button>
                       </div>
                     )}
                     {isMe ? <button type="button" className="v8-btn v8-btn-soft v8-btn-block" onClick={() => openConnect("creator")}><V8Icon name="crown" size={16} />Creator workspace</button> : null}
