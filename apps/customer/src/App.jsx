@@ -10,6 +10,7 @@ import V8Access from "./v8/V8Access";
 import V8Connect from "./v8/connect/V8Connect";
 import V8Notifications, { useV8Unread } from "./v8/V8Notifications";
 import V8CallCenter from "./v8/connect/Calls";
+import V8Works from "./v8/works/V8Works";
 import { V8Appearance, V8Permissions, V8IdentityBadges } from "./v8/V8Settings";
 import { V8Confirm, V8OfflineBanner, V8SessionExpired, loadV8Prefs, applyV8Prefs, useV8Ui } from "./v8/V8System";
 import HowdiFor from "./howdi-for/HowdiFor";
@@ -9947,7 +9948,8 @@ return () => window.clearInterval(timer);
       return;
     }
     if(next==="works"){
-      setWorksExperienceTab(view==="home"?"home":view);
+      // V8 Works paths carry case-sensitive public codes (BKG-…, worker codes): keep the original subview
+      setWorksExperienceTab(view==="home"?"home":String(subview||"home"));
       setWorksExperienceOpen(true);
       return;
     }
@@ -12702,7 +12704,7 @@ const removeNotification = async (notificationId) => {
     if(p==="/shop"){openNavigationOSArea("shop","catalogue");return true;}
     if(p==="/shop/crochet"){openNavigationOSArea("shop","crochet");return true;}
     if(p==="/shop/cart"){openNavigationOSArea("shop","cart");return true;}
-    if((m=p.match(/^\/works(?:\/(find|bookings|saved|safety|become))?$/))){openNavigationOSArea("works",m[1]||"find");return true;}
+    if((m=p.match(/^\/works(?:\/([A-Za-z0-9/_.@-]{1,120}))?$/))){openNavigationOSArea("works",m[1]||"find");return true;}
     if((m=p.match(/^\/learn(?:\/([a-z-]{2,24}))?$/))){openNavigationOSArea("learn",m[1]||"discover");return true;}
     if((m=p.match(/^\/me\/(appearance|privacy|badges)$/))){openNavigationOSArea("me",m[1]);return true;}
     if((m=p.match(/^\/@([a-z0-9._]{3,30})$/i))){openNavigationOSArea("profile",m[1].toLowerCase());return true;}
@@ -18502,7 +18504,12 @@ const removeNotification = async (notificationId) => {
 
         </>)}
 
-        {navigationOSArea==="works"&&(
+        {navigationOSArea==="works"&&worksExperienceTab!=="classic"&&(
+          <V8Works apiBase={SHOP_API_BASE} getAuthHeaders={customerSessionHeaders} user={currentUser} path={worksExperienceTab}
+            onNavigate={(p)=>openNavigationOSArea("works",String(p||"find"))} onRequireLogin={openLogin}
+            onOpenProfile={(h)=>openNavigationOSArea("profile",String(h||""))} onOpenClassic={()=>openNavigationOSArea("works","classic")} />
+        )}
+        {navigationOSArea==="works"&&worksExperienceTab==="classic"&&(
           <div className="howdi-os-workspace howdi-os-works" aria-label="HOWDI Works">
             <div className="howdi-works-experience-stage">
           <div className="howdi-works-shell" id="howdi-works-experience">

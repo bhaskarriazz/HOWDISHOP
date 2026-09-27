@@ -112,7 +112,7 @@ const ADDRESS = 'Flat 4B, Sai Residency, 2nd Lane'; const PHONE = '9876501234';
   check('customer reviews', rv.json.booking?.review?.rating === 5, rv.text.slice(0, 200));
   check('only one review', (await api('POST', `/api/v8/works/bookings/${B1}/review`, { token: C.token, body: { rating: 1 } })).json.code === 'ALREADY_REVIEWED');
   check('worker responds', (await api('POST', `/api/v8/works/bookings/${B1}/review/respond`, { token: WU.token, body: { text: 'Thank you!' } })).json.booking?.review?.response === 'Thank you!');
-  { const pr = await api('GET', '/api/v8/works/workers/WRK-RAVI-T1', { token: X.token }); check('review + response on the public profile', pr.json.worker.reviews.some((r) => r.text === 'Quick and tidy' && r.response === 'Thank you!') && pr.json.worker.rating === 5); }
+  { const pr = await api('GET', '/api/v8/works/workers/WRK-RAVI-T1', { token: X.token }); check('review + response on the public profile', pr.json.worker.review_list.some((r) => r.text === 'Quick and tidy' && r.response === 'Thank you!') && pr.json.worker.rating === 5); }
   check('booking appears under Completed', ((await api('GET', '/api/v8/works/bookings?tab=completed', { token: C.token })).json.items || []).some((x) => x.public_key === B1));
 
   // ---------------- decline (refund) and expiries

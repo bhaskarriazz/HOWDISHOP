@@ -70,7 +70,7 @@ function createWorksV8(deps) {
   const WORKER_COLS = `w.id wid, w.worker_code, w.city, w.rating, w.completed_jobs, w.starting_price, w.experience_years, w.service_radius_km, w.user_id wuid,
       COALESCE(w.availability_status, w.availability, 'offline') avail, w.availability_updated_at,
       (SELECT ps.name FROM works_worker_services pws JOIN works_services ps ON ps.id=pws.service_id WHERE pws.worker_id=w.id AND pws.is_primary=TRUE AND LOWER(TRIM(pws.status))='approved' AND ps.active=TRUE LIMIT 1) primary_service,
-      (SELECT COALESCE(json_agg(json_build_object('code', s.service_code, 'name', s.name) ORDER BY s.name), '[]'::json) FROM works_worker_services x JOIN works_services s ON s.id=x.service_id WHERE x.worker_id=w.id AND LOWER(TRIM(x.status))='approved' AND s.active=TRUE AND s.customer_visible=TRUE) services,
+      (SELECT COALESCE(json_agg(json_build_object('code', s.service_code, 'name', s.name) ORDER BY x.is_primary DESC, s.name), '[]'::json) FROM works_worker_services x JOIN works_services s ON s.id=x.service_id WHERE x.worker_id=w.id AND LOWER(TRIM(x.status))='approved' AND s.active=TRUE AND s.customer_visible=TRUE) services,
       (SELECT COUNT(*) FROM works_reviews r WHERE r.worker_id=w.id) reviews,
       ${authorCols('a_u.id', 'a_')}`;
   const WORKER_FROM = `FROM works_workers w JOIN users wu ON wu.id=w.user_id ${authorJoins('w.user_id', 'a_')}`;
@@ -201,7 +201,7 @@ function createWorksV8(deps) {
       out.consent_fields = PRIVATE_FIELDS.map((f) => ({ key: f, label: FIELD_LABEL[f], required: f === 'address' }));
       const pv = (await pool.query(`SELECT name, address, landmark, pincode, phone, notes FROM howdi_v8_works_private WHERE work_order_id=$1`, [b.work_order_id])).rows[0];
       // the customer sees their own details (masked phone) so they know what they are sharing
-      out.my_details = pv ? { name: pv.name || null, location: pv.address ? `${pv.address}${pv.landmark ? `, ${pv.landmark}` : ''}${pv.pincode ? ` · ${pv.pincode}` : ''}` : null, phone: pv.phone ? `•••••• ${String(pv.phone).slice(-4)}` : null, notes: pv.notes || null } : null;
+      out.my_details = pv ? { name: pv.name || null, location: pv.address ? `${pv.address}${pv.landmark ? `, ${pv.landmark}` : ''}${pv.pincode ? ` · ${pv.pincode}` : ''}` : null, contact: pv.phone ? `•••••• ${String(pv.phone).slice(-4)}` : null, notes: pv.notes || null } : null;
       // WRK-010: the PIN appears only once the worker has arrived
       if (['ARRIVED', 'IN_PROGRESS'].includes(b.state)) { const p = (await pool.query(`SELECT pin, attempts, locked_until, verified_at FROM howdi_v8_works_pins WHERE work_order_id=$1`, [b.work_order_id])).rows[0]; out.job_pin = p ? { pin: p.verified_at ? null : p.pin, verified: Boolean(p.verified_at), attempts: Number(p.attempts), locked: Boolean(p.locked_until && new Date(p.locked_until) > new Date()) } : null; }
       out.actions = b.state === 'ACCEPTED' ? ['consent', 'decline_consent', 'cancel'] : ['REQUESTED', 'CONFIRMED', 'EN_ROUTE'].includes(b.state) ? (b.state === 'CONFIRMED' || b.state === 'EN_ROUTE' ? ['withdraw', 'cancel'] : ['cancel'])
@@ -270,7 +270,7 @@ function createWorksV8(deps) {
         const sl = await slotsFor(r.wid, 3); const next = sl.days.flatMap((d) => d.slots.filter((s) => s.state === 'available')).slice(0, 1)[0];
         ok(res, { worker: workerCard(r, { saved, is_me: Number(r.wuid) === vid, radius_km: r.service_radius_km != null ? Number(r.service_radius_km) : null, next_slot: next ? next.starts_at : null,
           histogram: [5, 4, 3, 2, 1].map((s) => ({ stars: s, count: Number((hist.find((h) => Number(h.rating) === s) || {}).n || 0) })),
-          reviews: reviews.map((x) => ({ rating: Number(x.rating), text: x.review ? line(x.review, 600) : null, at: iso(x.created_at), by: authorDto(x, 'a_'), response: x.worker_response ? line(x.worker_response, 600) : null })) }) });
+          review_list: reviews.map((x) => ({ rating: Number(x.rating), text: x.review ? line(x.review, 600) : null, at: iso(x.created_at), by: authorDto(x, 'a_'), response: x.worker_response ? line(x.worker_response, 600) : null })) }) });
         return true;
       }
       if (m[2] === 'slots' && req.method === 'GET') { ok(res, await slotsFor(r.wid, Math.min(14, Math.max(1, Number(url.searchParams.get('days')) || 7)))); return true; }
