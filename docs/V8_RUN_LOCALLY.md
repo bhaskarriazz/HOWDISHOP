@@ -72,6 +72,7 @@ One HOWDI account can hold several roles, so use three accounts to see both side
 |---|---|---|---|
 | Vendor | `/me/roles` → Apply as Vendor → `/me/vendor` | — | Vendors: ask for info → approve (3 checks) |
 | Reviews / wishlist | Buyer (after delivery): product → ♡ save, rate + review · `/shop/wishlist` | Seller: same product page → Reply | — |
+| My HOWDI | `/me` hub → profile, rewards, size, family, addresses, delete account | Family: the invited member accepts in `/me/family` · Seller picks who funds points in `/me/rewards` | Reported reviews |
 | Wallet / photo | `/me/wallet` (add test money, receipts) · `/me/photo` | — | — |
 | Vendor workspace | `/me/vendor/store` → Add product → Publish | Buyer searches it in the top search | — |
 | Shop purchase | Buyer: product → Add to bag → `/shop/bag` → Checkout → HPay PIN | Vendor: `/me/vendor/store` → Orders: accept → pack → ship (courier + tracking) → delivered | — |
