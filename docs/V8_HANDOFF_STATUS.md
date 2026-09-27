@@ -14,22 +14,25 @@ Nothing below is PASS — everything is **built, awaiting Bhaskar's localhost wa
 | Works W2 Become a Worker + HOWDI Admin console `/admin` | 1e96935, 82b289e | 08: 41 / 41 |
 | My roles + Vendor application → Admin → vendor workspace | 00795cf | 09: 29 / 29 |
 | Shop purchase → vendor order desk → delivery → cancel / return / refund, both sides | 7fea79c, 2 UI commits up to 66c8b04 | 10: 39 / 39 |
+| Learn & Earn (catalogue, HPay join, lessons, certificate + verify, teacher workspace) + Teacher / Institute / Startup applications → Admin | 982c9ca, 1a758db | 11: 39 / 37 |
 
 Run all: `V8_PG_URL=postgresql://postgres@127.0.0.1:5440/postgres node backend/tests/v8-pg/run.cjs`
 
 ## Try it locally
+Full step-by-step guide: `docs/V8_RUN_LOCALLY.md`.
+
 1. `git pull` then `npm install` (qrcode + jsqr were added).
 2. Preview seeds (database name must end in `_preview`):
    `node backend/scripts/v8-preview/run-seed-messages.cjs <url> <photos folder>` · `run-seed-works.cjs <url>`
 3. Demo HPay PIN 2468 (Meera, Divya, Ravi, Kiran). Admin console: `/admin` (dev login admin / admin).
-4. Key pages: `/connect/messages`, `/works`, `/works/worker`, `/works/become`, `/me/roles`, `/me/vendor`, `/me/vendor/store` (orders are on this page), `/shop/products/PRD-…`, `/shop/bag`, `/shop/checkout`, `/shop/orders`, `/admin`.
+4. Key pages: `/connect/messages`, `/works`, `/works/worker`, `/works/become`, `/me/roles`, `/me/vendor`, `/me/vendor/store` (orders are on this page), `/shop/products/PRD-…`, `/shop/bag`, `/shop/checkout`, `/shop/orders`, `/learn/courses`, `/learn/mine`, `/learn/teach`, `/me/apply/teacher|institute|startup`, `/admin`.
 
 ## Not built yet (priority order agreed with Bhaskar)
 1. My HOWDI (orders hub linking to /shop/orders, addresses edit/default, account safety, data controls, support) — still legacy screens.
 2. My Profile redesign against the approved board.
-3. Shop gaps: product gallery/variants, reviews + Q&A, wishlist UI, return photos, Made for Me, Shop Home/category V8 polish.
-4. Vendor: shipping settings + courier integration, payout statement/provider, low-stock, store editing, analytics.
-5. Institute/College + Startup roles; Teacher / Learner / Institute admin queues; Learn & Earn learner flows.
+3. Learn gaps: video/media upload in the course builder, editing a published course, live classes/batches, assessments, Passport evidence, institute programmes/cohorts, startup needs/projects, document upload for Institute/Startup verification.
+4. Shop gaps: product gallery/variants, reviews + Q&A, wishlist UI, return photos, Made for Me, Shop Home/category V8 polish.
+5. Vendor: shipping settings + courier integration, payout statement/provider, low-stock, store editing, analytics.
 
 ## Open blockers
 - `HOWDI_V8_Claude_Build_Handoff_Visual_and_Flow_318.pdf` never supplied (worked from the coverage matrix + board names).
