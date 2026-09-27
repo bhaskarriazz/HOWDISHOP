@@ -22,3 +22,5 @@
 .v8me-next { background: var(--v8-bg); }
 .v8me-order { border-top: 1px solid var(--v8-line); padding: 12px 0; display: grid; gap: 6px; } .v8me-order header { display: flex; justify-content: space-between; gap: 8px; align-items: center; } .v8me-order p { margin: 0; font-size: 14px; }
 .v8me-hidden { padding: 8px 10px; border-radius: 10px; background: var(--v8-bg); color: var(--v8-ink-2); } .v8me-addr { padding: 8px 10px; border-radius: 10px; background: var(--v8-success-soft); } .v8me-ret { padding: 8px 10px; border-radius: 10px; background: #fff4e0; }
+.v8me-block, .v8me-order, .v8me-order > * { min-width: 0; } .v8me-order header { flex-wrap: wrap; } .v8me-order p { overflow-wrap: anywhere; }
+@media (max-width: 520px) { .v8me-order .v8w-steps li { font-size: 11px; flex-basis: 50px; } .v8me-order .v8w-row { flex-wrap: wrap; } }
