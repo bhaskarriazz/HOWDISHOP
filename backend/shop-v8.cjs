@@ -25,13 +25,17 @@ function createShopV8(deps) {
   const { issue, resolve, checkPin, line, text, iso, money } = M;
 
   async function ensureSchema() {
+    await pool.query(`CREATE TABLE IF NOT EXISTS howdi_v8_review_votes(product_id BIGINT NOT NULL, reviewer_id BIGINT NOT NULL, voter_id BIGINT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY(product_id, reviewer_id, voter_id))`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS howdi_v8_review_reports(id BIGSERIAL PRIMARY KEY, product_id BIGINT NOT NULL, reviewer_id BIGINT NOT NULL, reporter_id BIGINT NOT NULL, reason VARCHAR(40) NOT NULL, details VARCHAR(400), status VARCHAR(10) NOT NULL DEFAULT 'open', decided_by VARCHAR(80), decided_at TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), UNIQUE(product_id, reviewer_id, reporter_id))`);
     await pool.query(`CREATE TABLE IF NOT EXISTS howdi_v8_product_reviews(product_id BIGINT NOT NULL, user_id BIGINT NOT NULL, rating SMALLINT NOT NULL CHECK (rating BETWEEN 1 AND 5), body VARCHAR(1000), reply VARCHAR(600), reply_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY(product_id, user_id))`);
+    await pool.query(`ALTER TABLE howdi_v8_product_reviews ADD COLUMN IF NOT EXISTS hidden BOOLEAN NOT NULL DEFAULT FALSE`);
     await pool.query(`CREATE TABLE IF NOT EXISTS howdi_v8_cart(user_id BIGINT NOT NULL, product_id BIGINT NOT NULL, qty INT NOT NULL CHECK (qty BETWEEN 1 AND 20), added_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY(user_id, product_id))`);
     await pool.query(`CREATE TABLE IF NOT EXISTS howdi_v8_addresses(id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL, name VARCHAR(80) NOT NULL, phone VARCHAR(10) NOT NULL, line1 VARCHAR(200) NOT NULL, line2 VARCHAR(200), landmark VARCHAR(120), city VARCHAR(60) NOT NULL, state VARCHAR(60) NOT NULL, pincode VARCHAR(6) NOT NULL, is_default BOOLEAN NOT NULL DEFAULT FALSE, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
     await pool.query(`CREATE TABLE IF NOT EXISTS howdi_v8_shop_orders(order_id UUID PRIMARY KEY, vendor_profile_id BIGINT NOT NULL, buyer_user_id BIGINT NOT NULL, state VARCHAR(12) NOT NULL, method VARCHAR(4) NOT NULL,
       pay_state VARCHAR(10) NOT NULL, amount NUMERIC(12,2) NOT NULL, commission NUMERIC(12,2) NOT NULL, hold_txn VARCHAR(24), release_txn VARCHAR(24), refund_txn VARCHAR(24), courier VARCHAR(60), tracking VARCHAR(60),
       reason VARCHAR(300), group_key VARCHAR(64), idem_key VARCHAR(64), placed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), accepted_at TIMESTAMPTZ, packed_at TIMESTAMPTZ, shipped_at TIMESTAMPTZ, delivered_at TIMESTAMPTZ, closed_at TIMESTAMPTZ)`);
+    await pool.query(`ALTER TABLE howdi_v8_shop_orders ADD COLUMN IF NOT EXISTS size_snapshot JSONB`);
     await pool.query(`CREATE INDEX IF NOT EXISTS howdi_v8_shop_orders_vendor ON howdi_v8_shop_orders(vendor_profile_id, placed_at DESC)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS howdi_v8_shop_orders_buyer ON howdi_v8_shop_orders(buyer_user_id, placed_at DESC)`);
     await pool.query(`CREATE TABLE IF NOT EXISTS howdi_v8_shop_events(id BIGSERIAL PRIMARY KEY, order_id UUID NOT NULL, actor VARCHAR(8) NOT NULL, event VARCHAR(24) NOT NULL, note VARCHAR(300), at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
@@ -78,6 +82,7 @@ function createShopV8(deps) {
     };
     // delivery details: the buyer always; the vendor only after accepting (and never after a cancel / reject)
     const showAddr = role === 'buyer' || (['accepted', 'packed', 'shipped', 'delivered', 'returned'].includes(so.state));
+    out.size = so.size_snapshot ? (showAddr ? so.size_snapshot : { hidden: true }) : null;
     out.delivery = showAddr ? { name: o.delivery_name, line: [o.delivery_address_line1, o.delivery_address_line2, o.delivery_landmark].filter(Boolean).join(', '), city: o.delivery_city, state: o.delivery_state, pin_code: o.delivery_pincode, contact: role === 'vendor' ? o.delivery_phone : `•••••• ${String(o.delivery_phone || '').slice(-4)}` } : { hidden: true, city: o.delivery_city };
     const within = so.delivered_at && Date.now() - new Date(so.delivered_at).getTime() < RETURN_DAYS * 86400e3;
     if (role === 'buyer') out.actions = ['placed', 'accepted', 'packed'].includes(so.state) ? ['cancel'] : so.state === 'delivered' && within && !rt ? ['return'] : [];
@@ -96,19 +101,37 @@ function createShopV8(deps) {
     const v = await viewer(req); const vid = v ? v.id : 0; let m;
 
     // ---- product reviews: rating + comment by verified buyers (a delivered order), one per buyer; the seller replies publicly
-    if ((m = p.match(/^\/api\/v8\/shop\/products\/(PRD-[0-9A-F]{12})\/reviews(?:\/([a-z0-9._]{3,30})\/reply)?$/))) {
+    if ((m = p.match(/^\/api\/v8\/shop\/products\/(PRD-[0-9A-F]{12})\/reviews(?:\/([a-z0-9._]{3,30})\/(reply|helpful|report))?$/))) {
       const pr = await productByCode(m[1], vid); if (!pr) { fail(res, 404, 'NOT_FOUND', 'This product isn’t available.'); return true; }
       const seller = Number(pr.vendor_uid) === vid && vid > 0;
       const bought = vid ? Boolean((await pool.query(`SELECT 1 FROM howdi_v8_shop_orders s JOIN order_items i ON i.order_id=s.order_id WHERE s.buyer_user_id=$1 AND i.product_id=$2 AND s.state IN ('delivered','returned') LIMIT 1`, [vid, String(pr.id)])).rows[0]) : false;
       if (req.method === 'GET' && !m[2]) {
-        const rows = (await pool.query(`SELECT r.rating, r.body, r.reply, r.reply_at, r.created_at, r.updated_at, r.user_id=$2 AS mine, ${authorCols('r.user_id', 'a_')} FROM howdi_v8_product_reviews r ${authorJoins('r.user_id', 'a_')}
-          WHERE r.product_id=$1 AND NOT (${blockedSql('$2::bigint', 'r.user_id')}) ORDER BY (r.user_id=$2) DESC, r.updated_at DESC LIMIT 100`, [pr.id, vid || 0])).rows;
+        const rows = (await pool.query(`SELECT r.rating, r.body, r.reply, r.reply_at, r.created_at, r.updated_at, r.user_id=$2 AS mine, (SELECT COUNT(*) FROM howdi_v8_review_votes hv WHERE hv.product_id=r.product_id AND hv.reviewer_id=r.user_id)::int helpful,
+          EXISTS(SELECT 1 FROM howdi_v8_review_votes hv WHERE hv.product_id=r.product_id AND hv.reviewer_id=r.user_id AND hv.voter_id=$2) voted, EXISTS(SELECT 1 FROM howdi_v8_review_reports rr WHERE rr.product_id=r.product_id AND rr.reviewer_id=r.user_id AND rr.reporter_id=$2) reported, ${authorCols('r.user_id', 'a_')} FROM howdi_v8_product_reviews r ${authorJoins('r.user_id', 'a_')}
+          WHERE r.product_id=$1 AND (NOT r.hidden OR r.user_id=$2) AND NOT (${blockedSql('$2::bigint', 'r.user_id')}) ORDER BY (r.user_id=$2) DESC, helpful DESC, r.updated_at DESC LIMIT 100`, [pr.id, vid || 0])).rows;
         const hist = [5, 4, 3, 2, 1].map((n) => rows.filter((r) => r.rating === n).length); const count = rows.length;
         ok(res, { summary: { count, average: count ? Math.round((rows.reduce((t, r) => t + r.rating, 0) / count) * 10) / 10 : null, histogram: hist },
-          items: rows.map((r) => ({ author: authorDto(r, 'a_'), rating: r.rating, body: r.body, edited: r.updated_at > r.created_at, at: iso(r.updated_at), mine: r.mine, reply: r.reply ? { body: r.reply, at: iso(r.reply_at), store: pr.store } : null })),
+          items: rows.map((r) => ({ author: authorDto(r, 'a_'), rating: r.rating, body: r.body, edited: r.updated_at > r.created_at, at: iso(r.updated_at), mine: r.mine, helpful: r.helpful, voted: r.voted, reported: r.reported, reply: r.reply ? { body: r.reply, at: iso(r.reply_at), store: pr.store } : null })),
           can_review: bought && !seller, is_seller: seller, signed_in: Boolean(vid) }); return true;
       }
       if (!v) { fail(res, 401, 'SIGN_IN_REQUIRED', 'Sign in to review.'); return true; }
+      if (m[2] && m[3] !== 'reply' && req.method === 'POST') {
+        const who = (await pool.query(`SELECT user_id FROM howdi_connect_profiles WHERE public_username=$1`, [m[2]])).rows[0];
+        const rv = who ? (await pool.query(`SELECT user_id FROM howdi_v8_product_reviews WHERE product_id=$1 AND user_id=$2 AND NOT hidden`, [pr.id, who.user_id])).rows[0] : null;
+        if (!rv) { fail(res, 404, 'NOT_FOUND', 'Review not found.'); return true; }
+        if (Number(rv.user_id) === vid) { fail(res, 403, 'OWN_REVIEW', 'You can’t do that on your own review.'); return true; }
+        if (m[3] === 'helpful') {
+          const b = (await getBody(req).catch(() => ({}))) || {};
+          if (b.helpful === false) await pool.query(`DELETE FROM howdi_v8_review_votes WHERE product_id=$1 AND reviewer_id=$2 AND voter_id=$3`, [pr.id, rv.user_id, vid]);
+          else await pool.query(`INSERT INTO howdi_v8_review_votes(product_id,reviewer_id,voter_id) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`, [pr.id, rv.user_id, vid]);
+          const n = Number((await pool.query(`SELECT COUNT(*) n FROM howdi_v8_review_votes WHERE product_id=$1 AND reviewer_id=$2`, [pr.id, rv.user_id])).rows[0].n);
+          ok(res, { helpful: n, voted: b.helpful !== false }); return true;
+        }
+        const b = (await getBody(req).catch(() => ({}))) || {}; const REASONS = ['spam', 'offensive', 'fake', 'personal_info', 'off_topic'];
+        if (!REASONS.includes(b.reason)) { fail(res, 400, 'REASON_REQUIRED', 'Choose why you’re reporting this review.'); return true; }
+        const ins = await pool.query(`INSERT INTO howdi_v8_review_reports(product_id,reviewer_id,reporter_id,reason,details) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING RETURNING id`, [pr.id, rv.user_id, vid, b.reason, line(b.details, 400) || null]);
+        ok(res, { reported: true, already: !ins.rows[0], message: 'Thanks — HOWDI will review this report. The reviewer isn’t told who reported it.' }); return true;
+      }
       if (m[2] && req.method === 'POST') {
         if (!seller) { fail(res, 403, 'SELLER_ONLY', 'Only the seller can reply to reviews.'); return true; }
         const who = (await pool.query(`SELECT user_id FROM howdi_connect_profiles WHERE public_username=$1`, [m[2]])).rows[0];
@@ -164,6 +187,13 @@ function createShopV8(deps) {
       else await pool.query(`UPDATE howdi_v8_cart SET qty=$3 WHERE user_id=$1 AND product_id=$2`, [vid, pr.id, qty]);
       ok(res, { cart: await cartOf(vid) }); return true;
     }
+    if ((m = p.match(/^\/api\/v8\/shop\/addresses\/([A-Za-z0-9_-]{4,64})(?:\/(default))?$/))) {
+      const ad = await addrByKey(vid, m[1]); if (!ad) { fail(res, 404, 'NOT_FOUND', 'Address not found.'); return true; }
+      if (m[2] && req.method === 'POST') { await pool.query(`UPDATE howdi_v8_addresses SET is_default=(id=$2) WHERE user_id=$1`, [vid, ad.id]); }
+      else if (!m[2] && req.method === 'DELETE') { await pool.query(`DELETE FROM howdi_v8_addresses WHERE id=$1 AND user_id=$2`, [ad.id, vid]); if (ad.is_default) await pool.query(`UPDATE howdi_v8_addresses SET is_default=TRUE WHERE id=(SELECT id FROM howdi_v8_addresses WHERE user_id=$1 ORDER BY id DESC LIMIT 1)`, [vid]); }
+      else { fail(res, 405, 'METHOD', 'Not allowed.'); return true; }
+      ok(res, { items: (await pool.query(`SELECT * FROM howdi_v8_addresses WHERE user_id=$1 ORDER BY is_default DESC, id DESC`, [vid])).rows.map(addrDto) }); return true;
+    }
     if (p === '/api/v8/shop/addresses') {
       if (req.method === 'GET') { ok(res, { items: (await pool.query(`SELECT * FROM howdi_v8_addresses WHERE user_id=$1 ORDER BY is_default DESC, id DESC`, [vid])).rows.map(addrDto) }); return true; }
       if (req.method === 'POST') {
@@ -210,6 +240,7 @@ function createShopV8(deps) {
             await client.query(`INSERT INTO order_items(order_id,product_id,product_name,image_url,quantity,unit_price,line_total,vendor_profile_id,fulfillment_status) VALUES($1,$2,$3,$4,$5,$6,$7,$8,'placed')`, [o.id, String(pid), it.name, it.image_url, it.qty, it.price, it.line_total, vpid]);
           }
           await client.query(`INSERT INTO howdi_v8_shop_orders(order_id,vendor_profile_id,buyer_user_id,state,method,pay_state,amount,commission,group_key,idem_key) VALUES($1,$2,$3,'placed',$4,$5,$6,$7,$8,$9)`, [o.id, vpid, vid, method, method === 'HPAY' ? 'HELD' : 'COD', grand, money(sub * COMMISSION), group, idem]);
+          if (b.share_size === true) await client.query(`UPDATE howdi_v8_shop_orders SET size_snapshot=(SELECT to_jsonb(z) - 'user_id' - 'updated_at' - 'consent_at' FROM howdi_v8_size_profiles z WHERE z.user_id=$2) WHERE order_id=$1`, [o.id, vid]);
           created.push(o);
         }
         if (method === 'HPAY') {
@@ -292,6 +323,7 @@ function createShopV8(deps) {
             const net = money(Number(so.amount) - Number(so.commission));
             if (so.method === 'HPAY' && so.pay_state === 'HELD') { relTxn = await credit(c, vid, net, 'SHOP_EARNING', m[1], 'HOWDI Shop order (after 8% commission)'); await c.query(`UPDATE howdi_v8_shop_orders SET pay_state='RELEASED', release_txn=$2 WHERE order_id=$1`, [o.id, relTxn]); }
             else await c.query(`UPDATE howdi_v8_shop_orders SET pay_state='COLLECTED' WHERE order_id=$1`, [o.id]);
+            if (deps.rewards) await deps.rewards().earn(c, so, vid, m[1]);
           }
         });
         if (bad) { fail(res, 409, 'INVALID_STATE', `This order is ${bad.state}.`); return true; }
@@ -319,6 +351,7 @@ function createShopV8(deps) {
             await credit(client, Number(so.buyer_user_id), money(so.amount), 'SHOP_REFUND', oc, 'Return refund');
             if (so.pay_state === 'RELEASED') { const net = money(Number(so.amount) - Number(so.commission)); await wallet(vid, client); await client.query(`UPDATE howdi_v8_wallets SET balance=balance-$2 WHERE user_id=$1`, [vid, net]); await client.query(`INSERT INTO howdi_v8_ledger(txn_code,user_id,direction,amount,kind,reference,note) VALUES($1,$2,'DEBIT',$3,'SHOP_RETURN',$4,'Return refunded to buyer')`, ['HPS-' + crypto.randomBytes(5).toString('hex').toUpperCase(), vid, net, oc]); }
             await client.query(`UPDATE howdi_v8_shop_orders SET state='returned', pay_state='REFUNDED', closed_at=NOW() WHERE order_id=$1`, [rt.order_id]);
+            if (deps.rewards) await deps.rewards().reverse(client, so, oc);
             await client.query(`UPDATE orders SET status='returned', payment_status='refunded' WHERE id=$1`, [rt.order_id]);
             await client.query('COMMIT');
           } catch (e) { await client.query('ROLLBACK').catch(() => {}); throw e; } finally { client.release(); }

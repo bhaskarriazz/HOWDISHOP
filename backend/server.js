@@ -21419,8 +21419,14 @@ async function ensureVibeReleaseReadinessV140LSchema(){
       roleStatus: (uid) => learnV8._internal.roleStatus(uid),
       issuePublicRefs: connectHomeK5A._internal.issueRefs, resolvePublicRef: connectHomeK5A._internal.resolveRef,
     });
+    // V8 My HOWDI (./me-v8.cjs): profile, account deletion, data export, family, size profile, rewards, reported-review queue.
+    const meV8 = require("./me-v8.cjs").createMeV8({
+      pool, getBody, helpers: connectV8._internal, messages: connectV8Messages._internal, notify: connectV8Community._internal.notify, auditAdmin: auditAdminSecurity,
+      wallet: connectV8Rooms._internal.wallet,
+    });
     // V8 Shop purchase journey, both sides (./shop-v8.cjs): cart, checkout, vendor order handling, delivery, returns/refunds.
     const shopV8 = require("./shop-v8.cjs").createShopV8({
+      rewards: () => meV8._internal,
       pool, getBody, helpers: connectV8._internal, messages: connectV8Messages._internal, notify: connectV8Community._internal.notify,
       wallet: connectV8Rooms._internal.wallet, sandboxEnabled: () => accessV8.sandboxEnabled(),
       issuePublicRefs: connectHomeK5A._internal.issueRefs, resolvePublicRef: connectHomeK5A._internal.resolveRef,
@@ -21502,6 +21508,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
           if (await v8SafeHandle(shopV8, req, res, url)) return;
           if (await v8SafeHandle(vendorV8, req, res, url)) return;
           if (await v8SafeHandle(learnV8, req, res, url)) return;
+          if (await v8SafeHandle(meV8, req, res, url)) return;
           if (await v8SafeHandle(worksV8Onboarding, req, res, url)) return;
           if (await v8SafeHandle(worksV8, req, res, url)) return;
           if (await v8SafeHandle(connectV8Messages, req, res, url)) return;
@@ -57289,6 +57296,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
         await vendorV8.ensureSchema();
         await shopV8.ensureSchema();
         await learnV8.ensureSchema();
+        await meV8.ensureSchema();
         await backfillMissingOrderShipments();
         console.log("✅ HOWDI database initialization completed before accepting requests");
       console.log("✅ HOWDI Works Customer + Admin Separation V31 loaded");
