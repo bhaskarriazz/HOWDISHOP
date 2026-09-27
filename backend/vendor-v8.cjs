@@ -73,10 +73,21 @@ function createVendorV8(deps) {
   async function handle(req, res, url) {
     const p = url.pathname.replace(/\/+$/, '') || '/';
     if (p.startsWith('/api/admin/v8/vendors/')) return admin(req, res, url, p);
-    if (!(p === '/api/v8/me/roles' || p.startsWith('/api/v8/vendor/'))) return false;
+    if (!(p === '/api/v8/me/roles' || p === '/api/v8/me/avatar' || p.startsWith('/api/v8/vendor/'))) return false;
     const v = await viewer(req); if (!v) { fail(res, 401, 'SIGN_IN_REQUIRED', 'Sign in first.'); return true; }
     const vid = v.id; let m;
 
+    // profile picture: upload (image only, ≤5 MB, re-encoded path under /api/v8/media) or remove; shown everywhere via authorDto
+    if (p === '/api/v8/me/avatar') {
+      if (req.method === 'POST') {
+        const b = (await getBody(req).catch(() => ({}))) || {}; let img;
+        try { img = saveMedia(b.imageData, { videos: false, maxImage: 5 * 1024 * 1024 }); } catch (e) { fail(res, 400, e.code || 'MEDIA_INVALID', e.message || 'Use a JPG, PNG or WebP photo under 5 MB.'); return true; }
+        await pool.query(`UPDATE howdi_connect_profiles SET profile_image=$2, avatar_data=NULL, updated_at=NOW() WHERE user_id=$1`, [vid, img.url]);
+        ok(res, { avatar_url: img.url }); return true;
+      }
+      if (req.method === 'DELETE') { await pool.query(`UPDATE howdi_connect_profiles SET profile_image='', avatar_data=NULL, updated_at=NOW() WHERE user_id=$1`, [vid]); ok(res, { avatar_url: null }); return true; }
+      if (req.method === 'GET') { const r = (await pool.query(`SELECT ${authorCols('$1::bigint', 'a_')} FROM (SELECT 1) x ${authorJoins('$1::bigint', 'a_')}`, [vid])).rows[0]; ok(res, { me: authorDto(r, 'a_') }); return true; }
+    }
     if (p === '/api/v8/me/roles' && req.method === 'GET') {
       const rows = (await pool.query(`SELECT r.code, ur.role_status, ur.onboarding_state, ur.rejection_reason, ur.decided_at FROM user_roles ur JOIN roles r ON r.id=ur.role_id WHERE ur.user_id=$1`, [vid])).rows;
       const by = Object.fromEntries(rows.map((r) => [r.code, r]));

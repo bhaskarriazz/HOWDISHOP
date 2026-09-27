@@ -229,7 +229,7 @@ function createHpayV8Utilities(deps) {
 
   async function handle(req, res, url) {
     const p = url.pathname.replace(/\/+$/, '') || '/';
-    if (!/^\/api\/v8\/hpay\/(utilities|bills|qr|history)(\/|$)/.test(p)) return false;
+    if (!/^\/api\/v8\/hpay\/(utilities|bills|qr|history|add-money)(\/|$)/.test(p)) return false;
     const v = await viewer(req);
     if (!v) { fail(res, 401, 'SIGN_IN_REQUIRED', 'Sign in to use HPay.'); return true; }
     const vid = v.id; let m;
@@ -420,12 +420,33 @@ function createHpayV8Utilities(deps) {
       ok(res, { payment: await payDto(row, vid), balance: result.balance }, 201); return true;
     }
 
+    // Preview/Test only: add test money to the sandbox wallet (never available without the sandbox). Idempotent per key.
+    if (p === '/api/v8/hpay/add-money' && req.method === 'POST') {
+      if (!sandboxEnabled()) { fail(res, 503, 'PAYMENT_PROVIDER_REQUIRED', 'Adding money needs a payment provider, which isn’t connected yet.'); return true; }
+      const b = (await getBody(req)) || {}; const amount = Math.round(Number(b.amount)); const idem = line(b.idem_key, 64);
+      if (!idem) { fail(res, 400, 'VALIDATION', 'Missing payment key. Please try again.'); return true; }
+      if (!(amount >= 100 && amount <= 5000)) { fail(res, 400, 'AMOUNT', 'Add between ₹100 and ₹5,000 at a time.'); return true; }
+      const ref = 'TOPUP-' + crypto.createHash('sha256').update(`${vid}:${idem}`).digest('hex').slice(0, 16).toUpperCase();
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN'); await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`topup:${vid}`]);
+        const prior = (await client.query(`SELECT amount FROM howdi_v8_ledger WHERE user_id=$1 AND kind='TOPUP' AND reference=$2`, [vid, ref])).rows[0];
+        if (!prior) {
+          const today = Number((await client.query(`SELECT COALESCE(SUM(amount),0) s FROM howdi_v8_ledger WHERE user_id=$1 AND kind='TOPUP' AND created_at>NOW()-interval '1 day'`, [vid])).rows[0].s);
+          if (today + amount > 10000) { await client.query('ROLLBACK'); fail(res, 422, 'DAILY_LIMIT', 'You can add up to ₹10,000 a day in this preview.'); return true; }
+          await wallet(vid, client); await client.query(`UPDATE howdi_v8_wallets SET balance=balance+$2, updated_at=NOW() WHERE user_id=$1`, [vid, amount]);
+          await client.query(`INSERT INTO howdi_v8_ledger(txn_code,user_id,direction,amount,kind,reference,note) VALUES($1,$2,'CREDIT',$3,'TOPUP',$4,'Added money (Preview/Test)')`, ['HPT-' + crypto.randomBytes(5).toString('hex').toUpperCase(), vid, amount, ref]);
+        }
+        await client.query('COMMIT');
+        const w = await wallet(vid); ok(res, { added: prior ? money(prior.amount) : amount, replayed: Boolean(prior), balance: money(w.balance) }); return true;
+      } catch (e) { await client.query('ROLLBACK').catch(() => {}); throw e; } finally { client.release(); }
+    }
     if (p === '/api/v8/hpay/history' && req.method === 'GET') {
       const rows = (await pool.query(`SELECT l.txn_code, l.direction, l.amount, l.kind, l.reference, l.note, l.status, l.created_at, ${authorCols('a_u.id', 'a_')}
         FROM howdi_v8_ledger l ${authorJoins('l.counterparty_user_id', 'a_')} WHERE l.user_id=$1 ORDER BY l.created_at DESC, l.id DESC LIMIT 60`, [vid])).rows;
-      const LABEL = { CHAT_PAYMENT: 'Payment in Messages', QR_PAYMENT: 'QR payment', UTILITY: 'Utilities', UTILITY_REFUND: 'Refund', GIFT_CARD: 'Gift card redeemed', LIVE_TIP: 'Live tip', CREATOR_PAYOUT: 'Creator payout' };
+      const LABEL = { CHAT_PAYMENT: 'Payment in Messages', QR_PAYMENT: 'QR payment', UTILITY: 'Utilities', UTILITY_REFUND: 'Refund', GIFT_CARD: 'Gift card redeemed', LIVE_TIP: 'Live tip', CREATOR_PAYOUT: 'Creator payout', TOPUP: 'Added money', SHOP_PAYMENT: 'Shop order', SHOP_REFUND: 'Shop refund', SHOP_EARNING: 'Shop sale', SHOP_RETURN: 'Shop return', LEARN_PAYMENT: 'Course', WORKS_PAYMENT: 'Works booking' };
       const w = await wallet(vid);
-      ok(res, { balance: w ? money(w.balance) : null, sandbox: true, items: rows.map((r) => ({ reference: r.txn_code, direction: r.direction === 'CREDIT' ? 'in' : 'out', amount: money(r.amount), label: LABEL[r.kind] || 'HPay', note: line(r.note, 190) || null, status: String(r.status || 'COMPLETED').toLowerCase(), counterpart: authorDto(r, 'a_'), order: /^(PAY|UTL)-[0-9A-F]{12}$/.test(String(r.reference || '')) ? r.reference : null, created_at: iso(r.created_at) })) });
+      ok(res, { balance: w ? money(w.balance) : null, sandbox: sandboxEnabled(), items: rows.map((r) => ({ reference: r.txn_code, direction: r.direction === 'CREDIT' ? 'in' : 'out', amount: money(r.amount), label: LABEL[r.kind] || 'HPay', note: line(r.note, 190) || null, status: String(r.status || 'COMPLETED').toLowerCase(), counterpart: authorDto(r, 'a_'), order: /^(PAY|UTL)-[0-9A-F]{12}$/.test(String(r.reference || '')) ? r.reference : null, created_at: iso(r.created_at) })) });
       return true;
     }
     fail(res, 404, 'NOT_FOUND', 'Not found.'); return true;

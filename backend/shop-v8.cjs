@@ -21,10 +21,12 @@ const RETURN_REASONS = { damaged: 'Arrived damaged', wrong: 'Wrong item sent', n
 function createShopV8(deps) {
   const { pool, getBody, notify, wallet, sandboxEnabled, issuePublicRefs, resolvePublicRef } = deps;
   const H = deps.helpers; const M = deps.messages;
-  const { viewer, limited, ok, fail, blockedSql } = H;
+  const { viewer, limited, ok, fail, blockedSql, authorCols, authorJoins, authorDto } = H;
   const { issue, resolve, checkPin, line, text, iso, money } = M;
 
   async function ensureSchema() {
+    await pool.query(`CREATE TABLE IF NOT EXISTS howdi_v8_product_reviews(product_id BIGINT NOT NULL, user_id BIGINT NOT NULL, rating SMALLINT NOT NULL CHECK (rating BETWEEN 1 AND 5), body VARCHAR(1000), reply VARCHAR(600), reply_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY(product_id, user_id))`);
     await pool.query(`CREATE TABLE IF NOT EXISTS howdi_v8_cart(user_id BIGINT NOT NULL, product_id BIGINT NOT NULL, qty INT NOT NULL CHECK (qty BETWEEN 1 AND 20), added_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY(user_id, product_id))`);
     await pool.query(`CREATE TABLE IF NOT EXISTS howdi_v8_addresses(id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL, name VARCHAR(80) NOT NULL, phone VARCHAR(10) NOT NULL, line1 VARCHAR(200) NOT NULL, line2 VARCHAR(200), landmark VARCHAR(120), city VARCHAR(60) NOT NULL, state VARCHAR(60) NOT NULL, pincode VARCHAR(6) NOT NULL, is_default BOOLEAN NOT NULL DEFAULT FALSE, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
     await pool.query(`CREATE TABLE IF NOT EXISTS howdi_v8_shop_orders(order_id UUID PRIMARY KEY, vendor_profile_id BIGINT NOT NULL, buyer_user_id BIGINT NOT NULL, state VARCHAR(12) NOT NULL, method VARCHAR(4) NOT NULL,
@@ -93,11 +95,61 @@ function createShopV8(deps) {
     if (!p.startsWith('/api/v8/shop/') && !vendorPath) return false;
     const v = await viewer(req); const vid = v ? v.id : 0; let m;
 
+    // ---- product reviews: rating + comment by verified buyers (a delivered order), one per buyer; the seller replies publicly
+    if ((m = p.match(/^\/api\/v8\/shop\/products\/(PRD-[0-9A-F]{12})\/reviews(?:\/([a-z0-9._]{3,30})\/reply)?$/))) {
+      const pr = await productByCode(m[1], vid); if (!pr) { fail(res, 404, 'NOT_FOUND', 'This product isn’t available.'); return true; }
+      const seller = Number(pr.vendor_uid) === vid && vid > 0;
+      const bought = vid ? Boolean((await pool.query(`SELECT 1 FROM howdi_v8_shop_orders s JOIN order_items i ON i.order_id=s.order_id WHERE s.buyer_user_id=$1 AND i.product_id=$2 AND s.state IN ('delivered','returned') LIMIT 1`, [vid, String(pr.id)])).rows[0]) : false;
+      if (req.method === 'GET' && !m[2]) {
+        const rows = (await pool.query(`SELECT r.rating, r.body, r.reply, r.reply_at, r.created_at, r.updated_at, r.user_id=$2 AS mine, ${authorCols('r.user_id', 'a_')} FROM howdi_v8_product_reviews r ${authorJoins('r.user_id', 'a_')}
+          WHERE r.product_id=$1 AND NOT (${blockedSql('$2::bigint', 'r.user_id')}) ORDER BY (r.user_id=$2) DESC, r.updated_at DESC LIMIT 100`, [pr.id, vid || 0])).rows;
+        const hist = [5, 4, 3, 2, 1].map((n) => rows.filter((r) => r.rating === n).length); const count = rows.length;
+        ok(res, { summary: { count, average: count ? Math.round((rows.reduce((t, r) => t + r.rating, 0) / count) * 10) / 10 : null, histogram: hist },
+          items: rows.map((r) => ({ author: authorDto(r, 'a_'), rating: r.rating, body: r.body, edited: r.updated_at > r.created_at, at: iso(r.updated_at), mine: r.mine, reply: r.reply ? { body: r.reply, at: iso(r.reply_at), store: pr.store } : null })),
+          can_review: bought && !seller, is_seller: seller, signed_in: Boolean(vid) }); return true;
+      }
+      if (!v) { fail(res, 401, 'SIGN_IN_REQUIRED', 'Sign in to review.'); return true; }
+      if (m[2] && req.method === 'POST') {
+        if (!seller) { fail(res, 403, 'SELLER_ONLY', 'Only the seller can reply to reviews.'); return true; }
+        const who = (await pool.query(`SELECT user_id FROM howdi_connect_profiles WHERE public_username=$1`, [m[2]])).rows[0];
+        const b = (await getBody(req).catch(() => ({}))) || {}; const body = line(b.body, 600);
+        if (!body || body.length < 2) { fail(res, 400, 'REPLY_REQUIRED', 'Write a reply.'); return true; }
+        const up = who ? await pool.query(`UPDATE howdi_v8_product_reviews SET reply=$3, reply_at=NOW() WHERE product_id=$1 AND user_id=$2 RETURNING user_id`, [pr.id, who.user_id, body]) : { rows: [] };
+        if (!up.rows[0]) { fail(res, 404, 'NOT_FOUND', 'Review not found.'); return true; }
+        await notify(Number(who.user_id), 'SHOP_REVIEW_REPLY', `${line(pr.store, 60)} replied to your review`, line(body, 120), `/shop/products/${m[1]}`, null);
+        ok(res, { replied: true }); return true;
+      }
+      if (req.method === 'POST') {
+        if (seller) { fail(res, 403, 'OWN_PRODUCT', 'You can’t review your own product.'); return true; }
+        if (!bought) { fail(res, 403, 'VERIFIED_BUYER_ONLY', 'Only buyers who received this product can review it.'); return true; }
+        const b = (await getBody(req).catch(() => ({}))) || {}; const rating = Number(b.rating);
+        if (!(Number.isInteger(rating) && rating >= 1 && rating <= 5)) { fail(res, 400, 'RATING_REQUIRED', 'Choose 1 to 5 stars.'); return true; }
+        const body = text(b.body, 1000) || null;
+        const r = await pool.query(`INSERT INTO howdi_v8_product_reviews(product_id,user_id,rating,body) VALUES($1,$2,$3,$4) ON CONFLICT(product_id,user_id) DO UPDATE SET rating=$3, body=$4, updated_at=NOW() RETURNING (xmax=0) AS fresh`, [pr.id, vid, rating, body]);
+        if (r.rows[0].fresh) { const me = (await pool.query(`SELECT public_username FROM howdi_connect_profiles WHERE user_id=$1`, [vid])).rows[0]; await notify(Number(pr.vendor_uid), 'SHOP_NEW_REVIEW', `New ${rating}★ review on ${line(pr.name, 50)}`, `@${me?.public_username || 'a buyer'}${body ? `: ${line(body, 90)}` : ''}`, `/shop/products/${m[1]}`, null); }
+        ok(res, { saved: true, updated: !r.rows[0].fresh }); return true;
+      }
+      if (req.method === 'DELETE') { await pool.query(`DELETE FROM howdi_v8_product_reviews WHERE product_id=$1 AND user_id=$2`, [pr.id, vid]); ok(res, { deleted: true }); return true; }
+    }
     if ((m = p.match(/^\/api\/v8\/shop\/products\/(PRD-[0-9A-F]{12})$/)) && req.method === 'GET') {
       const pr = await productByCode(m[1], vid); if (!pr) { fail(res, 404, 'NOT_FOUND', 'This product isn’t available.'); return true; }
-      ok(res, { product: await productDto(pr), mine: Number(pr.vendor_uid) === vid }); return true;
+      const rv = (await pool.query(`SELECT COUNT(*) n, ROUND(AVG(rating)::numeric,1) a FROM howdi_v8_product_reviews WHERE product_id=$1`, [pr.id])).rows[0];
+      const saved = vid ? Boolean((await pool.query(`SELECT 1 FROM user_wishlist WHERE user_id=$1 AND product_id=$2`, [vid, String(pr.id)])).rows[0]) : false;
+      ok(res, { product: { ...(await productDto(pr)), rating: { count: Number(rv.n), average: rv.a === null ? null : Number(rv.a) } }, mine: Number(pr.vendor_uid) === vid, saved }); return true;
     }
     if (!v) { fail(res, 401, 'SIGN_IN_REQUIRED', 'Sign in to continue.'); return true; }
+
+    // ---- wishlist (existing user_wishlist table)
+    if (p === '/api/v8/shop/wishlist') {
+      if (req.method === 'GET') {
+        const rows = (await pool.query(`SELECT p.*, v.business_name store, v.user_id vendor_uid, v.city store_city, w.created_at saved_at FROM user_wishlist w JOIN vendor_products p ON p.id::text=w.product_id JOIN vendor_profiles v ON v.id=p.vendor_profile_id WHERE w.user_id=$1 AND ${PUB} ORDER BY w.created_at DESC LIMIT 100`, [vid])).rows;
+        ok(res, { items: await Promise.all(rows.map(productDto)) }); return true;
+      }
+      const b = (await getBody(req).catch(() => ({}))) || {}; const pr = await productByCode(b.product, vid);
+      if (!pr) { fail(res, 404, 'NOT_FOUND', 'This product isn’t available.'); return true; }
+      if (req.method === 'POST') { await pool.query(`INSERT INTO user_wishlist(user_id,product_id,product_name) VALUES($1,$2,$3) ON CONFLICT(user_id,product_id) DO UPDATE SET updated_at=NOW()`, [vid, String(pr.id), line(pr.name, 250)]); ok(res, { saved: true }); return true; }
+      if (req.method === 'DELETE') { await pool.query(`DELETE FROM user_wishlist WHERE user_id=$1 AND product_id=$2`, [vid, String(pr.id)]); ok(res, { saved: false }); return true; }
+    }
 
     if (p === '/api/v8/shop/cart') {
       if (req.method === 'GET') { ok(res, { cart: await cartOf(vid) }); return true; }
