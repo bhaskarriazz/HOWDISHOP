@@ -21408,6 +21408,11 @@ async function ensureVibeReleaseReadinessV140LSchema(){
     const worksV8Onboarding = require("./works-v8-onboarding.cjs").createWorksV8Onboarding({
       pool, getBody, helpers: connectV8._internal, messages: connectV8Messages._internal, notify: connectV8Community._internal.notify, auditAdmin: auditAdminSecurity,
     });
+    // V8 My roles + Vendor application → HOWDI Admin verification → vendor workspace (./vendor-v8.cjs).
+    const vendorV8 = require("./vendor-v8.cjs").createVendorV8({
+      pool, getBody, helpers: connectV8._internal, messages: connectV8Messages._internal, notify: connectV8Community._internal.notify, auditAdmin: auditAdminSecurity,
+      issuePublicRefs: connectHomeK5A._internal.issueRefs, resolvePublicRef: connectHomeK5A._internal.resolveRef,
+    });
     const v8SafeHandle = async (mod, req, res, url) => {
       try { return await mod.handle(req, res, url); }
       catch (e) { console.error("[V8 API]", e && e.message); if (!res.headersSent) sendJSON(res, 500, { status: "error", code: "SERVER_ERROR", message: "Something went wrong. Please try again." }); return true; }
@@ -21482,6 +21487,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
           if (await v8SafeHandle(connectV8Community, req, res, url)) return;
           if (await v8SafeHandle(connectV8Creator, req, res, url)) return;
           if (await v8SafeHandle(hpayV8Utilities, req, res, url)) return;
+          if (await v8SafeHandle(vendorV8, req, res, url)) return;
           if (await v8SafeHandle(worksV8Onboarding, req, res, url)) return;
           if (await v8SafeHandle(worksV8, req, res, url)) return;
           if (await v8SafeHandle(connectV8Messages, req, res, url)) return;
@@ -57266,6 +57272,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
         await hpayV8Utilities.ensureSchema();
         await worksV8.ensureSchema();
         await worksV8Onboarding.ensureSchema();
+        await vendorV8.ensureSchema();
         await backfillMissingOrderShipments();
         console.log("✅ HOWDI database initialization completed before accepting requests");
       console.log("✅ HOWDI Works Customer + Admin Separation V31 loaded");

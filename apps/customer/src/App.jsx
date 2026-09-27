@@ -11,6 +11,7 @@ import V8Connect from "./v8/connect/V8Connect";
 import V8Notifications, { useV8Unread } from "./v8/V8Notifications";
 import V8CallCenter from "./v8/connect/Calls";
 import V8Works from "./v8/works/V8Works";
+import V8Roles from "./v8/me/V8Roles";
 import { V8Appearance, V8Permissions, V8IdentityBadges } from "./v8/V8Settings";
 import { V8Confirm, V8OfflineBanner, V8SessionExpired, loadV8Prefs, applyV8Prefs, useV8Ui } from "./v8/V8System";
 import HowdiFor from "./howdi-for/HowdiFor";
@@ -12706,7 +12707,7 @@ const removeNotification = async (notificationId) => {
     if(p==="/shop/cart"){openNavigationOSArea("shop","cart");return true;}
     if((m=p.match(/^\/works(?:\/([A-Za-z0-9/_.@-]{1,120}))?$/))){openNavigationOSArea("works",m[1]||"find");return true;}
     if((m=p.match(/^\/learn(?:\/([a-z-]{2,24}))?$/))){openNavigationOSArea("learn",m[1]||"discover");return true;}
-    if((m=p.match(/^\/me\/(appearance|privacy|badges)$/))){openNavigationOSArea("me",m[1]);return true;}
+    if((m=p.match(/^\/me\/(appearance|privacy|badges|roles|vendor|vendor\/store)$/))){openNavigationOSArea("me",m[1]);return true;}
     if((m=p.match(/^\/@([a-z0-9._]{3,30})$/i))){openNavigationOSArea("profile",m[1].toLowerCase());return true;}
     return false;
   };
@@ -13251,6 +13252,7 @@ const removeNotification = async (notificationId) => {
               <div className="mh-label"><b>Profile & settings</b></div>
               <div className="mh-grid">
                 {v8OwnHandle ? <button type="button" onClick={() => openNavigationOSArea("profile", v8OwnHandle)}><i>◉</i><b>View profile</b></button> : null}
+                <button type="button" onClick={() => { setAccountMenuOpen(false); openNavigationOSArea("me", "roles"); }}><i>◈</i><b>My roles</b></button>
                 <button type="button" onClick={() => openNavigationOSArea("me", "badges")}><i>✓</i><b>Identity & badges</b></button>
                 <button type="button" onClick={() => openNavigationOSArea("me", "appearance")}><i>◐</i><b>Appearance</b></button>
                 <button type="button" onClick={() => openNavigationOSArea("me", "privacy")}><i>⚿</i><b>Privacy & permissions</b></button>
@@ -18024,6 +18026,10 @@ const removeNotification = async (notificationId) => {
             isMe={Boolean(currentUser?.public_username) && String(currentUser.public_username).toLowerCase() === v8ProfileHandle}
             onRequireLogin={openLogin} onBack={() => { try { if (window.history.length > 1) { window.history.back(); return; } } catch { /* ignore */ } v8Navigate("home"); }}
             onMessage={(h) => openNavigationOSArea("connect", `p:messages${h ? `?to=${encodeURIComponent(h)}` : ""}`)} onEdit={openMyHowdiProfileDrawer} />
+        )}
+        {navigationOSArea === "me" && ["roles", "vendor", "vendor/store"].includes(v8MeView) && (
+          <V8Roles key={v8MeView} apiBase={SHOP_API_BASE} getAuthHeaders={customerSessionHeaders} view={v8MeView === "vendor/store" ? "store" : v8MeView}
+            onRoute={(r) => { if (!v8ApplyPath(String(r || "/"))) openNavigationOSArea("home"); }} onBack={() => { try { window.history.back(); } catch { v8Navigate("home"); } }} />
         )}
         {navigationOSArea === "me" && v8MeView === "appearance" && <V8Appearance prefs={v8Prefs} setPrefs={setV8Prefs} onBack={() => { try { window.history.back(); } catch { v8Navigate("home"); } }} />}
         {navigationOSArea === "me" && v8MeView === "privacy" && <V8Permissions onBack={() => { try { window.history.back(); } catch { v8Navigate("home"); } }} onOpenPrivacy={() => { openNavigationOSArea("connect", "home"); window.setTimeout(() => openConnectSocial(), 0); }} />}
