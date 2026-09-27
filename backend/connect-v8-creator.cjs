@@ -412,7 +412,8 @@ function createConnectV8Creator(deps) {
         pool.query(`SELECT COUNT(*) n FROM howdi_community_posts WHERE user_id=$1 AND post_status='SCHEDULED' AND scheduled_for>NOW()`, [vid]),
         pool.query(`SELECT c.id::text k, c.name, c.topic, c.session_status, c.scheduled_for, c.live_thumbnail_data, c.community_type FROM howdi_connect_communities c WHERE c.owner_user_id=$1 AND c.community_type IN ('LIVE','SPACE') AND c.session_status IN ('SCHEDULED','LIVE') ORDER BY (c.session_status='LIVE') DESC, c.scheduled_for LIMIT 1`, [vid]),
         pool.query(`SELECT COUNT(*) n FROM howdi_v8_comment_holds WHERE creator_user_id=$1 AND status='HELD'`, [vid]),
-        pool.query(`SELECT COUNT(*) n FROM howdi_connect_trust_moderation_queue q WHERE q.target_user_id=$1 AND q.reason='copyright' AND UPPER(COALESCE(q.status,'OPEN')) IN ('OPEN','PENDING','UNDER_REVIEW')`, [vid]).catch(() => ({ rows: [{ n: 0 }] })),
+        pool.query(`SELECT (SELECT COUNT(*) FROM howdi_connect_trust_moderation_queue q WHERE q.target_user_id=$1 AND q.reason='copyright' AND UPPER(COALESCE(q.status,'OPEN')) IN ('OPEN','PENDING','UNDER_REVIEW'))
+          + (SELECT COUNT(*) FROM howdi_v8_rights_checks rc WHERE rc.user_id=$1 AND rc.status='PENDING') n`, [vid]).catch(() => ({ rows: [{ n: 0 }] })),
         pool.query(`SELECT COUNT(*) n FROM howdi_v8_creator_strikes WHERE user_id=$1 AND active=TRUE AND expires_at>NOW()`, [vid]),
         pool.query(`SELECT product_key FROM howdi_v8_creator_links WHERE user_id=$1`, [vid]),
         pool.query(`SELECT COUNT(*) n FROM howdi_connect_subscriptions WHERE creator_user_id=$1 AND status='ACTIVE' AND (current_period_end IS NULL OR current_period_end>NOW())`, [vid]),
@@ -591,7 +592,7 @@ function createConnectV8Creator(deps) {
       const auditRows = (await pool.query(`SELECT action, detail, created_at FROM howdi_v8_moderation_audit WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20`, [vid])).rows;
       const open = (r) => ['OPEN', 'PENDING', 'UNDER_REVIEW'].includes(r.st);
       ok(res, { counts: { reported: reports.reduce((a, r) => a + (open(r) ? count(r.n) : 0), 0), under_review: reports.filter((r) => r.st === 'UNDER_REVIEW').reduce((a, r) => a + count(r.n), 0),
-          copyright: reports.filter((r) => r.reason === 'copyright' && open(r)).reduce((a, r) => a + count(r.n), 0), manual_review: 0, active_strikes: strikes.length,
+          copyright: reports.filter((r) => r.reason === 'copyright' && open(r)).reduce((a, r) => a + count(r.n), 0), manual_review: count((await pool.query(`SELECT COUNT(*) n FROM howdi_v8_rights_checks WHERE user_id=$1 AND status='PENDING'`, [vid]).catch(() => ({ rows: [{ n: 0 }] }))).rows[0].n), active_strikes: strikes.length,
           held: count((await pool.query(`SELECT COUNT(*) n FROM howdi_v8_comment_holds WHERE creator_user_id=$1 AND status='HELD'`, [vid])).rows[0].n) },
         strikes: strikes.map((s, i) => ({ index: i + 1, reason: s.reason, details: s.details || null, issued_at: iso(s.created_at), expires_at: iso(s.expires_at) })),
         appeals: appeals.map((a) => ({ subject: a.subject, status: a.status.toLowerCase(), note: a.decision_note || null, at: iso(a.created_at), decided_at: iso(a.decided_at) })),

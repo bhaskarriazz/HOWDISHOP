@@ -21374,6 +21374,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
     const connectV8 = require("./connect-v8.cjs").createConnectV8({
       pool, sendJSON, getBody, getSessionUserFromRequest, rateLimit: vibeRateLimitV151B, clientIp: howdiRateLimitClientIp,
       mediaDir: VIBE_MEDIA_DIR, issueK5ARefs: connectHomeK5A._internal.issueRefs, resolveK5ARef: connectHomeK5A._internal.resolveRef,
+      auditAdmin: auditAdminSecurity,
     });
     const connectV8Rooms = require("./connect-v8-rooms.cjs").createConnectV8Rooms({
       pool, getBody, rateLimit: vibeRateLimitV151B, clientIp: howdiRateLimitClientIp, helpers: connectV8._internal, sandboxEnabled: () => accessV8.sandboxEnabled(),

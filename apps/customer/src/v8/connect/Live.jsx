@@ -1,10 +1,13 @@
 // HOWDI V8 Live — board 06 panel 5 "Live Event", board 17 "Live Programmes & Spaces" + mobile "Live & Replays",
 // PRIOR-07 panel 3. Live Now / Upcoming / Past · room with stage, chat, reactions, tips (HPay Preview/Test), share,
 // report, leave · scheduled (remind me) · ended / replay · connection lost · host controls (go live, end, pin, mute, remove).
+// Slice 2 (CRT-005): members-only rooms — the host restricts a Live or Space to paying members; everyone else sees a
+// locked room with the membership offer, and the room opens as soon as they join.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { V8Icon, V8State } from "../V8Shell";
 import { V8Badges, V8Confirm, useV8Ui } from "../V8System";
 import { Ava, Sheet, ReportSheet, ShareSheet, Skel, Tabs, fmt, when, since, safeImg, SignInCard } from "./common";
+import { MembershipOffer } from "./Membership";
 
 export function useRoom(api, code, { poll = 3000 } = {}) {
   const [room, setRoom] = useState({ status: "loading" });
@@ -16,6 +19,8 @@ export function useRoom(api, code, { poll = 3000 } = {}) {
     setRoom({ status: "ready", ...r.json.room, wallet_sandbox: r.json.wallet_sandbox }); setPeople(r.json.participants || []);
   }, [api, code]);
   useEffect(() => { seq.current = 0; setEvents([]); load(); }, [load]);
+  // joining the host's membership elsewhere on the page unlocks a members-only room
+  useEffect(() => { const on = () => load(); window.addEventListener("howdi:v8-membership", on); return () => window.removeEventListener("howdi:v8-membership", on); }, [load]);
   const tick = useCallback(async () => {
     const r = await api("GET", `/api/v8/rooms/${code}/events?after=${seq.current}`);
     if (!r.ok) { setLost(true); return; }
@@ -25,11 +30,33 @@ export function useRoom(api, code, { poll = 3000 } = {}) {
     setRoom((x) => (x.status === "ready" ? { ...x, state: r.json.state, counts: r.json.counts, viewer: r.json.viewer } : x));
   }, [api, code]);
   useEffect(() => {
-    if (room.status !== "ready") return undefined;
+    if (room.status !== "ready" || room.locked) return undefined;
     tick(); const id = window.setInterval(tick, poll);
     return () => window.clearInterval(id);
-  }, [room.status, tick, poll]);
+  }, [room.status, room.locked, tick, poll]);
   return { room, setRoom, events, people, lost, reload: load, tick };
+}
+
+// Non-members of a members-only room: what it is, who it's for, and the host's membership offer.
+export function MembersOnlyGate({ r, api, signedIn, onRequireLogin }) {
+  return (
+    <div className="v8l-gate">
+      <div className="v8l-gate-head"><span className="v8l-gate-ico"><V8Icon name="lock" size={22} /></span>
+        <div><b>Members-only {r.kind === "space" ? "Space" : "live"}</b><p className="v8c-muted">@{r.host.public_username} made this {r.kind === "space" ? "Space" : "live"} for members. Join the membership to watch, chat and take part{r.state === "replay" ? ", including the replay" : ""}.</p></div></div>
+      <MembershipOffer api={api} handle={r.host.public_username} signedIn={signedIn} onRequireLogin={onRequireLogin} compact />
+    </div>
+  );
+}
+// Host switch (before or during the session). Needs a paid membership tier.
+export function MembersOnlyRow({ r, act, onDone }) {
+  if (!["scheduled", "live"].includes(r.state)) return null;
+  return (
+    <button type="button" className="v8c-row" role="switch" aria-checked={Boolean(r.members_only)} onClick={async () => { const j = await act("host/members-only", { on: !r.members_only }, (x) => x.message); if (j) onDone(); }}>
+      <span className="v8c-row-ico"><V8Icon name="crown" size={20} /></span>
+      <span className="v8c-row-text"><b>Members only</b><small>{r.members_only ? "On — only your paying members can join" : "Off — anyone can join"}</small></span>
+      <span className={`v8c-switch ${r.members_only ? "on" : ""}`} aria-hidden="true"><i /></span>
+    </button>
+  );
 }
 
 export function TipSheet({ open, api, host, code, onClose, onTipped }) {
@@ -113,6 +140,7 @@ function RoomCard({ r, onOpen, onRemind }) {
       <button type="button" className="v8l-card-media" onClick={onOpen} aria-label={`Open ${r.title}`}>
         {safeImg(r.image_url) ? <img src={r.image_url} alt="" /> : <span className="v8l-card-ph"><V8Icon name="live" size={30} /></span>}
         {r.state === "live" ? <span className="v8l-badge live">LIVE</span> : r.state === "replay" ? <span className="v8l-badge replay">REPLAY</span> : <span className="v8l-badge soon">{when(r.starts_at)}</span>}
+        {r.members_only ? <span className="v8l-badge members"><V8Icon name="crown" size={12} />Members</span> : null}
         {r.state === "live" ? <span className="v8l-viewers"><V8Icon name="eye" size={14} />{fmt(r.counts.online)}</span> : null}
       </button>
       <div className="v8l-card-body">
@@ -156,16 +184,20 @@ export function RoomList({ api, kind, tabs, onOpen, signedIn, onRequireLogin, ti
   );
 }
 
+function MembersOnlyStage({ r }) {
+  return <div className="v8l-stage-over"><V8Icon name="lock" size={28} /><b>For @{r.host.public_username}’s members</b><span>{r.state === "live" ? "Live now — members are watching" : r.state === "scheduled" ? `Starts ${when(r.starts_at)}` : r.state === "replay" ? "Replay for members" : "This session has ended"}</span></div>;
+}
+
 function LiveRoom({ api, code, user, onBack, onRequireLogin, onOpenProfile }) {
   const ui = useV8Ui();
   const signedIn = Boolean(user);
   const { room, setRoom, events, people, lost, reload, tick } = useRoom(api, code);
   const [sheet, setSheet] = useState(""); const [hearts, setHearts] = useState([]); const [confirmEnd, setConfirmEnd] = useState(false); const [person, setPerson] = useState(null);
   useEffect(() => {
-    if (room.status !== "ready" || room.state !== "live" || !signedIn) return undefined;
+    if (room.status !== "ready" || room.state !== "live" || !signedIn || room.locked) return undefined;
     api("POST", `/api/v8/rooms/${code}/join`).then((r) => { if (!r.ok && r.json.code === "REMOVED") ui?.toast({ kind: "error", title: "You were removed from this live" }); });
     return () => { api("POST", `/api/v8/rooms/${code}/leave`); };
-  }, [room.status, room.state, signedIn, code, api]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [room.status, room.state, room.locked, signedIn, code, api]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { const rs = events.filter((e) => e.kind === "reaction").slice(-6); if (rs.length) setHearts(rs.map((e) => ({ k: e.seq, e: e.text }))); }, [events]);
   if (room.status === "loading") return <div className="v8l-room"><Skel h={360} r={18} /><Skel h={200} r={18} /></div>;
   if (room.status === "gone") return <V8State icon="alert" title="This live isn’t available" message="It may have been removed or made private." actionLabel="Back to Live" onAction={onBack} />;
@@ -191,11 +223,13 @@ function LiveRoom({ api, code, user, onBack, onRequireLogin, onOpenProfile }) {
       <div className="v8l-room-grid">
         <section className="v8l-stage-wrap">
           <div className="v8l-stage">
+            {r.locked ? <MembersOnlyStage r={r} /> : null}
             {r.state === "replay" && r.replay && r.replay.url ? <video src={r.replay.url} controls playsInline poster={safeImg(r.image_url) || undefined} />
               : safeImg(r.image_url) ? <img src={r.image_url} alt="" /> : <span className="v8l-card-ph big"><V8Icon name="live" size={48} /></span>}
-            {r.state === "live" ? <><span className="v8l-badge live">LIVE</span><span className="v8l-viewers top"><V8Icon name="eye" size={14} />{fmt(r.counts.online)}</span>
+            {r.members_only ? <span className="v8l-badge members top"><V8Icon name="crown" size={12} />Members only</span> : null}
+            {r.state === "live" && !r.locked ? <><span className="v8l-badge live">LIVE</span><span className="v8l-viewers top"><V8Icon name="eye" size={14} />{fmt(r.counts.online)}</span>
               <span className="v8c-sandbox stage"><b>PREVIEW / TEST</b><span>Live video isn’t connected in this preview — chat, reactions and tips are real.</span></span></> : null}
-            {r.state === "scheduled" ? <div className="v8l-stage-over"><V8Icon name="bell" size={28} /><b>Starts {when(r.starts_at)}</b><span>{fmt(r.counts.reminders)} people going</span>
+            {r.state === "scheduled" && !r.locked ? <div className="v8l-stage-over"><V8Icon name="bell" size={28} /><b>Starts {when(r.starts_at)}</b><span>{fmt(r.counts.reminders)} people going</span>
               {isHost ? <button type="button" className="v8-btn v8-btn-primary" onClick={() => act("host/start", {}, "You’re live!").then(() => reload())}>Go live now</button>
                 : <button type="button" className={`v8-btn ${r.viewer.reminded ? "" : "v8-btn-primary"}`} onClick={() => act("remind", {}, (j) => j.message).then((j) => j && setRoom((s) => ({ ...s, viewer: { ...s.viewer, reminded: j.reminded } })))}>{r.viewer.reminded ? "Reminder set ✓" : "Set reminder"}</button>}</div> : null}
             {r.state === "ended" || r.state === "cancelled" ? <div className="v8l-stage-over"><V8Icon name="live" size={28} /><b>{r.state === "cancelled" ? "This live was cancelled" : "This live has ended"}</b><span>Replay isn’t available for this session.</span></div> : null}
@@ -206,7 +240,8 @@ function LiveRoom({ api, code, user, onBack, onRequireLogin, onOpenProfile }) {
               <span><b>{r.host.display_name}</b><span className="v8c-who-line"><small>@{r.host.public_username} · Host</small><V8Badges verified={r.host.verified} premium={r.host.premium} size="sm" /></span></span></button>
             {!isHost ? <button type="button" className={`v8-btn ${r.viewer.following_host ? "" : "v8-btn-primary"}`} onClick={followHost}>{r.viewer.following_host ? "Following" : "Follow"}</button> : null}
           </div>
-          {r.state === "live" ? (
+          {r.locked ? <MembersOnlyGate r={r} api={api} signedIn={signedIn} onRequireLogin={onRequireLogin} /> : null}
+          {r.state === "live" && !r.locked ? (
             <div className="v8l-actions">
               {["❤️", "👏", "🔥"].map((e) => <button key={e} type="button" className="v8l-react" aria-label={`React ${e}`} onClick={() => act("react", { reaction: e })}>{e}</button>)}
               {!isHost ? <button type="button" className="v8-btn v8-btn-soft" onClick={() => (signedIn ? setSheet("tip") : onRequireLogin())}><V8Icon name="heart" size={16} />Send a tip</button> : null}
@@ -224,12 +259,14 @@ function LiveRoom({ api, code, user, onBack, onRequireLogin, onOpenProfile }) {
         </section>
         <aside className="v8-card v8l-side">
           <h3>Live chat</h3>
-          {r.state === "live" ? <RoomChat api={api} code={code} events={events} room={r} signedIn={signedIn} onRequireLogin={onRequireLogin} onPin={isHost ? (e) => act("host/pin", { seq: e.seq }, "Message pinned") : null} /> : <p className="v8c-muted">{r.state === "scheduled" ? "Chat opens when the live starts." : "Chat is closed."}</p>}
+          {r.locked ? <p className="v8c-muted"><V8Icon name="lock" size={14} /> Chat is for members of @{r.host.public_username}.</p>
+            : r.state === "live" ? <RoomChat api={api} code={code} events={events} room={r} signedIn={signedIn} onRequireLogin={onRequireLogin} onPin={isHost ? (e) => act("host/pin", { seq: e.seq }, "Message pinned") : null} /> : <p className="v8c-muted">{r.state === "scheduled" ? "Chat opens when the live starts." : "Chat is closed."}</p>}
         </aside>
       </div>
       <TipSheet open={sheet === "tip"} api={api} host={r.host} code={code} onClose={() => setSheet("")} onTipped={() => tick()} />
       <ShareSheet open={sheet === "share"} title={r.title} link={r.route} onClose={() => setSheet("")} />
       <Sheet open={sheet === "more"} title={r.title} onClose={() => setSheet("")}>
+        {isHost ? <MembersOnlyRow r={r} act={act} onDone={() => { setSheet(""); reload(); }} /> : null}
         {!isHost ? <button type="button" className="v8c-row" onClick={() => (signedIn ? setSheet("report") : onRequireLogin())}><span className="v8c-row-ico danger"><V8Icon name="flag" size={20} /></span><span className="v8c-row-text"><b>Report this live</b></span></button> : null}
         <button type="button" className="v8c-row" onClick={() => { setSheet(""); onOpenProfile(r.host.public_username); }}><span className="v8c-row-ico"><V8Icon name="user" size={20} /></span><span className="v8c-row-text"><b>View @{r.host.public_username}</b></span></button>
         {r.rules ? <div className="v8l-rules"><b>Room rules</b><p>{r.rules}</p></div> : null}

@@ -8,6 +8,8 @@
 //   GET  /api/v8/rooms/{code}/events?after=            chat / reactions / tips / system events (polling)
 //   POST /api/v8/rooms/{code}/join|leave|remind|chat|react|hand|tip|report
 //   POST /api/v8/rooms/{code}/host/start|end|pin|approve-speaker|mute|remove   (host only)
+//   POST /api/v8/rooms/{code}/host/members-only {on}   (host only) restrict to the host's paying members (active subscription);
+//        non-members then see a locked room (no chat, events, participants or replay) and can join the membership
 //   GET  /api/v8/wallet                                Preview/Test HPay sandbox balance (tips); real money needs a PSP
 //
 // Rules: session-only actor, public codes, DTO allow-lists (via connect-v8 helpers), block-aware, rate-limited.
@@ -51,6 +53,8 @@ function createConnectV8Rooms(deps) {
       (SELECT lr.duration_seconds FROM howdi_connect_live_replays lr WHERE lr.community_id=c.id AND lr.replay_status='READY' ORDER BY lr.created_at DESC LIMIT 1) replay_seconds,
       (SELECT row_to_json(pp) FROM (SELECT role, hand_raised, muted, removed FROM howdi_v8_room_presence p WHERE p.room_id=c.id AND p.user_id=$1::bigint) pp) v_presence,
       ($1::bigint>0 AND EXISTS(SELECT 1 FROM howdi_connect_follows f WHERE f.follower_user_id=$1::bigint AND f.following_user_id=c.owner_user_id)) v_following_host,
+      COALESCE(c.subscribers_only,FALSE) members_only,
+      ($1::bigint>0 AND EXISTS(SELECT 1 FROM howdi_connect_subscriptions ms WHERE ms.creator_user_id=c.owner_user_id AND ms.subscriber_user_id=$1::bigint AND ms.status='ACTIVE' AND (ms.current_period_end IS NULL OR ms.current_period_end>NOW()))) v_member,
       ${authorCols('a_u.id', 'a_')}`;
   const ROOM_FROM = `FROM howdi_connect_communities c ${authorJoins('c.owner_user_id', 'a_')}`;
   const ROOM_VISIBLE = `COALESCE(c.status,'ACTIVE') NOT IN ('ARCHIVED','REMOVED','DELETED') AND COALESCE(c.privacy,'PUBLIC')='PUBLIC' AND a_u.id IS NOT NULL
@@ -67,12 +71,14 @@ function createConnectV8Rooms(deps) {
     const kind = r.community_type === 'SPACE' ? 'space' : 'live';
     const pres = r.v_presence || null;
     const isHost = vid > 0 && Number(r.owner_id) === vid;
+    const locked = r.members_only === true && !isHost && r.v_member !== true;
     return {
       public_key: code, kind, title: text(r.name, 120), topic: text(r.topic || r.description, 240) || null, category: text(r.category, 40) || null,
       state: state(r), starts_at: iso(r.scheduled_for), started_at: iso(r.started_at), ended_at: iso(r.ended_at), image_url: img(r.live_thumbnail_data), host,
       counts: { online: count(r.online), reminders: count(r.reminders) }, rules: text(r.space_rules, 600) || null,
-      replay: r.replay_url ? { url: /^\/(?!\/)[^\s"'<>]{1,300}$/.test(String(r.replay_url)) ? r.replay_url : null, seconds: count(r.replay_seconds) } : null,
-      viewer: { reminded: r.v_reminded === true, joined: Boolean(pres && !pres.removed), role: isHost ? 'host' : pres ? pres.role : 'none', hand_raised: Boolean(pres && pres.hand_raised), muted: Boolean(pres && pres.muted), removed: Boolean(pres && pres.removed), following_host: r.v_following_host === true },
+      replay: r.replay_url ? { url: !locked && /^\/(?!\/)[^\s"'<>]{1,300}$/.test(String(r.replay_url)) ? r.replay_url : null, seconds: count(r.replay_seconds) } : null,
+      members_only: r.members_only === true, locked,
+      viewer: { reminded: r.v_reminded === true, joined: Boolean(pres && !pres.removed), role: isHost ? 'host' : pres ? pres.role : 'none', hand_raised: Boolean(pres && pres.hand_raised), muted: Boolean(pres && pres.muted), removed: Boolean(pres && pres.removed), following_host: r.v_following_host === true, member: r.v_member === true },
       chat_mode: ['open', 'followers', 'off'].includes(String(r.chat_mode || '').toLowerCase()) ? String(r.chat_mode).toLowerCase() : 'open',
       route: `/connect/${kind === 'space' ? 'spaces' : 'live'}/${code}`,
     };
@@ -165,10 +171,11 @@ function createConnectV8Rooms(deps) {
     if (!room) { fail(res, 404, 'NOT_FOUND', 'This room isn’t available.'); return true; }
     if (!action && req.method === 'GET') {
       const dto = roomDto(room, code, vid);
-      ok(res, { room: dto, participants: dto.state === 'live' ? await participants(room, vid) : [], wallet_sandbox: sandboxEnabled() });
+      ok(res, { room: dto, participants: dto.state === 'live' && !dto.locked ? await participants(room, vid) : [], wallet_sandbox: sandboxEnabled() });
       return true;
     }
     if (action === 'events' && req.method === 'GET') {
+      if (roomDto(room, code, vid).locked) { fail(res, 403, 'MEMBERS_ONLY', 'This room is for members only.'); return true; }
       if (vid && room.v_presence) await pool.query(`UPDATE howdi_v8_room_presence SET last_seen=NOW() WHERE room_id=$1 AND user_id=$2`, [room.rid, vid]);
       const r = roomDto(room, code, vid);
       ok(res, { state: r.state, counts: r.counts, viewer: r.viewer, events: await events(room, vid, url.searchParams.get('after')), participants: r.state === 'live' ? await participants(room, vid) : [] });
@@ -195,6 +202,8 @@ function createConnectV8Rooms(deps) {
         [vid, room.owner_id, isSpace ? 'SPACE' : 'LIVE', room.rkey, reason, text(body.details, 1000) || '']);
       ok(res, { reported: true, message: 'Thanks — our safety team will review this room.' }); return true;
     }
+    const locked = room.members_only === true && !isHost && room.v_member !== true;
+    if (locked && ['join', 'chat', 'react', 'hand', 'tip'].includes(action)) { fail(res, 403, 'MEMBERS_ONLY', `This ${isSpace ? 'Space' : 'live'} is for @${room.a_a_handle}’s members. Join the membership to take part.`); return true; }
     if (action === 'join') {
       if (st !== 'live') { fail(res, 409, 'NOT_LIVE', st === 'scheduled' ? 'This hasn’t started yet. Set a reminder and we’ll tell you when it goes live.' : 'This session has ended.'); return true; }
       if (pres && pres.removed) { fail(res, 403, 'REMOVED', 'The host removed you from this room.'); return true; }
@@ -247,6 +256,19 @@ function createConnectV8Rooms(deps) {
         await pool.query(`UPDATE howdi_connect_communities SET session_status='LIVE', started_at=NOW(), updated_at=NOW() WHERE id=$1`, [room.rid]);
         await pool.query(`INSERT INTO howdi_v8_room_presence(room_id,user_id,role) VALUES($1,$2,'host') ON CONFLICT(room_id,user_id) DO UPDATE SET role='host', last_seen=NOW()`, [room.rid, vid]);
         await event(room.rid, vid, 'system', 'went live'); ok(res, { state: 'live' }); return true;
+      }
+      if (what === 'members-only') {
+        const on = body.on === true;
+        if (on && !(await pool.query(`SELECT 1 FROM howdi_connect_subscription_plans WHERE creator_user_id=$1 AND is_active=TRUE AND price_monthly>0`, [vid])).rowCount) { fail(res, 400, 'NO_TIER', 'Create a paid membership tier first, then you can make rooms members-only.'); return true; }
+        if (!['scheduled', 'live'].includes(st)) { fail(res, 409, 'INVALID_STATE', 'You can change this before or during the session.'); return true; }
+        await pool.query(`UPDATE howdi_connect_communities SET subscribers_only=$2, updated_at=NOW() WHERE id=$1`, [room.rid, on]);
+        if (on) {
+          // people already inside who aren't members drop out of the room (they see the locked view next)
+          await pool.query(`UPDATE howdi_v8_room_presence p SET last_seen=NOW()-interval '10 minutes', hand_raised=FALSE WHERE p.room_id=$1 AND p.user_id<>$2
+            AND NOT EXISTS(SELECT 1 FROM howdi_connect_subscriptions ms WHERE ms.creator_user_id=$2 AND ms.subscriber_user_id=p.user_id AND ms.status='ACTIVE' AND (ms.current_period_end IS NULL OR ms.current_period_end>NOW()))`, [room.rid, vid]);
+        }
+        await event(room.rid, vid, 'system', on ? 'made this room members-only' : 'opened this room to everyone');
+        ok(res, { members_only: on, message: on ? 'Only your members can join now.' : 'Everyone can join now.' }); return true;
       }
       if (what === 'end') {
         if (st !== 'live') { fail(res, 409, 'INVALID_STATE', 'This room isn’t live.'); return true; }

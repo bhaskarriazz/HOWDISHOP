@@ -6,13 +6,14 @@
 //   /connect/creator[?tab=]     Creator workspace    /connect/create[?kind=|draft=|view=drafts]  Create content (studio)
 //   /connect/memberships        My memberships       /connect/posts|hype|tips/PST-…       Post / Hype / Tip detail
 //   /connect/hype · tips · explore · creators · ask   Discover (Hype, Tips, Explore, Creators, Ask HOWDI)
+//   /connect/stories            All stories + muted stories (Unmute)
 import { lazy, Suspense, useCallback, useState } from "react";
 import "./connect.css";
 import { useApi } from "./common";
 import ConnectHub from "./Hub";
 import VibeScreen from "./Vibe";
 import VibeCreate from "./VibeCreate";
-import { StoryViewer, StoryCreate } from "./Stories";
+import { StoryViewer, StoryCreate, StoriesPage } from "./Stories";
 import { V8State } from "../V8Shell";
 
 const LiveScreen = lazy(() => import("./Live"));
@@ -59,9 +60,10 @@ export default function V8Connect({ apiBase, getAuthHeaders, user, path, onNavig
   else if (section === "live") body = <LiveScreen {...common} focus={id} />;
   else if (section === "spaces") body = <SpacesScreen {...common} focus={id} />;
   else if (section === "articles") body = <ArticlesScreen {...common} focus={id} mode={query.get("mode") || ""} />;
-  else if (section === "communities") body = <CommunitiesScreen {...common} focus={id} type={query.get("type") || ""} />;
+  else if (section === "communities") body = <CommunitiesScreen {...common} focus={id} type={query.get("type") || ""} code={query.get("code") || ""} />;
   else if (section === "creator") body = <CreatorWorkspace {...common} tab={query.get("tab") || ""} />;
   else if (section === "create") body = <Studio {...common} query={query} onCreateStory={() => setStoryCreate(true)} />;
+  else if (section === "stories") body = <StoriesPage {...common} onOpenStory={(groups, index) => setStory({ groups, index })} onCreateStory={() => setStoryCreate(true)} />;
   else if (section === "memberships") body = <MyMemberships {...common} />;
   else if ((section === "posts" || section === "hype" || section === "tips") && pst) body = <PostDetail {...common} code={pst} kind={section === "tips" ? "tip" : section === "hype" ? "hype" : "post"} />;
   else if (section === "hype" || section === "tips") body = <KindFeed key={section} {...common} kind={section === "tips" ? "tip" : "hype"} query={query} />;

@@ -22,17 +22,17 @@ const AUDIENCES = [
   { value: "only_me", label: "Only Me", sub: "Only you can see this.", icon: "lock" },
 ];
 
-export function StoriesRail({ stories, loading, signedIn, onOpen, onCreate }) {
+export function StoriesRail({ stories, loading, signedIn, onOpen, onCreate, onViewAll }) {
   return (
     <section className="v8-card v8c-stories" aria-label="Stories">
-      <header className="v8c-sec-head"><h2>Stories</h2><button type="button" className="v8-link" onClick={() => stories[0] && onOpen(0)} disabled={!stories.length}>View all</button></header>
+      <header className="v8c-sec-head"><h2>Stories</h2><button type="button" className="v8-link" onClick={onViewAll}>View all</button></header>
       <div className="v8c-stories-row">
         <button type="button" className="v8c-story add" onClick={onCreate}>
           <span className="v8c-story-ring add"><V8Icon name="plus" size={26} /></span><b>{signedIn ? "Add story" : "Add story"}</b><small>{signedIn ? "Share a moment" : "Sign in"}</small>
         </button>
         {loading ? [0, 1, 2, 3, 4].map((i) => <span key={i} className="v8c-story"><Skel h={72} w={72} r={40} /><Skel h={10} w={56} /></span>) : null}
         {!loading && stories.map((g, i) => (
-          <button type="button" key={g.author.public_username} className={`v8c-story ${g.seen_all ? "seen" : ""}`} onClick={() => onOpen(i)} aria-label={`Story by @${g.author.public_username}${g.seen_all ? ", seen" : ", new"}`}>
+          <button type="button" key={g.author.public_username} className={`v8c-story ${g.seen_all ? "seen" : ""}`} onClick={() => onOpen(i)} aria-label={`${g.mine ? "Your story" : `Story by @${g.author.public_username}`}${g.seen_all ? ", seen" : ", new"}`}>
             <span className={`v8c-story-ring ${g.seen_all ? "seen" : ""}`}><Ava src={g.author.avatar_url} name={g.author.display_name} size={66} /></span>
             <b>{g.mine ? "Your story" : `@${g.author.public_username}`}</b><small>{since(g.latest_at)}</small>
           </button>
@@ -153,7 +153,7 @@ export default function ConnectHub({ api, user, onNav, onRequireLogin, onOpenPro
       <div className="v8c-hub-main">
         <div className="v8c-hub-title"><h1>Connect</h1><p>Real people, real conversations. Stories, Vibes, Live, Spaces, Articles and Communities.</p></div>
         {hub.status === "error" ? <div className="v8-banner-error" role="alert"><V8Icon name="alert" size={20} /><span><b>Connect didn’t load.</b> {hub.message || "Check your connection and try again."}</span><button type="button" className="v8-btn v8-btn-soft" onClick={() => setReload((x) => x + 1)}>Retry</button></div> : null}
-        <StoriesRail stories={hub.stories || []} loading={hub.status === "loading"} signedIn={signedIn} onOpen={(i) => onOpenStory(hub.stories, i)} onCreate={() => (signedIn ? onCreateStory() : onRequireLogin())} />
+        <StoriesRail stories={hub.stories || []} loading={hub.status === "loading"} signedIn={signedIn} onOpen={(i) => onOpenStory(hub.stories, i)} onCreate={() => (signedIn ? onCreateStory() : onRequireLogin())} onViewAll={() => onNav("stories")} />
         <nav className="v8c-features" aria-label="Connect features">
           {FEATURES.map((f) => (
             <button key={f.key} type="button" className={`v8c-feature tone-${f.tone}`} onClick={() => onNav(f.key)}>

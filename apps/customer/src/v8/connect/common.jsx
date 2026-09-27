@@ -135,6 +135,16 @@ export function ReportSheet({ open, what = "content", onClose, onSubmit }) {
   );
 }
 
+// VIB-008 external share targets. Each opens the app's own share page with the public link (no tracking parameters).
+const enc = encodeURIComponent;
+const EXTERNAL_APPS = [
+  { id: "wa", label: "WhatsApp", glyph: "W", href: (u, t) => `https://wa.me/?text=${enc(`${t} ${u}`)}` },
+  { id: "tg", label: "Telegram", glyph: "T", href: (u, t) => `https://t.me/share/url?url=${enc(u)}&text=${enc(t)}` },
+  { id: "x", label: "X", glyph: "X", href: (u, t) => `https://twitter.com/intent/tweet?url=${enc(u)}&text=${enc(t)}` },
+  { id: "fb", label: "Facebook", glyph: "f", href: (u) => `https://www.facebook.com/sharer/sharer.php?u=${enc(u)}` },
+  { id: "mail", label: "Email", glyph: "@", self: true, href: (u, t) => `mailto:?subject=${enc(t)}&body=${enc(u)}` },
+  { id: "sms", label: "SMS", glyph: "✉", self: true, href: (u, t) => `sms:?&body=${enc(`${t} ${u}`)}` },
+];
 export function ShareSheet({ open, title, link, onClose, onShared }) {
   const ui = useV8Ui();
   const abs = typeof window !== "undefined" ? `${window.location.origin}${link || ""}` : link;
@@ -153,6 +163,14 @@ export function ShareSheet({ open, title, link, onClose, onShared }) {
         <button type="button" onClick={() => { onShared?.("messages"); onClose(); ui?.toast({ title: "Choose a chat to send it to", message: "Opening Messages" }); window.dispatchEvent(new CustomEvent("howdi:v8-open", { detail: { area: "connect", view: "messages" } })); }}><span><V8Icon name="send" size={22} /></span>Messages</button>
         {typeof navigator !== "undefined" && navigator.share ? <button type="button" onClick={native}><span><V8Icon name="share" size={22} /></span>More apps</button> : null}
       </div>
+      <h3 className="v8c-sheet-h">Share to other apps</h3>
+      <div className="v8c-share-apps">
+        {EXTERNAL_APPS.map((a) => (
+          <a key={a.id} href={a.href(abs, title || "HOWDI")} target={a.self ? undefined : "_blank"} rel="noopener noreferrer" onClick={() => { onShared?.("external"); ui?.toast({ title: `Opening ${a.label}` }); onClose(); }}>
+            <span className={`v8c-app ${a.id}`} aria-hidden="true">{a.glyph}</span>{a.label}<span className="v8-sr"> (opens {a.self ? "your app" : "in a new tab"})</span></a>
+        ))}
+      </div>
+      <p className="v8c-muted v8c-share-note">HOWDI only shares the public link. Private or members-only content stays locked for people who can’t see it.</p>
     </Sheet>
   );
 }
@@ -182,5 +200,19 @@ export function SignInCard({ title = "Sign in to continue", message, onSignIn })
       <b>{title}</b>{message ? <p>{message}</p> : null}
       <button type="button" className="v8-btn v8-btn-primary" onClick={onSignIn}>Sign in</button>
     </div>
+  );
+}
+
+// Rights declaration (CRT-003 / VIB-013). Declaring someone else's material, or reusing media already on HOWDI,
+// holds the item for a HOWDI rights check before it goes live.
+export function RightsField({ value, note, onChange }) {
+  const opts = [["original", "It’s all mine", "I made everything in this."], ["licensed", "I have permission", "It uses music, photos or video I’m licensed to use."], ["third_party", "It uses someone else’s work", "HOWDI checks the rights before it goes live."]];
+  return (
+    <fieldset className="v8c-field v8st-rights"><legend>Who owns this content?</legend>
+      {opts.map(([v, l, sub]) => <label key={v} className={`v8c-aud ${value === v ? "on" : ""}`}><input type="radio" name="v8-rights" checked={value === v} onChange={() => onChange("rights", v)} /><V8Icon name={v === "original" ? "check" : v === "licensed" ? "shield" : "alert"} size={20} /><span><b>{l}</b><small>{sub}</small></span></label>)}
+      {value === "licensed" ? <label className="v8c-field"><span>Licence or permission</span><input value={note} maxLength={500} onChange={(e) => onChange("rights_note", e.target.value)} placeholder="e.g. Music licensed from ClipStock, licence #A1234" /></label> : null}
+      {value === "third_party" ? <label className="v8c-field"><span>What did you use? (optional)</span><input value={note} maxLength={500} onChange={(e) => onChange("rights_note", e.target.value)} placeholder="e.g. Pattern chart by @lakshmi_stitches" /></label> : null}
+      <small className="v8c-muted">Media that matches something another member already shared is also checked before it goes live.</small>
+    </fieldset>
   );
 }

@@ -17,6 +17,16 @@
 //   POST /api/v8/vibes                                create + publish (media as data URL, stored without user ids)
 //   POST|DELETE /api/v8/creators/{@handle}/follow|block
 //   GET  /api/v8/media/{file}                         serves V8-stored media (range requests for video)
+//   POST|DELETE /api/v8/creators/{@handle}/story-mute   hide / show a member's stories for me   GET /api/v8/stories/muted
+//   GET  /api/v8/stories/{STY}/viewers                owner only: who viewed (signed-in viewers) + their reaction
+//   POST /api/v8/stories/{STY}/highlight              owner only: keep a story in a named highlight (keeps its audience)
+//   GET  /api/v8/creators/{@handle}/highlights        highlights on a profile (audience + block + private rules)
+//   DELETE /api/v8/highlights/{HLT}                   owner removes an item from a highlight
+//   Rights review (VIB-013 · CRT-003 · CRT-010): a post / Hype / Tip / Vibe that declares someone else's material, or reuses
+//   media another member already published, is held (not visible to anyone but its author) until HOWDI Admin clears it.
+//   GET  /api/v8/rights/mine                          my held / blocked items
+//   GET  /api/admin/v8/rights?status=  ·  POST /api/admin/v8/rights/{RRV}/decide {decision: clear|block, note}   (admin guard)
+//   POST /api/v8/highlights/{HLT}/cover · POST /api/v8/highlights/rename {title,to} · DELETE /api/v8/highlights?title=  (owner)
 //
 // Rules: the viewer comes ONLY from the Bearer session; request bodies never carry actor ids. Every response is built
 // from an explicit DTO and passes through stripInternal() (no id / *_id / uuid / howdi_id / email / phone). Content
@@ -26,9 +36,9 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const PREFIX = Object.freeze({ VIBE: 'VIB', VCOMMENT: 'VCM', PCOMMENT: 'PCM', LIVE: 'LIV', SPACE: 'SPC', COMMUNITY: 'CMY', PLAN: 'PLN' });
+const PREFIX = Object.freeze({ VIBE: 'VIB', VCOMMENT: 'VCM', PCOMMENT: 'PCM', LIVE: 'LIV', SPACE: 'SPC', COMMUNITY: 'CMY', PLAN: 'PLN', HIGHLIGHT: 'HLT', RIGHTS: 'RRV' });
 const PREFIX_TYPE = Object.freeze(Object.fromEntries(Object.entries(PREFIX).map(([t, p]) => [p, t])));
-const CODE_RE = /^(VIB|VCM|PCM|LIV|SPC|CMY|PLN)-[0-9A-F]{12}$/;
+const CODE_RE = /^(VIB|VCM|PCM|LIV|SPC|CMY|PLN|HLT|RRV)-[0-9A-F]{12}$/;
 const HANDLE_RE = /^[a-z0-9._]{3,30}$/;
 const REPORT_REASONS = Object.freeze(['spam', 'harassment', 'hate', 'violence', 'nudity', 'misinformation', 'copyright', 'self-harm', 'scam', 'other']);
 const TABS = Object.freeze(['for-you', 'following', 'explore', 'learn']);
@@ -96,6 +106,7 @@ function privateOkSql(owner, viewer) {
 
 function createConnectV8(deps) {
   const { pool, sendJSON, getBody, getSessionUserFromRequest, rateLimit, clientIp, mediaDir, logger = console } = deps;
+  const auditAdmin = deps.auditAdmin || (async () => {});
   const k5aIssue = deps.issueK5ARefs || null;
   const MEDIA_DIR = path.join(mediaDir, 'v8');
   try { fs.mkdirSync(MEDIA_DIR, { recursive: true }); } catch { /* created on first write */ }
@@ -118,6 +129,18 @@ function createConnectV8(deps) {
       status VARCHAR(10) NOT NULL DEFAULT 'HELD', decided_at TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), UNIQUE(kind, comment_key))`);
     await pool.query(`CREATE TABLE IF NOT EXISTS howdi_v8_creator_safety(user_id BIGINT PRIMARY KEY, muted_words JSONB NOT NULL DEFAULT '[]'::jsonb, blocked_phrases JSONB NOT NULL DEFAULT '[]'::jsonb,
       mentions VARCHAR(12) NOT NULL DEFAULT 'everyone', sensitive_default BOOLEAN NOT NULL DEFAULT FALSE, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
+    // V8 slice 2 — story mutes (per viewer, private to them) and highlights that keep the source story's audience
+    await pool.query(`CREATE TABLE IF NOT EXISTS howdi_v8_story_mutes(user_id BIGINT NOT NULL, muted_user_id BIGINT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY(user_id, muted_user_id))`);
+    await pool.query(`ALTER TABLE howdi_connect_highlights ADD COLUMN IF NOT EXISTS audience VARCHAR(30) NOT NULL DEFAULT 'Everyone'`);
+    await pool.query(`ALTER TABLE howdi_connect_highlights ADD COLUMN IF NOT EXISTS is_cover BOOLEAN NOT NULL DEFAULT FALSE`);
+    // rights review: content fingerprints (sha-256 of stored media) and the review queue
+    await pool.query(`CREATE TABLE IF NOT EXISTS howdi_v8_media_fingerprints(sha256 CHAR(64) NOT NULL, user_id BIGINT NOT NULL, kind VARCHAR(8) NOT NULL, entity_key VARCHAR(64) NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY(sha256, kind, entity_key))`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS howdi_v8_media_fingerprints_user_idx ON howdi_v8_media_fingerprints(sha256, user_id)`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS howdi_v8_rights_checks(id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL, kind VARCHAR(8) NOT NULL, entity_key VARCHAR(64) NOT NULL,
+      reason VARCHAR(24) NOT NULL, declared VARCHAR(16) NOT NULL DEFAULT 'original', note VARCHAR(500), target_status VARCHAR(16) NOT NULL, status VARCHAR(10) NOT NULL DEFAULT 'PENDING',
+      decision_note VARCHAR(300), decided_by VARCHAR(120), decided_at TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), UNIQUE(kind, entity_key))`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS howdi_v8_rights_checks_status_idx ON howdi_v8_rights_checks(status, created_at)`);
+    await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS howdi_connect_highlights_src_uq ON howdi_connect_highlights(user_id, source_story_id, title) WHERE source_story_id IS NOT NULL`);
   }
   // late-bound hooks from sibling modules (notifications live in the community module)
   const hooks = { notify: async () => {} };
@@ -148,6 +171,27 @@ function createConnectV8(deps) {
       await hooks.notify(uid, 'MENTION', `@${me ? me.public_username : 'someone'} mentioned you in a ${what}`, oneLine(textBody, 120), route, actorId);
     }
   }
+
+  // ---------------------------------------------------------------- rights review
+  const RIGHTS = Object.freeze(['original', 'licensed', 'third_party']);
+  // Decide whether new content must wait for a rights review. Returns null (publish now) or { reason, declared, note }.
+  async function rightsHold(uid, body, hashes) {
+    const declared = RIGHTS.includes(body.rights) ? body.rights : 'original';
+    const note = oneLine(body.rights_note, 500);
+    if (declared === 'licensed' && note.length < 6) return { error: 'Say where the licence or permission comes from.' };
+    if (declared === 'third_party') return { reason: 'declared', declared, note };
+    const hs = [...new Set(hashes.filter((h) => /^[0-9a-f]{64}$/.test(String(h || ''))))];
+    if (hs.length && (await pool.query(`SELECT 1 FROM howdi_v8_media_fingerprints WHERE sha256=ANY($1::char(64)[]) AND user_id<>$2 LIMIT 1`, [hs, uid])).rowCount) return { reason: 'duplicate_media', declared, note };
+    return null;
+  }
+  async function fingerprint(uid, kind, key, hashes, client = pool) {
+    for (const h of new Set(hashes.filter((x) => /^[0-9a-f]{64}$/.test(String(x || ''))))) await client.query(`INSERT INTO howdi_v8_media_fingerprints(sha256,user_id,kind,entity_key) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, [h, uid, kind, String(key)]);
+  }
+  const RIGHTS_MSG = {
+    declared: 'You said this uses someone else’s material, so HOWDI checks the rights before it goes live. You’ll get a notification when it’s decided.',
+    duplicate_media: 'This media matches something another member already shared on HOWDI, so we’re checking the rights before it goes live. You’ll get a notification when it’s decided.',
+  };
+  const rightsDto = (r) => (r ? { status: String(r.status).toLowerCase(), reason: r.reason, message: r.status === 'PENDING' ? RIGHTS_MSG[r.reason] || RIGHTS_MSG.declared : r.status === 'BLOCKED' ? `Not published: ${r.decision_note || 'the rights check did not pass.'} You can appeal from Creator workspace → Safety.` : 'Cleared and published.', decided_at: iso(r.decided_at) } : null);
 
   // ---------------------------------------------------------------- helpers
   const noStore = (res) => { res.setHeader('Cache-Control', 'no-store'); };
@@ -214,7 +258,7 @@ function createConnectV8(deps) {
     const name = crypto.randomBytes(16).toString('hex') + ext;
     fs.mkdirSync(MEDIA_DIR, { recursive: true });
     fs.writeFileSync(path.join(MEDIA_DIR, name), raw);
-    return { url: `/api/v8/media/${name}`, mime, size: raw.length, type: mime.startsWith('video/') ? 'video' : 'image' };
+    return { url: `/api/v8/media/${name}`, mime, size: raw.length, type: mime.startsWith('video/') ? 'video' : 'image', sha256: crypto.createHash('sha256').update(raw).digest('hex') };
   }
   function serveMedia(req, res, file) {
     if (!/^[0-9a-f]{32}\.(jpg|png|webp|mp4|webm|mov)$/.test(file)) { fail(res, 404, 'NOT_FOUND', 'Not found'); return; }
@@ -351,6 +395,9 @@ function createConnectV8(deps) {
       media = saveMedia(body.mediaData, { maxVideo: 20 * 1024 * 1024 });
       if (body.coverData) cover = saveMedia(body.coverData, { videos: false, maxImage: 4 * 1024 * 1024 });
     } catch (e) { return fail(res, 400, e.code || 'MEDIA_INVALID', e.message); }
+    const vHashes = [media.sha256, cover && cover.sha256];
+    const vHold = await rightsHold(v.id, body, vHashes);
+    if (vHold && vHold.error) return fail(res, 400, 'VALIDATION', vHold.error);
     let link = null;
     if (body.link && typeof body.link === 'object') {
       const kind = String(body.link.kind || '');
@@ -383,8 +430,10 @@ function createConnectV8(deps) {
       const n = (await client.query(`SELECT COALESCE(MAX(NULLIF(regexp_replace(vibe_code,'\\D','','g'),'')::bigint),0)+1 n FROM vibes`)).rows[0].n;
       const name = (await client.query(`SELECT COALESCE(NULLIF(u.full_name,''),'HOWDI member') n FROM users u WHERE u.id=$1`, [v.id])).rows[0]?.n || 'HOWDI member';
       vibeKey = (await client.query(`INSERT INTO vibes(vibe_code,creator_user_id,creator_name,vibe_type,caption,visibility,status,content_type,allow_comments,allow_remix,allow_share,cover_url,published_at,remix_source_vibe_id,moderation_status)
-        VALUES($1,$2,$3,$4,$5,$6,'published','general',$7,$8,TRUE,$9,NOW(),$10,'approved') RETURNING id::text`,
-        [`VIBE-${String(n).padStart(6, '0')}`, String(v.id), name, media.type === 'video' ? 'video' : 'photo', caption, audience, body.allowComments !== false, body.allowRemix !== false, cover ? cover.url : (media.type === 'image' ? media.url : null), remixId])).rows[0].id;
+        VALUES($1,$2,$3,$4,$5,$6,$11,'general',$7,$8,TRUE,$9,NOW(),$10,'approved') RETURNING id::text`,
+        [`VIBE-${String(n).padStart(6, '0')}`, String(v.id), name, media.type === 'video' ? 'video' : 'photo', caption, audience, body.allowComments !== false, body.allowRemix !== false, cover ? cover.url : (media.type === 'image' ? media.url : null), remixId, vHold ? 'rights_review' : 'published'])).rows[0].id;
+      await fingerprint(v.id, 'vibe', vibeKey, vHashes, client);
+      if (vHold) await client.query(`INSERT INTO howdi_v8_rights_checks(user_id,kind,entity_key,reason,declared,note,target_status) VALUES($1,'vibe',$2,$3,$4,$5,'published')`, [v.id, vibeKey, vHold.reason, vHold.declared, vHold.note || null]);
       await client.query(`INSERT INTO vibe_media(vibe_id,media_type,media_url,thumbnail_url,mime_type,file_size_bytes,position,processing_status) VALUES($1::uuid,$2,$3,$4,$5,$6,0,'ready')`,
         [vibeKey, media.type, media.url, cover ? cover.url : null, media.mime, media.size]);
       await client.query(`INSERT INTO vibe_stats(vibe_id) VALUES($1::uuid) ON CONFLICT DO NOTHING`, [vibeKey]);
@@ -396,17 +445,21 @@ function createConnectV8(deps) {
       await client.query('COMMIT');
     } catch (e) { await client.query('ROLLBACK').catch(() => {}); throw e; } finally { client.release(); }
     const code = (await issue('VIBE', [vibeKey])).get(String(vibeKey));
-    ok(res, { vibe: { public_key: code, route: `/connect/vibe/${code}`, audience } }, 201);
+    ok(res, { vibe: { public_key: code, route: `/connect/vibe/${code}`, audience, review: vHold ? 'pending' : null }, rights_review: vHold ? rightsDto({ status: 'PENDING', reason: vHold.reason }) : null }, 201);
   }
 
   // ---------------------------------------------------------------- STORIES (grouped by author)
   async function stories(vid) {
     const rows = (await pool.query(`SELECT s.id::text skey, s.content, s.media_data, s.media_type, s.created_at, s.audience, s.filter_name,
         ($1::bigint>0 AND EXISTS(SELECT 1 FROM howdi_connect_story_views sv WHERE sv.story_id=s.id AND sv.user_id=$1::bigint)) seen,
-        (a_u.id=$1::bigint) mine, ${authorCols('a_u.id', 'a_')}
+        (a_u.id=$1::bigint) mine, CASE WHEN a_u.id=$1::bigint THEN (SELECT COUNT(*) FROM howdi_connect_story_views sv WHERE sv.story_id=s.id AND sv.user_id IS NOT NULL AND sv.user_id<>a_u.id) END view_count,
+        CASE WHEN a_u.id=$1::bigint THEN (SELECT COUNT(*) FROM howdi_connect_story_reactions sr WHERE sr.story_id=s.id) END reaction_count,
+        CASE WHEN a_u.id=$1::bigint THEN (SELECT COUNT(*) FROM howdi_connect_story_replies sp WHERE sp.story_id=s.id) END reply_count,
+        ${authorCols('a_u.id', 'a_')}
       FROM howdi_connect_stories s ${authorJoins('s.user_id', 'a_')}
       WHERE s.expires_at>NOW() AND a_u.id IS NOT NULL
         AND (a_u.id=$1::bigint OR (NOT (${blockedSql('$1::bigint', 'a_u.id')}) AND ${privateOkSql('a_u.id', '$1::bigint')}
+          AND ($1::bigint=0 OR NOT EXISTS(SELECT 1 FROM howdi_v8_story_mutes sm WHERE sm.user_id=$1::bigint AND sm.muted_user_id=a_u.id))
           AND (COALESCE(s.audience,'Everyone')='Everyone'
             OR (s.audience='Friends' AND EXISTS(SELECT 1 FROM howdi_connect_follows f1 WHERE f1.follower_user_id=$1::bigint AND f1.following_user_id=a_u.id) AND EXISTS(SELECT 1 FROM howdi_connect_follows f2 WHERE f2.follower_user_id=a_u.id AND f2.following_user_id=$1::bigint))
             OR (s.audience='Close friends' AND EXISTS(SELECT 1 FROM howdi_connect_close_friends cf WHERE cf.user_id=a_u.id AND cf.friend_user_id=$1::bigint)))))
@@ -419,7 +472,7 @@ function createConnectV8(deps) {
       if (!groups.has(a.public_username)) groups.set(a.public_username, { author: a, mine: r.mine === true, seen_all: true, latest_at: iso(r.created_at), items: [] });
       const g = groups.get(a.public_username);
       const isVideo = /^data:video\//.test(String(r.media_data || '')) || String(r.media_type || '').toLowerCase().startsWith('video');
-      g.items.push({ public_key: code, text: text(r.content, 280), media_type: r.media_data ? (isVideo ? 'video' : 'image') : 'text', media_url: mediaUrl(r.media_data, 6 * 1024 * 1024), created_at: iso(r.created_at), seen: r.seen === true, filter: ['warm', 'cool', 'mono'].includes(r.filter_name) ? r.filter_name : 'none', audience: r.mine ? oneLine(r.audience, 20) : undefined });
+      g.items.push({ public_key: code, text: text(r.content, 280), media_type: r.media_data ? (isVideo ? 'video' : 'image') : 'text', media_url: mediaUrl(r.media_data, 6 * 1024 * 1024), created_at: iso(r.created_at), seen: r.seen === true, filter: ['warm', 'cool', 'mono'].includes(r.filter_name) ? r.filter_name : 'none', audience: r.mine ? oneLine(r.audience, 20) : undefined, view_count: r.mine ? count(r.view_count) : undefined, reaction_count: r.mine ? count(r.reaction_count) : undefined, reply_count: r.mine ? count(r.reply_count) : undefined });
       if (!r.seen) g.seen_all = false;
     }
     const list = [...groups.values()].map((g) => ({ ...g, items: g.items.reverse() }));
@@ -494,7 +547,7 @@ function createConnectV8(deps) {
       ${authorCols('a_u.id', 'a_')}`;
   const POST_FROM = `FROM howdi_community_posts p LEFT JOIN howdi_v8_post_meta pm ON pm.post_id=p.id ${authorJoins('p.user_id', 'a_')}`;
   const POST_VISIBLE = `COALESCE(p.post_type,'POST') NOT IN ('ARTICLE') AND a_u.id IS NOT NULL
-      AND (p.post_status='PUBLISHED' OR (p.post_status='SCHEDULED' AND (p.scheduled_for<=NOW() OR a_u.id=$1::bigint)))
+      AND (p.post_status='PUBLISHED' OR (p.post_status='SCHEDULED' AND (p.scheduled_for<=NOW() OR a_u.id=$1::bigint)) OR (p.post_status IN ('RIGHTS_REVIEW','RIGHTS_BLOCKED') AND a_u.id=$1::bigint))
       AND (COALESCE(p.audience_scope,'EVERYONE')='EVERYONE' OR a_u.id=$1::bigint
         OR (p.audience_scope='FOLLOWERS' AND EXISTS(SELECT 1 FROM howdi_connect_follows f WHERE f.follower_user_id=$1::bigint AND f.following_user_id=a_u.id))
         OR (p.audience_scope='FRIENDS' AND EXISTS(SELECT 1 FROM howdi_connect_follows f WHERE f.follower_user_id=$1::bigint AND f.following_user_id=a_u.id) AND EXISTS(SELECT 1 FROM howdi_connect_follows f2 WHERE f2.follower_user_id=a_u.id AND f2.following_user_id=$1::bigint))
@@ -523,7 +576,7 @@ function createConnectV8(deps) {
         counts: { likes: count(r.reactions), comments: count(r.comments), shares: count(r.shares) }, allow_comments: r.allow_comments !== false && !locked,
         viewer: { liked: r.v_liked === true, saved: r.v_saved === true, mine: r.v_mine === true, member: r.v_member === true }, published_at: iso(scheduled ? r.scheduled_for : r.created_at),
         members_only: r.members_only === true, locked, teaser: r.members_only ? oneLine(r.m_teaser, 200) || null : null, tier: r.members_only ? oneLine(r.m_tier, 60) || 'Members' : null,
-        scheduled: scheduled || false, tags: arr(r.m_tags).map((t) => oneLine(t, 30)).filter(Boolean).slice(0, 10),
+        scheduled: scheduled || false, review: r.post_status === 'RIGHTS_REVIEW' ? 'pending' : r.post_status === 'RIGHTS_BLOCKED' ? 'blocked' : null, tags: arr(r.m_tags).map((t) => oneLine(t, 30)).filter(Boolean).slice(0, 10),
         route: kind === 'tip' ? `/connect/tips/${code}` : kind === 'hype' ? `/connect/hype/${code}` : `/connect/posts/${code}` };
       if (kind === 'hype') { dto.hype_type = oneLine(r.m_hype, 20) || 'creator'; dto.disclosure = oneLine(r.m_disclosure, 20) || 'none'; }
       if (kind === 'tip') {
@@ -624,12 +677,17 @@ function createConnectV8(deps) {
     for (const it of (Array.isArray(body.related) ? body.related : []).slice(0, 4)) { const c = await relatedCard(it); if (c) related.push(c); else return fail(res, 400, 'LINK_INVALID', 'One of the linked items isn’t available.'); }
     const tags = [...new Set([...(t.match(/#([\p{L}\p{N}_]{2,30})/gu) || []).map((x) => x.slice(1).toLowerCase()), ...(Array.isArray(body.tags) ? body.tags : []).map((x) => oneLine(x, 30).replace(/^#/, '').toLowerCase())].filter(Boolean))].slice(0, 10);
     const gallery = saved.map((m) => ({ url: m.url, type: m.type }));
+    const hashes = saved.map((m) => m.sha256);
+    const hold = await rightsHold(v.id, body, hashes);
+    if (hold && hold.error) return fail(res, 400, 'VALIDATION', hold.error);
     const client = await pool.connect(); let key;
     try {
       await client.query('BEGIN');
       key = (await client.query(`INSERT INTO howdi_community_posts(user_id,content,category,visibility,post_type,post_status,audience_scope,allow_comments,media_gallery,media_type,subscribers_only,article_excerpt,scheduled_for,created_at,updated_at)
         VALUES($1,$2,'GENERAL','PUBLIC',$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11,NOW(),NOW()) RETURNING id::text`,
-        [v.id, t, kind.toUpperCase(), sched ? 'SCHEDULED' : 'PUBLISHED', aud, body.allow_comments !== false, JSON.stringify(gallery), saved[0] ? saved[0].type : null, membersOnly, membersOnly ? oneLine(body.teaser, 200) : '', sched])).rows[0].id;
+        [v.id, t, kind.toUpperCase(), hold ? 'RIGHTS_REVIEW' : sched ? 'SCHEDULED' : 'PUBLISHED', aud, body.allow_comments !== false, JSON.stringify(gallery), saved[0] ? saved[0].type : null, membersOnly, membersOnly ? oneLine(body.teaser, 200) : '', sched])).rows[0].id;
+      await fingerprint(v.id, 'post', key, hashes, client);
+      if (hold) await client.query(`INSERT INTO howdi_v8_rights_checks(user_id,kind,entity_key,reason,declared,note,target_status) VALUES($1,'post',$2,$3,$4,$5,$6)`, [v.id, key, hold.reason, hold.declared, hold.note || null, sched ? 'SCHEDULED' : 'PUBLISHED']);
       if (idem) await client.query(`INSERT INTO howdi_v8_idem(user_id,idem_key,scope,response) VALUES($1,$2,'post',$3::jsonb) ON CONFLICT DO NOTHING`, [v.id, idem, JSON.stringify({ pkey: key })]);
       await client.query(`INSERT INTO howdi_v8_post_meta(post_id,kind,title,hype_type,disclosure,category,steps,related,alts,tags,teaser) VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10::jsonb,$11)`,
         [key, kind, title || null, hype, disclosure, category, JSON.stringify(stepOut), JSON.stringify(related), JSON.stringify(alts), JSON.stringify(tags), membersOnly ? oneLine(body.teaser, 200) || null : null]);
@@ -638,8 +696,8 @@ function createConnectV8(deps) {
     if (body.draft && /^DRF-[0-9A-F]{12}$/.test(String(body.draft))) await pool.query(`DELETE FROM howdi_v8_drafts d USING howdi_v8_refs3 r WHERE r.public_code=$1 AND r.entity_type='DRAFT' AND d.id=r.entity_key::bigint AND d.user_id=$2`, [body.draft, v.id]).catch(() => {});
     const rows = (await pool.query(`SELECT ${POST_SELECT} ${POST_FROM} WHERE p.id=$2::bigint`, [v.id, key])).rows;
     const dto = (await postDtos(rows))[0] || null;
-    if (dto && !sched) await mentionNotify(v.id, t, dto.route, kind === 'post' ? 'post' : kind === 'hype' ? 'Hype' : 'Tip');
-    ok(res, { post: dto }, 201);
+    if (dto && !sched && !hold) await mentionNotify(v.id, t, dto.route, kind === 'post' ? 'post' : kind === 'hype' ? 'Hype' : 'Tip');
+    ok(res, { post: dto, rights_review: hold ? rightsDto({ status: 'PENDING', reason: hold.reason }) : null }, 201);
   }
   // Hype / Tips feeds (post kinds). Trending = engagement in the last 14 days.
   async function kindFeed(vid, kind, { chip, category, tab, cursor, limit }) {
@@ -683,9 +741,53 @@ function createConnectV8(deps) {
   // ---------------------------------------------------------------- router
   async function handle(req, res, url) {
     const p = url.pathname.replace(/\/+$/, '') || '/';
-    if (!p.startsWith('/api/v8/')) return false;
+    if (!p.startsWith('/api/v8/') && !p.startsWith('/api/admin/v8/rights')) return false;
     let m;
     try {
+      // ---- rights review: HOWDI Admin queue (the global admin guard already authenticated this request)
+      if (p === '/api/admin/v8/rights' && req.method === 'GET') {
+        const st = String(url.searchParams.get('status') || 'PENDING').toUpperCase();
+        if (!['PENDING', 'CLEARED', 'BLOCKED', 'ALL'].includes(st)) { fail(res, 400, 'INVALID_PARAMS', 'Unknown status.'); return true; }
+        const rows = (await pool.query(`SELECT rc.id::text k, rc.kind, rc.reason, rc.declared, rc.note, rc.status, rc.decision_note, rc.created_at, rc.decided_at,
+            COALESCE(p.content, vb.caption) body, ${authorCols('a_u.id', 'a_')}
+          FROM howdi_v8_rights_checks rc ${authorJoins('rc.user_id', 'a_')}
+          LEFT JOIN howdi_community_posts p ON rc.kind='post' AND p.id::text=rc.entity_key
+          LEFT JOIN vibes vb ON rc.kind='vibe' AND vb.id::text=rc.entity_key
+          WHERE ($1='ALL' OR rc.status=$1) ORDER BY rc.created_at ASC LIMIT 100`, [st])).rows;
+        const refs = await issue('RIGHTS', rows.map((r) => r.k));
+        ok(res, { items: rows.map((r) => ({ key: refs.get(r.k), kind: r.kind, creator: authorDto(r, 'a_'), reason: r.reason, declared: r.declared, note: r.note || null, excerpt: oneLine(r.body, 200), status: r.status.toLowerCase(), decision_note: r.decision_note || null, created_at: iso(r.created_at), decided_at: iso(r.decided_at) })) });
+        return true;
+      }
+      if ((m = p.match(/^\/api\/admin\/v8\/rights\/(RRV-[0-9A-F]{12})\/decide$/)) && req.method === 'POST') {
+        const k = await resolve(m[1], 'RIGHTS'); if (!k) { fail(res, 404, 'NOT_FOUND', 'Review not found.'); return true; }
+        const b = (await getBody(req)) || {}; const d = String(b.decision || ''); const note = oneLine(b.note, 300);
+        if (!['clear', 'block'].includes(d)) { fail(res, 400, 'VALIDATION', 'Choose clear or block.'); return true; }
+        if (d === 'block' && note.length < 6) { fail(res, 400, 'VALIDATION', 'Give the creator a reason.'); return true; }
+        const admin = String((req.howdiAdminSession && req.howdiAdminSession.username) || 'HOWDI Admin').slice(0, 120);
+        const client = await pool.connect(); let row;
+        try {
+          await client.query('BEGIN');
+          row = (await client.query(`SELECT * FROM howdi_v8_rights_checks WHERE id=$1::bigint FOR UPDATE`, [k])).rows[0];
+          if (!row || row.status !== 'PENDING') { await client.query('ROLLBACK'); fail(res, 409, 'ALREADY_DECIDED', 'This review was already decided.'); return true; }
+          await client.query(`UPDATE howdi_v8_rights_checks SET status=$2, decision_note=$3, decided_by=$4, decided_at=NOW() WHERE id=$1::bigint`, [k, d === 'clear' ? 'CLEARED' : 'BLOCKED', note || null, admin]);
+          if (row.kind === 'post') await client.query(`UPDATE howdi_community_posts SET post_status=$2, updated_at=NOW() WHERE id=$1::bigint AND post_status='RIGHTS_REVIEW'`, [row.entity_key, d === 'clear' ? row.target_status : 'RIGHTS_BLOCKED']);
+          else await client.query(`UPDATE vibes SET status=$2::text, published_at=CASE WHEN $2::text='published' THEN NOW() ELSE published_at END WHERE id::text=$1 AND status='rights_review'`, [row.entity_key, d === 'clear' ? 'published' : 'rights_blocked']);
+          await client.query('COMMIT');
+        } catch (e) { await client.query('ROLLBACK').catch(() => {}); throw e; } finally { client.release(); }
+        await auditAdmin(req, req.howdiAdminSession, 'V8_RIGHTS_' + (d === 'clear' ? 'CLEARED' : 'BLOCKED'), { kind: row.kind });
+        const what = row.kind === 'vibe' ? 'Vibe' : 'post';
+        await hooks.notify(Number(row.user_id), d === 'clear' ? 'RIGHTS_CLEARED' : 'RIGHTS_BLOCKED', d === 'clear' ? `Your ${what} passed the rights check` : `Your ${what} wasn’t published`, d === 'clear' ? (row.target_status === 'SCHEDULED' ? 'It will go live at the time you scheduled.' : 'It’s live now.') : `${note} You can appeal from Creator workspace → Safety.`, '/connect/creator?tab=safety', null);
+        ok(res, { decided: d }); return true;
+      }
+      if (p === '/api/v8/rights/mine' && req.method === 'GET') {
+        const v = await viewer(req);
+        if (!v) { fail(res, 401, 'SIGN_IN_REQUIRED', 'Sign in to continue.'); return true; }
+        const rows = (await pool.query(`SELECT rc.kind, rc.reason, rc.status, rc.decision_note, rc.created_at, rc.decided_at, rc.entity_key, COALESCE(p.content, vb.caption) body
+          FROM howdi_v8_rights_checks rc LEFT JOIN howdi_community_posts p ON rc.kind='post' AND p.id::text=rc.entity_key LEFT JOIN vibes vb ON rc.kind='vibe' AND vb.id::text=rc.entity_key
+          WHERE rc.user_id=$1 ORDER BY rc.created_at DESC LIMIT 50`, [v.id])).rows;
+        ok(res, { items: rows.map((r) => ({ kind: r.kind, excerpt: oneLine(r.body, 140), created_at: iso(r.created_at), ...rightsDto(r) })) });
+        return true;
+      }
       if ((m = p.match(/^\/api\/v8\/media\/([0-9a-f]{32}\.[a-z0-9]{3,4})$/)) && (req.method === 'GET' || req.method === 'HEAD')) { serveMedia(req, res, m[1]); return true; }
 
       if (p === '/api/v8/connect/hub' && req.method === 'GET') {
@@ -883,6 +985,117 @@ function createConnectV8(deps) {
         if (!t) { fail(res, 400, 'VALIDATION', 'Write a reply first.'); return true; }
         await pool.query(`INSERT INTO howdi_connect_story_replies(story_id,sender_user_id,body) VALUES($1,$2,$3)`, [r.entity_key, vid, t]);
         ok(res, { replied: true, message: 'Reply sent privately.' }); return true;
+      }
+      // ---- V8 slice 2: story viewer list (owner only), highlights, story mutes
+      if ((m = p.match(/^\/api\/v8\/stories\/(STY-[0-9A-F]{12})\/(viewers|highlight)$/))) {
+        const v = await viewer(req);
+        if (!v) { fail(res, 401, 'SIGN_IN_REQUIRED', 'Sign in to continue.'); return true; }
+        const r = deps.resolveK5ARef ? await deps.resolveK5ARef(m[1], ['STORY']) : null;
+        // only the author may see viewers or highlight it; anyone else gets the same 404 as an expired story
+        const own = r ? (await pool.query(`SELECT id, content, media_data, media_type, audience, filter_name, created_at FROM howdi_connect_stories WHERE id=$1::bigint AND user_id=$2`, [r.entity_key, v.id])).rows[0] : null;
+        if (!own) { fail(res, 404, 'NOT_FOUND', 'This story isn’t available.'); return true; }
+        if (m[2] === 'viewers' && req.method === 'GET') {
+          const rows = (await pool.query(`SELECT sv.created_at, rx.reaction, ${authorCols('a_u.id', 'a_')}
+            FROM howdi_connect_story_views sv ${authorJoins('sv.user_id', 'a_')}
+            LEFT JOIN howdi_connect_story_reactions rx ON rx.story_id=sv.story_id AND rx.user_id=sv.user_id
+            WHERE sv.story_id=$1 AND sv.user_id IS NOT NULL AND sv.user_id<>$2 AND NOT (${blockedSql('$2::bigint', 'a_u.id')})
+            ORDER BY sv.created_at DESC LIMIT 200`, [own.id, v.id])).rows;
+          const viewers = rows.map((x) => ({ person: authorDto(x, 'a_'), viewed_at: iso(x.created_at), reaction: x.reaction ? oneLine(x.reaction, 8) : null })).filter((x) => x.person);
+          ok(res, { count: viewers.length, viewers, note: 'Only people signed in to HOWDI are listed. Guests are not counted.' }); return true;
+        }
+        if (m[2] === 'highlight' && req.method === 'POST') {
+          if (limited(res, `v8-hl:${v.id}`, 40, 60 * 60000)) return true;
+          const body = (await getBody(req)) || {};
+          const title = oneLine(body.title, 40);
+          if (title.length < 2) { fail(res, 400, 'VALIDATION', 'Name the highlight (2–40 characters).'); return true; }
+          const n = (await pool.query(`SELECT COUNT(DISTINCT title) n FROM howdi_connect_highlights WHERE user_id=$1 AND title<>$2`, [v.id, title])).rows[0].n;
+          if (Number(n) >= 20) { fail(res, 400, 'LIMIT', 'You can have up to 20 highlights.'); return true; }
+          await pool.query(`INSERT INTO howdi_connect_highlights(user_id,source_story_id,title,content,media_data,media_type,filter_name,audience,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
+            ON CONFLICT (user_id, source_story_id, title) WHERE source_story_id IS NOT NULL DO NOTHING`,
+            [v.id, own.id, title, own.content || '', own.media_data, own.media_type, own.filter_name || 'none', own.audience || 'Everyone', own.created_at]);
+          ok(res, { highlighted: true, title, audience: oneLine(own.audience || 'Everyone', 20), message: `Added to “${title}”. It stays on your profile after the story ends, for the same audience.` }, 201); return true;
+        }
+        fail(res, 405, 'METHOD_NOT_ALLOWED', 'Not supported.'); return true;
+      }
+      if (p === '/api/v8/stories/muted' && req.method === 'GET') {
+        const v = await viewer(req);
+        if (!v) { fail(res, 401, 'SIGN_IN_REQUIRED', 'Sign in to continue.'); return true; }
+        const rows = (await pool.query(`SELECT sm.created_at, ${authorCols('a_u.id', 'a_')} FROM howdi_v8_story_mutes sm ${authorJoins('sm.muted_user_id', 'a_')} WHERE sm.user_id=$1 ORDER BY sm.created_at DESC LIMIT 200`, [v.id])).rows;
+        ok(res, { muted: rows.map((x) => ({ person: authorDto(x, 'a_'), since: iso(x.created_at) })).filter((x) => x.person) }); return true;
+      }
+      if ((m = p.match(/^\/api\/v8\/creators\/@?([a-z0-9._]{3,30})\/story-mute$/i)) && (req.method === 'POST' || req.method === 'DELETE')) {
+        const v = await viewer(req);
+        if (!v) { fail(res, 401, 'SIGN_IN_REQUIRED', 'Sign in to continue.'); return true; }
+        if (limited(res, `v8-rel:${v.id}`, 60, 60000)) return true;
+        const target = await userIdByHandle(m[1]);
+        if (!target || target === v.id) { fail(res, 404, 'NOT_FOUND', 'Profile not found.'); return true; }
+        if (req.method === 'POST') await pool.query(`INSERT INTO howdi_v8_story_mutes(user_id,muted_user_id) VALUES($1,$2) ON CONFLICT DO NOTHING`, [v.id, target]);
+        else await pool.query(`DELETE FROM howdi_v8_story_mutes WHERE user_id=$1 AND muted_user_id=$2`, [v.id, target]);
+        // muting is private: the muted member is never told
+        ok(res, { muted: req.method === 'POST' }); return true;
+      }
+      if ((m = p.match(/^\/api\/v8\/creators\/@?([a-z0-9._]{3,30})\/highlights$/i)) && req.method === 'GET') {
+        const v = await viewer(req); const vid = v ? v.id : 0;
+        if (limited(res, `v8-hls:${vid || clientIp(req)}`, 120, 60000)) return true;
+        const owner = await userIdByHandle(m[1]);
+        if (!owner) { fail(res, 404, 'NOT_FOUND', 'Profile not found.'); return true; }
+        const rows = (await pool.query(`SELECT h.id::text hkey, h.title, h.content, h.media_data, h.media_type, h.filter_name, h.created_at, h.audience, h.is_cover, (h.user_id=$1::bigint) mine, ${authorCols('a_u.id', 'a_')}
+          FROM howdi_connect_highlights h ${authorJoins('h.user_id', 'a_')}
+          WHERE h.user_id=$2 AND h.source_story_id IS NOT NULL AND a_u.id IS NOT NULL
+            AND (a_u.id=$1::bigint OR (NOT (${blockedSql('$1::bigint', 'a_u.id')}) AND ${privateOkSql('a_u.id', '$1::bigint')}
+              AND (COALESCE(h.audience,'Everyone')='Everyone'
+                OR (h.audience='Friends' AND EXISTS(SELECT 1 FROM howdi_connect_follows f1 WHERE f1.follower_user_id=$1::bigint AND f1.following_user_id=a_u.id) AND EXISTS(SELECT 1 FROM howdi_connect_follows f2 WHERE f2.follower_user_id=a_u.id AND f2.following_user_id=$1::bigint))
+                OR (h.audience='Close friends' AND EXISTS(SELECT 1 FROM howdi_connect_close_friends cf WHERE cf.user_id=a_u.id AND cf.friend_user_id=$1::bigint)))))
+          ORDER BY h.created_at ASC LIMIT 300`, [vid, owner])).rows;
+        const refs = await issue('HIGHLIGHT', rows.map((r) => r.hkey));
+        const groups = new Map(); let author = null;
+        for (const r of rows) {
+          const a = authorDto(r, 'a_'); const code = refs.get(r.hkey); if (!a || !code) continue; author = a;
+          const title = oneLine(r.title, 40) || 'Highlight';
+          if (!groups.has(title)) groups.set(title, { title, cover_url: null, items: [] });
+          const g = groups.get(title);
+          const isVideo = /^data:video\//.test(String(r.media_data || '')) || String(r.media_type || '').toLowerCase().startsWith('video');
+          const media = mediaUrl(r.media_data, 6 * 1024 * 1024);
+          if (media && !isVideo && (r.is_cover || !g.cover_url)) { if (r.is_cover || !g.cover_set) g.cover_url = media; if (r.is_cover) g.cover_set = true; }
+          g.items.push({ public_key: code, text: text(r.content, 280), media_type: r.media_data ? (isVideo ? 'video' : 'image') : 'text', media_url: media, created_at: iso(r.created_at), filter: ['warm', 'cool', 'mono'].includes(r.filter_name) ? r.filter_name : 'none', audience: r.mine ? oneLine(r.audience, 20) : undefined });
+        }
+        ok(res, { author, mine: vid > 0 && vid === owner, highlights: [...groups.values()].map(({ cover_set, ...g }) => ({ ...g, count: g.items.length })) }); return true;
+      }
+      if ((m = p.match(/^\/api\/v8\/highlights\/(HLT-[0-9A-F]{12})\/cover$/)) && req.method === 'POST') {
+        const v = await viewer(req);
+        if (!v) { fail(res, 401, 'SIGN_IN_REQUIRED', 'Sign in to continue.'); return true; }
+        const key = await resolve(m[1], 'HIGHLIGHT');
+        const row = key ? (await pool.query(`SELECT title, media_type, media_data FROM howdi_connect_highlights WHERE id=$1::bigint AND user_id=$2`, [key, v.id])).rows[0] : null;
+        if (!row) { fail(res, 404, 'NOT_FOUND', 'That highlight isn’t available.'); return true; }
+        if (!row.media_data || /^video|^data:video/i.test(String(row.media_type || '') + String(row.media_data).slice(0, 12))) { fail(res, 400, 'COVER_IMAGE_ONLY', 'Choose a photo for the cover.'); return true; }
+        await pool.query(`UPDATE howdi_connect_highlights SET is_cover=(id=$1::bigint) WHERE user_id=$2 AND title=$3`, [key, v.id, row.title]);
+        ok(res, { cover: true }); return true;
+      }
+      if (p === '/api/v8/highlights/rename' && req.method === 'POST') {
+        const v = await viewer(req);
+        if (!v) { fail(res, 401, 'SIGN_IN_REQUIRED', 'Sign in to continue.'); return true; }
+        const body = (await getBody(req)) || {}; const from = oneLine(body.title, 40); const to = oneLine(body.to, 40);
+        if (to.length < 2) { fail(res, 400, 'VALIDATION', 'Name the highlight (2–40 characters).'); return true; }
+        if (from !== to && (await pool.query(`SELECT 1 FROM howdi_connect_highlights WHERE user_id=$1 AND title=$2 LIMIT 1`, [v.id, to])).rowCount) { fail(res, 409, 'NAME_TAKEN', 'You already have a highlight with that name.'); return true; }
+        const up = await pool.query(`UPDATE howdi_connect_highlights SET title=$3 WHERE user_id=$1 AND title=$2 AND source_story_id IS NOT NULL`, [v.id, from, to]);
+        if (!up.rowCount) { fail(res, 404, 'NOT_FOUND', 'That highlight isn’t available.'); return true; }
+        ok(res, { renamed: true, title: to }); return true;
+      }
+      if (p === '/api/v8/highlights' && req.method === 'DELETE') {
+        const v = await viewer(req);
+        if (!v) { fail(res, 401, 'SIGN_IN_REQUIRED', 'Sign in to continue.'); return true; }
+        const title = oneLine(url.searchParams.get('title'), 40);
+        const del = title ? await pool.query(`DELETE FROM howdi_connect_highlights WHERE user_id=$1 AND title=$2 AND source_story_id IS NOT NULL`, [v.id, title]) : { rowCount: 0 };
+        if (!del.rowCount) { fail(res, 404, 'NOT_FOUND', 'That highlight isn’t available.'); return true; }
+        ok(res, { deleted: true, items: del.rowCount }); return true;
+      }
+      if ((m = p.match(/^\/api\/v8\/highlights\/(HLT-[0-9A-F]{12})$/)) && req.method === 'DELETE') {
+        const v = await viewer(req);
+        if (!v) { fail(res, 401, 'SIGN_IN_REQUIRED', 'Sign in to continue.'); return true; }
+        const key = await resolve(m[1], 'HIGHLIGHT');
+        const del = key ? await pool.query(`DELETE FROM howdi_connect_highlights WHERE id=$1::bigint AND user_id=$2`, [key, v.id]) : { rowCount: 0 };
+        if (!del.rowCount) { fail(res, 404, 'NOT_FOUND', 'That highlight isn’t available.'); return true; }
+        ok(res, { removed: true }); return true;
       }
       if (p === '/api/v8/vibes/categories' && req.method === 'GET') {
         const rows = (await pool.query(`SELECT name, slug FROM vibe_categories WHERE is_active=TRUE AND parent_category_id IS NULL ORDER BY sort_order, name LIMIT 30`)).rows;

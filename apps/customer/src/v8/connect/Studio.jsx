@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { V8Icon, V8State } from "../V8Shell";
 import { useV8Ui } from "../V8System";
-import { Sheet, Skel, Tabs, since, safeImg, readFileAsDataUrl } from "./common";
+import { Sheet, Skel, Tabs, since, safeImg, readFileAsDataUrl, RightsField } from "./common";
 import { PostCard } from "./Post";
 
 const TYPES = [["vibe", "Vibe", "play"], ["story", "Story", "camera"], ["article", "Article", "article"], ["hype", "Hype", "fire"], ["tip", "Tip", "bulb"], ["post", "Post", "comment"]];
@@ -14,7 +14,7 @@ const TIP_CATS = [["crochet", "Crochet"], ["tools", "Tools & Materials"], ["patt
 const DISCLOSURES = [["none", "No disclosure needed"], ["sponsored", "Sponsored / paid partnership"], ["affiliate", "Affiliate link"], ["gifted", "Gifted product"]];
 const AUD = [["everyone", "Public"], ["followers", "Followers"], ["friends", "Friends"], ["close_friends", "Close Friends"], ["only_me", "Only me"]];
 const LOCAL_KEY = "howdi.v8.studio.offline";
-const empty = (kind, members) => ({ kind, text: "", title: "", hype_type: "creator", disclosure: "none", category: "crochet", steps: [{ text: "", image: "" }], related: [], audience: "everyone", members_only: Boolean(members), teaser: "", allow_comments: true, schedule_at: "", tags: [] });
+const empty = (kind, members) => ({ kind, text: "", title: "", hype_type: "creator", disclosure: "none", category: "crochet", steps: [{ text: "", image: "" }], related: [], audience: "everyone", members_only: Boolean(members), teaser: "", allow_comments: true, schedule_at: "", tags: [], rights: "original", rights_note: "" });
 const newKey = () => `s-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 
 // publish with upload progress (XHR); resolves {ok,status,json}
@@ -85,12 +85,13 @@ export default function Studio({ api, user, onNav, onRequireLogin, onCreateStory
   const stepPick = async (file) => { if (!file) return; if (!/^image\/(jpeg|png|webp)$/.test(file.type) || file.size > 5 * 1024 * 1024) { setErr("Step photos: JPG, PNG or WebP up to 5 MB."); return; } const data = await readFileAsDataUrl(file); setF((x) => ({ ...x, steps: x.steps.map((s, i) => (i === stepIdx.current ? { ...s, image: data } : s)) })); };
   const body = () => ({ kind, text: f.text, title: f.title, hype_type: f.hype_type, disclosure: f.disclosure, category: f.category, steps: f.steps.filter((s) => s.text.trim()),
     related: f.related.map((r) => ({ kind: r.kind, code: r.code })), audience: f.audience, members_only: f.members_only, teaser: f.teaser, allow_comments: f.allow_comments,
-    schedule_at: f.schedule_at ? new Date(f.schedule_at).toISOString() : undefined, tags: f.tags, media: media.map((m) => ({ data: m.data, alt: m.alt })), draft: draft.key || undefined, idempotency_key: pubKey });
+    schedule_at: f.schedule_at ? new Date(f.schedule_at).toISOString() : undefined, tags: f.tags, media: media.map((m) => ({ data: m.data, alt: m.alt })), draft: draft.key || undefined, idempotency_key: pubKey, rights: f.rights, rights_note: f.rights_note });
   const validate = () => {
     if (kind === "tip" && f.title.trim().length < 4) return "Give your Tip a short title.";
     if (kind === "tip" && !f.steps.some((s) => s.text.trim())) return "Add at least one step.";
     if (!f.text.trim() && !media.length) return "Write something or add a photo.";
     if (f.members_only && tiers && !tiers.length) return "Create a paid membership tier before posting members-only content.";
+    if (f.rights === "licensed" && f.rights_note.trim().length < 6) return "Say where the licence or permission comes from.";
     return "";
   };
   const publish = async () => {
@@ -100,6 +101,7 @@ export default function Studio({ api, user, onNav, onRequireLogin, onCreateStory
     const r = await xhrJson(`${String(apiBase || "").replace(/\/+$/, "")}/api/v8/posts`, body(), headers, setPct);
     if (!r.ok) { setState("failed"); setErr(r.json.message || "Couldn’t publish. Your draft is safe."); if (dirty.current) saveDraft(false); return; }
     setState("done"); try { localStorage.removeItem(LOCAL_KEY); } catch { /* ignore */ }
+    if (r.json.rights_review) { ui?.toast({ title: "Sent for a rights check", message: r.json.rights_review.message, timeout: 7000 }); onNav("creator?tab=safety"); return; }
     ui?.toast({ title: f.schedule_at ? "Scheduled" : kind === "hype" ? "Your Hype is live" : kind === "tip" ? "Your Tip is published" : "Your post is live", message: f.schedule_at ? `Publishes ${new Date(f.schedule_at).toLocaleString("en-IN")}` : "" });
     const route = r.json.post?.route || "";
     onNav(f.schedule_at ? "creator" : route.replace(/^\/connect\//, "") || "");
@@ -154,6 +156,7 @@ export default function Studio({ api, user, onNav, onRequireLogin, onCreateStory
             <label className="v8st-toggle"><input type="checkbox" checked={f.members_only} onChange={(e) => set("members_only", e.target.checked)} /><span><b>Members only</b><small>{tiers && !tiers.length ? "Create a paid tier first (Creator workspace → Memberships)." : "Everyone else sees a locked preview with a Subscribe button."}</small></span></label>
             {f.members_only ? <label className="v8c-field"><span>Preview text everyone can see</span><input value={f.teaser} maxLength={200} onChange={(e) => set("teaser", e.target.value)} placeholder="Live stitch-along replay: crochet tote bag" /></label> : null}
             <label className="v8st-toggle"><input type="checkbox" checked={f.allow_comments} onChange={(e) => set("allow_comments", e.target.checked)} /><span><b>Allow comments</b><small>Comments with your blocked phrases are held for review.</small></span></label>
+            <RightsField value={f.rights} note={f.rights_note} onChange={(k, v) => set(k, v)} />
             {err ? <p className="v8c-err" role="alert">{err}</p> : null}
             <div className="v8st-actions">
               <button type="button" className="v8-btn" onClick={() => saveDraft(true)}>Save draft</button>
@@ -224,3 +227,4 @@ function Drafts({ api, onNav }) {
     </div>
   );
 }
+

@@ -4,17 +4,17 @@ import { useEffect, useState } from "react";
 import { V8Icon, V8State } from "../V8Shell";
 import { V8Badges, V8Confirm, useV8Ui } from "../V8System";
 import { Ava, Sheet, ReportSheet, ShareSheet, Skel, fmt, when } from "./common";
-import { RoomList, RoomChat, TipSheet, useRoom } from "./Live";
+import { RoomList, RoomChat, TipSheet, useRoom, MembersOnlyGate, MembersOnlyRow } from "./Live";
 
 function SpaceRoom({ api, code, user, onBack, onRequireLogin, onOpenProfile }) {
   const ui = useV8Ui(); const signedIn = Boolean(user);
   const { room, setRoom, events, people, lost, reload, tick } = useRoom(api, code, { poll: 2500 });
   const [sheet, setSheet] = useState(""); const [mic, setMic] = useState("off"); const [confirmEnd, setConfirmEnd] = useState(false); const [person, setPerson] = useState(null);
   useEffect(() => {
-    if (room.status !== "ready" || room.state !== "live" || !signedIn) return undefined;
+    if (room.status !== "ready" || room.state !== "live" || !signedIn || room.locked) return undefined;
     api("POST", `/api/v8/rooms/${code}/join`);
     return () => { api("POST", `/api/v8/rooms/${code}/leave`); };
-  }, [room.status, room.state, signedIn, code, api]);
+  }, [room.status, room.state, room.locked, signedIn, code, api]);
   if (room.status === "loading") return <div className="v8sp-room"><Skel h={260} r={18} /></div>;
   if (room.status === "gone") return <V8State icon="alert" title="This Space isn’t available" actionLabel="Back to Spaces" onAction={onBack} />;
   if (room.status === "error") return <V8State kind="error" title="Couldn’t open this Space" message={room.message} actionLabel="Try again" onAction={reload} />;
@@ -47,8 +47,8 @@ function SpaceRoom({ api, code, user, onBack, onRequireLogin, onOpenProfile }) {
       <div className="v8l-room-grid">
         <section className="v8-card v8sp-stage">
           {r.topic ? <p className="v8c-muted">{r.topic}</p> : null}
-          {r.category ? <div className="v8c-chips"><span className="v8c-chip">{r.category}</span></div> : null}
-          {r.state === "live" ? (<>
+          {r.category || r.members_only ? <div className="v8c-chips">{r.category ? <span className="v8c-chip">{r.category}</span> : null}{r.members_only ? <span className="v8c-chip v8c-chip-premium"><V8Icon name="crown" size={14} />Members only</span> : null}</div> : null}
+          {r.locked ? <MembersOnlyGate r={r} api={api} signedIn={signedIn} onRequireLogin={onRequireLogin} /> : r.state === "live" ? (<>
             <span className="v8c-sandbox"><b>PREVIEW / TEST</b><span>Audio isn’t connected in this preview — speaking roles, hands, chat and tips are real.</span></span>
             <div className="v8sp-speakers">
               {stage.length ? stage.map((p) => (
@@ -91,12 +91,14 @@ function SpaceRoom({ api, code, user, onBack, onRequireLogin, onOpenProfile }) {
           </div>
         </section>
         <aside className="v8-card v8l-side"><h3>Space chat</h3>
-          {r.state === "live" ? <RoomChat api={api} code={code} events={events} room={r} signedIn={signedIn} onRequireLogin={onRequireLogin} onPin={isHost ? (e) => act("host/pin", { seq: e.seq }, "Pinned") : null} /> : <p className="v8c-muted">Chat opens when the Space starts.</p>}
+          {r.locked ? <p className="v8c-muted"><V8Icon name="lock" size={14} /> Chat is for members of @{r.host.public_username}.</p>
+            : r.state === "live" ? <RoomChat api={api} code={code} events={events} room={r} signedIn={signedIn} onRequireLogin={onRequireLogin} onPin={isHost ? (e) => act("host/pin", { seq: e.seq }, "Pinned") : null} /> : <p className="v8c-muted">Chat opens when the Space starts.</p>}
         </aside>
       </div>
       <TipSheet open={sheet === "tip"} api={api} host={r.host} code={code} onClose={() => setSheet("")} onTipped={() => tick()} />
       <ShareSheet open={sheet === "share"} title={r.title} link={r.route} onClose={() => setSheet("")} />
       <Sheet open={sheet === "more"} title={r.title} onClose={() => setSheet("")}>
+        {isHost ? <MembersOnlyRow r={r} act={act} onDone={() => { setSheet(""); reload(); }} /> : null}
         {!isHost ? <button type="button" className="v8c-row" onClick={() => (signedIn ? setSheet("report") : onRequireLogin())}><span className="v8c-row-ico danger"><V8Icon name="flag" size={20} /></span><span className="v8c-row-text"><b>Report this Space</b></span></button> : null}
         {r.rules ? <div className="v8l-rules"><b>Space rules</b><p>{r.rules}</p></div> : <p className="v8c-muted">Be kind. Hosts can remove anyone who breaks the Community Guidelines.</p>}
       </Sheet>

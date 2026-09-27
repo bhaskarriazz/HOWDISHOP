@@ -5,7 +5,10 @@
 // moderation actions), 06 panel 4 (group/channel page), PRIOR-07 panels 5–6 (articles, communities), 07 panel 5 (article).
 //
 //   GET  /api/v8/communities?type=all|groups|channels&q=&topic=          browse (public + private listings)
-//   POST /api/v8/communities                                              create group / channel (creator becomes OWNER)
+//   POST /api/v8/communities                                              create group / channel (creator becomes OWNER): cover, rules, topic, location,
+//                                                                         privacy public | private | invite (invite-only = INVITE_ONLY: members only, joined by invite link)
+//   PATCH /api/v8/communities/{slug}/settings                             owner/admin: about, topic, location, rules, cover, privacy
+//   GET|POST /api/v8/communities/invite/{code} · POST {slug}/invite/reset  invite-link preview · join · mods rotate the link
 //   GET  /api/v8/communities/{slug}                                       detail + my membership/role + rules + counts
 //   POST|DELETE /api/v8/communities/{slug}/join                           join / request / subscribe · leave / cancel
 //   GET|POST /api/v8/communities/{slug}/feed                              posts inside (channels: only owner/admin/mod post)
@@ -46,6 +49,9 @@ function createConnectV8Community(deps) {
     await pool.query(`CREATE TABLE IF NOT EXISTS howdi_v8_community_rsvps(event_id BIGINT NOT NULL, user_id BIGINT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY(event_id,user_id))`);
     await pool.query(`CREATE TABLE IF NOT EXISTS howdi_v8_notifications(id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL, kind VARCHAR(32) NOT NULL, title VARCHAR(160) NOT NULL, body VARCHAR(300), route VARCHAR(200), actor_user_id BIGINT, read_at TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
     await pool.query(`CREATE INDEX IF NOT EXISTS howdi_v8_notifications_user_idx ON howdi_v8_notifications(user_id, created_at DESC)`);
+    await pool.query(`ALTER TABLE howdi_v8_community_meta ADD COLUMN IF NOT EXISTS location VARCHAR(80)`);
+    await pool.query(`ALTER TABLE howdi_v8_community_meta ADD COLUMN IF NOT EXISTS invite_code VARCHAR(16)`);
+    await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS howdi_v8_community_meta_invite_uq ON howdi_v8_community_meta(invite_code) WHERE invite_code IS NOT NULL`);
     await pool.query(`CREATE TABLE IF NOT EXISTS howdi_v8_community_mutes(space_id BIGINT NOT NULL, user_id BIGINT NOT NULL, until TIMESTAMPTZ NOT NULL, PRIMARY KEY(space_id,user_id))`);
   }
   const PFX = { CPOST: 'CPS', CREPORT: 'CRP', CEVENT: 'CEV', NOTIF: 'NTF' };
@@ -82,6 +88,8 @@ function createConnectV8Community(deps) {
       (SELECT COUNT(*) FROM howdi_connect_social_space_members m WHERE m.space_id=sp.id AND m.status='ACTIVE') active_members,
       (SELECT COUNT(*) FROM howdi_connect_social_space_members m WHERE m.space_id=sp.id AND m.status='PENDING') pending_members,
       (SELECT meta.rules FROM howdi_v8_community_meta meta WHERE meta.space_id=sp.id) rules,
+      (SELECT meta.location FROM howdi_v8_community_meta meta WHERE meta.space_id=sp.id) location,
+      (SELECT meta.invite_code FROM howdi_v8_community_meta meta WHERE meta.space_id=sp.id) invite_code,
       ${authorCols('a_u.id', 'a_')}`;
   const SPACE_FROM = `FROM howdi_connect_social_spaces sp ${authorJoins('sp.owner_user_id', 'a_')}`;
   const SPACE_VISIBLE = `COALESCE(sp.is_archived,FALSE)=FALSE AND sp.slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$'
@@ -91,11 +99,14 @@ function createConnectV8Community(deps) {
     const role = r.my_status === 'ACTIVE' ? String(r.my_role || 'MEMBER').toUpperCase() : null;
     return {
       kind: r.space_type === 'CHANNEL' ? 'channel' : 'group', public_key: r.slug, name: line(r.name, 80), description: text(r.description, 600) || null, category: line(r.category, 40) || null,
-      privacy: r.privacy === 'PRIVATE' ? 'private' : r.privacy === 'PUBLIC' ? 'public' : 'hidden', image_url: img(r.avatar_data || r.cover_data), cover_url: img(r.cover_data || r.avatar_data),
+      privacy: r.privacy === 'PRIVATE' ? 'private' : r.privacy === 'PUBLIC' ? 'public' : 'invite', image_url: img(r.avatar_data || r.cover_data), cover_url: img(r.cover_data || r.avatar_data),
       member_count: count(r.active_members), verified: r.is_verified === true, owner: authorDto(r, 'a_'),
       membership: r.my_status === 'ACTIVE' ? 'member' : r.my_status === 'PENDING' ? 'pending' : 'none', role: role ? role.toLowerCase() : null,
       is_mod: Boolean(role && MOD_ROLES.includes(role)), pending_requests: role && MOD_ROLES.includes(role) ? count(r.pending_members) : undefined,
       rules: Array.isArray(r.rules) ? r.rules.map((x) => line(x, 140)).filter(Boolean).slice(0, 10) : [],
+      location: line(r.location, 80) || null,
+      // the invite link is shown only to owners / admins / moderators
+      invite_code: role && MOD_ROLES.includes(role) && /^[A-Z0-9]{10}$/.test(String(r.invite_code || '')) ? r.invite_code : undefined,
       created_at: iso(r.created_at), route: `/connect/communities/${r.slug}`,
     };
   }
@@ -123,6 +134,7 @@ function createConnectV8Community(deps) {
       ORDER BY CASE m.role WHEN 'OWNER' THEN 0 WHEN 'ADMIN' THEN 1 WHEN 'MODERATOR' THEN 2 ELSE 3 END, m.joined_at LIMIT 200`, [vid || 0, r.sid, Boolean(withPending)])).rows;
     return rows.map((x) => ({ person: authorDto(x, 'a_'), role: String(x.role || 'MEMBER').toLowerCase(), status: x.status === 'PENDING' ? 'pending' : 'active', me: x.me === true, muted: x.muted === true, since: iso(x.joined_at) })).filter((x) => x.person);
   }
+  const inviteCode = () => { const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; const b = crypto.randomBytes(10); let o = ''; for (let i = 0; i < 10; i++) o += A[b[i] % A.length]; return o; };
   async function recount(sid) {
     await pool.query(`UPDATE howdi_connect_social_spaces SET member_count=(SELECT COUNT(*) FROM howdi_connect_social_space_members WHERE space_id=$1 AND status='ACTIVE'), updated_at=NOW() WHERE id=$1`, [sid]);
   }
@@ -272,7 +284,7 @@ function createConnectV8Community(deps) {
       if (q) { params.push(`%${q.replace(/[\\%_]/g, (c) => '\\' + c)}%`); where.push(`(sp.name ILIKE $${params.length} OR sp.description ILIKE $${params.length})`); }
       if (topic) { params.push(topic); where.push(`LOWER(sp.category)=LOWER($${params.length})`); }
       const rows = (await pool.query(`SELECT ${SPACE_COLS} ${SPACE_FROM} WHERE ${where.join(' AND ')} ORDER BY sp.is_verified DESC, sp.member_count DESC, sp.created_at DESC LIMIT 60`, params)).rows;
-      const topics = (await pool.query(`SELECT DISTINCT category FROM howdi_connect_social_spaces WHERE COALESCE(is_archived,FALSE)=FALSE AND category IS NOT NULL ORDER BY 1 LIMIT 20`)).rows.map((r) => line(r.category, 40));
+      const topics = (await pool.query(`SELECT DISTINCT category FROM howdi_connect_social_spaces WHERE COALESCE(is_archived,FALSE)=FALSE AND privacy IN ('PUBLIC','PRIVATE') AND category IS NOT NULL ORDER BY 1 LIMIT 20`)).rows.map((r) => line(r.category, 40));
       ok(res, { type, items: rows.map(spaceDto), topics }); return true;
     }
     if (p === '/api/v8/communities' && req.method === 'POST') {
@@ -280,7 +292,10 @@ function createConnectV8Community(deps) {
       if (limited(res, `v8-com-create:${vid}`, 5, 60 * 60000)) return true;
       const b = (await getBody(req)) || {};
       const kind = b.kind === 'channel' ? 'CHANNEL' : 'GROUP'; const name = line(b.name, 80); const desc = text(b.description, 600); const cat = line(b.category, 40) || 'General';
-      const privacy = b.privacy === 'private' ? 'PRIVATE' : 'PUBLIC';
+      const privacy = b.privacy === 'private' ? 'PRIVATE' : b.privacy === 'invite' ? 'INVITE_ONLY' : 'PUBLIC';
+      const location = line(b.location, 80) || null;
+      let cover = null;
+      if (b.coverData) { try { cover = saveMedia(b.coverData, { videos: false, maxImage: 4 * 1024 * 1024 }).url; } catch (e) { fail(res, 400, e.code || 'MEDIA_INVALID', e.message); return true; } }
       if (name.length < 3) { fail(res, 400, 'VALIDATION', 'Give it a name (at least 3 characters).'); return true; }
       if (desc.length < 10) { fail(res, 400, 'VALIDATION', 'Describe what it’s about (at least 10 characters).'); return true; }
       const rules = Array.isArray(b.rules) ? b.rules.map((x) => line(x, 140)).filter(Boolean).slice(0, 10) : [];
@@ -289,12 +304,31 @@ function createConnectV8Community(deps) {
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
-        const sid = (await client.query(`INSERT INTO howdi_connect_social_spaces(owner_user_id,space_type,name,slug,description,category,privacy,member_count,message_count,is_verified,is_archived,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,1,0,FALSE,FALSE,NOW(),NOW()) RETURNING id`, [vid, kind, name, slug, desc, cat, privacy])).rows[0].id;
+        const sid = (await client.query(`INSERT INTO howdi_connect_social_spaces(owner_user_id,space_type,name,slug,description,category,privacy,member_count,message_count,is_verified,is_archived,cover_data,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,1,0,FALSE,FALSE,$8,NOW(),NOW()) RETURNING id`, [vid, kind, name, slug, desc, cat, privacy, cover])).rows[0].id;
         await client.query(`INSERT INTO howdi_connect_social_space_members(space_id,user_id,role,status,joined_via,joined_at,updated_at) VALUES($1,$2,'OWNER','ACTIVE','create',NOW(),NOW())`, [sid, vid]);
-        await client.query(`INSERT INTO howdi_v8_community_meta(space_id,rules) VALUES($1,$2::jsonb)`, [sid, JSON.stringify(rules)]);
+        await client.query(`INSERT INTO howdi_v8_community_meta(space_id,rules,location,invite_code) VALUES($1,$2::jsonb,$3,$4)`, [sid, JSON.stringify(rules), location, inviteCode()]);
         await client.query('COMMIT');
       } catch (e) { await client.query('ROLLBACK').catch(() => {}); throw e; } finally { client.release(); }
-      ok(res, { community: { public_key: slug, route: `/connect/communities/${slug}` } }, 201); return true;
+      const made = await space(slug, vid);
+      ok(res, { community: { public_key: slug, route: `/connect/communities/${slug}`, ...(made ? { invite_code: spaceDto(made).invite_code, privacy: spaceDto(made).privacy, kind: spaceDto(made).kind } : {}) } }, 201); return true;
+    }
+    if ((m = p.match(/^\/api\/v8\/communities\/invite\/([A-Z0-9]{10})$/)) && (req.method === 'GET' || req.method === 'POST')) {
+      if (limited(res, `v8-com-invite:${vid || clientIp(req)}`, 30, 60000)) return true;
+      const row = (await pool.query(`SELECT ${SPACE_COLS} ${SPACE_FROM} JOIN howdi_v8_community_meta im ON im.space_id=sp.id
+        WHERE im.invite_code=$2 AND COALESCE(sp.is_archived,FALSE)=FALSE AND (sp.owner_user_id=$1::bigint OR NOT (${blockedSql('$1::bigint', 'sp.owner_user_id')}))`, [vid || 0, m[1]])).rows[0];
+      // a wrong, rotated or blocked link all look the same
+      if (!row) { fail(res, 404, 'INVITE_INVALID', 'This invite link isn’t valid any more. Ask for a new one.'); return true; }
+      const dto = spaceDto(row);
+      if (req.method === 'GET') { ok(res, { invite: { name: dto.name, kind: dto.kind, privacy: dto.privacy, description: dto.description, cover_url: dto.cover_url, member_count: dto.member_count, owner: dto.owner, membership: dto.membership, public_key: dto.public_key } }); return true; }
+      if (needV()) return true;
+      // an invite from the community is pre-approved: private and invite-only communities join directly
+      if (row.my_status !== 'ACTIVE') {
+        await pool.query(`INSERT INTO howdi_connect_social_space_members(space_id,user_id,role,status,joined_via,joined_at,updated_at) VALUES($1,$2,'MEMBER','ACTIVE','invite',NOW(),NOW())
+          ON CONFLICT(space_id,user_id) DO UPDATE SET status='ACTIVE', joined_via='invite', updated_at=NOW()`, [row.sid, vid]);
+        await recount(row.sid);
+        await notify(Number(row.owner_id), 'COMMUNITY_JOINED', `Someone joined ${line(row.name, 60)} with your invite link`, 'See who’s new in Members.', `/connect/communities/${row.slug}?tab=members`, vid);
+      }
+      ok(res, { membership: 'member', public_key: row.slug, message: `You joined ${line(row.name, 60)}.` }); return true;
     }
     if (!(m = p.match(/^\/api\/v8\/communities\/([a-z0-9-]{2,80})(?:\/(.+))?$/))) { fail(res, 404, 'NOT_FOUND', 'Not found.'); return true; }
     const r = await space(m[1], vid);
@@ -304,6 +338,34 @@ function createConnectV8Community(deps) {
     if (!sub && req.method === 'GET') {
       const ev = (await pool.query(`SELECT COUNT(*) n FROM howdi_v8_community_events WHERE space_id=$1 AND starts_at>NOW() AND NOT cancelled`, [r.sid])).rows[0].n;
       ok(res, { community: { ...spaceDto(r), upcoming_events: count(ev), can_post: r.my_status === 'ACTIVE' && (r.space_type !== 'CHANNEL' || mod), can_read: canRead(r) } }); return true;
+    }
+    if (sub === 'settings' && req.method === 'PATCH') {
+      if (needV()) return true;
+      if (!['OWNER', 'ADMIN'].includes(role) || r.my_status !== 'ACTIVE') { fail(res, 403, 'FORBIDDEN', 'Only the owner or an admin can change these settings.'); return true; }
+      const b = (await getBody(req)) || {};
+      const desc = b.description !== undefined ? text(b.description, 600) : null;
+      if (desc !== null && desc.length < 10) { fail(res, 400, 'VALIDATION', 'Describe what it’s about (at least 10 characters).'); return true; }
+      let cover; // undefined = unchanged, null = removed
+      if (b.removeCover === true) cover = null;
+      else if (b.coverData) { try { cover = saveMedia(b.coverData, { videos: false, maxImage: 4 * 1024 * 1024 }).url; } catch (e) { fail(res, 400, e.code || 'MEDIA_INVALID', e.message); return true; } }
+      const privacy = b.privacy === undefined ? null : b.privacy === 'private' ? 'PRIVATE' : b.privacy === 'invite' ? 'INVITE_ONLY' : b.privacy === 'public' ? 'PUBLIC' : 'X';
+      if (privacy === 'X') { fail(res, 400, 'VALIDATION', 'Choose public, private or invite only.'); return true; }
+      if (privacy && role !== 'OWNER') { fail(res, 403, 'FORBIDDEN', 'Only the owner can change privacy.'); return true; }
+      const rules = Array.isArray(b.rules) ? b.rules.map((x) => line(x, 140)).filter(Boolean).slice(0, 10) : null;
+      await pool.query(`UPDATE howdi_connect_social_spaces SET description=COALESCE($2,description), category=COALESCE($3,category), privacy=COALESCE($4,privacy),
+        cover_data=CASE WHEN $5::boolean THEN $6 ELSE cover_data END, updated_at=NOW() WHERE id=$1`,
+        [r.sid, desc, b.category !== undefined ? (line(b.category, 40) || null) : null, privacy, cover !== undefined, cover === undefined ? null : cover]);
+      await pool.query(`INSERT INTO howdi_v8_community_meta(space_id,rules,location) VALUES($1,COALESCE($2::jsonb,'[]'::jsonb),$3) ON CONFLICT(space_id) DO UPDATE SET
+        rules=COALESCE($2::jsonb,howdi_v8_community_meta.rules), location=CASE WHEN $4::boolean THEN $3 ELSE howdi_v8_community_meta.location END, updated_at=NOW()`,
+        [r.sid, rules ? JSON.stringify(rules) : null, b.location !== undefined ? (line(b.location, 80) || null) : null, b.location !== undefined]);
+      ok(res, { community: spaceDto(await space(r.slug, vid)) }); return true;
+    }
+    if (sub === 'invite/reset' && req.method === 'POST') {
+      if (needV()) return true;
+      if (!mod) { fail(res, 403, 'FORBIDDEN', 'Only moderators can reset the invite link.'); return true; }
+      const code = inviteCode();
+      await pool.query(`INSERT INTO howdi_v8_community_meta(space_id,invite_code) VALUES($1,$2) ON CONFLICT(space_id) DO UPDATE SET invite_code=EXCLUDED.invite_code, updated_at=NOW()`, [r.sid, code]);
+      ok(res, { invite_code: code, message: 'New invite link created. The old link no longer works.' }); return true;
     }
     if (sub === 'join') {
       if (needV()) return true;

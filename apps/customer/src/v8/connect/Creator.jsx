@@ -312,10 +312,11 @@ function Earnings({ api, ui, reload }) {
 
 // ------------------------------------------------------------------ Safety (muted words, held comments, reports, strikes, appeals, audit)
 function Safety({ api, ui, onOpenProfile }) {
-  const [s, setS] = useState(null); const [held, setHeld] = useState(null); const [mod, setMod] = useState(null); const [edit, setEdit] = useState(null); const [appeal, setAppeal] = useState(false);
+  const [s, setS] = useState(null); const [held, setHeld] = useState(null); const [mod, setMod] = useState(null); const [rights, setRights] = useState(null); const [edit, setEdit] = useState(null); const [appeal, setAppeal] = useState(false);
   const load = useCallback(async () => {
     const [a, b, c] = await Promise.all([api("GET", "/api/v8/creator/safety"), api("GET", "/api/v8/creator/held-comments"), api("GET", "/api/v8/creator/moderation")]);
     setS(a.ok ? a.json.safety : "error"); setHeld(b.ok ? b.json.items : []); setMod(c.ok ? c.json : null);
+    api("GET", "/api/v8/rights/mine").then((x) => setRights(x.ok ? x.json.items || [] : []));
   }, [api]);
   useEffect(() => { load(); }, [load]);
   if (s === null) return <div className="v8-card"><Skel h={160} /></div>;
@@ -344,6 +345,10 @@ function Safety({ api, ui, onOpenProfile }) {
           <div key={l} className="v8cr-srow static"><V8Icon name={i} size={18} /><span>{l}</span><b className={n ? tone : ""}>{n || 0}</b></div>
         ))}
         {mod?.strikes?.length ? <ul className="v8cr-ledger">{mod.strikes.map((st) => <li key={st.index}><span><b>Strike {st.index}: {st.reason}</b><small>{st.details || ""} · expires {since(st.expires_at).replace(" ago", "")}</small></span></li>)}</ul> : null}
+        <h3 className="v8m-h">Rights checks</h3>
+        {!rights ? <Skel h={40} /> : !rights.length ? <p className="v8c-muted">Nothing is waiting. Content that uses someone else’s material, or matches media already on HOWDI, is checked here before it goes live.</p> : (
+          <ul className="v8cr-ledger v8cr-rights">{rights.map((x, i) => <li key={i}><span><b>{x.kind === "vibe" ? "Vibe" : "Post"}: {x.excerpt || "(media only)"}</b><small>{x.message} · {since(x.created_at)}</small></span><span className={`v8m-state ${x.status === "cleared" ? "ok" : x.status === "blocked" ? "bad" : "warn"}`}>{x.status === "pending" ? "In review" : x.status === "cleared" ? "Cleared" : "Not published"}</span></li>)}</ul>
+        )}
         <button type="button" className="v8-btn v8-btn-block" onClick={() => setAppeal(true)}>Appeal a decision</button>
         {mod?.appeals?.length ? <><h3 className="v8m-h">Appeals</h3><ul className="v8cr-ledger">{mod.appeals.map((a, i) => <li key={i}><span><b>{a.subject}</b><small>{since(a.at)}{a.note ? ` · ${a.note}` : ""}</small></span><span className={`v8m-state ${a.status === "overturned" ? "ok" : a.status === "open" ? "warn" : ""}`}><i />{{ open: "Under review", upheld: "Upheld", overturned: "Accepted" }[a.status]}</span></li>)}</ul></> : null}
         <h3 className="v8m-h">Moderation audit</h3>

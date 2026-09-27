@@ -6,6 +6,7 @@ import { V8Icon, V8State } from "./V8Shell";
 import { V8Badges, V8BadgeExplainer, useSingleFlight, useV8Ui } from "./V8System";
 import { useApi } from "./connect/common";
 import { MembershipOffer } from "./connect/Membership";
+import { HighlightsRow } from "./connect/Stories";
 const openConnect = (view) => window.dispatchEvent(new CustomEvent("howdi:v8-open", { detail: { area: "connect", view: `p:${view}` } }));
 
 const HANDLE_RE = /^[a-z0-9._]{3,30}$/i;
@@ -107,6 +108,7 @@ export default function V8Profile({ apiBase, handle, getAuthHeaders, signedIn, i
                     {isMe ? <button type="button" className="v8-btn v8-btn-soft v8-btn-block" onClick={() => openConnect("creator")}><V8Icon name="crown" size={16} />Creator workspace</button> : null}
                   </div>
                 </div>
+                <HighlightsRow api={api} handle={p.public_username || handle} signedIn={signedIn} onRequireLogin={onRequireLogin} onOpenProfile={() => {}} />
                 <div className="v8-profile-offer"><MembershipOffer api={api} handle={handle} signedIn={signedIn} onRequireLogin={onRequireLogin} compact onNav={(v) => openConnect(v)} /></div>
                 <nav className="v8-tabs" aria-label="Profile content">
                   {[["posts", "Posts", (d.recent_posts || []).length], ["vibes", "Vibes", (d.vibes || []).length], ["articles", "Articles", (d.articles || []).length]].map(([id, label]) => (

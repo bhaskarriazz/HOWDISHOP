@@ -2,16 +2,18 @@
 // Video / Photo, media pick + preview + cover, caption (2,200), hashtags as categories, audience, optional linked item
 // (Product · Course · Community · Profile), captions switch, remix of an existing Vibe, save draft (text only, this device),
 // upload progress, too-large / unsupported / failed-upload retry, published → open the new Vibe.
+// Slice 2: record in the app and trim (VibeCapture), rights declaration — held for a rights check when needed.
 import { useEffect, useRef, useState } from "react";
 import { V8Icon } from "../V8Shell";
 import { useV8Ui } from "../V8System";
-import { Sheet, readFileAsDataUrl, safeImg } from "./common";
+import { Sheet, readFileAsDataUrl, safeImg, RightsField } from "./common";
+import { RecordSheet, TrimSheet } from "./VibeCapture";
 
 const DRAFT_KEY = "howdi.v8.vibeDraft";
 const AUD = [{ v: "public", l: "Public", s: "Anyone on HOWDI" }, { v: "followers", l: "Followers", s: "Only people who follow you" }, { v: "private", l: "Only me", s: "Private — only you" }];
 const LIMITS = { video: 20 * 1024 * 1024, image: 5 * 1024 * 1024 };
 
-export default function VibeCreate({ api, apiBase, getAuthHeaders, user, remixOf, onDone, onCancel }) {
+export default function VibeCreate({ api, apiBase, getAuthHeaders, user, remixOf, onDone, onCancel, onNav }) {
   const ui = useV8Ui();
   const [kind, setKind] = useState("video");
   const [file, setFile] = useState(null); // {data, type, name, size}
@@ -21,6 +23,7 @@ export default function VibeCreate({ api, apiBase, getAuthHeaders, user, remixOf
   const [aud, setAud] = useState("public");
   const [captions, setCaptions] = useState(true);
   const [link, setLink] = useState(null);
+  const [rights, setRights] = useState({ rights: "original", rights_note: "" });
   const [sheet, setSheet] = useState("");
   const [state, setState] = useState({ phase: "edit", progress: 0, error: "" });
   const [remix, setRemix] = useState(null);
@@ -51,8 +54,9 @@ export default function VibeCreate({ api, apiBase, getAuthHeaders, user, remixOf
   const saveDraft = () => { try { localStorage.setItem(DRAFT_KEY, JSON.stringify({ caption, picked, aud, captions })); ui?.toast({ title: "Draft saved on this device", message: "Your caption and settings are saved. Add the video again when you’re ready." }); } catch { ui?.toast({ kind: "error", title: "Couldn’t save draft" }); } };
   const post = () => {
     if (!file) { setState({ phase: "edit", progress: 0, error: "Add a video or photo first." }); return; }
+    if (rights.rights === "licensed" && rights.rights_note.trim().length < 6) { setState({ phase: "edit", progress: 0, error: "Say where the licence or permission comes from." }); return; }
     setState({ phase: "uploading", progress: 0, error: "" });
-    const body = JSON.stringify({ caption, audience: aud, mediaData: file.data, coverData: cover ? cover.data : undefined, categories: picked, captions, link: link || undefined, remixOf: remix && remix !== "gone" ? remix.public_key : undefined });
+    const body = JSON.stringify({ caption, audience: aud, mediaData: file.data, coverData: cover ? cover.data : undefined, categories: picked, captions, link: link || undefined, remixOf: remix && remix !== "gone" ? remix.public_key : undefined, rights: rights.rights, rights_note: rights.rights_note });
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `${String(apiBase || "").replace(/\/+$/, "")}/api/v8/vibes`);
     xhr.setRequestHeader("Content-Type", "application/json"); xhr.setRequestHeader("Accept", "application/json");
@@ -63,6 +67,7 @@ export default function VibeCreate({ api, apiBase, getAuthHeaders, user, remixOf
       let json = {}; try { json = JSON.parse(xhr.responseText || "{}"); } catch { /* ignore */ }
       if (xhr.status >= 200 && xhr.status < 300 && json.vibe) {
         try { localStorage.removeItem(DRAFT_KEY); } catch { /* ignore */ }
+        if (json.rights_review) { setState({ phase: "held", progress: 100, error: "", message: json.rights_review.message }); return; }
         setState({ phase: "done", progress: 100, error: "" });
         ui?.toast({ title: "Your Vibe is live!", message: aud === "public" ? "Everyone on HOWDI can see it." : aud === "followers" ? "Your followers can see it." : "Only you can see it." });
         window.setTimeout(() => onDone(json.vibe.public_key), 600);
@@ -93,17 +98,21 @@ export default function VibeCreate({ api, apiBase, getAuthHeaders, user, remixOf
               {file.type === "video" ? <video src={file.data} poster={cover ? cover.data : undefined} controls playsInline muted /> : <img src={file.data} alt="Selected photo" />}
               <div className="v8vc-preview-actions">
                 {file.type === "video" ? <button type="button" className="v8-btn" onClick={() => coverRef.current?.click()}><V8Icon name="image" size={16} />{cover ? "Change cover" : "Edit cover"}</button> : null}
+                {file.type === "video" ? <button type="button" className="v8-btn" onClick={() => setSheet("trim")}><V8Icon name="sliders" size={16} />{file.trimmed ? "Trim again" : "Trim"}</button> : null}
                 <button type="button" className="v8-btn" onClick={() => fileRef.current?.click()}><V8Icon name="refresh" size={16} />Replace</button>
                 <button type="button" className="v8-btn" onClick={() => { setFile(null); setCover(null); }}><V8Icon name="trash" size={16} />Remove</button>
               </div>
               <small className="v8c-muted">{file.name} · {(file.size / 1048576).toFixed(1)} MB</small>
             </div>
           ) : (
-            <button type="button" className="v8vc-drop" onClick={() => fileRef.current?.click()}>
-              <span><V8Icon name={kind === "video" ? "video" : "image"} size={34} /></span>
-              <b>{kind === "video" ? "Upload a video" : "Upload a photo"}</b>
-              <small>{kind === "video" ? "MP4, WebM or MOV · up to 20 MB · vertical 9:16 works best" : "JPG, PNG or WebP · up to 5 MB"}</small>
-            </button>
+            <div className="v8vc-start">
+              <button type="button" className="v8vc-drop" onClick={() => fileRef.current?.click()}>
+                <span><V8Icon name={kind === "video" ? "video" : "image"} size={34} /></span>
+                <b>{kind === "video" ? "Upload a video" : "Upload a photo"}</b>
+                <small>{kind === "video" ? "MP4, WebM or MOV · up to 20 MB · vertical 9:16 works best" : "JPG, PNG or WebP · up to 5 MB"}</small>
+              </button>
+              {kind === "video" ? <button type="button" className="v8-btn v8-btn-soft v8-btn-block" onClick={() => setSheet("record")}><V8Icon name="camera" size={18} />Record in HOWDI</button> : null}
+            </div>
           )}
         </section>
         <section className="v8vc-form">
@@ -116,16 +125,19 @@ export default function VibeCreate({ api, apiBase, getAuthHeaders, user, remixOf
           <button type="button" className="v8c-row" onClick={() => setSheet("aud")}><span className="v8c-row-ico"><V8Icon name="globe" size={20} /></span><span className="v8c-row-text"><b>Audience</b><small>{AUD.find((a) => a.v === aud).l}</small></span><V8Icon name="chevr" size={18} /></button>
           <button type="button" className="v8c-row" onClick={() => setSheet("link")}><span className="v8c-row-ico"><V8Icon name="link" size={20} /></span><span className="v8c-row-text"><b>Add linked item (optional)</b><small>{link ? `${link.kindLabel}: ${link.label}` : "Product, course, community or profile"}</small></span>{link ? <button type="button" className="v8-link" onClick={(e) => { e.stopPropagation(); setLink(null); }}>Remove</button> : <V8Icon name="chevr" size={18} />}</button>
           <label className="v8c-switch-row"><span><b>Add captions</b><small>Show captions to viewers when available</small></span><input type="checkbox" role="switch" checked={captions} onChange={(e) => setCaptions(e.target.checked)} /></label>
-          <p className="v8c-muted v8vc-rights"><V8Icon name="shield" size={14} /> Only post videos, music and photos you have the rights to use. Vibes that break copyright or Community Guidelines can be removed.</p>
+          <RightsField value={rights.rights} note={rights.rights_note} onChange={(k, v) => setRights((x) => ({ ...x, [k]: v }))} />
           {state.error ? <div className="v8c-err-box" role="alert"><V8Icon name="alert" size={18} /><span>{state.error}</span>{state.phase === "failed" ? <button type="button" className="v8-btn v8-btn-soft" onClick={post}>Retry</button> : null}</div> : null}
           {state.phase === "uploading" ? <div className="v8c-upload" role="status"><span>Uploading… {state.progress}%</span><div className="v8c-progress"><i style={{ width: `${state.progress}%` }} /></div></div> : null}
           {state.phase === "done" ? <div className="v8c-ok-box" role="status"><V8Icon name="check" size={18} />Posted! Opening your Vibe…</div> : null}
+          {state.phase === "held" ? <div className="v8c-warn-box" role="status"><V8Icon name="shield" size={18} /><span><b>Waiting for a rights check</b>{state.message}</span>{onNav ? <button type="button" className="v8-btn" onClick={() => onNav("creator?tab=safety")}>View status</button> : null}</div> : null}
           <div className="v8vc-actions">
             <button type="button" className="v8-btn" onClick={saveDraft} disabled={state.phase === "uploading"}>Save draft</button>
-            <button type="button" className="v8-btn v8-btn-primary" onClick={post} disabled={state.phase === "uploading" || state.phase === "done" || !file}>Post Vibe</button>
+            <button type="button" className="v8-btn v8-btn-primary" onClick={post} disabled={state.phase === "uploading" || state.phase === "done" || state.phase === "held" || !file}>Post Vibe</button>
           </div>
         </section>
       </div>
+      <RecordSheet open={sheet === "record"} onClose={() => setSheet("")} onUse={(f) => { setFile(f); setKind("video"); setState({ phase: "edit", progress: 0, error: "" }); }} />
+      <TrimSheet open={sheet === "trim"} file={file} onClose={() => setSheet("")} onTrimmed={(f) => { setFile(f); ui?.toast({ title: "Video trimmed", message: f.name.replace(/\.webm$/, "") }); }} />
       <Sheet open={sheet === "aud"} title="Audience" onClose={() => setSheet("")}>
         {AUD.map((a) => <label key={a.v} className={`v8c-aud ${aud === a.v ? "on" : ""}`}><input type="radio" name="v8vc-aud" checked={aud === a.v} onChange={() => { setAud(a.v); setSheet(""); }} /><V8Icon name={a.v === "public" ? "globe" : a.v === "followers" ? "users" : "lock"} size={20} /><span><b>{a.l}</b><small>{a.s}</small></span></label>)}
       </Sheet>
