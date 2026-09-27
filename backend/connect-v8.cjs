@@ -64,7 +64,8 @@ function authorCols(uid, p) {
     COALESCE(NULLIF(${p}vp.display_name,''), NULLIF(${p}u.full_name,'')) AS ${p}a_name,
     COALESCE(NULLIF(${p}cp.profile_image,''), NULLIF(${p}cp.avatar_data,''), NULLIF(${p}vp.avatar_url,'')) AS ${p}a_avatar,
     (COALESCE(${p}cp.identity_verified,FALSE) OR LOWER(COALESCE(${p}vp.verified_status,''))='verified') AS ${p}a_verified,
-    (COALESCE(${p}cp.creator_mode,FALSE) AND EXISTS(SELECT 1 FROM howdi_connect_creator_plans ${p}pl WHERE ${p}pl.creator_user_id=${p}u.id AND ${p}pl.is_active=TRUE AND COALESCE(${p}pl.price,0)>0)) AS ${p}a_premium,
+    (COALESCE(${p}cp.creator_mode,FALSE) AND (EXISTS(SELECT 1 FROM howdi_connect_creator_plans ${p}pl WHERE ${p}pl.creator_user_id=${p}u.id AND ${p}pl.is_active=TRUE AND COALESCE(${p}pl.price,0)>0)
+      OR EXISTS(SELECT 1 FROM howdi_connect_subscription_plans ${p}sp WHERE ${p}sp.creator_user_id=${p}u.id AND ${p}sp.is_active=TRUE AND ${p}sp.price_monthly>0))) AS ${p}a_premium,
     (COALESCE(${p}u.is_active,TRUE) AND UPPER(COALESCE(${p}u.account_status,'ACTIVE'))='ACTIVE' AND COALESCE(${p}cp.discoverable,TRUE)) AS ${p}a_ok`;
 }
 function authorJoins(uid, p) {
@@ -106,6 +107,46 @@ function createConnectV8(deps) {
     await pool.query(`CREATE TABLE IF NOT EXISTS howdi_v8_vibe_links(
       vibe_id UUID PRIMARY KEY, link_kind VARCHAR(16) NOT NULL, link_label VARCHAR(120) NOT NULL, link_sub VARCHAR(120),
       link_route VARCHAR(200) NOT NULL, captions BOOLEAN NOT NULL DEFAULT TRUE, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
+    // V8 post kinds (post · hype · tip), members-only teaser, alt text, tip steps and related links
+    await pool.query(`CREATE TABLE IF NOT EXISTS howdi_v8_post_meta(post_id BIGINT PRIMARY KEY, kind VARCHAR(8) NOT NULL DEFAULT 'post', title VARCHAR(140), hype_type VARCHAR(16), disclosure VARCHAR(16),
+      category VARCHAR(24), steps JSONB NOT NULL DEFAULT '[]'::jsonb, related JSONB NOT NULL DEFAULT '[]'::jsonb, alts JSONB NOT NULL DEFAULT '[]'::jsonb, tags JSONB NOT NULL DEFAULT '[]'::jsonb,
+      teaser VARCHAR(200), created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
+    await pool.query(`ALTER TABLE howdi_community_comments ADD COLUMN IF NOT EXISTS parent_comment_id BIGINT`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS howdi_v8_ask_feedback(id BIGSERIAL PRIMARY KEY, question_hash VARCHAR(32) NOT NULL, helpful BOOLEAN NOT NULL, signed_in BOOLEAN NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS howdi_v8_idem(user_id BIGINT NOT NULL, idem_key VARCHAR(64) NOT NULL, scope VARCHAR(24) NOT NULL, response JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY(user_id, scope, idem_key))`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS howdi_v8_comment_holds(id BIGSERIAL PRIMARY KEY, creator_user_id BIGINT NOT NULL, kind VARCHAR(8) NOT NULL, comment_key VARCHAR(64) NOT NULL, matched VARCHAR(60),
+      status VARCHAR(10) NOT NULL DEFAULT 'HELD', decided_at TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), UNIQUE(kind, comment_key))`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS howdi_v8_creator_safety(user_id BIGINT PRIMARY KEY, muted_words JSONB NOT NULL DEFAULT '[]'::jsonb, blocked_phrases JSONB NOT NULL DEFAULT '[]'::jsonb,
+      mentions VARCHAR(12) NOT NULL DEFAULT 'everyone', sensitive_default BOOLEAN NOT NULL DEFAULT FALSE, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
+  }
+  // late-bound hooks from sibling modules (notifications live in the community module)
+  const hooks = { notify: async () => {} };
+  // A comment containing one of the creator's blocked phrases / muted words is HELD: visible only to its author and the creator.
+  async function screenComment(creatorId, kind, commentKey, body) {
+    const s = (await pool.query(`SELECT blocked_phrases, muted_words FROM howdi_v8_creator_safety WHERE user_id=$1`, [creatorId])).rows[0];
+    if (!s) return null;
+    const words = []; for (const l of [s.blocked_phrases, s.muted_words]) if (Array.isArray(l)) for (const w of l) if (typeof w === 'string' && w.length >= 2) words.push(w.toLowerCase());
+    const low = String(body || '').toLowerCase(); const hit = words.find((w) => low.includes(w));
+    if (!hit) return null;
+    await pool.query(`INSERT INTO howdi_v8_comment_holds(creator_user_id,kind,comment_key,matched) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, [creatorId, kind, String(commentKey), hit.slice(0, 60)]);
+    return hit;
+  }
+  const holdHidden = (kind, keyExpr, authorExpr, creatorExpr) => `NOT EXISTS(SELECT 1 FROM howdi_v8_comment_holds hh WHERE hh.kind='${kind}' AND hh.comment_key=(${keyExpr})::text
+      AND (hh.status='REMOVED' OR (hh.status='HELD' AND $1::bigint<>${authorExpr} AND $1::bigint<>${creatorExpr})))`;
+  // @mentions: notify each mentioned member whose mention setting allows it (everyone · following · members · nobody)
+  async function mentionNotify(actorId, textBody, route, what) {
+    const hs = [...new Set((String(textBody || '').match(/@([a-z0-9._]{3,30})/gi) || []).map((x) => x.slice(1).toLowerCase()))].slice(0, 5);
+    const me = (await pool.query(`SELECT public_username FROM howdi_connect_profiles WHERE user_id=$1`, [actorId])).rows[0];
+    for (const h of hs) {
+      const uid = await userIdByHandle(h); if (!uid || uid === actorId) continue;
+      const pol = (await pool.query(`SELECT mentions FROM howdi_v8_creator_safety WHERE user_id=$1`, [uid])).rows[0];
+      const mode = pol ? pol.mentions : 'everyone';
+      if (mode === 'nobody') continue;
+      if (mode === 'following' && !(await pool.query(`SELECT 1 FROM howdi_connect_follows WHERE follower_user_id=$1 AND following_user_id=$2`, [uid, actorId])).rowCount) continue;
+      if (mode === 'members' && !(await pool.query(`SELECT 1 FROM howdi_connect_subscriptions WHERE creator_user_id=$1 AND subscriber_user_id=$2 AND status='ACTIVE'`, [uid, actorId])).rowCount) continue;
+      if ((await pool.query(`SELECT ${blockedSql('$1::bigint', '$2::bigint')} b`, [uid, actorId])).rows[0].b) continue;
+      await hooks.notify(uid, 'MENTION', `@${me ? me.public_username : 'someone'} mentioned you in a ${what}`, oneLine(textBody, 120), route, actorId);
+    }
   }
 
   // ---------------------------------------------------------------- helpers
@@ -241,10 +282,11 @@ function createConnectV8(deps) {
     const refs = await issue('VIBE', rows.map((r) => r.vkey));
     return rows.map((r) => vibeDto(r, refs.get(String(r.vkey)))).filter((x) => x && x.public_key);
   }
+  function likeTerms(q) { return String(q || '').normalize('NFKC').toLowerCase().replace(/[\u0000-\u001f]/g, ' ').split(/\s+/).filter((w) => w.length >= 2).slice(0, 6).map((w) => '%' + w.replace(/[\\%_]/g, (c) => '\\' + c) + '%'); }
   function seal(obj) { return Buffer.from(JSON.stringify(obj)).toString('base64url'); }
   function unseal(s) { try { const o = JSON.parse(Buffer.from(String(s || ''), 'base64url').toString()); return o && typeof o === 'object' ? o : null; } catch { return null; } }
 
-  async function vibeFeed(vid, { tab, category, cursor, limit }) {
+  async function vibeFeed(vid, { tab, category, cursor, limit, q }) {
     const params = [vid];
     const where = [VIBE_VISIBLE];
     if (tab === 'following') {
@@ -255,6 +297,7 @@ function createConnectV8(deps) {
     if (tab === 'learn') where.push('v.is_learning_vibe=TRUE');
     if (vid) where.push(`NOT EXISTS(SELECT 1 FROM vibe_not_interested ni WHERE ni.user_id=$1::text AND (ni.vibe_id=v.id OR (ni.vibe_id IS NULL AND ni.creator_user_id=v.creator_user_id)))`);
     if (category) { params.push(category); where.push(`EXISTS(SELECT 1 FROM vibe_category_map cm JOIN vibe_categories c ON c.id=cm.category_id WHERE cm.vibe_id=v.id AND c.slug=$${params.length})`); }
+    if (q) { params.push(likeTerms(q)); where.push(`NOT EXISTS(SELECT 1 FROM unnest($${params.length}::text[]) t(p) WHERE NOT (v.caption ILIKE t.p ESCAPE '\\'))`); }
     const off = Math.max(0, Math.min(400, Number((unseal(cursor) || {}).o) || 0));
     params.push(limit + 1, off);
     const order = tab === 'explore'
@@ -280,17 +323,19 @@ function createConnectV8(deps) {
     return rows.map((r) => {
       const author = authorDto(r, 'a_'); const code = refs.get(String(r.ckey));
       if (!author || !code) return null;
-      return { public_key: code, text: text(r.comment_text, 1000), author, created_at: iso(r.created_at), likes: count(r.likes), reply_to: r.parent_code || null, mine: vid > 0 && Number(r.owner_id) === vid, by_creator: r.by_creator === true };
+      return { public_key: code, text: text(r.comment_text, 1000), author, created_at: iso(r.created_at), likes: count(r.likes), reply_to: r.parent_code || null, mine: vid > 0 && Number(r.owner_id) === vid, by_creator: r.by_creator === true, held: r.held === true };
     }).filter(Boolean);
   }
   const COMMENT_SQL = `SELECT c.id::text ckey, c.comment_text, c.created_at, a_u.id AS owner_id,
       (SELECT COUNT(*) FROM vibe_comment_likes cl WHERE cl.comment_id=c.id) likes, (c.user_id=v.creator_user_id) by_creator,
       (SELECT r.public_code FROM howdi_v8_refs r WHERE r.entity_type='VCOMMENT' AND r.entity_key=c.parent_comment_id::text) parent_code,
+      EXISTS(SELECT 1 FROM howdi_v8_comment_holds hh WHERE hh.kind='vibe' AND hh.comment_key=c.id::text AND hh.status='HELD') held,
       ${authorCols('a_u.id', 'a_')}
     FROM vibe_comments c JOIN vibes v ON v.id=c.vibe_id
     ${authorJoins("CASE WHEN c.user_id ~ '^[0-9]{1,18}$' THEN c.user_id::bigint END", 'a_')}
     WHERE c.vibe_id=$2::uuid AND COALESCE(c.status,'visible') NOT IN ('deleted','hidden','removed') AND a_u.id IS NOT NULL
-      AND (a_u.id=$1::bigint OR NOT (${blockedSql('$1::bigint', 'a_u.id')}))`;
+      AND (a_u.id=$1::bigint OR NOT (${blockedSql('$1::bigint', 'a_u.id')}))
+      AND ${holdHidden('vibe', 'c.id', 'a_u.id', "(CASE WHEN v.creator_user_id ~ '^[0-9]{1,18}$' THEN v.creator_user_id::bigint END)")}`;
 
   async function createVibe(req, res, v) {
     if (limited(res, `v8-vibe-create:${v.id}`, 12, 60 * 60 * 1000)) return;
@@ -434,7 +479,12 @@ function createConnectV8(deps) {
 
 
   // ---------------------------------------------------------------- CONNECT POSTS (hub feed, composer, actions)
+  const MEMBER_OK = `(a_u.id=$1::bigint OR EXISTS(SELECT 1 FROM howdi_connect_subscriptions ms WHERE ms.creator_user_id=a_u.id AND ms.subscriber_user_id=$1::bigint AND ms.status='ACTIVE' AND (ms.current_period_end IS NULL OR ms.current_period_end>NOW()))
+      OR EXISTS(SELECT 1 FROM howdi_connect_creator_subscriptions cs WHERE cs.creator_user_id=a_u.id AND cs.subscriber_user_id=$1::bigint AND cs.status='ACTIVE' AND (cs.current_period_end IS NULL OR cs.current_period_end>NOW())))`;
   const POST_SELECT = `p.id::text pkey, a_u.id AS owner_id, p.content, p.media_data, p.media_type, p.media_gallery, p.created_at, p.audience_scope, p.allow_comments, p.post_type,
+      p.post_status, p.scheduled_for, (COALESCE(p.subscribers_only,FALSE) OR COALESCE(p.subscriber_only,FALSE)) members_only, ${MEMBER_OK} v_member,
+      pm.kind m_kind, pm.title m_title, pm.hype_type m_hype, pm.disclosure m_disclosure, pm.category m_category, pm.steps m_steps, pm.related m_related, pm.alts m_alts, pm.tags m_tags, pm.teaser m_teaser,
+      (SELECT sp.plan_name FROM howdi_connect_subscription_plans sp WHERE sp.creator_user_id=a_u.id AND sp.is_active=TRUE AND sp.price_monthly>0 ORDER BY sp.price_monthly LIMIT 1) m_tier,
       (SELECT COUNT(*) FROM howdi_community_reactions r WHERE r.post_id=p.id) reactions,
       (SELECT COUNT(*) FROM howdi_community_comments c WHERE c.post_id=p.id) comments,
       (SELECT COUNT(*) FROM howdi_connect_shares sh WHERE sh.post_id=p.id) shares,
@@ -442,14 +492,13 @@ function createConnectV8(deps) {
       ($1::bigint>0 AND EXISTS(SELECT 1 FROM howdi_connect_post_saves s WHERE s.post_id=p.id AND s.user_id=$1::bigint)) v_saved,
       ($1::bigint>0 AND a_u.id=$1::bigint) v_mine,
       ${authorCols('a_u.id', 'a_')}`;
-  const POST_FROM = `FROM howdi_community_posts p ${authorJoins('p.user_id', 'a_')}`;
+  const POST_FROM = `FROM howdi_community_posts p LEFT JOIN howdi_v8_post_meta pm ON pm.post_id=p.id ${authorJoins('p.user_id', 'a_')}`;
   const POST_VISIBLE = `COALESCE(p.post_type,'POST') NOT IN ('ARTICLE') AND a_u.id IS NOT NULL
-      AND (p.post_status='PUBLISHED' OR (p.post_status='SCHEDULED' AND p.scheduled_for<=NOW()) OR a_u.id=$1::bigint)
+      AND (p.post_status='PUBLISHED' OR (p.post_status='SCHEDULED' AND (p.scheduled_for<=NOW() OR a_u.id=$1::bigint)))
       AND (COALESCE(p.audience_scope,'EVERYONE')='EVERYONE' OR a_u.id=$1::bigint
         OR (p.audience_scope='FOLLOWERS' AND EXISTS(SELECT 1 FROM howdi_connect_follows f WHERE f.follower_user_id=$1::bigint AND f.following_user_id=a_u.id))
         OR (p.audience_scope='FRIENDS' AND EXISTS(SELECT 1 FROM howdi_connect_follows f WHERE f.follower_user_id=$1::bigint AND f.following_user_id=a_u.id) AND EXISTS(SELECT 1 FROM howdi_connect_follows f2 WHERE f2.follower_user_id=a_u.id AND f2.following_user_id=$1::bigint))
         OR (p.audience_scope='CLOSE_FRIENDS' AND EXISTS(SELECT 1 FROM howdi_connect_close_friends cf WHERE cf.user_id=a_u.id AND cf.friend_user_id=$1::bigint)))
-      AND (COALESCE(p.subscribers_only,FALSE)=FALSE OR a_u.id=$1::bigint OR EXISTS(SELECT 1 FROM howdi_connect_creator_subscriptions cs WHERE cs.creator_user_id=a_u.id AND cs.subscriber_user_id=$1::bigint AND cs.status='ACTIVE' AND (cs.current_period_end IS NULL OR cs.current_period_end>NOW())))
       AND (a_u.id=$1::bigint OR NOT (${blockedSql('$1::bigint', 'a_u.id')})) AND ${privateOkSql('a_u.id', '$1::bigint')}`;
   const AUDIENCE_OUT = { EVERYONE: 'everyone', FOLLOWERS: 'followers', FRIENDS: 'friends', CLOSE_FRIENDS: 'close_friends', ONLY_ME: 'only_me' };
   function postMedia(r) {
@@ -464,9 +513,25 @@ function createConnectV8(deps) {
     return rows.map((r) => {
       const a = authorDto(r, 'a_'); const code = refs.get(String(r.pkey));
       if (!a || !code) return null;
-      return { public_key: code, author: a, text: text(r.content, 5000), media: postMedia(r), audience: AUDIENCE_OUT[String(r.audience_scope || 'EVERYONE')] || 'everyone',
-        counts: { likes: count(r.reactions), comments: count(r.comments), shares: count(r.shares) }, allow_comments: r.allow_comments !== false,
-        viewer: { liked: r.v_liked === true, saved: r.v_saved === true, mine: r.v_mine === true }, published_at: iso(r.created_at), route: `/posts/${code}` };
+      const kind = ['hype', 'tip'].includes(r.m_kind) ? r.m_kind : 'post';
+      const locked = r.members_only === true && r.v_member !== true;
+      const arr = (x) => { let v = x; if (typeof v === 'string') { try { v = JSON.parse(v); } catch { v = []; } } return Array.isArray(v) ? v : []; };
+      const alts = arr(r.m_alts);
+      const media = locked ? [] : postMedia(r).map((mm, i) => ({ ...mm, alt: oneLine(alts[i], 200) || null }));
+      const scheduled = r.post_status === 'SCHEDULED' && r.scheduled_for && new Date(r.scheduled_for) > new Date();
+      const dto = { public_key: code, kind, author: a, text: locked ? '' : text(r.content, 5000), media, audience: AUDIENCE_OUT[String(r.audience_scope || 'EVERYONE')] || 'everyone',
+        counts: { likes: count(r.reactions), comments: count(r.comments), shares: count(r.shares) }, allow_comments: r.allow_comments !== false && !locked,
+        viewer: { liked: r.v_liked === true, saved: r.v_saved === true, mine: r.v_mine === true, member: r.v_member === true }, published_at: iso(scheduled ? r.scheduled_for : r.created_at),
+        members_only: r.members_only === true, locked, teaser: r.members_only ? oneLine(r.m_teaser, 200) || null : null, tier: r.members_only ? oneLine(r.m_tier, 60) || 'Members' : null,
+        scheduled: scheduled || false, tags: arr(r.m_tags).map((t) => oneLine(t, 30)).filter(Boolean).slice(0, 10),
+        route: kind === 'tip' ? `/connect/tips/${code}` : kind === 'hype' ? `/connect/hype/${code}` : `/connect/posts/${code}` };
+      if (kind === 'hype') { dto.hype_type = oneLine(r.m_hype, 20) || 'creator'; dto.disclosure = oneLine(r.m_disclosure, 20) || 'none'; }
+      if (kind === 'tip') {
+        dto.title = oneLine(r.m_title, 140) || oneLine(r.content, 80); dto.category = oneLine(r.m_category, 24) || 'crochet';
+        dto.steps = locked ? [] : arr(r.m_steps).slice(0, 12).map((st, i) => ({ n: i + 1, text: text(st && st.text, 400), image: st && mediaUrl(st.image, 1) })).filter((st) => st.text);
+        dto.related = arr(r.m_related).slice(0, 6).map((x) => x && typeof x === 'object' ? { kind: oneLine(x.kind, 12), title: oneLine(x.title, 80), sub: oneLine(x.sub, 80), image: mediaUrl(x.image, 1), route: /^\/(shop|learn|works|connect)\/[A-Za-z0-9/_@.-]{1,120}$/.test(String(x.route || '')) ? x.route : null } : null).filter((x) => x && x.route);
+      }
+      return dto;
     }).filter(Boolean);
   }
   async function postFeed(vid, cursor, limit) {
@@ -481,24 +546,138 @@ function createConnectV8(deps) {
     const row = (await pool.query(`SELECT ${POST_SELECT} ${POST_FROM} WHERE p.id=$2::bigint AND ${POST_VISIBLE}`, [vid || 0, r.entity_key])).rows[0];
     return row || null;
   }
-  const PCOMMENT_SQL = `SELECT c.id::text ckey, c.content AS comment_text, c.created_at, a_u.id AS owner_id, 0 likes, (c.user_id=p.user_id) by_creator, NULL parent_code, ${authorCols('a_u.id', 'a_')}
+  const PCOMMENT_SQL = `SELECT c.id::text ckey, c.content AS comment_text, c.created_at, a_u.id AS owner_id, 0 likes, (c.user_id=p.user_id) by_creator,
+      (SELECT r.public_code FROM howdi_v8_refs r WHERE r.entity_type='PCOMMENT' AND r.entity_key=c.parent_comment_id::text) parent_code,
+      EXISTS(SELECT 1 FROM howdi_v8_comment_holds hh WHERE hh.kind='post' AND hh.comment_key=c.id::text AND hh.status='HELD') held, ${authorCols('a_u.id', 'a_')}
     FROM howdi_community_comments c JOIN howdi_community_posts p ON p.id=c.post_id ${authorJoins('c.user_id', 'a_')}
-    WHERE c.post_id=$2::bigint AND a_u.id IS NOT NULL AND (a_u.id=$1::bigint OR NOT (${blockedSql('$1::bigint', 'a_u.id')}))`;
+    WHERE c.post_id=$2::bigint AND a_u.id IS NOT NULL AND (a_u.id=$1::bigint OR NOT (${blockedSql('$1::bigint', 'a_u.id')}))
+      AND ${holdHidden('post', 'c.id', 'c.user_id', 'p.user_id')}`;
+  // related-entity cards for Tips / Hype: resolved server-side from public keys only (never trusted from the client)
+  async function relatedCard(item) {
+    const kind = String(item && item.kind || ''); const code = String(item && item.code || '');
+    if (kind === 'product' && deps.resolveK5ARef && /^PRD-[0-9A-F]{12}$/.test(code)) {
+      const r = await deps.resolveK5ARef(code, ['PRODUCT']); if (!r) return null;
+      const x = (await pool.query(`SELECT p.name, p.price, p.image_urls FROM vendor_products p JOIN vendor_profiles vp ON vp.id=p.vendor_profile_id WHERE p.id=$1::bigint AND p.status='published' AND p.archived_at IS NULL`, [r.entity_key]).catch(() => ({ rows: [] }))).rows[0];
+      if (!x) return null; let im = x.image_urls; if (typeof im === 'string') { try { im = JSON.parse(im); } catch { im = [im]; } }
+      return { kind: 'product', title: oneLine(x.name, 80), sub: `Shop · ₹${Number(x.price || 0).toLocaleString('en-IN')}`, image: Array.isArray(im) ? mediaUrl(im[0], 1) : null, route: `/shop/products/${code}` };
+    }
+    if (kind === 'course' && deps.resolveK5ARef && /^CRS-[0-9A-F]{12}$/.test(code)) {
+      const r = await deps.resolveK5ARef(code, ['COURSE']); if (!r) return null;
+      const x = (await pool.query(`SELECT title, level FROM learning_courses WHERE id=$1::bigint AND is_active=TRUE AND UPPER(publish_status)='PUBLISHED'`, [r.entity_key]).catch(() => ({ rows: [] }))).rows[0];
+      return x ? { kind: 'course', title: oneLine(x.title, 80), sub: `Course · ${oneLine(x.level, 20) || 'All levels'}`, image: null, route: `/learn/courses/${code}` } : null;
+    }
+    if (kind === 'community' && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(code)) {
+      const x = (await pool.query(`SELECT name, member_count, space_type FROM howdi_connect_social_spaces WHERE slug=$1 AND COALESCE(is_archived,FALSE)=FALSE`, [code])).rows[0];
+      return x ? { kind: 'community', title: oneLine(x.name, 80), sub: `${x.space_type === 'CHANNEL' ? 'Channel' : 'Group'} · ${count(x.member_count)} members`, image: null, route: `/connect/communities/${code}` } : null;
+    }
+    if (kind === 'worker' && /^[A-Z0-9-]{4,40}$/.test(code)) {
+      const x = (await pool.query(`SELECT w.full_name, s.name svc FROM works_workers w LEFT JOIN works_worker_services ws ON ws.worker_id=w.id AND ws.is_primary=TRUE LEFT JOIN works_services s ON s.id=ws.service_id
+        WHERE w.worker_code=$1 AND LOWER(TRIM(w.kyc_status))='verified' AND LOWER(TRIM(w.account_status))='active'`, [code]).catch(() => ({ rows: [] }))).rows[0];
+      return x ? { kind: 'worker', title: oneLine(x.full_name, 80), sub: `Worker · ${oneLine(x.svc, 40) || 'Services'}`, image: null, route: `/works/workers/${code}` } : null;
+    }
+    if (kind === 'profile' && HANDLE_RE.test(code.replace(/^@/, '').toLowerCase())) {
+      const uid = await userIdByHandle(code); if (!uid) return null;
+      return { kind: 'profile', title: '@' + code.replace(/^@/, '').toLowerCase(), sub: 'Profile', image: null, route: `/connect/@${code.replace(/^@/, '').toLowerCase()}` };
+    }
+    return null;
+  }
+  const HYPE_TYPES = ['creator', 'community', 'live', 'vibe', 'trending'];
+  const DISCLOSURES = ['none', 'sponsored', 'affiliate', 'gifted'];
+  const TIP_CATEGORIES = ['crochet', 'tools', 'patterns', 'business', 'care', 'other'];
   async function createPost(req, res, v) {
     if (limited(res, `v8-post-create:${v.id}`, 20, 60 * 60 * 1000)) return;
     const body = (await getBody(req)) || {};
-    const t = text(body.text, 5000);
+    const idem = /^[A-Za-z0-9_-]{8,64}$/.test(String(body.idempotency_key || '')) ? String(body.idempotency_key) : null;
+    if (idem) {
+      const prior = (await pool.query(`SELECT response FROM howdi_v8_idem WHERE user_id=$1 AND scope='post' AND idem_key=$2`, [v.id, idem]).catch(() => ({ rows: [] }))).rows[0];
+      if (prior && prior.response && prior.response.pkey) {
+        const rows = (await pool.query(`SELECT ${POST_SELECT} ${POST_FROM} WHERE p.id=$2::bigint`, [v.id, prior.response.pkey])).rows;
+        return ok(res, { post: (await postDtos(rows))[0] || null, replayed: true }, 200);
+      }
+    }
+    const kind = ['post', 'hype', 'tip'].includes(body.kind) ? body.kind : 'post';
+    const t = text(body.text, kind === 'hype' ? 500 : 5000);
     const aud = { everyone: 'EVERYONE', followers: 'FOLLOWERS', friends: 'FRIENDS', close_friends: 'CLOSE_FRIENDS', only_me: 'ONLY_ME' }[String(body.audience || 'everyone')];
     if (!aud) return fail(res, 400, 'VALIDATION', 'Choose who can see this post.');
-    const media = Array.isArray(body.media) ? body.media.slice(0, 4) : [];
+    const media = Array.isArray(body.media) ? body.media.slice(0, kind === 'post' ? 4 : 4) : [];
     if (!t && !media.length) return fail(res, 400, 'VALIDATION', 'Write something or add a photo.');
+    const title = oneLine(body.title, 140);
+    if (kind === 'tip' && title.length < 4) return fail(res, 400, 'VALIDATION', 'Give your Tip a short title.');
+    const steps = kind === 'tip' ? (Array.isArray(body.steps) ? body.steps : []).slice(0, 12) : [];
+    if (kind === 'tip' && !steps.some((x) => text(x && x.text, 400))) return fail(res, 400, 'VALIDATION', 'Add at least one step.');
+    const hype = kind === 'hype' ? (HYPE_TYPES.includes(body.hype_type) ? body.hype_type : null) : null;
+    if (kind === 'hype' && !hype) return fail(res, 400, 'VALIDATION', 'Choose what kind of Hype this is.');
+    const disclosure = DISCLOSURES.includes(body.disclosure) ? body.disclosure : 'none';
+    const category = kind === 'tip' ? (TIP_CATEGORIES.includes(body.category) ? body.category : null) : null;
+    if (kind === 'tip' && !category) return fail(res, 400, 'VALIDATION', 'Choose a Tip category.');
+    const membersOnly = body.members_only === true;
+    if (membersOnly && !(await pool.query(`SELECT 1 FROM howdi_connect_subscription_plans WHERE creator_user_id=$1 AND is_active=TRUE AND price_monthly>0`, [v.id])).rowCount)
+      return fail(res, 400, 'NO_TIER', 'Create a paid membership tier before posting members-only content.');
+    let sched = null;
+    if (body.schedule_at) { const d = new Date(body.schedule_at); if (!Number.isFinite(d.getTime()) || d.getTime() < Date.now() + 5 * 60000 || d.getTime() > Date.now() + 90 * 86400000) return fail(res, 400, 'VALIDATION', 'Schedule between 5 minutes and 90 days from now.'); sched = d; }
     const saved = [];
-    try { for (const m of media) saved.push(saveMedia(m, { maxImage: 5 * 1024 * 1024, maxVideo: 20 * 1024 * 1024 })); } catch (e) { return fail(res, 400, e.code || 'MEDIA_INVALID', e.message); }
+    try { for (const m of media) saved.push(saveMedia(m && typeof m === 'object' ? m.data : m, { maxImage: 5 * 1024 * 1024, maxVideo: 20 * 1024 * 1024 })); } catch (e) { return fail(res, 400, e.code || 'MEDIA_INVALID', e.message); }
+    const alts = media.map((m) => oneLine(m && typeof m === 'object' ? m.alt : '', 200));
+    const stepOut = [];
+    try { for (const st of steps) { const tx = text(st && st.text, 400); if (!tx) continue; const im = st && st.image ? saveMedia(st.image, { videos: false, maxImage: 5 * 1024 * 1024 }) : null; stepOut.push({ text: tx, image: im ? im.url : null }); } } catch (e) { return fail(res, 400, e.code || 'MEDIA_INVALID', e.message); }
+    const related = [];
+    for (const it of (Array.isArray(body.related) ? body.related : []).slice(0, 4)) { const c = await relatedCard(it); if (c) related.push(c); else return fail(res, 400, 'LINK_INVALID', 'One of the linked items isn’t available.'); }
+    const tags = [...new Set([...(t.match(/#([\p{L}\p{N}_]{2,30})/gu) || []).map((x) => x.slice(1).toLowerCase()), ...(Array.isArray(body.tags) ? body.tags : []).map((x) => oneLine(x, 30).replace(/^#/, '').toLowerCase())].filter(Boolean))].slice(0, 10);
     const gallery = saved.map((m) => ({ url: m.url, type: m.type }));
-    const key = (await pool.query(`INSERT INTO howdi_community_posts(user_id,content,category,visibility,post_type,post_status,audience_scope,allow_comments,media_gallery,media_type,created_at,updated_at)
-      VALUES($1,$2,'GENERAL','PUBLIC','POST','PUBLISHED',$3,TRUE,$4::jsonb,$5,NOW(),NOW()) RETURNING id::text`, [v.id, t, aud, JSON.stringify(gallery), saved[0] ? saved[0].type : null])).rows[0].id;
+    const client = await pool.connect(); let key;
+    try {
+      await client.query('BEGIN');
+      key = (await client.query(`INSERT INTO howdi_community_posts(user_id,content,category,visibility,post_type,post_status,audience_scope,allow_comments,media_gallery,media_type,subscribers_only,article_excerpt,scheduled_for,created_at,updated_at)
+        VALUES($1,$2,'GENERAL','PUBLIC',$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11,NOW(),NOW()) RETURNING id::text`,
+        [v.id, t, kind.toUpperCase(), sched ? 'SCHEDULED' : 'PUBLISHED', aud, body.allow_comments !== false, JSON.stringify(gallery), saved[0] ? saved[0].type : null, membersOnly, membersOnly ? oneLine(body.teaser, 200) : '', sched])).rows[0].id;
+      if (idem) await client.query(`INSERT INTO howdi_v8_idem(user_id,idem_key,scope,response) VALUES($1,$2,'post',$3::jsonb) ON CONFLICT DO NOTHING`, [v.id, idem, JSON.stringify({ pkey: key })]);
+      await client.query(`INSERT INTO howdi_v8_post_meta(post_id,kind,title,hype_type,disclosure,category,steps,related,alts,tags,teaser) VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10::jsonb,$11)`,
+        [key, kind, title || null, hype, disclosure, category, JSON.stringify(stepOut), JSON.stringify(related), JSON.stringify(alts), JSON.stringify(tags), membersOnly ? oneLine(body.teaser, 200) || null : null]);
+      await client.query('COMMIT');
+    } catch (e) { await client.query('ROLLBACK').catch(() => {}); throw e; } finally { client.release(); }
+    if (body.draft && /^DRF-[0-9A-F]{12}$/.test(String(body.draft))) await pool.query(`DELETE FROM howdi_v8_drafts d USING howdi_v8_refs3 r WHERE r.public_code=$1 AND r.entity_type='DRAFT' AND d.id=r.entity_key::bigint AND d.user_id=$2`, [body.draft, v.id]).catch(() => {});
     const rows = (await pool.query(`SELECT ${POST_SELECT} ${POST_FROM} WHERE p.id=$2::bigint`, [v.id, key])).rows;
-    ok(res, { post: (await postDtos(rows))[0] || null }, 201);
+    const dto = (await postDtos(rows))[0] || null;
+    if (dto && !sched) await mentionNotify(v.id, t, dto.route, kind === 'post' ? 'post' : kind === 'hype' ? 'Hype' : 'Tip');
+    ok(res, { post: dto }, 201);
+  }
+  // Hype / Tips feeds (post kinds). Trending = engagement in the last 14 days.
+  async function kindFeed(vid, kind, { chip, category, tab, cursor, limit }) {
+    const off = Math.max(0, Math.min(500, Number((unseal(cursor) || {}).o) || 0));
+    const args = [vid || 0, limit + 1, off, kind];
+    let extra = '';
+    if (kind === 'hype' && chip && chip !== 'trending' && HYPE_TYPES.includes(chip)) { args.push(chip); extra += ` AND pm.hype_type=$${args.length}`; }
+    if (kind === 'tip' && category && TIP_CATEGORIES.includes(category)) { args.push(category); extra += ` AND pm.category=$${args.length}`; }
+    if (tab === 'following') extra += ` AND EXISTS(SELECT 1 FROM howdi_connect_follows ff WHERE ff.follower_user_id=$1::bigint AND ff.following_user_id=a_u.id)`;
+    const order = kind === 'hype' && (!chip || chip === 'trending') ? `((SELECT COUNT(*) FROM howdi_community_reactions r WHERE r.post_id=p.id)*2 + (SELECT COUNT(*) FROM howdi_community_comments c WHERE c.post_id=p.id)*3) / (1 + EXTRACT(EPOCH FROM (NOW()-p.created_at))/86400.0) DESC, p.created_at DESC` : 'p.created_at DESC, p.id DESC';
+    const rows = (await pool.query(`SELECT ${POST_SELECT} ${POST_FROM} WHERE pm.kind=$4 AND p.post_status<>'DELETED' AND ${POST_VISIBLE} ${extra} ORDER BY ${order} LIMIT $2 OFFSET $3`, args)).rows;
+    return { items: await postDtos(rows.slice(0, limit)), next_cursor: rows.length > limit ? seal({ o: off + limit }) : null };
+  }
+
+  // Ask HOWDI (Preview/Test): no AI provider is connected. Answers are retrieved from public HOWDI Tips (steps) and
+  // Articles, and always cite their source. Unsafe questions get a safe refusal; nothing is sent outside HOWDI.
+  const UNSAFE = /\b(suicide|kill (myself|yourself)|self[- ]?harm|bomb|weapon|explosive|poison|hack (into|someone)|steal)\b/i;
+  const STOP = new Set(['how', 'do', 'i', 'a', 'an', 'the', 'to', 'what', 'is', 'are', 'can', 'my', 'for', 'of', 'and', 'in', 'on', 'with', 'you', 'me', 'it', 'start', 'make', 'best', 'way', 'should', 'does']);
+  async function askHowdi(vid, q) {
+    if (UNSAFE.test(q)) return { kind: 'refusal', question: q, answer: { intro: 'I can’t help with that here. If you or someone else is in danger, please contact local emergency services or a trusted person right away.', steps: [] }, sources: [], preview: true };
+    const words = [...new Set(q.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/).filter((w) => w.length >= 3 && !STOP.has(w)))].slice(0, 6);
+    if (!words.length) return { kind: 'none', question: q, answer: null, sources: [], preview: true };
+    const pats = words.map((w) => '%' + w.replace(/[\\%_]/g, (c) => '\\' + c) + '%');
+    const score = `(SELECT COUNT(*) FROM unnest($2::text[]) t(p) WHERE (COALESCE(pm.title,'') || ' ' || p.content || ' ' || COALESCE(p.article_title,'') || ' ' || COALESCE(pm.steps::text,'')) ILIKE t.p ESCAPE '\\')`;
+    const rows = (await pool.query(`SELECT ${POST_SELECT}, ${score} score, p.article_title, p.article_excerpt FROM howdi_community_posts p LEFT JOIN howdi_v8_post_meta pm ON pm.post_id=p.id ${authorJoins('p.user_id', 'a_')}
+      WHERE (pm.kind='tip' OR p.post_type='ARTICLE') AND p.post_status='PUBLISHED' AND COALESCE(p.audience_scope,'EVERYONE')='EVERYONE' AND NOT (COALESCE(p.subscribers_only,FALSE)) AND a_u.id IS NOT NULL
+        AND (a_u.id=$1::bigint OR NOT (${blockedSql('$1::bigint', 'a_u.id')})) AND ${score}>0 ORDER BY score DESC, p.created_at DESC LIMIT 4`, [vid || 0, pats])).rows;
+    if (!rows.length || Number(rows[0].score) < Math.min(2, words.length)) return { kind: 'none', question: q, answer: null, sources: [], suggestions: words.slice(0, 3), preview: true };
+    const best = rows[0];
+    const isTip = best.m_kind === 'tip';
+    let steps = [];
+    if (isTip) { let st = best.m_steps; if (typeof st === 'string') { try { st = JSON.parse(st); } catch { st = []; } } steps = (Array.isArray(st) ? st : []).slice(0, 8).map((x) => oneLine(x && x.text, 200)).filter(Boolean); }
+    else steps = text(best.content, 4000).split(/\n+|(?<=\.)\s+/).map((x) => oneLine(x, 200)).filter((x) => x.length > 20).slice(0, 5);
+    const artRefs = k5aIssue ? await k5aIssue('ARTICLE', rows.filter((r) => r.post_type === 'ARTICLE').map((r) => r.pkey)) : new Map();
+    const postRefs = k5aIssue ? await k5aIssue('POST', rows.filter((r) => r.post_type !== 'ARTICLE').map((r) => r.pkey)) : new Map();
+    const sources = rows.map((r) => { const art = r.post_type === 'ARTICLE'; const c = (art ? artRefs : postRefs).get(String(r.pkey)); const a = authorDto(r, 'a_');
+      return c && a ? { kind: art ? 'article' : 'tip', title: oneLine(art ? r.article_title : (r.m_title || r.content), 100), author: a, route: art ? `/connect/articles/${c}` : `/connect/tips/${c}` } : null; }).filter(Boolean);
+    return { kind: 'answer', question: q, answer: { intro: `Here’s what HOWDI creators suggest${sources[0] ? `, from “${sources[0].title}”` : ''}:`, steps }, sources, preview: true };
   }
 
   // ---------------------------------------------------------------- router
@@ -534,6 +713,44 @@ function createConnectV8(deps) {
         ok(res, await postFeed(vid, url.searchParams.get('cursor'), limit));
         return true;
       }
+      if ((p === '/api/v8/hype' || p === '/api/v8/tips') && req.method === 'GET') {
+        const v = await viewer(req); const vid = v ? v.id : 0;
+        if (limited(res, `v8-kfeed:${vid || clientIp(req)}`, 120, 60000)) return true;
+        const limit = Math.max(1, Math.min(24, Number(url.searchParams.get('limit')) || 12));
+        ok(res, await kindFeed(vid, p.endsWith('hype') ? 'hype' : 'tip', { chip: url.searchParams.get('chip'), category: url.searchParams.get('category'), tab: url.searchParams.get('tab'), cursor: url.searchParams.get('cursor'), limit }));
+        return true;
+      }
+      if (p === '/api/v8/explore/creators' && req.method === 'GET') {
+        const v = await viewer(req); const vid = v ? v.id : 0;
+        const rows = (await pool.query(`SELECT ${authorCols('a_u.id', 'a_')}, a_cp.headline, a_cp.professional_category,
+            (SELECT COUNT(*) FROM howdi_connect_follows f WHERE f.following_user_id=a_u.id) followers,
+            ($1::bigint>0 AND EXISTS(SELECT 1 FROM howdi_connect_follows f WHERE f.follower_user_id=$1::bigint AND f.following_user_id=a_u.id)) following
+          FROM howdi_connect_profiles x ${authorJoins('x.user_id', 'a_')}
+          WHERE a_u.id<>$1::bigint AND COALESCE(x.discoverable,TRUE) AND COALESCE(x.private_profile,FALSE)=FALSE AND x.public_username IS NOT NULL
+            AND (COALESCE(x.creator_mode,FALSE) OR EXISTS(SELECT 1 FROM vibes vv WHERE vv.creator_user_id=x.user_id::text AND vv.status='published'))
+            AND NOT (${blockedSql('$1::bigint', 'a_u.id')}) ORDER BY followers DESC, x.public_username LIMIT 24`, [vid])).rows;
+        ok(res, { items: rows.map((r) => { const a = authorDto(r, 'a_'); return a && r.a_a_ok ? { author: a, headline: oneLine(r.headline || r.professional_category, 80), followers: count(r.followers), following: r.following === true } : null; }).filter(Boolean) });
+        return true;
+      }
+      if (p === '/api/v8/ask' && req.method === 'POST') {
+        const v = await viewer(req); const vid = v ? v.id : 0;
+        if (limited(res, `v8-ask:${vid || clientIp(req)}`, 20, 60000)) return true;
+        const body = (await getBody(req)) || {}; const q = oneLine(body.question, 300);
+        if (q.length < 4) { fail(res, 400, 'VALIDATION', 'Ask a question with a few words.'); return true; }
+        ok(res, await askHowdi(vid, q)); return true;
+      }
+      if (p === '/api/v8/ask/feedback' && req.method === 'POST') {
+        const v = await viewer(req); const body = (await getBody(req)) || {};
+        const helpful = body.helpful === true; const qh = crypto.createHash('sha256').update(oneLine(body.question, 300).toLowerCase()).digest('hex').slice(0, 32);
+        await pool.query(`INSERT INTO howdi_v8_ask_feedback(question_hash,helpful,signed_in) VALUES($1,$2,$3)`, [qh, helpful, Boolean(v)]);
+        ok(res, { thanks: true }); return true;
+      }
+      if (p === '/api/v8/explore/trends' && req.method === 'GET') {
+        const rows = (await pool.query(`SELECT t tag, COUNT(*) n FROM (SELECT jsonb_array_elements_text(pm.tags) t FROM howdi_v8_post_meta pm JOIN howdi_community_posts p ON p.id=pm.post_id WHERE p.post_status='PUBLISHED' AND p.created_at>NOW()-interval '30 days' AND COALESCE(p.audience_scope,'EVERYONE')='EVERYONE'
+            UNION ALL SELECT lower(m[1]) FROM vibes v, regexp_matches(v.caption, '#([A-Za-z0-9_]{2,30})', 'g') m WHERE v.status='published' AND v.visibility='public' AND v.deleted_at IS NULL) x GROUP BY t ORDER BY n DESC, t LIMIT 12`)).rows;
+        ok(res, { trends: rows.map((r) => ({ tag: oneLine(r.tag, 30), count: count(r.n) })).filter((r) => /^[\p{L}\p{N}_]{2,30}$/u.test(r.tag)) });
+        return true;
+      }
       if (p === '/api/v8/posts' && req.method === 'POST') {
         const v = await viewer(req);
         if (!v) { fail(res, 401, 'SIGN_IN_REQUIRED', 'Sign in to post.'); return true; }
@@ -545,7 +762,9 @@ function createConnectV8(deps) {
         const row = await postKeyByCode(code, vid);
         if (!row) { fail(res, 404, 'NOT_FOUND', 'This post isn’t available.'); return true; }
         if (!action && req.method === 'GET') { ok(res, { post: (await postDtos([row]))[0] }); return true; }
+        const locked = row.members_only === true && row.v_member !== true;
         if (action === 'comments' && req.method === 'GET') {
+          if (locked) { fail(res, 403, 'MEMBERS_ONLY', 'Join the membership to see the conversation.'); return true; }
           const rows = (await pool.query(`${PCOMMENT_SQL} ORDER BY c.created_at ASC LIMIT 200`, [vid, row.pkey])).rows;
           ok(res, { allow_comments: row.allow_comments !== false, comments: (await commentDtosFor('PCOMMENT', rows, vid)) });
           return true;
@@ -570,13 +789,28 @@ function createConnectV8(deps) {
           ok(res, { shared: true, link: `/posts/${code}` }); return true;
         }
         if (action === 'comments' && req.method === 'POST') {
+          if (locked) { fail(res, 403, 'MEMBERS_ONLY', 'Join the membership to comment.'); return true; }
           if (row.allow_comments === false) { fail(res, 403, 'COMMENTS_OFF', 'Comments are turned off.'); return true; }
           if (limited(res, `v8-comment:${vid}`, 20, 60000)) return true;
           const body = (await getBody(req)) || {}; const t = text(body.text, 1000);
           if (!t) { fail(res, 400, 'VALIDATION', 'Write a comment first.'); return true; }
-          const ck = (await pool.query(`INSERT INTO howdi_community_comments(post_id,user_id,content) VALUES($1,$2,$3) RETURNING id::text`, [row.pkey, vid, t])).rows[0].id;
+          let parent = null;
+          if (body.replyTo) {
+            const pk = await resolve(String(body.replyTo), 'PCOMMENT');
+            parent = pk ? (await pool.query(`SELECT id FROM howdi_community_comments WHERE id=$1::bigint AND post_id=$2::bigint`, [pk, row.pkey])).rows[0] : null;
+            if (!parent) { fail(res, 400, 'VALIDATION', 'That comment is no longer available.'); return true; }
+          }
+          const ck = (await pool.query(`INSERT INTO howdi_community_comments(post_id,user_id,content,parent_comment_id) VALUES($1,$2,$3,$4) RETURNING id::text`, [row.pkey, vid, t, parent ? parent.id : null])).rows[0].id;
+          const ownerId = Number(row.owner_id || 0);
+          const held = ownerId && ownerId !== vid ? await screenComment(ownerId, 'post', ck, t) : null;
+          const route = (await postDtos([row]))[0]?.route || `/connect/posts/${code}`;
+          if (!held) {
+            if (ownerId && ownerId !== vid) await hooks.notify(ownerId, 'POST_COMMENT', 'New comment on your post', oneLine(t, 120), route, vid);
+            if (parent) { const pa = (await pool.query(`SELECT user_id FROM howdi_community_comments WHERE id=$1`, [parent.id])).rows[0]; if (pa && Number(pa.user_id) !== vid && Number(pa.user_id) !== ownerId) await hooks.notify(Number(pa.user_id), 'COMMENT_REPLY', 'New reply to your comment', oneLine(t, 120), route, vid); }
+            await mentionNotify(vid, t, route, 'comment');
+          }
           const rows = (await pool.query(`${PCOMMENT_SQL} AND c.id=$3::bigint`, [vid, row.pkey, ck])).rows;
-          ok(res, { comment: (await commentDtosFor('PCOMMENT', rows, vid))[0] || null }, 201); return true;
+          ok(res, { comment: (await commentDtosFor('PCOMMENT', rows, vid))[0] || null, held: Boolean(held) }, 201); return true;
         }
         if (action === 'report' && req.method === 'POST') {
           if (limited(res, `v8-report:${vid}`, 10, 60 * 60 * 1000)) return true;
@@ -656,7 +890,7 @@ function createConnectV8(deps) {
         return true;
       }
       if (p === '/api/v8/vibes' && req.method === 'GET') {
-        const allowed = new Set(['tab', 'category', 'cursor', 'limit']);
+        const allowed = new Set(['tab', 'category', 'cursor', 'limit', 'q']);
         for (const k of url.searchParams.keys()) if (!allowed.has(k)) { fail(res, 400, 'INVALID_PARAMS', 'Unknown parameter.'); return true; }
         const tab = String(url.searchParams.get('tab') || 'for-you');
         if (!TABS.includes(tab)) { fail(res, 400, 'INVALID_PARAMS', 'Unknown tab.'); return true; }
@@ -665,7 +899,9 @@ function createConnectV8(deps) {
         const limit = Math.max(1, Math.min(20, Number(url.searchParams.get('limit')) || 10));
         const v = await viewer(req); const vid = v ? v.id : 0;
         if (limited(res, `v8-vibes:${vid || clientIp(req)}`, 120, 60000)) return true;
-        ok(res, { tab, ...(await vibeFeed(vid, { tab, category, cursor: url.searchParams.get('cursor'), limit })) });
+        const q = String(url.searchParams.get('q') || '').trim();
+        if (q && (q.length < 2 || q.length > 80)) { fail(res, 400, 'INVALID_PARAMS', 'Search between 2 and 80 characters.'); return true; }
+        ok(res, { tab, ...(await vibeFeed(vid, { tab, category, cursor: url.searchParams.get('cursor'), limit, q: q || null })) });
         return true;
       }
       if (p === '/api/v8/vibes' && req.method === 'POST') {
@@ -714,7 +950,13 @@ function createConnectV8(deps) {
           let parent = null;
           if (body.replyTo) { parent = await resolve(String(body.replyTo), 'VCOMMENT'); if (!parent) { fail(res, 400, 'VALIDATION', 'That comment is no longer available.'); return true; } }
           const ck = (await pool.query(`INSERT INTO vibe_comments(vibe_id,user_id,parent_comment_id,comment_text,status) VALUES($1::uuid,$2,$3::uuid,$4,'visible') RETURNING id::text`, [row.vkey, String(vid), parent, t])).rows[0].id;
-          await bumpStat(row.vkey, 'comments', 1);
+          const creatorId = /^[0-9]{1,18}$/.test(String(row.owner_text || '')) ? Number(row.owner_text) : 0;
+          const held = creatorId && creatorId !== vid ? await screenComment(creatorId, 'vibe', ck, t) : null;
+          if (!held) {
+            await bumpStat(row.vkey, 'comments', 1);
+            if (creatorId && creatorId !== vid) await hooks.notify(creatorId, 'VIBE_COMMENT', 'New comment on your Vibe', oneLine(t, 120), `/connect/vibe/${code}`, vid);
+            await mentionNotify(vid, t, `/connect/vibe/${code}`, 'comment');
+          }
           const rows = (await pool.query(`${COMMENT_SQL} AND c.id=$3::uuid`, [vid, row.vkey, ck])).rows;
           ok(res, { comment: (await commentDtos(rows, vid))[0] || null }, 201);
           return true;
@@ -770,7 +1012,7 @@ function createConnectV8(deps) {
     }
   }
 
-  return { ensureSchema, handle, _internal: { issue, resolve, saveMedia, stripInternal, authorCols, authorJoins, authorDto, blockedSql, privateOkSql, viewer, limited, ok, fail, userIdByHandle } };
+  return { ensureSchema, handle, _internal: { issue, resolve, saveMedia, stripInternal, authorCols, authorJoins, authorDto, blockedSql, privateOkSql, viewer, limited, ok, fail, userIdByHandle, setHooks: (h) => Object.assign(hooks, h) } };
 }
 
 module.exports = { createConnectV8, stripInternal, CODE_RE };

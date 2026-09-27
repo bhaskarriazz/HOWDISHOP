@@ -13,7 +13,7 @@ const withDb = (n) => { const u = new URL(base); u.pathname = '/' + n; return u.
       const db = `howdi_v8_${f.slice(0, 2)}_${process.pid}_${Date.now().toString(36)}${sandbox ? '_preview' : '_scratch'}`;
       await admin.query(`CREATE DATABASE "${db}"`);
       try {
-        const r = spawnSync(process.execPath, [path.join(__dirname, f)], { env: { ...process.env, WORKER_PG_URL: withDb(db), HOWDI_PREVIEW_SANDBOX: '1', V8_EXPECT_SANDBOX: sandbox ? '1' : '0', HOWDI_ALLOWED_ORIGINS: 'http://127.0.0.1:5178,http://localhost:5178', HOWDI_PUBLIC_APP_URL: '', HOWDI_TRUSTED_PROXIES: '' }, encoding: 'utf8', timeout: 300000 });
+        const r = spawnSync(process.execPath, [path.join(__dirname, f)], { env: { ...process.env, WORKER_PG_URL: withDb(db), HOWDI_PREVIEW_SANDBOX: '1', V8_EXPECT_SANDBOX: sandbox ? '1' : '0', HOWDI_ALLOWED_ORIGINS: 'http://127.0.0.1:5178,http://localhost:5178', HOWDI_ADMIN_TOKEN: 'v8-test-admin-token-0123456789abcdef', HOWDI_PUBLIC_APP_URL: '', HOWDI_TRUSTED_PROXIES: '' }, encoding: 'utf8', timeout: 300000 });
         process.stdout.write(r.stdout.split('\n').filter((l) => /FAIL|passed/.test(l)).join('\n') + '\n');
         console.log(`${r.status === 0 ? 'PASS' : 'FAIL'}  ${f} [${sandbox ? 'sandbox' : 'no-sandbox'}]`); if (r.status !== 0) failed++;
       } finally { await admin.query(`DROP DATABASE IF EXISTS "${db}" WITH (FORCE)`); }

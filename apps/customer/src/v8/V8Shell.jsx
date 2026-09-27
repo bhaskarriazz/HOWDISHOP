@@ -84,6 +84,19 @@ const PATHS = {
   chevl: "M15 5l-7 7 7 7",
   edit: "M4 20h4L19 9l-4-4L4 16ZM13.5 6.5l4 4",
   trash: "M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13",
+  wallet: "M4 7h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4ZM4 7l11-3v3M16 13.5h.01",
+  info: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM12 11v5M12 8h.01",
+  calendar: "M4 6h16v14H4ZM4 10h16M8 3v4M16 3v4",
+  chart: "M4 20V4M4 20h16M8 16v-4M12 16V8M16 16v-6",
+  rupee: "M7 4h10M7 8h10M7 4c7 0 7 8 0 8h-1l8 8",
+  clock: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM12 7v5l3 2",
+  upload: "M12 16V4M7 9l5-5 5 5M4 20h16",
+  fire: "M12 21c4 0 7-3 7-7 0-5-5-7-5-11-3 2-5 5-5 8-1-1-2-2-2-4-2 2-2 4-2 7 0 4 3 7 7 7Z",
+  list: "M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01",
+  tag: "M3 12V4h8l10 10-8 8ZM7.5 7.5h.01",
+  sparkles: "M12 3l1.8 4.7L18 9.5l-4.2 1.8L12 16l-1.8-4.7L6 9.5l4.2-1.8ZM19 15l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8Z",
+  thumbup: "M7 11v9H4v-9ZM7 11l4-8c1.5 0 2.5 1 2.5 2.5V9H19a2 2 0 0 1 2 2.3l-1.2 7A2 2 0 0 1 17.8 20H7",
+  thumbdown: "M7 13V4H4v9ZM7 13l4 8c1.5 0 2.5-1 2.5-2.5V15H19a2 2 0 0 0 2-2.3l-1.2-7A2 2 0 0 0 17.8 4H7",
 };
 
 export function V8Icon({ name, size = 20, fill = false, stroke = 1.8, className, title }) {

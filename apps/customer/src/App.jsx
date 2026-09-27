@@ -13092,7 +13092,7 @@ const removeNotification = async (notificationId) => {
         searchRef={searchInputRef}
         searchPlaceholder={v8AskMode ? "Ask HOWDI — try “crochet tote” or “yarn”" : navigationOSArea === "shop" ? "Search handmade crochet, bags, home decor…" : "Search people, products, services, skills…"}
         askActive={v8AskMode}
-        onAsk={() => { setV8AskMode((v) => !v); window.setTimeout(() => searchInputRef.current?.focus(), 0); }}
+        onAsk={() => { setV8AskMode(false); openNavigationOSArea("connect", "p:ask"); }}
         location={customerLocation}
         onLocation={() => toggleHeaderPanel("location")}
         locationOpen={locationPickerOpen}

@@ -21382,6 +21382,12 @@ async function ensureVibeReleaseReadinessV140LSchema(){
       pool, getBody, clientIp: howdiRateLimitClientIp, helpers: connectV8._internal,
       issueK5ARefs: connectHomeK5A._internal.issueRefs, resolveK5ARef: connectHomeK5A._internal.resolveRef,
     });
+    connectV8._internal.setHooks({ notify: connectV8Community._internal.notify });
+    const connectV8Creator = require("./connect-v8-creator.cjs").createConnectV8Creator({
+      pool, getBody, clientIp: howdiRateLimitClientIp, helpers: connectV8._internal, notify: connectV8Community._internal.notify,
+      wallet: connectV8Rooms._internal.wallet, sandboxEnabled: () => accessV8.sandboxEnabled(), auditAdmin: auditAdminSecurity,
+      issueK5ARefs: connectHomeK5A._internal.issueRefs, resolveK5ARef: connectHomeK5A._internal.resolveRef,
+    });
     const v8SafeHandle = async (mod, req, res, url) => {
       try { return await mod.handle(req, res, url); }
       catch (e) { console.error("[V8 API]", e && e.message); if (!res.headersSent) sendJSON(res, 500, { status: "error", code: "SERVER_ERROR", message: "Something went wrong. Please try again." }); return true; }
@@ -21454,6 +21460,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
           if (await connectV8.handle(req, res, url)) return;
           if (await v8SafeHandle(connectV8Rooms, req, res, url)) return;
           if (await v8SafeHandle(connectV8Community, req, res, url)) return;
+          if (await v8SafeHandle(connectV8Creator, req, res, url)) return;
 
           const pathname =
             url.pathname;
@@ -50250,6 +50257,9 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               const p=(await pool.query(`SELECT * FROM howdi_connect_subscription_plans WHERE id=$1 AND is_active=TRUE`,[planId])).rows[0];if(!p)return sendJSON(res,404,{status:"error",message:"Plan unavailable"});if(Number(p.creator_user_id)===userId)return sendJSON(res,400,{status:"error",message:"You cannot subscribe to your own plan"});if((await pool.query(`SELECT 1 WHERE ${K5E_BLOCKED_BETWEEN_SQL("$1::bigint","$2::bigint")}`,[userId,p.creator_user_id])).rows[0])return sendJSON(res,404,{status:"error",message:"Plan unavailable"});
               const existing=(await pool.query(`SELECT id FROM howdi_connect_subscriptions WHERE subscriber_user_id=$1 AND creator_user_id=$2 AND status IN('ACTIVE','TRIALING','PAST_DUE')`,[userId,p.creator_user_id])).rows[0];if(existing)return sendJSON(res,409,{status:"error",message:"You already have an active subscription to this creator"});
               const amount=Number(cycle==='YEARLY'?p.price_yearly:p.price_monthly)||0,period=cycle==='YEARLY'?`NOW()+INTERVAL '1 year'`:`NOW()+INTERVAL '1 month'`;
+              // V8 CRT-004: a paid tier is never activated here without a payment. Paid memberships go through
+              // POST /api/v8/memberships/{TIR}/subscribe, which charges HPay (Preview/Test sandbox until a provider is connected).
+              if(amount>0)return sendJSON(res,402,{status:"error",code:"PAYMENT_REQUIRED",message:"Paid memberships are joined through HPay checkout. No membership was created."});
               const s=(await pool.query(`INSERT INTO howdi_connect_subscriptions(subscriber_user_id,creator_user_id,plan_id,billing_cycle,status,amount,currency,current_period_end) VALUES($1,$2,$3,$4,'ACTIVE',$5,$6,${period}) RETURNING id,status,billing_cycle,amount,currency,current_period_end`,[userId,p.creator_user_id,planId,cycle,amount,p.currency])).rows[0];
               const fee=Number((amount*.10).toFixed(2)),creator=Number((amount-fee).toFixed(2));await pool.query(`INSERT INTO howdi_connect_subscription_ledger(subscription_id,creator_user_id,subscriber_user_id,event_type,gross_amount,platform_fee,creator_amount,currency,reference_code) VALUES($1,$2,$3,'SUBSCRIPTION_STARTED',$4,$5,$6,$7,$8)`,[s.id,p.creator_user_id,userId,amount,fee,creator,p.currency,`HOWDI-SUB-${s.id}`]);
               return sendJSON(res,201,{status:"success",subscription:s,message:"Subscription activated. Payment gateway settlement remains a production integration."});
@@ -57227,6 +57237,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
         await connectV8.ensureSchema();
         await connectV8Rooms.ensureSchema();
         await connectV8Community.ensureSchema();
+        await connectV8Creator.ensureSchema();
         await backfillMissingOrderShipments();
         console.log("✅ HOWDI database initialization completed before accepting requests");
       console.log("✅ HOWDI Works Customer + Admin Separation V31 loaded");

@@ -4,6 +4,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { V8Icon, V8State } from "./V8Shell";
 import { V8Badges, V8BadgeExplainer, useSingleFlight, useV8Ui } from "./V8System";
+import { useApi } from "./connect/common";
+import { MembershipOffer } from "./connect/Membership";
+const openConnect = (view) => window.dispatchEvent(new CustomEvent("howdi:v8-open", { detail: { area: "connect", view: `p:${view}` } }));
 
 const HANDLE_RE = /^[a-z0-9._]{3,30}$/i;
 const safeImg = (u) => (typeof u === "string" && /^(https?:\/\/|data:image\/(png|jpe?g|webp|gif);base64,)/i.test(u) ? u : "");
@@ -18,6 +21,7 @@ export default function V8Profile({ apiBase, handle, getAuthHeaders, signedIn, i
   const [tab, setTab] = useState("posts");
   const [reload, setReload] = useState(0);
   const [busy, run] = useSingleFlight();
+  const api = useApi(apiBase, getAuthHeaders);
   const valid = HANDLE_RE.test(String(handle || ""));
 
   useEffect(() => {
@@ -100,15 +104,10 @@ export default function V8Profile({ apiBase, handle, getAuthHeaders, signedIn, i
                         <button type="button" className="v8-btn" onClick={() => (signedIn ? onMessage?.(handle) : onRequireLogin?.())} disabled={signedIn && d.canMessage === false} title={signedIn && d.canMessage === false ? "This person only accepts messages from people they follow" : undefined}>Message</button>
                       </div>
                     )}
-                    {premium ? (
-                      <div className="v8-premium-card">
-                        <span className="v8-premium-ico"><V8Icon name="crown" size={20} fill /></span>
-                        <span><b>{premium.viewer_subscribed ? "Subscribed" : premium.plan_name}</b><small>{money(premium.price)}/{String(premium.billing_period).toLowerCase().startsWith("year") ? "year" : "month"}</small></span>
-                        {!isMe && !premium.viewer_subscribed ? <span className="v8-pill-soft">Subscribe in Creator slice</span> : null}
-                      </div>
-                    ) : null}
+                    {isMe ? <button type="button" className="v8-btn v8-btn-soft v8-btn-block" onClick={() => openConnect("creator")}><V8Icon name="crown" size={16} />Creator workspace</button> : null}
                   </div>
                 </div>
+                <div className="v8-profile-offer"><MembershipOffer api={api} handle={handle} signedIn={signedIn} onRequireLogin={onRequireLogin} compact onNav={(v) => openConnect(v)} /></div>
                 <nav className="v8-tabs" aria-label="Profile content">
                   {[["posts", "Posts", (d.recent_posts || []).length], ["vibes", "Vibes", (d.vibes || []).length], ["articles", "Articles", (d.articles || []).length]].map(([id, label]) => (
                     <button key={id} type="button" aria-pressed={tab === id} onClick={() => setTab(id)}>{label}</button>

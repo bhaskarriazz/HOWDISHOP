@@ -3,8 +3,10 @@
 // Spaces, Articles, Communities), the feed, and right-hand rails for Communities / Groups / Channels / Live / Spaces.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { V8Icon, V8State } from "../V8Shell";
-import { V8Badges, V8Confirm, useV8Ui } from "../V8System";
-import { Ava, Who, Sheet, ReportSheet, ShareSheet, Skel, fmt, since, when, safeImg, safeVideo, readFileAsDataUrl, SignInCard } from "./common";
+import { V8Badges, useV8Ui } from "../V8System";
+import { Ava, Sheet, Skel, fmt, since, when, safeImg, readFileAsDataUrl, SignInCard } from "./common";
+import { PostCard } from "./Post";
+export { PostCard };
 
 const FEATURES = [
   { key: "vibe", label: "Vibe", sub: "Short videos", icon: "play", tone: "coral" },
@@ -92,6 +94,7 @@ function Composer({ user, api, onPosted, onRequireLogin, onOpenCreate }) {
         <button type="button" onClick={() => (signedIn ? fileRef.current?.click() : onRequireLogin())}><V8Icon name="image" size={18} /><span>Photo / Video</span></button>
         <button type="button" onClick={() => onOpenCreate("live")}><V8Icon name="live" size={18} /><span>Live</span></button>
         <button type="button" onClick={() => onOpenCreate("vibe/create")}><V8Icon name="play" size={18} /><span>Vibe</span></button>
+        <button type="button" onClick={() => (signedIn ? onOpenCreate("create") : onRequireLogin())}><V8Icon name="sparkles" size={18} /><span>Hype · Tip · more</span></button>
         <button type="button" className="v8-btn v8-btn-primary" disabled={state === "posting" || (!text.trim() && !media.length)} onClick={post}>Post</button>
       </div>
       <Sheet open={audOpen} title="Choose audience" onClose={() => setAudOpen(false)}>
@@ -108,86 +111,6 @@ function Composer({ user, api, onPosted, onRequireLogin, onOpenCreate }) {
   );
 }
 
-export function PostCard({ post, api, signedIn, onRequireLogin, onOpenProfile, onChanged, onRemoved }) {
-  const ui = useV8Ui();
-  const [p, setP] = useState(post); const [menu, setMenu] = useState(false); const [report, setReport] = useState(false); const [share, setShare] = useState(false);
-  const [comments, setComments] = useState(null); const [cOpen, setCOpen] = useState(false); const [ctext, setCtext] = useState(""); const [cbusy, setCbusy] = useState(false); const [block, setBlock] = useState(false); const [del, setDel] = useState(false);
-  useEffect(() => setP(post), [post]);
-  const need = () => { if (!signedIn) { onRequireLogin(); return true; } return false; };
-  const toggle = async (kind) => {
-    if (need()) return;
-    const on = kind === "like" ? p.viewer.liked : p.viewer.saved;
-    const next = { ...p, viewer: { ...p.viewer, [kind === "like" ? "liked" : "saved"]: !on }, counts: kind === "like" ? { ...p.counts, likes: p.counts.likes + (on ? -1 : 1) } : p.counts };
-    setP(next);
-    const r = await api(on ? "DELETE" : "POST", `/api/v8/posts/${p.public_key}/${kind}`);
-    if (!r.ok) { setP(p); ui?.toast({ kind: "error", title: "Couldn’t update", message: r.json.message || "Please try again." }); }
-    else { if (kind === "like") setP((x) => ({ ...x, counts: { ...x.counts, likes: r.json.count } })); if (kind === "save") ui?.toast({ title: on ? "Removed from Saved" : "Saved" }); onChanged?.(); }
-  };
-  const openComments = async () => {
-    setCOpen(true); setComments(null);
-    const r = await api("GET", `/api/v8/posts/${p.public_key}/comments`);
-    setComments(r.ok ? r.json.comments : "error");
-  };
-  const addComment = async () => {
-    if (need() || !ctext.trim()) return;
-    setCbusy(true);
-    const r = await api("POST", `/api/v8/posts/${p.public_key}/comments`, { text: ctext });
-    setCbusy(false);
-    if (!r.ok) { ui?.toast({ kind: "error", title: "Comment not posted", message: r.json.message || "Please try again." }); return; }
-    setComments((c) => [...(Array.isArray(c) ? c : []), r.json.comment]); setCtext(""); setP((x) => ({ ...x, counts: { ...x.counts, comments: x.counts.comments + 1 } }));
-  };
-  const media = p.media || [];
-  return (
-    <article className="v8-card v8c-post" aria-label={`Post by @${p.author.public_username}`}>
-      <header className="v8c-post-head">
-        <Who author={p.author} sub={`${since(p.published_at)} · ${{ everyone: "Everyone", friends: "Friends", close_friends: "Close friends", followers: "Followers", only_me: "Only me" }[p.audience] || "Everyone"}`} onOpen={onOpenProfile} />
-        <button type="button" className="v8-icon-btn" aria-label="More options" onClick={() => setMenu(true)}><V8Icon name="more" size={22} /></button>
-      </header>
-      {p.text ? <p className="v8c-post-text">{p.text}</p> : null}
-      {media.length ? (
-        <div className={`v8c-post-media n${media.length}`}>
-          {media.map((m, i) => (m.type === "video" && safeVideo(m.url) ? <video key={i} src={m.url} controls playsInline preload="metadata" /> : safeImg(m.url) ? <img key={i} src={m.url} alt="" loading="lazy" /> : null))}
-        </div>
-      ) : null}
-      <footer className="v8c-post-actions">
-        <button type="button" className={p.viewer.liked ? "on like" : ""} aria-pressed={p.viewer.liked} onClick={() => toggle("like")}><V8Icon name="heart" size={20} fill={p.viewer.liked} />{fmt(p.counts.likes)}</button>
-        <button type="button" onClick={openComments}><V8Icon name="comment" size={20} />{fmt(p.counts.comments)}</button>
-        <button type="button" className={p.viewer.saved ? "on" : ""} aria-pressed={p.viewer.saved} onClick={() => toggle("save")}><V8Icon name="bookmark" size={20} fill={p.viewer.saved} />{p.viewer.saved ? "Saved" : "Save"}</button>
-        <button type="button" onClick={() => setShare(true)}><V8Icon name="share" size={20} />Share</button>
-      </footer>
-      <Sheet open={menu} title="Post options" onClose={() => setMenu(false)}>
-        {p.viewer.mine ? (
-          <button type="button" className="v8c-row danger" onClick={() => { setMenu(false); setDel(true); }}><span className="v8c-row-ico"><V8Icon name="trash" size={20} /></span><span className="v8c-row-text"><b>Delete post</b></span></button>
-        ) : (<>
-          <button type="button" className="v8c-row" onClick={() => { setMenu(false); if (!need()) setReport(true); }}><span className="v8c-row-ico"><V8Icon name="flag" size={20} /></span><span className="v8c-row-text"><b>Report post</b><small>Private — the author isn’t told who reported</small></span></button>
-          <button type="button" className="v8c-row danger" onClick={() => { setMenu(false); if (!need()) setBlock(true); }}><span className="v8c-row-ico"><V8Icon name="ban" size={20} /></span><span className="v8c-row-text"><b>Block @{p.author.public_username}</b><small>They won’t see your content or contact you</small></span></button>
-        </>)}
-      </Sheet>
-      <ReportSheet open={report} what="post" onClose={() => setReport(false)} onSubmit={(reason, details) => api("POST", `/api/v8/posts/${p.public_key}/report`, { reason, details })} />
-      <ShareSheet open={share} title="HOWDI post" link={p.route} onClose={() => setShare(false)} onShared={(channel) => api("POST", `/api/v8/posts/${p.public_key}/share`, { channel })} />
-      <V8Confirm open={block} danger title={`Block @${p.author.public_username}?`} body="They won’t be able to see your posts, stories or Vibes, message you or find your profile. You can unblock them from Privacy & safety." confirmLabel="Block" onCancel={() => setBlock(false)}
-        onConfirm={async () => { const r = await api("POST", `/api/v8/creators/${p.author.public_username}/block`); setBlock(false); if (r.ok) { ui?.toast({ title: `@${p.author.public_username} is blocked` }); onRemoved?.(p.author.public_username, "author"); } else ui?.toast({ kind: "error", title: "Couldn’t block", message: r.json.message }); }} />
-      <V8Confirm open={del} danger title="Delete this post?" body="It will be removed from Connect for everyone. This can’t be undone." confirmLabel="Delete" onCancel={() => setDel(false)}
-        onConfirm={async () => { const r = await api("DELETE", `/api/v8/posts/${p.public_key}`); setDel(false); if (r.ok) { ui?.toast({ title: "Post deleted" }); onRemoved?.(p.public_key, "post"); } else ui?.toast({ kind: "error", title: "Couldn’t delete", message: r.json.message }); }} />
-      <Sheet open={cOpen} title={`Comments${p.counts.comments ? ` (${p.counts.comments})` : ""}`} onClose={() => setCOpen(false)}>
-        <div className="v8c-comments">
-          {comments === null ? <><Skel h={40} /><Skel h={40} /></> : comments === "error" ? <V8State kind="error" title="Couldn’t load comments" actionLabel="Try again" onAction={openComments} />
-            : comments.length ? comments.map((c) => (
-              <div key={c.public_key} className="v8c-comment"><Ava src={c.author.avatar_url} name={c.author.display_name} size={34} />
-                <div><span className="v8c-who-line"><b>@{c.author.public_username}</b><V8Badges verified={c.author.verified} premium={c.author.premium} size="sm" />{c.by_creator ? <span className="v8c-chip-mini">Author</span> : null}<small>{since(c.created_at)}</small></span><p>{c.text}</p></div></div>
-            )) : <p className="v8c-muted">No comments yet. Start the conversation.</p>}
-        </div>
-        {p.allow_comments ? (
-          <div className="v8c-comment-box">
-            <input value={ctext} maxLength={1000} onChange={(e) => setCtext(e.target.value)} placeholder={signedIn ? "Add a comment…" : "Sign in to comment"} onFocus={() => need()} onKeyDown={(e) => { if (e.key === "Enter") addComment(); }} aria-label="Add a comment" />
-            <button type="button" className="v8-btn v8-btn-primary" disabled={cbusy || !ctext.trim()} onClick={addComment}>{cbusy ? "…" : "Post"}</button>
-          </div>
-        ) : <p className="v8c-muted">Comments are turned off for this post.</p>}
-      </Sheet>
-    </article>
-  );
-}
-
 function RailCard({ title, onViewAll, children, empty }) {
   return (
     <section className="v8-card v8c-rail">
@@ -198,7 +121,7 @@ function RailCard({ title, onViewAll, children, empty }) {
   );
 }
 
-export default function ConnectHub({ api, user, onNav, onRequireLogin, onOpenProfile, onOpenStory, onCreateStory }) {
+export default function ConnectHub({ api, user, onNav, onRequireLogin, onOpenProfile, onOpenStory, onCreateStory, onRoute }) {
   const [hub, setHub] = useState({ status: "loading" });
   const [feed, setFeed] = useState({ status: "loading", items: [], next: null });
   const [reload, setReload] = useState(0);
@@ -211,6 +134,7 @@ export default function ConnectHub({ api, user, onNav, onRequireLogin, onOpenPro
     api("GET", "/api/v8/connect/feed?limit=8", undefined, { signal: ctl.signal }).then((r) => { if (!r.aborted) setFeed(r.ok ? { status: "ready", items: r.json.items, next: r.json.next_cursor } : { status: "error", items: [], next: null }); });
     return () => ctl.abort();
   }, [api, reload, signedIn]);
+  useEffect(() => { const on = () => setReload((x) => x + 1); window.addEventListener("howdi:v8-membership", on); return () => window.removeEventListener("howdi:v8-membership", on); }, []);
   const more = async () => {
     if (!feed.next) return;
     setFeed((f) => ({ ...f, status: "more" }));
@@ -239,6 +163,12 @@ export default function ConnectHub({ api, user, onNav, onRequireLogin, onOpenPro
             </button>
           ))}
         </nav>
+        <nav className="v8c-discover" aria-label="Discover">
+          {[["explore", "Explore", "search"], ["hype", "Hype", "fire"], ["tips", "Tips", "bulb"], ["creators", "Creators", "users"], ["ask", "Ask HOWDI", "mic"]].map(([k, l, i]) => (
+            <button key={k} type="button" className="v8c-chip" onClick={() => onNav(k)}><V8Icon name={i} size={15} />{l}</button>))}
+          {signedIn ? <button type="button" className="v8c-chip on" onClick={() => onNav("creator")}><V8Icon name="crown" size={15} />Creator workspace</button> : null}
+          {signedIn ? <button type="button" className="v8c-chip" onClick={() => onNav("memberships")}><V8Icon name="star" size={15} />My memberships</button> : null}
+        </nav>
         <Composer user={user} api={api} onRequireLogin={onRequireLogin} onOpenCreate={(k) => onNav(k)} onPosted={(post) => { if (post) setFeed((f) => ({ ...f, items: [post, ...f.items] })); }} />
         {(hub.vibes || []).length ? (
           <section className="v8-card v8c-vibe-rail" aria-label="Vibes for you">
@@ -258,7 +188,8 @@ export default function ConnectHub({ api, user, onNav, onRequireLogin, onOpenPro
           {feed.status === "loading" ? [0, 1].map((i) => <div key={i} className="v8-card v8c-post"><Skel h={40} w="50%" /><Skel h={14} /><Skel h={220} r={14} /></div>) : null}
           {feed.status === "error" ? <V8State kind="error" title="Posts didn’t load" message="Check your connection and try again." actionLabel="Try again" onAction={() => setReload((x) => x + 1)} /> : null}
           {feed.status !== "loading" && feed.status !== "error" && !feed.items.length ? <V8State icon="comment" title="No posts yet" message="Follow people and join communities to fill your feed — or share the first post." actionLabel={signedIn ? "Explore communities" : "Sign in"} onAction={() => (signedIn ? onNav("communities") : onRequireLogin())} /> : null}
-          {feed.items.map((p) => <PostCard key={p.public_key} post={p} api={api} signedIn={signedIn} onRequireLogin={onRequireLogin} onOpenProfile={onOpenProfile}
+          {feed.items.map((p) => <PostCard key={p.public_key} post={p} api={api} signedIn={signedIn} onRequireLogin={onRequireLogin} onOpenProfile={onOpenProfile} onRoute={onRoute}
+            onOpen={(x) => onNav(x.route.replace(/^\/connect\//, ""))} onChanged={(x) => { if (x === "reload") setReload((v) => v + 1); }}
             onRemoved={(key, kind) => setFeed((f) => ({ ...f, items: f.items.filter((x) => (kind === "author" ? x.author.public_username !== key : x.public_key !== key)) }))} />)}
           {feed.next ? <button type="button" className="v8-btn v8-btn-block" disabled={feed.status === "more"} onClick={more}>{feed.status === "more" ? "Loading…" : "Load more posts"}</button> : null}
           {feed.moreError ? <p className="v8c-err" role="alert">Couldn’t load more. <button type="button" className="v8-link" onClick={more}>Retry</button></p> : null}
