@@ -12,6 +12,7 @@ import V8Notifications, { useV8Unread } from "./v8/V8Notifications";
 import V8CallCenter from "./v8/connect/Calls";
 import V8Works from "./v8/works/V8Works";
 import V8Roles from "./v8/me/V8Roles";
+import V8Shop from "./v8/shop/V8Shop";
 import { V8Appearance, V8Permissions, V8IdentityBadges } from "./v8/V8Settings";
 import { V8Confirm, V8OfflineBanner, V8SessionExpired, loadV8Prefs, applyV8Prefs, useV8Ui } from "./v8/V8System";
 import HowdiFor from "./howdi-for/HowdiFor";
@@ -2671,6 +2672,7 @@ function App() {
   const [v8MeView,setV8MeView]=useState("appearance");
   // V8 Connect feature hub: sub-path under /connect (""=hub, "vibe", "vibe/VIB-…", "live", "spaces", "articles", "communities/slug" …)
   const [v8ConnectPath,setV8ConnectPath]=useState("");
+  const [v8ShopPath,setV8ShopPath]=useState("");
   const [v8NotifOpen,setV8NotifOpen]=useState(false);
   const [v8ProfileHandle,setV8ProfileHandle]=useState("");
   const [v8Prefs,setV8Prefs]=useState(()=>loadV8Prefs());
@@ -9927,6 +9929,8 @@ return () => window.clearInterval(timer);
     }
     if(next==="shop"){
       setActiveSection("shop");
+      // V8 Shop purchase journey pages keep their case-sensitive public codes (PRD-…, ORD-…)
+      if(/^(products\/PRD-[0-9A-Fa-f]{12}|bag|checkout|orders(\/ORD-[0-9A-Fa-f]{12})?)$/.test(String(subview||""))){setV8ShopPath(String(subview));setShopOSView("v8");setNavigationOSArea("shop");window.setTimeout(()=>{const m=document.querySelector(".v8-page");if(m)m.scrollTop=0;},30);return;}
       // V8 SHP-001: one Shop. Legacy "home", "categories", "discovery" and "crochet" entries all land on the catalogue.
       if(view==="crochet")setShopCollection("crochet");
       else if(view==="catalogue"||view==="home")setShopCollection("");
@@ -12689,6 +12693,7 @@ const removeNotification = async (notificationId) => {
       return "/connect";
     }
     if(navigationOSArea==="shop"){
+      if(shopOSView==="v8")return `/shop/${v8ShopPath}`;
       if(shopOSView==="cart")return "/shop/cart";
       return shopCollection==="crochet"?"/shop/crochet":"/shop";
     }
@@ -12705,6 +12710,7 @@ const removeNotification = async (notificationId) => {
     if(p==="/shop"){openNavigationOSArea("shop","catalogue");return true;}
     if(p==="/shop/crochet"){openNavigationOSArea("shop","crochet");return true;}
     if(p==="/shop/cart"){openNavigationOSArea("shop","cart");return true;}
+    if((m=p.match(/^\/shop\/(products\/PRD-[0-9A-F]{12}|bag|checkout|orders(?:\/ORD-[0-9A-F]{12})?)$/))){openNavigationOSArea("shop",m[1]);return true;}
     if((m=p.match(/^\/works(?:\/([A-Za-z0-9/_.@-]{1,120}))?$/))){openNavigationOSArea("works",m[1]||"find");return true;}
     if((m=p.match(/^\/learn(?:\/([a-z-]{2,24}))?$/))){openNavigationOSArea("learn",m[1]||"discover");return true;}
     if((m=p.match(/^\/me\/(appearance|privacy|badges|roles|vendor|vendor\/store)$/))){openNavigationOSArea("me",m[1]);return true;}
@@ -12748,7 +12754,7 @@ const removeNotification = async (notificationId) => {
     // content may still be loading: retry the restore a few times until the page is tall enough
     [60,300,800,1500].forEach((ms)=>window.setTimeout(()=>{const el=document.querySelector(".v8-page")||document.querySelector(".howdi-os-workspace");if(el&&v8LastPath.current===path&&Math.abs(el.scrollTop-restore)>2)el.scrollTop=restore;},ms));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[v8RouterOn,navigationOSArea,connectView,connectContentMode,v8ConnectPath,shopOSView,shopCollection,worksExperienceTab,learningPortalView,v8MeView,v8ProfileHandle]);
+  },[v8RouterOn,navigationOSArea,connectView,connectContentMode,v8ConnectPath,v8ShopPath,shopOSView,shopCollection,worksExperienceTab,learningPortalView,v8MeView,v8ProfileHandle]);
   useEffect(()=>{
     // V8 Connect sheets (e.g. Share → Messages) ask the shell to open another area.
     const onOpen=(e)=>{const d=e&&e.detail;if(d&&typeof d.area==="string")openNavigationOSArea(d.area,d.view||"home");};
@@ -19150,7 +19156,11 @@ const removeNotification = async (notificationId) => {
             SHOP — V8 SHP-001: the one canonical Shop (board 16). Handmade Crochet is a collection chip;
             the legacy "Shop Home" (hs2) page is retired. Cart and vendor open on top of this page.
         ==================================== */}
-        {navigationOSArea==="shop" && (
+        {navigationOSArea==="shop" && shopOSView==="v8" && (
+          <V8Shop apiBase={SHOP_API_BASE} getAuthHeaders={customerSessionHeaders} user={currentUser} path={v8ShopPath}
+            onNavigate={(p)=>openNavigationOSArea("shop",String(p||"home"))} onRequireLogin={openLogin} />
+        )}
+        {navigationOSArea==="shop" && shopOSView!=="v8" && (
           <div className="v8-page" data-v8-page="shop">
             <div className="v8-page-inner">
               <ShopCatalogue apiBase={SHOP_API_BASE} v8

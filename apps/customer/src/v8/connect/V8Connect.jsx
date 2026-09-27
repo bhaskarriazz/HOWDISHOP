@@ -50,6 +50,7 @@ export default function V8Connect({ apiBase, getAuthHeaders, user, path, onNavig
     if (s.startsWith("/connect")) return onNavigate(s.replace(/^\/connect\/?/, ""));
     if (s.startsWith("/@")) return onOpenProfile(s.slice(2));
     const m = s.match(/^\/(shop|learn|works)(?:\/(.*))?$/);
+    if (m && m[1] === "shop" && /^products\/PRD-[0-9A-F]{12}$/.test(m[2] || "")) return onOpenArea("shop", m[2]);
     if (m) return onOpenArea(m[1], m[1] === "shop" ? "crochet" : (m[2] || "home"));
     return undefined;
   }, [onNavigate, onOpenProfile, onOpenArea]);

@@ -20,3 +20,5 @@
 .v8me-prod > span:nth-child(2) { display: grid; gap: 3px; } .v8me-prod small { color: var(--v8-muted); } .v8me-prod-act { display: flex; gap: 6px; }
 .v8me-prev { width: 96px; height: 96px; object-fit: cover; border-radius: 12px; }
 .v8me-next { background: var(--v8-bg); }
+.v8me-order { border-top: 1px solid var(--v8-line); padding: 12px 0; display: grid; gap: 6px; } .v8me-order header { display: flex; justify-content: space-between; gap: 8px; align-items: center; } .v8me-order p { margin: 0; font-size: 14px; }
+.v8me-hidden { padding: 8px 10px; border-radius: 10px; background: var(--v8-bg); color: var(--v8-ink-2); } .v8me-addr { padding: 8px 10px; border-radius: 10px; background: var(--v8-success-soft); } .v8me-ret { padding: 8px 10px; border-radius: 10px; background: #fff4e0; }

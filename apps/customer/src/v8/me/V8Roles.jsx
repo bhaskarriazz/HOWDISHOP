@@ -4,7 +4,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { V8Icon, V8State } from "../V8Shell";
 import { useV8Ui } from "../V8System";
-import { useApi, Sheet, Skel, readFileAsDataUrl, safeImg } from "../connect/common";
+import { useApi, Sheet, Skel, Tabs, readFileAsDataUrl, safeImg } from "../connect/common";
+import { OrderChip, OrderSteps } from "../shop/V8Shop";
 import { inr } from "../connect/HPayUtilities";
 import "../works/works.css";
 import "./me.css";
@@ -117,7 +118,7 @@ function VendorStore({ api, onRoute }) {
   return (
     <section className="v8me-store">
       <div className="v8-card v8me-storehead"><span className="v8me-role-ico vendor"><V8Icon name="store" size={24} /></span><div><h2>{st.name}</h2><p className="v8c-muted">{st.category} · {st.city} · @{st.handle} · Verified vendor</p></div><span className={`v8m-state ${st.status === "online" ? "ok" : "muted"}`}><i />Store {st.status}</span></div>
-      <div className="v8w-tiles"><div className="v8-card v8w-tile"><small>Live in Shop</small><b>{s.counts.published}</b></div><div className="v8-card v8w-tile"><small>Drafts</small><b>{s.counts.drafts}</b></div><div className="v8-card v8w-tile"><small>Out of stock</small><b>{s.counts.out_of_stock}</b></div><div className="v8-card v8w-tile"><small>Orders</small><b>—</b><small>Next build</small></div></div>
+      <div className="v8w-tiles"><div className="v8-card v8w-tile"><small>Live in Shop</small><b>{s.counts.published}</b></div><div className="v8-card v8w-tile"><small>Drafts</small><b>{s.counts.drafts}</b></div><div className="v8-card v8w-tile"><small>Out of stock</small><b>{s.counts.out_of_stock}</b></div></div>
       <div className="v8w-row"><button type="button" className="v8-btn v8-btn-primary" onClick={() => setForm({ name: "", price: "", mrp: "", stock: "1", category: st.category, description: "" })}><V8Icon name="plus" size={16} />Add product</button></div>
       <section className="v8-card v8me-block"><h3>Products</h3>
         {!items ? <Skel h={80} /> : !items.length ? <p className="v8c-muted">No products yet. Add one — it starts as a draft; publish it when it has a photo.</p> : items.map((p) => (
@@ -125,7 +126,7 @@ function VendorStore({ api, onRoute }) {
             <span><b>{p.name}</b><small>{inr(p.price)}{p.mrp > p.price ? ` · MRP ${inr(p.mrp)}` : ""} · {p.stock} in stock</small><span className={`v8m-state ${p.status === "published" ? "ok" : "muted"}`}><i />{p.status === "published" ? "Live in Shop" : "Draft"}</span></span>
             <span className="v8me-prod-act"><button type="button" className="v8-btn" onClick={() => setForm({ key: p.public_key, name: p.name, price: String(p.price), mrp: String(p.mrp), stock: String(p.stock), category: p.category, description: p.description || "", preview: p.images[0] })}>Edit</button><button type="button" className={`v8-btn ${p.status === "published" ? "" : "v8-btn-primary"}`} onClick={() => toggle(p)}>{p.status === "published" ? "Unpublish" : "Publish"}</button></span></div>))}
       </section>
-      <section className="v8-card v8me-block v8me-next"><h3>Orders, dispatch & returns</h3><p className="v8c-muted">Next build (Shop slice): buyer orders appear here to accept, pack, dispatch and deliver, with returns and refunds.</p></section>
+      <VendorOrders api={api} />
       {form ? (
         <Sheet open title={form.key ? "Edit product" : "Add product"} onClose={() => setForm(null)}>
           <div className="v8u-form">
@@ -138,6 +139,46 @@ function VendorStore({ api, onRoute }) {
             <div className="v8vc-actions"><button type="button" className="v8-btn" onClick={() => setForm(null)}>Cancel</button><button type="button" className="v8-btn v8-btn-primary" disabled={busy || !form.name || !form.price} onClick={save}>{busy ? "Saving…" : "Save"}</button></div>
           </div>
         </Sheet>) : null}
+    </section>
+  );
+}
+
+// Seller side of the Shop journey: New → accept / decline (reason) → pack → ship (courier + tracking) → deliver; returns:
+// approve (pickup) / reject (reason) → received (refund). The buyer's address appears only after accepting.
+const RWHEN = (iso) => (iso ? new Date(iso).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }) : "");
+function VendorOrders({ api }) {
+  const ui = useV8Ui(); const [tab, setTab] = useState("new"); const [d, setD] = useState(null); const [sheet, setSheet] = useState(null); const [x, setX] = useState({ reason: "", courier: "", tracking: "" });
+  const load = useCallback(async () => { const r = await api("GET", `/api/v8/vendor/orders?tab=${tab}`); setD(r.ok ? r.json : { error: r.json.message }); }, [api, tab]);
+  useEffect(() => { load(); const id = window.setInterval(load, 8000); return () => window.clearInterval(id); }, [load]);
+  const act = async (o, a, body) => { const r = await api("POST", a.startsWith("return:") ? `/api/v8/vendor/returns/${o.return.public_key}/${a.slice(7)}` : `/api/v8/vendor/orders/${o.public_key}/${a}`, body); setSheet(null); if (!r.ok) { ui?.toast({ kind: "error", title: r.json.message }); return; } ui?.toast({ title: "Updated — the buyer was notified" }); load(); };
+  const LBL = { accept: "Accept order", pack: "Mark packed", ship: "Ship", deliver: "Mark delivered" };
+  return (
+    <section className="v8-card v8me-block" aria-label="Orders">
+      <h3>Orders</h3>
+      <Tabs compact tabs={[{ value: "new", label: "New", count: d?.counts?.new }, { value: "active", label: "To ship", count: d?.counts?.active }, { value: "returns", label: "Returns", count: d?.counts?.returns }, { value: "done", label: "Done" }]} value={tab} onChange={setTab} label="Order tabs" />
+      {!d ? <Skel h={90} /> : d.error ? <p className="v8c-err">{d.error}</p> : !d.items.length ? <p className="v8c-muted">{tab === "new" ? "No new orders. You’ll get a notification when someone buys." : "Nothing here."}</p> : d.items.map((o) => (
+        <article key={o.public_key} className="v8me-order">
+          <header><b>{o.public_key}</b><OrderChip s={o.state} /></header>
+          {o.items.map((i, k) => <p key={k}>{i.qty} × {i.name} · {inr(i.line_total)}</p>)}
+          <p className="v8c-muted">{RWHEN(o.placed_at)} · total {inr(o.total)} · you receive {inr(o.net)} (8% HOWDI commission) · {o.payment.method === "hpay" ? `HPay ${o.payment.state}` : `Cash on delivery${o.payment.state === "collected" ? " · collected" : ""}`}</p>
+          {o.delivery.hidden ? <p className="v8me-hidden"><V8Icon name="lock" size={14} /> Ships to {o.delivery.city}. The buyer’s address appears when you accept.</p> : <p className="v8me-addr"><b>Ship to:</b> {o.delivery.name}, {o.delivery.line}, {o.delivery.city}, {o.delivery.state} {o.delivery.pin_code} · {o.delivery.contact}</p>}
+          {o.tracking ? <p className="v8c-muted">{o.courier} · {o.tracking}</p> : null}
+          {!["cancelled", "rejected", "returned"].includes(o.state) ? <OrderSteps o={o} /> : o.reason ? <p className="v8c-muted">Reason: {o.reason}</p> : null}
+          {o.return ? <p className="v8me-ret"><V8Icon name="refresh" size={14} /> Return {o.return.public_key}: {o.return.reason}{o.return.details ? ` — ${o.return.details}` : ""} · <b>{o.return.status}</b></p> : null}
+          <div className="v8w-row">
+            {o.actions.map((a) => a === "reject" ? <button key={a} type="button" className="v8-btn" onClick={() => { setX({ reason: "" }); setSheet({ o, a: "reject" }); }}>Decline</button>
+              : a === "ship" ? <button key={a} type="button" className="v8-btn v8-btn-primary" onClick={() => { setX({ courier: "", tracking: "" }); setSheet({ o, a: "ship" }); }}>Ship</button>
+                : <button key={a} type="button" className="v8-btn v8-btn-primary" onClick={() => act(o, a)}>{LBL[a]}</button>)}
+            {(o.return?.actions || []).map((a) => a === "reject" ? <button key={a} type="button" className="v8-btn" onClick={() => { setX({ reason: "" }); setSheet({ o, a: "return:reject" }); }}>Reject return</button>
+              : <button key={a} type="button" className="v8-btn v8-btn-primary" onClick={() => act(o, `return:${a}`)}>{a === "approve" ? "Approve return (schedule pickup)" : "Item received — refund buyer"}</button>)}
+          </div>
+        </article>))}
+      {sheet ? <Sheet open title={sheet.a === "ship" ? "Ship order" : sheet.a === "reject" ? "Decline order" : "Reject return"} onClose={() => setSheet(null)}>
+        {sheet.a === "ship" ? (<div className="v8u-two"><label className="v8c-field"><span>Courier</span><input value={x.courier} onChange={(e) => setX((y) => ({ ...y, courier: e.target.value }))} placeholder="e.g. India Post" /></label><label className="v8c-field"><span>Tracking number</span><input value={x.tracking} onChange={(e) => setX((y) => ({ ...y, tracking: e.target.value }))} /></label></div>)
+          : <label className="v8c-field"><span>Reason (the buyer sees this)</span><input value={x.reason} onChange={(e) => setX((y) => ({ ...y, reason: e.target.value }))} /></label>}
+        <p className="v8c-muted">{sheet.a === "reject" ? "The buyer is refunded in full and the stock goes back." : sheet.a === "ship" ? "The buyer gets the tracking number." : "The buyer can contact HOWDI support."}</p>
+        <div className="v8vc-actions"><button type="button" className="v8-btn" onClick={() => setSheet(null)}>Back</button><button type="button" className="v8-btn v8-btn-primary" disabled={sheet.a === "ship" ? !(x.courier && x.tracking) : x.reason.trim().length < 4} onClick={() => act(sheet.o, sheet.a, sheet.a === "ship" ? { courier: x.courier, tracking: x.tracking } : { reason: x.reason })}>Confirm</button></div>
+      </Sheet> : null}
     </section>
   );
 }
