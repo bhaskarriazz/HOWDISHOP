@@ -9,6 +9,7 @@ import V8Profile from "./v8/V8Profile";
 import V8Access from "./v8/V8Access";
 import V8Connect from "./v8/connect/V8Connect";
 import V8Notifications, { useV8Unread } from "./v8/V8Notifications";
+import V8CallCenter from "./v8/connect/Calls";
 import { V8Appearance, V8Permissions, V8IdentityBadges } from "./v8/V8Settings";
 import { V8Confirm, V8OfflineBanner, V8SessionExpired, loadV8Prefs, applyV8Prefs, useV8Ui } from "./v8/V8System";
 import HowdiFor from "./howdi-for/HowdiFor";
@@ -13079,6 +13080,7 @@ const removeNotification = async (notificationId) => {
         legacyCount={unreadNotificationCount + worksNotificationUnread}
         onOpenLegacy={() => { loadNotifications(); loadWorksNotifications(); setNotificationOpen(true); }}
         onRoute={(r) => { const s = String(r || ""); if (s.startsWith("/connect")) openNavigationOSArea("connect", "p:" + s.replace(/^\/connect\/?/, "")); else if (s.startsWith("/@")) openNavigationOSArea("profile", s.slice(2)); else v8ApplyPath(s.split("?")[0]); }} />
+      {currentUser ? <V8CallCenter apiBase={SHOP_API_BASE} getAuthHeaders={customerSessionHeaders} user={currentUser} /> : null}
       <a className="v8-skip" href="#v8-main" onClick={(e) => { e.preventDefault(); const m = document.querySelector(".v8-page") || document.getElementById("v8-main"); if (m) { m.setAttribute("tabindex", "-1"); m.focus(); } }}>Skip to content</a>
       <V8Rail active={v8ActivePillar} onNavigate={v8Navigate} />
       <V8Header

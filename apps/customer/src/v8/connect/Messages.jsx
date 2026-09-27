@@ -18,12 +18,12 @@ export default function MessagesScreen({ api, user, focus, to, onNav, onRequireL
 }
 
 function Messages({ api, user, focus, to, onNav, onOpenProfile }) {
-  const [tab, setTab] = useState("all"); const [q, setQ] = useState(""); const [list, setList] = useState({ status: "loading", items: [], requests: 0 });
+  const [tab, setTab] = useState("all"); const [filter, setFilter] = useState("all"); const [q, setQ] = useState(""); const [list, setList] = useState({ status: "loading", items: [], requests: 0 });
   const [sheet, setSheet] = useState(to ? "new" : ""); const [rev, setRev] = useState(0);
   const load = useCallback(async () => {
-    const r = await api("GET", `/api/v8/conversations?tab=${tab}${q.trim() ? `&q=${encodeURIComponent(q.trim())}` : ""}`);
+    const r = await api("GET", `/api/v8/conversations?tab=${tab}${tab === "all" && filter !== "all" ? `&filter=${filter}` : ""}${q.trim() ? `&q=${encodeURIComponent(q.trim())}` : ""}`);
     setList(r.ok ? { status: "ready", items: r.json.items || [], requests: r.json.requests || 0 } : { status: "error", items: [], requests: 0, message: r.json.message });
-  }, [api, tab, q]);
+  }, [api, tab, filter, q]);
   useEffect(() => { const t = window.setTimeout(load, q ? 250 : 0); return () => window.clearTimeout(t); }, [load, q, rev]);
   useEffect(() => { const id = window.setInterval(load, 8000); return () => window.clearInterval(id); }, [load]);
   return (
@@ -34,10 +34,11 @@ function Messages({ api, user, focus, to, onNav, onOpenProfile }) {
           <button type="button" className="v8-btn v8-btn-primary" onClick={() => setSheet("new")}><V8Icon name="plus" size={16} />New</button></header>
         <label className="v8msg-search"><V8Icon name="search" size={18} /><span className="v8-sr">Search messages</span><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search people or messages" /></label>
         <Tabs compact tabs={[{ value: "all", label: "All" }, { value: "requests", label: "Message requests", count: list.requests }]} value={tab} onChange={setTab} label="Inbox" />
+        {tab === "all" ? <div className="v8c-chips v8msg-filters" role="group" aria-label="Filter conversations">{[["all", "All"], ["unread", "Unread"], ["groups", "Groups"], ["payments", "Payments"]].map(([v, l]) => <button key={v} type="button" className={`v8c-chip ${filter === v ? "on" : ""}`} aria-pressed={filter === v} onClick={() => setFilter(v)}>{l}</button>)}</div> : null}
         <p className="v8msg-safe"><V8Icon name="lock" size={14} /> Encrypted in transit</p>
         {list.status === "loading" ? [0, 1, 2, 3].map((i) => <Skel key={i} h={60} r={12} />) : null}
         {list.status === "error" ? <V8State kind="error" title="Messages didn’t load" message={list.message} actionLabel="Retry" onAction={load} /> : null}
-        {list.status === "ready" && !list.items.length ? <div className="v8msg-empty"><V8Icon name={tab === "requests" ? "mail" : "send"} size={28} /><b>{tab === "requests" ? "No message requests" : q ? "No matches" : "No messages yet"}</b><p className="v8c-muted">{tab === "requests" ? "When someone you don’t follow messages you, it appears here first." : "Start a chat with someone on HOWDI."}</p>{tab === "all" && !q ? <button type="button" className="v8-btn v8-btn-primary" onClick={() => setSheet("new")}>New message</button> : null}</div> : null}
+        {list.status === "ready" && !list.items.length ? <div className="v8msg-empty"><V8Icon name={tab === "requests" ? "mail" : "send"} size={28} /><b>{tab === "requests" ? "No message requests" : q ? "No matches" : filter === "unread" ? "You’re all caught up" : filter === "groups" ? "No groups yet" : filter === "payments" ? "No HPay payments yet" : "No messages yet"}</b><p className="v8c-muted">{tab === "requests" ? "When someone you don’t follow messages you, it appears here first." : "Start a chat with someone on HOWDI."}</p>{tab === "all" && !q && filter === "all" ? <button type="button" className="v8-btn v8-btn-primary" onClick={() => setSheet("new")}>New message</button> : null}</div> : null}
         <ul className="v8msg-list">{list.items.map((c) => (
           <li key={c.public_key}><button type="button" className={`v8msg-row ${focus === c.public_key ? "on" : ""} ${c.unread ? "unread" : ""}`} onClick={() => onNav(`messages/${c.public_key}`)} aria-label={`${c.title}${c.unread ? `, ${c.unread} unread` : ""}`}>
             {c.kind === "group" ? <span className="v8msg-group-ava"><V8Icon name="users" size={20} /></span> : <Ava src={c.members.find((m) => !m.me)?.avatar_url} name={c.title} size={48} />}
@@ -146,6 +147,7 @@ function Chat({ api, user, code, onBack, onChanged, onOpenProfile }) {
   }, [api, code]);
   useEffect(() => { loadConv(); loadMsgs(true); }, [loadConv, loadMsgs]);
   useEffect(() => { const id = window.setInterval(() => loadMsgs(false), 4000); return () => window.clearInterval(id); }, [loadMsgs]);
+  useEffect(() => { const on = () => loadMsgs(true); window.addEventListener("howdi:v8-chat-refresh", on); return () => window.removeEventListener("howdi:v8-chat-refresh", on); }, [loadMsgs]);
   const earlier = async () => { const r = await api("GET", `/api/v8/conversations/${code}/messages?before=${msgs[0]?.public_key || ""}`); if (r.ok) { setMsgs((m) => [...(r.json.items || []), ...m]); setMore(Boolean(r.json.has_more)); } };
   if (conv.status === "loading") return <div className="v8-card v8msg-chat"><Skel h={48} /><Skel h={300} /></div>;
   if (conv.status === "gone") return <div className="v8-card"><V8State icon="send" title="This conversation isn’t available" message="You may have left it or been removed." actionLabel="Back to Messages" onAction={onBack} /></div>;
@@ -161,6 +163,7 @@ function Chat({ api, user, code, onBack, onChanged, onOpenProfile }) {
   };
   const pickImg = async (f) => { if (!f) return; if (!/^image\/(jpeg|png|webp)$/.test(f.type) || f.size > 5 * 1024 * 1024) { setErr("Photos: JPG, PNG or WebP up to 5 MB."); return; } setImg(await readFileAsDataUrl(f)); };
   const answer = async (a) => { const r = await api("POST", `/api/v8/conversations/${code}/request/${a}`); if (r.ok) { ui?.toast({ title: r.json.message }); onChanged(); if (a === "accept") loadConv(); else onBack(); } else ui?.toast({ kind: "error", title: r.json.message }); };
+  const startCall = (type) => window.dispatchEvent(new CustomEvent("howdi:v8-call", { detail: { handle: other.public_username, name: c.title, avatar: other.avatar_url, type, conversation: code } }));
   const act = async (method, path, body, msg) => { const r = await api(method, path, body); if (!r.ok) { ui?.toast({ kind: "error", title: r.json.message || "Couldn’t do that." }); return null; } if (msg) ui?.toast({ title: typeof msg === "function" ? msg(r.json) : msg }); loadMsgs(false); loadConv(); onChanged(); return r.json; };
   return (
     <div className="v8-card v8msg-chat">
@@ -170,6 +173,10 @@ function Chat({ api, user, code, onBack, onChanged, onOpenProfile }) {
           {c.kind === "group" ? <span className="v8msg-group-ava"><V8Icon name="users" size={20} /></span> : <Ava src={other?.avatar_url} name={c.title} size={40} />}
           <span><b>{c.title}{other && c.kind !== "group" ? <V8Badges verified={other.verified} premium={other.premium} size="sm" /> : null}</b><small>{c.kind === "group" ? `${c.member_count} members` : `@${other?.public_username}`}{c.muted ? " · muted" : ""}</small></span>
         </button>
+        {c.kind !== "group" && c.can_send && !c.request && other ? (<>
+          <button type="button" className="v8-icon-btn" aria-label={`Voice call @${other.public_username}`} onClick={() => startCall("VOICE")}><V8Icon name="call" size={20} /></button>
+          <button type="button" className="v8-icon-btn" aria-label={`Video call @${other.public_username}`} onClick={() => startCall("VIDEO")}><V8Icon name="video" size={20} /></button>
+        </>) : null}
         <button type="button" className="v8-icon-btn" aria-label="Chat options" onClick={() => setSheet("menu")}><V8Icon name="more" size={20} /></button>
       </header>
       <div className="v8msg-notice"><V8Icon name="lock" size={14} /> {c.safety.encryption}. {c.kind === "group" ? "Only members see this group." : "HOWDI shows your @handle, never your phone number or ID."} <button type="button" className="v8-link" onClick={() => setSheet("safety")}>Learn more</button></div>
@@ -184,6 +191,7 @@ function Chat({ api, user, code, onBack, onChanged, onOpenProfile }) {
       <div className="v8msg-thread" role="log" aria-live="polite" aria-label="Messages">
         {more ? <button type="button" className="v8-link v8msg-earlier" onClick={earlier}>Load earlier messages</button> : null}
         {msgs.map((m) => m.kind === "system" ? <p key={m.public_key} className="v8msg-sys">{m.text}</p>
+          : m.kind === "call" ? <p key={m.public_key} className={`v8msg-sys call ${/Missed|declined|No answer/i.test(m.text || "") ? "bad" : ""}`}><V8Icon name={/video/i.test(m.text || "") ? "video" : "call"} size={14} /> {m.mine ? "" : `@${m.author?.public_username} · `}{m.text} · {clock(m.created_at)}{c.kind !== "group" && c.can_send && !c.request && other ? <button type="button" className="v8-link" onClick={() => startCall(/video/i.test(m.text || "") ? "VIDEO" : "VOICE")}>Call back</button> : null}</p>
           // paying a request: the request card above updates to "Paid"; the payment itself shows as one receipt line
           : m.kind === "payment" && m.payment && m.payment.kind === "request" ? <p key={m.public_key} className="v8msg-sys ok"><V8Icon name="check" size={14} /> {m.mine ? "You" : `@${m.author?.public_username}`} paid {inr(m.payment.amount)}{m.payment.reference ? ` · Ref ${m.payment.reference}` : ""} · {clock(m.created_at)}</p> : (
           <div key={m.public_key} className={`v8msg-b ${m.mine ? "mine" : ""} ${m.payment ? "pay" : ""}`}>

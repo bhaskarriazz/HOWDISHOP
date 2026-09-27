@@ -3,3 +3,5 @@ node_modules/
 backend/.dev-otp-log.jsonl
 # runtime uploads / private media written by the backend (never commit)
 backend/data/
+# Vite build output
+apps/customer/dist/

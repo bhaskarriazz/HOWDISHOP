@@ -191,6 +191,32 @@ const thread = async (m, c) => ((await api('GET', `/api/v8/conversations/${c}/me
     check('without the sandbox no money moves (503)', np.status === 503 && np.json.code === 'PAYMENT_PROVIDER_REQUIRED', np.text.slice(0, 200));
     check('requests refused without the sandbox', (await api('POST', `/api/v8/conversations/${CV}/payments`, { token: B.token, body: { kind: 'request', amount: 10, idempotency_key: key() } })).status === 503);
   }
+  // ---- inbox filters
+  { const g = await api('GET', '/api/v8/conversations?filter=groups', { token: A.token }); check('groups filter: only groups', g.status === 200 && (g.json.items || []).every((x) => x.kind === 'group'), g.text.slice(0, 200));
+    const u = await api('GET', '/api/v8/conversations?filter=unread', { token: A.token }); check('unread filter: only unread', (u.json.items || []).every((x) => x.unread > 0));
+    const pf = await api('GET', '/api/v8/conversations?filter=payments', { token: A.token }); check('payments filter includes the chat with payment history (failed attempts count as history)', (pf.json.items || []).some((x) => x.public_key === CV)); check('payments filter excludes chats with no payments', (pf.json.items || []).every((x) => x.kind !== 'group'));
+    check('unknown filter falls back to all', (await api('GET', '/api/v8/conversations?filter=%27;drop', { token: A.token })).status === 200); }
+  // ---- CON-010 call history (outcome read from the call record, only the caller can log)
+  { const mk = async (type) => (await api('POST', '/api/connect/calls', { token: A.token, body: { callType: type, inviteeUsernames: ['bala_r'] } })).json.call;
+    const c1 = await mk('VOICE'); check('call created without numeric user ids', c1 && typeof c1.my_token === 'string');
+    check('cannot log a call still ringing', (await api('POST', `/api/v8/conversations/${CV}/call-log`, { token: A.token, body: { call: c1.id } })).json.code === 'CALL_ACTIVE');
+    check('B sees it ringing', ((await api('GET', '/api/connect/calls/inbox', { token: B.token })).json.calls || []).some((x) => x.id === c1.id));
+    await api('PATCH', `/api/connect/calls/${c1.id}/respond`, { token: B.token, body: { accept: true } });
+    await pool.query(`UPDATE howdi_connect_calls SET started_at=NOW()-interval '151 seconds' WHERE id=$1`, [c1.id]);
+    await api('POST', `/api/connect/calls/${c1.id}/leave`, { token: B.token, body: {} }); await api('POST', `/api/connect/calls/${c1.id}/leave`, { token: A.token, body: {} });
+    check('callee cannot log the call', (await api('POST', `/api/v8/conversations/${CV}/call-log`, { token: B.token, body: { call: c1.id } })).status === 404);
+    const lg = await api('POST', `/api/v8/conversations/${CV}/call-log`, { token: A.token, body: { call: c1.id, text: 'Voice call · 99:99' } });
+    check('answered call logged with duration from the record', lg.json.logged === true && /^Voice call · 2:3\d$/.test(lg.json.text), lg.text);
+    noLeak('call-log', lg);
+    check('call log is idempotent', (await api('POST', `/api/v8/conversations/${CV}/call-log`, { token: A.token, body: { call: c1.id } })).json.logged === false);
+    const c2 = await mk('VIDEO'); await api('POST', `/api/connect/calls/${c2.id}/leave`, { token: A.token, body: {} });
+    const lg2 = await api('POST', `/api/v8/conversations/${CV}/call-log`, { token: A.token, body: { call: c2.id } });
+    check('unanswered video call → Missed', lg2.json.text === 'Missed video call', lg2.text);
+    check('B notified of the missed call', (await notes(B)).some((n) => n.kind === 'CALL_MISSED' || /Missed video call/.test(n.title)));
+    const c3 = await mk('VOICE'); await api('PATCH', `/api/connect/calls/${c3.id}/respond`, { token: B.token, body: { accept: false } }); await api('POST', `/api/connect/calls/${c3.id}/leave`, { token: A.token, body: {} });
+    check('declined call → Voice call declined', (await api('POST', `/api/v8/conversations/${CV}/call-log`, { token: A.token, body: { call: c3.id } })).json.text === 'Voice call declined');
+    const th = await thread(B, CV); check('both sides see call lines in the thread', th.filter((m) => m.kind === 'call').length === 3, th.map((m) => m.kind));
+    check('a stranger cannot log into this chat', (await api('POST', `/api/v8/conversations/${CV}/call-log`, { token: E.token, body: { call: c1.id } })).status >= 403); }
   // blocking closes the chat both ways
   check('A blocks B', (await api('POST', '/api/v8/creators/bala_r/block', { token: A.token })).json.blocked === true);
   check('B cannot send to A after block', (await api('POST', `/api/v8/conversations/${CV}/messages`, { token: B.token, body: { text: 'hello?' } })).status === 403);

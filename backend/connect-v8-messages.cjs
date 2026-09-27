@@ -12,6 +12,8 @@
 //   POST /api/v8/conversations/{CNV}/read · /mute {on} · /request/accept|decline|block · /report {reason}
 //   PATCH /api/v8/conversations/{CNV}                group rename (admin) · POST|DELETE …/members[/@h] add · remove / leave
 //   POST /api/v8/conversations/{CNV}/members/{@h}/admin  owner toggles admin
+//   POST /api/v8/conversations/{CNV}/call-log {call} history line for a finished voice/video call (read from the call record)
+//   GET  /api/v8/conversations?filter=unread|groups|payments   inbox filters
 //   PATCH|DELETE /api/v8/chat-messages/{CMS}         edit own within 15 min (versions kept for safety) · delete own
 //   GET|POST /api/v8/hpay/pin                        HPay PIN status · set / change (scrypt, 5 tries then 15 min lock)
 //   POST /api/v8/conversations/{CNV}/payments/quote  review: amount, fee, total, balance, counterpart — nothing moves
@@ -235,6 +237,7 @@ function createConnectV8Messages(deps) {
 
     if (p === '/api/v8/conversations' && req.method === 'GET') {
       const tab = url.searchParams.get('tab') === 'requests' ? 'requests' : 'all';
+      const filter = ['unread', 'groups', 'payments'].includes(url.searchParams.get('filter')) ? url.searchParams.get('filter') : 'all';
       const q = line(url.searchParams.get('q'), 60).toLowerCase();
       const rows = (await pool.query(`${CONV_SQL}
         WHERE ${tab === 'requests' ? `c.request_status='PENDING' AND c.requested_by<>$1::bigint` : `(c.request_status IS NULL OR c.requested_by=$1::bigint)`}
@@ -251,10 +254,13 @@ function createConnectV8Messages(deps) {
         let preview = last ? (last.deleted_at ? 'Message deleted' : last.kind === 'payment' || last.kind === 'request' ? line(last.message_text, 80) : last.kind === 'image' ? '📷 Photo' : line(last.message_text, 80)) : 'No messages yet';
         if (last && Number(last.sender_user_id) === vid && last.kind === 'text') preview = `You: ${preview}`;
         if (q && !`${dto.title} ${dto.members.map((x) => x.public_username).join(' ')} ${preview}`.toLowerCase().includes(q)) continue;
+        if (filter === 'unread' && !unread) continue;
+        if (filter === 'groups' && c.conversation_type !== 'GROUP') continue;
+        if (filter === 'payments' && !(await pool.query(`SELECT 1 FROM howdi_v8_chat_payments WHERE conversation_id=$1 LIMIT 1`, [c.id])).rowCount) continue;
         items.push({ ...dto, preview, last_at: iso(last ? last.created_at : c.updated_at), unread });
       }
       const requests = Number((await pool.query(`SELECT COUNT(*) n FROM howdi_connect_conversations c JOIN howdi_connect_conversation_members me ON me.conversation_id=c.id AND me.user_id=$1 AND me.left_at IS NULL WHERE c.request_status='PENDING' AND c.requested_by<>$1`, [vid])).rows[0].n);
-      ok(res, { tab, items, requests, safety: 'Encrypted in transit' }); return true;
+      ok(res, { tab, filter, items, requests, safety: 'Encrypted in transit' }); return true;
     }
 
     if (p === '/api/v8/conversations' && req.method === 'POST') {
@@ -424,6 +430,21 @@ function createConnectV8Messages(deps) {
       if (id) for (const x of ms) if (!x.me && !(await pool.query(`SELECT muted FROM howdi_connect_conversation_members WHERE conversation_id=$1 AND user_id=$2`, [cid, x.uid])).rows[0]?.muted)
         await notify(x.uid, 'MESSAGE', c.conversation_type === 'GROUP' ? `@${await handleOf(vid)} in ${dto.title}` : `New message from @${await handleOf(vid)}`, img && !t ? '📷 Photo' : line(t, 100), route, vid);
       ok(res, { message: (await msgDtos([row], vid, ms))[0], replayed: !id }, id ? 201 : 200); return true;
+    }
+    if (sub === 'call-log' && req.method === 'POST') {
+      // the outcome comes from the call record, never from the browser: only the caller logs, only for a call with this chat's other member
+      const b = (await getBody(req)) || {}; const callId = Number(b.call);
+      const other = ms.find((x) => !x.me);
+      const call = Number.isSafeInteger(callId) && other ? (await pool.query(`SELECT c.id, c.call_type, c.status, c.started_at, c.ended_at, p.invite_status
+        FROM howdi_connect_calls c JOIN howdi_connect_call_participants p ON p.call_id=c.id AND p.user_id=$3 WHERE c.id=$1 AND c.caller_user_id=$2`, [callId, vid, other.uid])).rows[0] : null;
+      if (!call || c.conversation_type === 'GROUP') { fail(res, 404, 'NOT_FOUND', 'Call not found.'); return true; }
+      if (call.status !== 'ENDED') { fail(res, 409, 'CALL_ACTIVE', 'The call hasn’t ended yet.'); return true; }
+      const kind = call.call_type === 'VIDEO' ? 'Video call' : 'Voice call';
+      const secs = call.started_at && call.ended_at ? Math.max(0, Math.round((new Date(call.ended_at) - new Date(call.started_at)) / 1000)) : 0;
+      const line2 = call.started_at ? `${kind} · ${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}` : call.invite_status === 'DECLINED' ? `${kind} declined` : `Missed ${kind.toLowerCase()}`;
+      const id = await addMessage(pool, cid, vid, line2, { kind: 'call', idem: `call-${call.id}` });
+      if (id && !call.started_at) await notify(other.uid, 'CALL_MISSED', `Missed ${kind.toLowerCase()} from @${await handleOf(vid)}`, 'Call back from Messages.', route, vid);
+      ok(res, { logged: Boolean(id), text: line2 }); return true;
     }
     if (sub === 'read' && req.method === 'POST') { await pool.query(`UPDATE howdi_connect_conversation_members SET last_read_at=NOW() WHERE conversation_id=$1 AND user_id=$2`, [cid, vid]); ok(res, { read: true }); return true; }
     if (sub === 'mute' && req.method === 'POST') { const b = (await getBody(req)) || {}; await pool.query(`UPDATE howdi_connect_conversation_members SET muted=$3 WHERE conversation_id=$1 AND user_id=$2`, [cid, vid, b.on === true]); ok(res, { muted: b.on === true }); return true; }
