@@ -77,8 +77,8 @@ function createConnectV8Messages(deps) {
   }
 
   // ------------------------------------------------------------ public codes (shared refs2 table)
-  const PFX = { CONV: 'CNV', CMSG: 'CMS', PAY: 'PAY', UTL: 'UTL' };
-  const CODE = /^(CNV|CMS|PAY|UTL)-[0-9A-F]{12}$/;
+  const PFX = { CONV: 'CNV', CMSG: 'CMS', PAY: 'PAY', UTL: 'UTL', WBKG: 'BKG' };
+  const CODE = /^(CNV|CMS|PAY|UTL|BKG)-[0-9A-F]{12}$/;
   async function issue(type, keys) {
     const uniq = [...new Set(keys.map(String))]; const out = new Map(); if (!uniq.length) return out;
     for (let a = 0; a < 4; a++) {
