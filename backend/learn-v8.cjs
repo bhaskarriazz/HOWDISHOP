@@ -278,7 +278,7 @@ function createLearnV8(deps) {
     const d = { public_key: await code('RAPP', a.id), role: a.role, label: ROLE_FORMS[a.role].label, status: a.status, editable: ['draft', 'info_requested', 'rejected'].includes(a.status),
       note: ['info_requested', 'rejected'].includes(a.status) ? a.review_note : null, fields: a.fields || {}, declaration: a.declaration, missing: missing(a.role, a),
       submitted_at: iso(a.submitted_at), decided_at: iso(a.decided_at), open_route: a.status === 'approved' ? ROLE_FORMS[a.role].route : null,
-      history: ev.map((e) => ({ actor: e.actor === 'admin' ? (admin ? `admin · ${e.admin_username || ''}` : 'HOWDI') : 'you', action: e.action, reason: e.reason, at: iso(e.at) })) };
+      history: ev.map((e) => ({ actor: e.actor === 'admin' ? (admin ? `admin · ${e.admin_username || ''}` : 'HOWDI') : (admin ? 'applicant' : 'you'), action: e.action, reason: e.reason, at: iso(e.at) })) };
     if (admin) {
       const u = (await pool.query(`SELECT bu.full_name, bu.created_at, ${authorCols('bu.id', 'a_')} FROM users bu ${authorJoins('bu.id', 'a_')} WHERE bu.id=$1`, [a.user_id])).rows[0];
       d.applicant = u ? { ...authorDto(u, 'a_'), legal_name: u.full_name, member_since: iso(u.created_at) } : null; d.reject_templates = ROLE_FORMS[a.role].templates;

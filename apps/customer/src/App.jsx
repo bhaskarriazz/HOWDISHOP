@@ -12,6 +12,7 @@ import V8Notifications, { useV8Unread } from "./v8/V8Notifications";
 import V8CallCenter from "./v8/connect/Calls";
 import V8Works from "./v8/works/V8Works";
 import V8Roles from "./v8/me/V8Roles";
+import V8Learn from "./v8/learn/V8Learn";
 import V8Shop from "./v8/shop/V8Shop";
 import { V8Appearance, V8Permissions, V8IdentityBadges } from "./v8/V8Settings";
 import { V8Confirm, V8OfflineBanner, V8SessionExpired, loadV8Prefs, applyV8Prefs, useV8Ui } from "./v8/V8System";
@@ -2673,6 +2674,7 @@ function App() {
   // V8 Connect feature hub: sub-path under /connect (""=hub, "vibe", "vibe/VIB-…", "live", "spaces", "articles", "communities/slug" …)
   const [v8ConnectPath,setV8ConnectPath]=useState("");
   const [v8ShopPath,setV8ShopPath]=useState("");
+  const [v8LearnPath,setV8LearnPath]=useState("courses");
   const [v8NotifOpen,setV8NotifOpen]=useState(false);
   const [v8ProfileHandle,setV8ProfileHandle]=useState("");
   const [v8Prefs,setV8Prefs]=useState(()=>loadV8Prefs());
@@ -9959,6 +9961,12 @@ return () => window.clearInterval(timer);
       return;
     }
     if(next==="learn"){
+      // V8 Learn & Earn pages keep their case-sensitive public codes (CRS-…, LSN-…, certificate numbers).
+      const sub=String(subview||"");
+      if(view==="discover"||view==="home"||/^(courses(\/CRS-[0-9A-Fa-f]{12})?|lessons\/LSN-[0-9A-Fa-f]{12}|mine|teach(\/CRS-[0-9A-Fa-f]{12})?|certificates\/[A-Za-z0-9-]{6,80}|apply\/(teacher|institute|startup))$/.test(sub)){
+        setV8LearnPath(view==="discover"||view==="home"?"courses":sub);setLearningPortalView("v8");setLearningBrowseOpen(true);setNavigationOSArea("learn");setActiveSection("learn");
+        window.setTimeout(()=>{const m=document.querySelector(".v8-page");if(m)m.scrollTop=0;window.scrollTo(0,0);},30);return;
+      }
       setLearningPortalView(view);
       setLearningBrowseOpen(true);
       if(currentUser)loadLearnerHome();
@@ -12698,6 +12706,7 @@ const removeNotification = async (notificationId) => {
       return shopCollection==="crochet"?"/shop/crochet":"/shop";
     }
     if(navigationOSArea==="works")return worksExperienceTab&&!["find","home"].includes(worksExperienceTab)?`/works/${worksExperienceTab}`:"/works";
+    if(navigationOSArea==="learn"&&learningPortalView==="v8")return v8LearnPath.startsWith("apply/")?`/me/${v8LearnPath}`:`/learn/${v8LearnPath}`;
     if(navigationOSArea==="learn")return learningPortalView&&!["discover","home"].includes(learningPortalView)?`/learn/${learningPortalView}`:"/learn";
     return null;
   };
@@ -12714,6 +12723,8 @@ const removeNotification = async (notificationId) => {
     if((m=p.match(/^\/works(?:\/([A-Za-z0-9/_.@-]{1,120}))?$/))){openNavigationOSArea("works",m[1]||"find");return true;}
     if((m=p.match(/^\/learn(?:\/([a-z-]{2,24}))?$/))){openNavigationOSArea("learn",m[1]||"discover");return true;}
     if((m=p.match(/^\/me\/(appearance|privacy|badges|roles|vendor|vendor\/store)$/))){openNavigationOSArea("me",m[1]);return true;}
+    if((m=p.match(/^\/me\/apply\/(teacher|institute|startup)$/))){openNavigationOSArea("learn","apply/"+m[1]);return true;}
+    if((m=p.match(/^\/learn\/(courses(?:\/CRS-[0-9A-F]{12})?|lessons\/LSN-[0-9A-F]{12}|mine|teach(?:\/CRS-[0-9A-F]{12})?|certificates\/[A-Z0-9-]{6,80})$/))){openNavigationOSArea("learn",m[1]);return true;}
     if((m=p.match(/^\/@([a-z0-9._]{3,30})$/i))){openNavigationOSArea("profile",m[1].toLowerCase());return true;}
     return false;
   };
@@ -12754,7 +12765,7 @@ const removeNotification = async (notificationId) => {
     // content may still be loading: retry the restore a few times until the page is tall enough
     [60,300,800,1500].forEach((ms)=>window.setTimeout(()=>{const el=document.querySelector(".v8-page")||document.querySelector(".howdi-os-workspace");if(el&&v8LastPath.current===path&&Math.abs(el.scrollTop-restore)>2)el.scrollTop=restore;},ms));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[v8RouterOn,navigationOSArea,connectView,connectContentMode,v8ConnectPath,v8ShopPath,shopOSView,shopCollection,worksExperienceTab,learningPortalView,v8MeView,v8ProfileHandle]);
+  },[v8RouterOn,navigationOSArea,connectView,connectContentMode,v8ConnectPath,v8ShopPath,v8LearnPath,shopOSView,shopCollection,worksExperienceTab,learningPortalView,v8MeView,v8ProfileHandle]);
   useEffect(()=>{
     // V8 Connect sheets (e.g. Share → Messages) ask the shell to open another area.
     const onOpen=(e)=>{const d=e&&e.detail;if(d&&typeof d.area==="string")openNavigationOSArea(d.area,d.view||"home");};
@@ -21532,7 +21543,11 @@ const removeNotification = async (notificationId) => {
 
         {classroomIssueOpen&&activeClassroom&&<div className="classroom-issue-overlay"><div className="classroom-issue-modal"><button className="close" onClick={()=>setClassroomIssueOpen(false)}>×</button><small>HOWDI CLASSROOM SUPPORT</small><h3>Report a classroom issue</h3><p>This creates a tracked HOWDI incident linked to this class.</p><div className="issue-grid"><button onClick={()=>reportLearnerIssue("TEACHER_NOT_VISIBLE","Teacher video/audio is not available")}>Teacher not visible</button><button onClick={()=>reportLearnerIssue("AUDIO_VIDEO_PROBLEM","Audio or video problem")}>Audio / video problem</button><button onClick={()=>reportLearnerIssue("TEACHER_DISCONNECTED","Teacher disconnected")}>Teacher disconnected</button><button onClick={()=>reportLearnerIssue("DIRECT_PAYMENT_REQUEST","Teacher requested direct payment")}>Direct payment request</button><button onClick={()=>reportLearnerIssue("CLASS_QUALITY_ISSUE","Class quality issue")}>Class quality issue</button><button onClick={()=>reportLearnerIssue("OTHER_CLASSROOM_ISSUE","Other classroom issue")}>Other</button></div></div></div>}
 
-        {navigationOSArea==="learn" && (
+        {navigationOSArea==="learn" && learningPortalView==="v8" && (
+          <V8Learn apiBase={SHOP_API_BASE} getAuthHeaders={customerSessionHeaders} user={currentUser} path={v8LearnPath} onRequireLogin={openLogin}
+            onNavigate={(p)=>{const s=String(p||"courses");if(s.startsWith("/")){if(!v8ApplyPath(s))openNavigationOSArea("home");}else openNavigationOSArea("learn",s);}} />
+        )}
+        {navigationOSArea==="learn" && learningPortalView!=="v8" && (
                   <div className="howdi-os-workspace howdi-os-learn" aria-label="HOWDI Learn & Earn">
                     <style>{`.howdi-app[data-active-pillar="learn"] .howdi-os-learn .hle-hpay-v1912{display:block!important}`}</style>
                     <div className="hle-shell">
