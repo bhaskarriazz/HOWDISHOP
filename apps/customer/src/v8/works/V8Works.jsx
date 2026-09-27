@@ -9,6 +9,7 @@ import { PinStep, inr, newKey } from "../connect/HPayUtilities";
 import "./works.css";
 
 const WorkerDesk = lazy(() => import("./WorkerDesk"));
+const BecomeWorker = lazy(() => import("./BecomeWorker"));
 export const when = (iso) => { const d = new Date(iso); return Number.isFinite(d.getTime()) ? d.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }) : ""; };
 export const STATE_LABEL = { requested: ["warn", "Waiting for the worker"], accepted: ["warn", "Accepted — confirm details"], confirmed: ["ok", "Confirmed"], en_route: ["ok", "On the way"], arrived: ["ok", "Arrived"], in_progress: ["ok", "Job in progress"], completed: ["warn", "Done — please confirm"], closed: ["ok", "Completed"], declined: ["bad", "Declined"], expired: ["muted", "Expired"], cancelled: ["muted", "Cancelled"], disputed: ["bad", "Issue reported"] };
 export function StateChip({ state, worker }) {
@@ -62,7 +63,7 @@ export default function V8Works({ apiBase, getAuthHeaders, user, path, onNavigat
       {r.view === "booking" ? need(<BookingDetail key={r.code} api={api} code={r.code} nav={nav} />) : null}
       {r.view === "saved" ? need(<Saved api={api} nav={nav} />) : null}
       {r.view === "safety" ? <Safety nav={nav} /> : null}
-      {r.view === "become" ? need(<Become me={me} onOpenClassic={onOpenClassic} />) : null}
+      {r.view === "become" ? need(<Suspense fallback={<Skel h={300} />}><BecomeWorker api={api} nav={nav} reloadMe={() => api("GET", "/api/v8/works/worker/me").then((x) => setMe(x.ok ? x.json : null))} /></Suspense>) : null}
       {r.view === "desk" ? need(<Suspense fallback={<Skel h={200} />}><WorkerDesk api={api} me={me} sub={r.sub} nav={nav} reloadMe={() => api("GET", "/api/v8/works/worker/me").then((x) => setMe(x.ok ? x.json : null))} /></Suspense>) : null}
     </div>
   );
@@ -393,18 +394,6 @@ function Safety({ nav }) {
       <T icon="flag" title="Report or block" body="From any worker profile or booking: report safety concerns, fraud or overcharging. Block to hide them everywhere on HOWDI." />
       <div className="v8-card v8w-tip danger"><V8Icon name="alert" size={22} /><span><b>In an emergency call 112</b><p>HOWDI safety tools don’t replace emergency services.</p></span></div>
       <button type="button" className="v8-btn" onClick={() => nav("bookings")}>Go to my bookings</button>
-    </section>
-  );
-}
-function Become({ me, onOpenClassic }) {
-  const a = me?.application;
-  return (
-    <section className="v8-card v8w-block v8w-become">
-      <h2>Become a verified HOWDI worker</h2>
-      <ol className="v8w-check"><li>Eligibility — 18+, living in your service area</li><li>Identity — ID document and a live selfie</li><li>Services & pricing — what you do and your starting price</li><li>Availability — working hours and days off</li><li>HOWDI review — usually within 2 working days</li></ol>
-      {a ? <p className={`v8w-appstate ${a.status}`}>Your application: <b>{a.status.replace(/_/g, " ")}</b>{a.note ? ` — ${a.note}` : ""}</p> : null}
-      <p className="v8c-muted">The V8 application with HOWDI Admin review is being built next. Until then, apply with the current form.</p>
-      <button type="button" className="v8-btn v8-btn-primary" onClick={onOpenClassic}>{a ? "View my application" : "Apply now"}</button>
     </section>
   );
 }

@@ -102,3 +102,14 @@
 .v8w .v8c-receipt b { overflow-wrap: anywhere; }
 @media (max-width: 520px) { .v8w-search { flex-wrap: wrap; } .v8w-q { flex-basis: 100%; } .v8w-sel { flex: 1; } .v8w-sel select { width: 100%; } }
 .v8w-bookhead b, .v8w-card-text b { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.v8w-wiz { list-style: none; margin: 0; padding: 0; display: flex; gap: 6px; overflow-x: auto; }
+.v8w-wiz button { display: flex; align-items: center; gap: 6px; white-space: nowrap; border: 1px solid var(--v8-line-2); border-radius: 999px; padding: 6px 12px 6px 6px; background: var(--v8-surface); color: var(--v8-ink-2); font: 600 13px inherit; cursor: pointer; }
+.v8w-wiz i { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; background: var(--v8-bg); font-style: normal; font-size: 12px; }
+.v8w-wiz button.on { border-color: var(--v8-primary); color: var(--v8-primary); } .v8w-wiz button.on i { background: var(--v8-primary); color: #fff; }
+.v8w-docs { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; } @media (max-width: 520px) { .v8w-docs { grid-template-columns: 1fr; } }
+.v8w-doc { display: grid; gap: 4px; justify-items: start; padding: 14px; border: 2px dashed var(--v8-line-2); border-radius: 14px; cursor: pointer; }
+.v8w-doc small { color: var(--v8-muted); } .v8w-doc.done { border-style: solid; border-color: var(--v8-success); background: var(--v8-success-soft); } .v8w-doc.done > svg { color: var(--v8-success); }
+.v8w-appstate.submitted { background: #fff4e0; } .v8w-appstate.info_requested { background: var(--v8-primary-soft); } .v8w-appstate.rejected { background: var(--v8-danger-soft); } .v8w-appstate.ok { background: var(--v8-success-soft); color: var(--v8-success); display: flex; gap: 6px; align-items: center; }
+.v8w-appsteps { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; } .v8w-appsteps li { display: flex; gap: 8px; align-items: center; } .v8w-appsteps li.done svg { color: var(--v8-success); } .v8w-appsteps li.now { font-weight: 700; color: #9a5b00; } .v8w-appsteps li.bad { font-weight: 700; color: var(--v8-danger); }
+.v8w-become input[type=range] { width: 100%; accent-color: var(--v8-primary); }
+.v8w-become .v8-banner-error .v8-link { margin: 0 6px; }

@@ -51,7 +51,7 @@ function createWorksV8Onboarding(deps) {
     const dto = {
       public_key: await codeOf(a.id), status: s, editable: ['draft', 'info_requested', 'rejected'].includes(s),
       note: ['info_requested', 'rejected'].includes(s) ? a.review_note || null : null,
-      name: a.full_name || null, age_confirmed: a.dob_confirmed === true, city: a.city || null, pincode: a.pincode || null, radius_km: a.service_radius_km != null ? Number(a.service_radius_km) : null,
+      name: a.full_name || null, age_confirmed: a.dob_confirmed === true, city: a.city || null, pin_code: a.pincode || null, radius_km: a.service_radius_km != null ? Number(a.service_radius_km) : null,
       languages: Array.isArray(a.languages) ? a.languages : [], experience_years: a.experience_years != null ? Number(a.experience_years) : null,
       id_type: a.kyc_document_type || null, id_last4: a.kyc_id_last4 || null, has_id_photo: Boolean(a.kyc_document_file), has_selfie: Boolean(a.live_selfie_file),
       services: Array.isArray(a.services) ? a.services : [], price: a.expected_starting_price != null ? money(a.expected_starting_price) : null, bio: a.bio || null,
