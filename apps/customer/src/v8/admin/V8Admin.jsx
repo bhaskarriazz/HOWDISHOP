@@ -46,6 +46,7 @@ const QUEUES = [
   { key: "workers", label: "Workers", icon: "works", live: true },
   { key: "vendors", label: "Vendors", icon: "store", live: true }, { key: "teacher", label: "Teachers", icon: "learn", live: true },
   { key: "institute", label: "Institutes / Colleges", icon: "users", live: true }, { key: "startup", label: "Startups", icon: "spark", live: true },
+  { key: "reviews", label: "Reported reviews", icon: "alert", live: true },
 ];
 function Console({ call, token, onSignOut }) {
   const [q, setQ] = useState("workers");
@@ -57,7 +58,7 @@ function Console({ call, token, onSignOut }) {
         {QUEUES.map((x) => <button key={x.key} type="button" className={q === x.key ? "on" : ""} aria-current={q === x.key ? "page" : undefined} onClick={() => setQ(x.key)}><V8Icon name={x.icon} size={18} />{x.label}{!x.live ? <small>next</small> : null}</button>)}
         <button type="button" className="v8a-out" onClick={onSignOut}><V8Icon name="back" size={16} />Sign out</button>
       </aside>
-      <main className="v8a-main">{q === "workers" ? <Workers key="w" kind="workers" call={call} token={token} /> : q === "vendors" ? <Workers key="v" kind="vendors" call={call} token={token} /> : ["teacher", "institute", "startup"].includes(q) ? <Workers key={q} kind={q} call={call} token={token} /> : <div className="v8a-card"><h1>{QUEUES.find((x) => x.key === q).label}</h1><p className="v8a-muted">This verification queue is being built next (same approve / reject / request-info journey as Workers).</p></div>}</main>
+      <main className="v8a-main">{q === "workers" ? <Workers key="w" kind="workers" call={call} token={token} /> : q === "vendors" ? <Workers key="v" kind="vendors" call={call} token={token} /> : ["teacher", "institute", "startup"].includes(q) ? <Workers key={q} kind={q} call={call} token={token} /> : q === "reviews" ? <Reports call={call} /> : <div className="v8a-card"><h1>{QUEUES.find((x) => x.key === q).label}</h1><p className="v8a-muted">This verification queue is being built next (same approve / reject / request-info journey as Workers).</p></div>}</main>
     </div>
   );
 }
@@ -213,5 +214,26 @@ function RoleApp({ call, kind, code, onDecided }) {
       {a.note ? <p className="v8a-note"><b>Reason given:</b> {a.note}</p> : null}
       <section><h3>History</h3><ol className="v8a-hist">{a.history.map((h, i) => <li key={i}><b>{h.action.replace("_", " ")}</b> <small>{h.actor} · {when(h.at)}</small>{h.reason ? <p>{h.reason}</p> : null}</li>)}</ol></section>
     </div>
+  );
+}
+
+function Reports({ call }) {
+  const [status, setStatus] = useState("open"); const [d, setD] = useState(null); const [msg, setMsg] = useState(null); const [note, setNote] = useState({});
+  const load = useCallback(async () => { const r = await call("GET", `/api/admin/v8/reviews/reports?status=${status}`); setD(r.ok ? r.json : { error: r.json.message }); }, [call, status]);
+  useEffect(() => { setD(null); load(); }, [load]);
+  const decide = async (x, decision) => { const r = await call("POST", `/api/admin/v8/reviews/reports/${x.public_key}/decide`, { decision, note: note[x.public_key] || "" }); setMsg(r.ok ? { text: decision === "hide" ? `Hidden — @${x.reviewer?.public_username} was told why.` : "Kept — the review stays visible." } : { err: true, text: r.json.message }); load(); };
+  return (
+    <section className="v8a-card"><h1>Reported reviews</h1>
+      <div className="v8a-tabs" role="tablist">{[["open", "To review"], ["hidden", "Hidden"], ["kept", "Kept"]].map(([k, l]) => <button key={k} role="tab" aria-selected={status === k} className={status === k ? "on" : ""} onClick={() => { if (status === k) load(); setStatus(k); }}>{l}{d?.counts?.[k] ? <i>{d.counts[k]}</i> : null}</button>)}</div>
+      {msg ? <p className={msg.err ? "v8a-err" : "v8a-ok"} role="status">{msg.text}</p> : null}
+      {!d ? <p className="v8a-muted">Loading…</p> : d.error ? <p className="v8a-err">{d.error}</p> : !d.items.length ? <p className="v8a-empty">Nothing here.</p>
+        : <ul className="v8a-reports">{d.items.map((x) => <li key={x.public_key} className="v8a-app">
+          <header><div><h2>{x.product}</h2><p className="v8a-muted">{x.public_key} · reported by @{x.reporter?.public_username} · {when(x.at)}</p></div><span className={`v8a-status ${x.status === "open" ? "submitted" : x.status === "hidden" ? "rejected" : "approved"}`}>{x.status}</span></header>
+          <p><b>Reason:</b> {x.reason}{x.details ? ` — ${x.details}` : ""}</p>
+          <blockquote className="v8a-quote"><b>@{x.reviewer?.public_username} · {x.rating}★</b><br />{x.review || "(no text)"}</blockquote>
+          {x.status === "open" ? <><textarea rows={2} maxLength={200} aria-label="Note to the reviewer" placeholder="Note to the reviewer if you hide it (optional)" value={note[x.public_key] || ""} onChange={(e) => setNote((n) => ({ ...n, [x.public_key]: e.target.value }))} />
+            <div className="v8a-actions"><button type="button" className="v8a-btn" onClick={() => decide(x, "keep")}>Keep review</button><button type="button" className="v8a-btn danger" onClick={() => decide(x, "hide")}>Hide review</button></div></> : <p className="v8a-muted">Decided by {x.decided_by} · {when(x.decided_at)}</p>}
+        </li>)}</ul>}
+    </section>
   );
 }

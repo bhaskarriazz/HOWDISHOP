@@ -14,6 +14,7 @@ import V8Works from "./v8/works/V8Works";
 import V8Roles from "./v8/me/V8Roles";
 import V8Learn from "./v8/learn/V8Learn";
 import { Wallet as V8Wallet, Photo as V8Photo } from "./v8/me/V8Wallet";
+import * as V8MyHowdi from "./v8/me/V8MyHowdi";
 import V8Shop from "./v8/shop/V8Shop";
 import { V8Appearance, V8Permissions, V8IdentityBadges } from "./v8/V8Settings";
 import { V8Confirm, V8OfflineBanner, V8SessionExpired, loadV8Prefs, applyV8Prefs, useV8Ui } from "./v8/V8System";
@@ -12690,7 +12691,7 @@ const removeNotification = async (notificationId) => {
   const v8PathForState=()=>{
     if(navigationOSArea==="home")return "/";
     if(navigationOSArea==="profile")return v8ProfileHandle?`/@${v8ProfileHandle}`:"/";
-    if(navigationOSArea==="me")return `/me/${v8MeView}`;
+    if(navigationOSArea==="me")return v8MeView==="hub"?"/me":`/me/${v8MeView}`;
     if(navigationOSArea==="connect"){
       if(connectView==="v8")return v8ConnectPath?`/connect/${v8ConnectPath}`:"/connect";
       if(connectView==="hpay")return "/hpay";
@@ -12723,7 +12724,8 @@ const removeNotification = async (notificationId) => {
     if((m=p.match(/^\/shop\/(products\/PRD-[0-9A-F]{12}|bag|wishlist|checkout|orders(?:\/ORD-[0-9A-F]{12})?)$/))){openNavigationOSArea("shop",m[1]);return true;}
     if((m=p.match(/^\/works(?:\/([A-Za-z0-9/_.@-]{1,120}))?$/))){openNavigationOSArea("works",m[1]||"find");return true;}
     if((m=p.match(/^\/learn(?:\/([a-z-]{2,24}))?$/))){openNavigationOSArea("learn",m[1]||"discover");return true;}
-    if((m=p.match(/^\/me\/(appearance|privacy|badges|roles|vendor|vendor\/store|wallet|photo)$/))){openNavigationOSArea("me",m[1]);return true;}
+    if(p==="/me"){openNavigationOSArea("me","hub");return true;}
+    if((m=p.match(/^\/me\/(appearance|privacy|badges|roles|vendor|vendor\/store|wallet|photo|hub|profile|rewards|size|family|addresses|delete)$/))){openNavigationOSArea("me",m[1]);return true;}
     if((m=p.match(/^\/me\/apply\/(teacher|institute|startup)$/))){openNavigationOSArea("learn","apply/"+m[1]);return true;}
     if((m=p.match(/^\/learn\/(courses(?:\/CRS-[0-9A-F]{12})?|lessons\/LSN-[0-9A-F]{12}|mine|teach(?:\/CRS-[0-9A-F]{12})?|certificates\/[A-Z0-9-]{6,80})$/))){openNavigationOSArea("learn",m[1]);return true;}
     if((m=p.match(/^\/@([a-z0-9._]{3,30})$/i))){openNavigationOSArea("profile",m[1].toLowerCase());return true;}
@@ -13270,6 +13272,7 @@ const removeNotification = async (notificationId) => {
               <div className="mh-label"><b>Profile & settings</b></div>
               <div className="mh-grid">
                 {v8OwnHandle ? <button type="button" onClick={() => openNavigationOSArea("profile", v8OwnHandle)}><i>◉</i><b>View profile</b></button> : null}
+                <button type="button" onClick={() => { setAccountMenuOpen(false); openNavigationOSArea("me", "hub"); }}><i>⌂</i><b>My HOWDI</b></button>
                 <button type="button" onClick={() => { setAccountMenuOpen(false); openNavigationOSArea("me", "roles"); }}><i>◈</i><b>My roles</b></button>
                 <button type="button" onClick={() => { setAccountMenuOpen(false); openNavigationOSArea("me", "wallet"); }}><i>₹</i><b>HPay wallet</b></button>
                 <button type="button" onClick={() => { setAccountMenuOpen(false); openNavigationOSArea("shop", "wishlist"); }}><i>♡</i><b>Wishlist</b></button>
@@ -18052,6 +18055,11 @@ const removeNotification = async (notificationId) => {
           <V8Roles key={v8MeView} apiBase={SHOP_API_BASE} getAuthHeaders={customerSessionHeaders} view={v8MeView === "vendor/store" ? "store" : v8MeView}
             onRoute={(r) => { if (!v8ApplyPath(String(r || "/"))) openNavigationOSArea("home"); }} onBack={() => { try { window.history.back(); } catch { v8Navigate("home"); } }} />
         )}
+        {navigationOSArea === "me" && ["hub", "profile", "rewards", "size", "family", "addresses", "delete"].includes(v8MeView) && (() => {
+          const props = { apiBase: SHOP_API_BASE, getAuthHeaders: customerSessionHeaders, onRoute: (r) => { if (!v8ApplyPath(String(r || "/"))) openNavigationOSArea("home"); }, onBack: () => { try { window.history.back(); } catch { v8Navigate("home"); } } };
+          const C = { hub: V8MyHowdi.Hub, profile: V8MyHowdi.Profile, rewards: V8MyHowdi.Rewards, size: V8MyHowdi.Size, family: V8MyHowdi.Family, addresses: V8MyHowdi.Addresses, delete: V8MyHowdi.DeleteAccount }[v8MeView];
+          return <C key={v8MeView} {...props} />;
+        })()}
         {navigationOSArea === "me" && v8MeView === "wallet" && <V8Wallet apiBase={SHOP_API_BASE} getAuthHeaders={customerSessionHeaders} onRoute={(r) => { if (!v8ApplyPath(String(r || "/"))) openNavigationOSArea("home"); }} onBack={() => { try { window.history.back(); } catch { v8Navigate("home"); } }} />}
         {navigationOSArea === "me" && v8MeView === "photo" && <V8Photo apiBase={SHOP_API_BASE} getAuthHeaders={customerSessionHeaders} onBack={() => { try { window.history.back(); } catch { v8Navigate("home"); } }} />}
         {navigationOSArea === "me" && v8MeView === "appearance" && <V8Appearance prefs={v8Prefs} setPrefs={setV8Prefs} onBack={() => { try { window.history.back(); } catch { v8Navigate("home"); } }} />}

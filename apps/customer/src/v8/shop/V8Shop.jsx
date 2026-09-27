@@ -62,7 +62,7 @@ function Product({ api, code, user, nav, onRequireLogin }) {
 
 const Stars = ({ n }) => <span className="v8s-stars" aria-label={`${n} out of 5 stars`}>{[1, 2, 3, 4, 5].map((i) => <V8Icon key={i} name="star" size={14} fill={i <= Math.round(n)} />)}</span>;
 function Reviews({ api, code, user, onRequireLogin }) {
-  const ui = useV8Ui(); const [d, setD] = useState(null); const [rating, setRating] = useState(0); const [body, setBody] = useState(""); const [edit, setEdit] = useState(false); const [reply, setReply] = useState({});
+  const ui = useV8Ui(); const [d, setD] = useState(null); const [rating, setRating] = useState(0); const [body, setBody] = useState(""); const [edit, setEdit] = useState(false); const [reply, setReply] = useState({}); const [report, setReport] = useState(null);
   const load = useCallback(async () => { const r = await api("GET", `/api/v8/shop/products/${code}/reviews`); setD(r.ok ? r.json : { error: r.json.message }); }, [api, code]);
   useEffect(() => { load(); }, [load]);
   if (!d) return <Skel h={160} r={16} />;
@@ -70,6 +70,8 @@ function Reviews({ api, code, user, onRequireLogin }) {
   const mine = d.items.find((x) => x.mine);
   const submit = async () => { const r = await api("POST", `/api/v8/shop/products/${code}/reviews`, { rating, body }); if (!r.ok) { ui?.toast({ kind: "error", title: r.json.message }); return; } ui?.toast({ title: r.json.updated ? "Review updated" : "Thanks — your review is live. The seller was notified." }); setEdit(false); load(); };
   const remove = async () => { const r = await api("DELETE", `/api/v8/shop/products/${code}/reviews`); if (r.ok) { ui?.toast({ title: "Review deleted" }); setRating(0); setBody(""); load(); } };
+  const vote = async (r) => { if (!d.signed_in) { onRequireLogin?.(); return; } const h = r.author?.public_username; const x = await api("POST", `/api/v8/shop/products/${code}/reviews/${h}/helpful`, { helpful: !r.voted }); if (!x.ok) { ui?.toast({ kind: "error", title: x.json.message }); return; } setD((y) => ({ ...y, items: y.items.map((i) => (i.author?.public_username === h ? { ...i, helpful: x.json.helpful, voted: x.json.voted } : i)) })); };
+  const sendReport = async () => { const x = await api("POST", `/api/v8/shop/products/${code}/reviews/${report.h}/report`, { reason: report.reason, details: report.details }); if (!x.ok) { ui?.toast({ kind: "error", title: x.json.message }); return; } setReport(null); ui?.toast({ title: x.json.message }); load(); };
   const sendReply = async (h) => { const r = await api("POST", `/api/v8/shop/products/${code}/reviews/${h}/reply`, { body: reply[h] }); if (!r.ok) { ui?.toast({ kind: "error", title: r.json.message }); return; } ui?.toast({ title: "Reply posted — the buyer was notified" }); setReply((x) => ({ ...x, [h]: undefined })); load(); };
   const form = (d.can_review && (!mine || edit)) ? (
     <div className="v8s-rform"><b>{mine ? "Edit your review" : "Rate this product"}</b>
@@ -86,11 +88,17 @@ function Reviews({ api, code, user, onRequireLogin }) {
       <ul className="v8s-rlist">{d.items.map((r) => { const h = r.author?.public_username; return (
         <li key={h || r.at}><header><b>@{h || "buyer"}</b><Stars n={r.rating} /><small>{new Date(r.at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}{r.edited ? " · edited" : ""} · verified purchase</small></header>
           {r.body ? <p>{r.body}</p> : null}
+          {!r.mine ? <div className="v8w-row v8s-rvote"><button type="button" className={`v8-btn v8-btn-sm ${r.voted ? "on" : ""}`} aria-pressed={r.voted} onClick={() => vote(r)}><V8Icon name="check" size={14} />Helpful{r.helpful ? ` · ${r.helpful}` : ""}</button>{r.reported ? <small className="v8c-muted">Reported</small> : <button type="button" className="v8-link" onClick={() => (d.signed_in ? setReport({ h, reason: "", details: "" }) : onRequireLogin?.())}>Report</button>}</div> : (r.helpful ? <small className="v8c-muted">{r.helpful} found this helpful</small> : null)}
           {r.mine && !edit ? <div className="v8w-row"><button type="button" className="v8-link" onClick={() => { setRating(r.rating); setBody(r.body || ""); setEdit(true); }}>Edit</button><button type="button" className="v8-link" onClick={remove}>Delete</button></div> : null}
           {r.reply ? <div className="v8s-reply"><b>{r.reply.store} (seller)</b><p>{r.reply.body}</p></div>
             : d.is_seller ? (reply[h] !== undefined ? <div className="v8s-reply"><label className="v8c-field"><span>Reply publicly as the seller</span><textarea rows={2} maxLength={600} value={reply[h]} onChange={(e) => setReply((x) => ({ ...x, [h]: e.target.value }))} /></label><div className="v8w-row"><button type="button" className="v8-btn v8-btn-primary" disabled={!String(reply[h]).trim()} onClick={() => sendReply(h)}>Post reply</button><button type="button" className="v8-btn" onClick={() => setReply((x) => ({ ...x, [h]: undefined }))}>Cancel</button></div></div>
               : <button type="button" className="v8-link" onClick={() => setReply((x) => ({ ...x, [h]: "" }))}>Reply</button>) : null}
         </li>); })}</ul>
+      {report ? <Sheet open title="Report this review" onClose={() => setReport(null)}>
+        <div className="v8w-radios" role="radiogroup" aria-label="Reason">{[["spam", "Spam or advertising"], ["offensive", "Offensive or abusive"], ["fake", "Fake or not a real purchase"], ["personal_info", "Shares personal information"], ["off_topic", "Not about the product"]].map(([k, l]) => <label key={k} className={report.reason === k ? "on" : ""}><input type="radio" name="rr" checked={report.reason === k} onChange={() => setReport((x) => ({ ...x, reason: k }))} />{l}</label>)}</div>
+        <label className="v8c-field"><span>Details (optional)</span><input value={report.details} maxLength={400} onChange={(e) => setReport((x) => ({ ...x, details: e.target.value }))} /></label>
+        <p className="v8c-muted">HOWDI reviews every report. The reviewer isn’t told who reported it.</p>
+        <div className="v8vc-actions"><button type="button" className="v8-btn" onClick={() => setReport(null)}>Cancel</button><button type="button" className="v8-btn v8-btn-primary" disabled={!report.reason} onClick={sendReport}>Send report</button></div></Sheet> : null}
     </section>
   );
 }
@@ -138,13 +146,13 @@ function Bag({ api, nav }) {
 function Checkout({ api, nav }) {
   const ui = useV8Ui();
   const [addrs, setAddrs] = useState(null); const [sel, setSel] = useState(""); const [adding, setAdding] = useState(false); const [f, setF] = useState({ name: "", phone: "", line1: "", line2: "", landmark: "", city: "", state: "Telangana", pin_code: "" });
-  const [method, setMethod] = useState("hpay"); const [review, setReview] = useState(null); const [step, setStep] = useState("address"); const [err, setErr] = useState(""); const key = useRef(newKey());
+  const [method, setMethod] = useState("hpay"); const [size, setSize] = useState(null); const [shareSize, setShareSize] = useState(false); const [review, setReview] = useState(null); const [step, setStep] = useState("address"); const [err, setErr] = useState(""); const key = useRef(newKey());
   const loadA = useCallback(async () => { const r = await api("GET", "/api/v8/shop/addresses"); const items = r.ok ? r.json.items : []; setAddrs(items); if (items[0]) setSel((s) => s || items[0].key); else setAdding(true); }, [api]);
-  useEffect(() => { loadA(); }, [loadA]);
+  useEffect(() => { loadA(); api("GET", "/api/v8/me/size").then((r) => setSize(r.ok ? r.json.size : null)); }, [loadA, api]);
   const saveAddr = async () => { setErr(""); const r = await api("POST", "/api/v8/shop/addresses", f); if (!r.ok) { setErr(r.json.message); return; } setAdding(false); await loadA(); setSel(r.json.saved.key); };
   const toReview = async () => { setErr(""); const r = await api("POST", "/api/v8/shop/checkout/quote", { address: sel, method }); if (!r.ok) { setErr(r.json.message); return; } setReview(r.json.review); setStep("review"); };
   const place = async (pin) => {
-    const r = await api("POST", "/api/v8/shop/checkout", { address: sel, method, pin, idempotency_key: key.current });
+    const r = await api("POST", "/api/v8/shop/checkout", { address: sel, method, pin, share_size: shareSize, idempotency_key: key.current });
     if (!r.ok) { if (["PIN_WRONG", "PIN_LOCKED"].includes(r.json.code)) return { code: r.json.code, message: r.json.message }; setErr(r.json.message); setStep("review"); return null; }
     ui?.toast({ title: r.json.orders.length > 1 ? `${r.json.orders.length} orders placed` : "Order placed" }); nav(`orders/${r.json.orders[0].public_key}`); return null;
   };
@@ -172,6 +180,7 @@ function Checkout({ api, nav }) {
         {review.items.map((it) => <div key={it.product} className="v8s-rline"><span>{it.qty} × {it.name}</span><b>{inr(it.line_total)}</b></div>)}
         <div className="v8c-receipt"><span>Items</span><b>{inr(review.subtotal)}</b><span>Delivery</span><b>{review.shipping ? inr(review.shipping) : "Free"}</b><span>Total</span><b>{inr(review.total)}</b><span>Deliver to</span><b>{review.ship_to.name}, {review.ship_to.city} {review.ship_to.pin_code}</b><span>Payment</span><b>{review.method === "hpay" ? "HPay — held until delivery" : "Cash on delivery"}</b>{review.balance != null ? <><span>HPay balance</span><b>{inr(review.balance)}</b></> : null}</div>
         {review.note ? <p className="v8c-muted">{review.note}</p> : null}
+        {size ? <label className="v8s-addr"><input type="checkbox" checked={shareSize} onChange={(e) => setShareSize(e.target.checked)} /><span><b>Share my size with the seller</b><small> Chest {size.chest_cm ?? "—"} · waist {size.waist_cm ?? "—"} · length {size.length_cm ?? "—"} cm. They see it only after accepting your order.</small></span></label> : <p className="v8c-muted">Buying clothes? <a href="/me/size">Save your size</a> to share it with sellers.</p>}
         {!review.provider_ready ? <p className="v8c-err">HPay isn’t connected here. Choose cash on delivery.</p> : null}
         {err ? <p className="v8c-err" role="alert">{err}</p> : null}
         <div className="v8vc-actions"><button type="button" className="v8-btn" onClick={() => setStep("address")}>Back</button><button type="button" className="v8-btn v8-btn-primary" disabled={!review.provider_ready} onClick={() => (review.method === "hpay" ? setStep("pin") : place(undefined))}>{review.method === "hpay" ? `Pay ${inr(review.total)}` : "Place order"}</button></div>
