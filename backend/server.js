@@ -21408,9 +21408,15 @@ async function ensureVibeReleaseReadinessV140LSchema(){
     const worksV8Onboarding = require("./works-v8-onboarding.cjs").createWorksV8Onboarding({
       pool, getBody, helpers: connectV8._internal, messages: connectV8Messages._internal, notify: connectV8Community._internal.notify, auditAdmin: auditAdminSecurity,
     });
+    // V8 Learn & Earn learner + teacher journeys and Teacher / Institute / Startup applications (./learn-v8.cjs).
+    const learnV8 = require("./learn-v8.cjs").createLearnV8({
+      pool, getBody, helpers: connectV8._internal, messages: connectV8Messages._internal, notify: connectV8Community._internal.notify, auditAdmin: auditAdminSecurity,
+      wallet: connectV8Rooms._internal.wallet,
+    });
     // V8 My roles + Vendor application → HOWDI Admin verification → vendor workspace (./vendor-v8.cjs).
     const vendorV8 = require("./vendor-v8.cjs").createVendorV8({
       pool, getBody, helpers: connectV8._internal, messages: connectV8Messages._internal, notify: connectV8Community._internal.notify, auditAdmin: auditAdminSecurity,
+      roleStatus: (uid) => learnV8._internal.roleStatus(uid),
       issuePublicRefs: connectHomeK5A._internal.issueRefs, resolvePublicRef: connectHomeK5A._internal.resolveRef,
     });
     // V8 Shop purchase journey, both sides (./shop-v8.cjs): cart, checkout, vendor order handling, delivery, returns/refunds.
@@ -21495,6 +21501,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
           if (await v8SafeHandle(hpayV8Utilities, req, res, url)) return;
           if (await v8SafeHandle(shopV8, req, res, url)) return;
           if (await v8SafeHandle(vendorV8, req, res, url)) return;
+          if (await v8SafeHandle(learnV8, req, res, url)) return;
           if (await v8SafeHandle(worksV8Onboarding, req, res, url)) return;
           if (await v8SafeHandle(worksV8, req, res, url)) return;
           if (await v8SafeHandle(connectV8Messages, req, res, url)) return;
@@ -57281,6 +57288,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
         await worksV8Onboarding.ensureSchema();
         await vendorV8.ensureSchema();
         await shopV8.ensureSchema();
+        await learnV8.ensureSchema();
         await backfillMissingOrderShipments();
         console.log("✅ HOWDI database initialization completed before accepting requests");
       console.log("✅ HOWDI Works Customer + Admin Separation V31 loaded");

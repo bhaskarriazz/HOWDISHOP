@@ -18,8 +18,10 @@ const ROLE_META = {
   CREATOR: { label: 'Creator', about: 'Memberships, tips and your creator workspace.', route: '/connect/creator', apply: '/connect/creator' },
   VENDOR: { label: 'Vendor', about: 'Sell your products in HOWDI Shop.', route: '/me/vendor/store', apply: '/me/vendor' },
   WORKER: { label: 'Worker', about: 'Get booked for local jobs in Works.', route: '/works/worker', apply: '/works/become' },
-  LEARNER: { label: 'Learner', about: 'Courses, batches and your Passport.', route: '/learn', apply: '/learn' },
-  TEACHER: { label: 'Teacher', about: 'Teach batches in Learn & Earn.', route: '/learn', apply: '/learn' },
+  LEARNER: { label: 'Learner', about: 'Join courses, track lessons and earn certificates.', route: '/learn/mine', apply: '/learn/courses' },
+  TEACHER: { label: 'Teacher', about: 'Create courses in Learn & Earn and get paid in HPay.', route: '/learn/teach', apply: '/me/apply/teacher' },
+  INSTITUTE: { label: 'Institute / College', about: 'Verified organisation for courses, seats and learners.', route: '/me/apply/institute', apply: '/me/apply/institute' },
+  STARTUP: { label: 'Startup', about: 'Verified startup profile for mentors, interns and customers.', route: '/me/apply/startup', apply: '/me/apply/startup' },
 };
 
 function createVendorV8(deps) {
@@ -80,14 +82,15 @@ function createVendorV8(deps) {
       const by = Object.fromEntries(rows.map((r) => [r.code, r]));
       const creator = (await pool.query(`SELECT creator_mode FROM howdi_connect_profiles WHERE user_id=$1`, [vid])).rows[0]?.creator_mode === true;
       const vend = await vendorOf(vid); const wk = (await pool.query(`SELECT kyc_status FROM works_workers WHERE user_id=$1 ORDER BY id DESC LIMIT 1`, [vid])).rows[0];
-      const vapp = await latest(vid);
+      const vapp = await latest(vid); const extra = deps.roleStatus ? await deps.roleStatus(vid) : {};
       const items = Object.entries(ROLE_META).map(([code, meta]) => {
         const r = by[code]; let status = code === 'CUSTOMER' ? 'active' : r ? String(r.role_status || '').toLowerCase() : 'none';
         if (code === 'CREATOR' && creator) status = 'active';
         if (code === 'VENDOR') { if (liveVendor(vend)) status = 'active'; else if (vapp) status = { draft: 'draft', submitted: 'pending', info_requested: 'action_needed', rejected: 'rejected', approved: 'active' }[vapp.status] || status; }
         if (code === 'WORKER' && wk && String(wk.kyc_status).toLowerCase() === 'verified') status = 'active';
         if (code === 'WORKER' && r && String(r.onboarding_state || '').toUpperCase() === 'INFO_REQUESTED') status = 'action_needed';
-        const reason = code === 'VENDOR' && vapp && ['info_requested', 'rejected'].includes(vapp.status) ? vapp.review_note : r && ['rejected', 'pending'].includes(status === 'action_needed' ? 'pending' : status) ? r.rejection_reason : null;
+        if (extra[code]) status = extra[code].status;
+        const reason = extra[code] ? extra[code].reason : code === 'VENDOR' && vapp && ['info_requested', 'rejected'].includes(vapp.status) ? vapp.review_note : r && ['rejected', 'pending'].includes(status === 'action_needed' ? 'pending' : status) ? r.rejection_reason : null;
         return { code: code.toLowerCase(), label: meta.label, about: meta.about, status: ['active', 'pending', 'rejected', 'draft', 'action_needed', 'none'].includes(status) ? status : 'pending', reason: reason || null, permanent: code === 'CUSTOMER',
           open_route: status === 'active' ? meta.route : null, apply_route: status !== 'active' ? meta.apply || null : null };
       });
