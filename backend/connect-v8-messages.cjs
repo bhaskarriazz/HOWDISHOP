@@ -15,6 +15,9 @@
 //   POST /api/v8/conversations/{CNV}/call-log {call} history line for a finished voice/video call (read from the call record)
 //   GET  /api/v8/conversations?filter=unread|groups|payments   inbox filters
 //   PATCH|DELETE /api/v8/chat-messages/{CMS}         edit own within 15 min (versions kept for safety) · delete own
+//   POST /api/v8/chat-messages/{CMS}/open            view-once photo / video: each recipient can open it once (MSG-007)
+//   POST /api/v8/conversations/{CNV}/auto-erase {hours: 24|0}  per-chat 24-hour auto-erase, both sides told (MSG-008)
+//   send {card:{type: product|community|worker, ref}}  rich cards resolved server-side for every viewer (MSG-004/005/006)
 //   GET|POST /api/v8/hpay/pin                        HPay PIN status · set / change (scrypt, 5 tries then 15 min lock)
 //   POST /api/v8/conversations/{CNV}/payments/quote  review: amount, fee, total, balance, counterpart — nothing moves
 //   POST /api/v8/conversations/{CNV}/payments        {kind: send|request, amount, note, pin (send), idempotency_key}
@@ -25,11 +28,14 @@
 // Money is the Preview/Test sandbox only: without it payments answer 503 PAYMENT_PROVIDER_REQUIRED.
 // =====================================================================================
 const crypto = require('node:crypto');
+const { mediaUrl, isPublicWorkerCode } = require('./connect-home-k5a.cjs');
 
 function createConnectV8Messages(deps) {
   const { pool, getBody, clientIp, notify, wallet, sandboxEnabled, logger = console } = deps;
+  const resolveK5ARef = deps.resolveK5ARef || (async () => null);
   const H = deps.helpers;
-  const { authorCols, authorJoins, authorDto, blockedSql, viewer, limited, ok, fail, userIdByHandle, saveMedia } = H;
+  const { authorCols, authorJoins, authorDto, blockedSql, viewer, limited, ok, fail, userIdByHandle, saveMedia, savePrivate, readPrivate, deletePrivate } = H;
+  const hooks = {}; // utilities module registers utilityDto(orderId, viewerId) for 'utility' messages
   const text = (v, max) => String(v ?? '').normalize('NFKC').replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, ' ').replace(/[ \t]+/g, ' ').trim().slice(0, max);
   const line = (v, max) => text(v, max * 2).replace(/\s+/g, ' ').slice(0, max);
   const iso = (v) => { if (!v) return null; const d = new Date(v); return Number.isFinite(d.getTime()) ? d.toISOString() : null; };
@@ -59,12 +65,20 @@ function createConnectV8Messages(deps) {
       status VARCHAR(10) NOT NULL, txn_code VARCHAR(24), failure VARCHAR(160), expires_at TIMESTAMPTZ, reminded_at TIMESTAMPTZ, decided_at TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
     await pool.query(`CREATE INDEX IF NOT EXISTS howdi_v8_chat_payments_conv_idx ON howdi_v8_chat_payments(conversation_id, created_at DESC)`);
     await pool.query(`CREATE TABLE IF NOT EXISTS howdi_v8_pay_idem(user_id BIGINT NOT NULL, idem_key VARCHAR(64) NOT NULL, payment_id BIGINT, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY(user_id, idem_key))`);
+    await pool.query(`ALTER TABLE howdi_connect_messages ADD COLUMN IF NOT EXISTS view_once BOOLEAN NOT NULL DEFAULT FALSE`);
+    await pool.query(`ALTER TABLE howdi_connect_messages ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ`);
+    await pool.query(`ALTER TABLE howdi_connect_messages ADD COLUMN IF NOT EXISTS card_type VARCHAR(12)`);
+    await pool.query(`ALTER TABLE howdi_connect_messages ADD COLUMN IF NOT EXISTS card_ref VARCHAR(100)`);
+    await pool.query(`ALTER TABLE howdi_connect_messages ADD COLUMN IF NOT EXISTS utility_id BIGINT`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS howdi_v8_message_opens(message_id BIGINT NOT NULL, user_id BIGINT NOT NULL, opened_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY(message_id, user_id))`);
+    await pool.query(`ALTER TABLE howdi_connect_conversations ADD COLUMN IF NOT EXISTS auto_erase_hours INT`);
+    await pool.query(`ALTER TABLE howdi_connect_conversations ADD COLUMN IF NOT EXISTS auto_erase_by BIGINT`);
     await pool.query(`CREATE TABLE IF NOT EXISTS howdi_v8_hpay_pins(user_id BIGINT PRIMARY KEY, pin_hash VARCHAR(128) NOT NULL, salt VARCHAR(32) NOT NULL, failed INT NOT NULL DEFAULT 0, locked_until TIMESTAMPTZ, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
   }
 
   // ------------------------------------------------------------ public codes (shared refs2 table)
-  const PFX = { CONV: 'CNV', CMSG: 'CMS', PAY: 'PAY' };
-  const CODE = /^(CNV|CMS|PAY)-[0-9A-F]{12}$/;
+  const PFX = { CONV: 'CNV', CMSG: 'CMS', PAY: 'PAY', UTL: 'UTL' };
+  const CODE = /^(CNV|CMS|PAY|UTL)-[0-9A-F]{12}$/;
   async function issue(type, keys) {
     const uniq = [...new Set(keys.map(String))]; const out = new Map(); if (!uniq.length) return out;
     for (let a = 0; a < 4; a++) {
@@ -96,7 +110,7 @@ function createConnectV8Messages(deps) {
   }
 
   // ------------------------------------------------------------ conversation loading
-  const CONV_SQL = `SELECT c.id, c.conversation_type, c.title, c.request_status, c.requested_by, c.created_by, c.updated_at,
+  const CONV_SQL = `SELECT c.id, c.conversation_type, c.title, c.request_status, c.requested_by, c.created_by, c.updated_at, c.auto_erase_hours, c.auto_erase_by,
       me.role my_role, me.muted my_muted, me.last_read_at my_read
     FROM howdi_connect_conversations c JOIN howdi_connect_conversation_members me ON me.conversation_id=c.id AND me.user_id=$1::bigint AND me.left_at IS NULL`;
   async function convFor(vid, cid) { return (await pool.query(`${CONV_SQL} WHERE c.id=$2`, [vid, cid])).rows[0] || null; }
@@ -116,7 +130,9 @@ function createConnectV8Messages(deps) {
       my_role: c.my_role || 'member', muted: c.my_muted === true, request: req, blocked,
       can_send: !blocked && req !== 'declined' && req !== 'declined_by_them' && req !== 'received',
       can_pay: c.conversation_type !== 'GROUP' && !blocked && !req,
-      safety: { encryption: 'Encrypted in transit', retention: 'Messages stay until someone deletes them. If you report a chat, HOWDI’s safety team sees the reported messages and any earlier versions of edited messages.' },
+      auto_erase: c.auto_erase_hours ? { hours: Number(c.auto_erase_hours), set_by: (ms.find((x) => x.uid === Number(c.auto_erase_by)) || {}).person?.public_username || null, by_me: Number(c.auto_erase_by) === vid } : null,
+      can_auto_erase: c.conversation_type !== 'GROUP' || ['owner', 'admin'].includes(c.my_role),
+      safety: { encryption: 'Encrypted in transit', retention: c.auto_erase_hours ? `Auto-erase is on: new messages disappear ${Number(c.auto_erase_hours)} hours after they’re sent (payments and receipts stay in HPay history). If you report a chat,` : 'Messages stay until someone deletes them. If you report a chat, HOWDI’s safety team sees the reported messages and any earlier versions of edited messages.' },
     };
   }
 
@@ -137,6 +153,51 @@ function createConnectV8Messages(deps) {
       sandbox: true,
     };
   }
+  // ------------------------------------------------------------ rich cards (MSG-004/005/006): stored as a public ref, resolved for EACH viewer at
+  // read time with the same visibility gates as Shop / Works / Communities, so a card never shows something the viewer may not see
+  // (a product taken down, a worker suspended, a private group) and never carries ids, phone numbers or addresses.
+  const firstImg = (list) => { let a = list; if (typeof a === 'string') { try { a = JSON.parse(a); } catch { a = [a]; } } if (!Array.isArray(a)) return null; for (const x of a) { const u = mediaUrl(typeof x === 'object' && x ? x.url : x); if (u) return u; } return null; };
+  const CARD_RE = { product: /^PRD-[0-9A-F]{12}$/, community: /^[a-z0-9]+(?:-[a-z0-9]+)*(?:#[A-Z0-9]{10})?$/, worker: /^[A-Za-z0-9][A-Za-z0-9_-]{2,63}$/ };
+  async function cardDto(type, ref, vid) {
+    if (!CARD_RE[type] || !CARD_RE[type].test(String(ref || ''))) return null;
+    if (type === 'product') {
+      const k = await resolveK5ARef(ref, ['PRODUCT']); if (!k) return null;
+      const r = (await pool.query(`SELECT p.name, p.category, p.price, p.mrp, p.image_urls, v.business_name store,
+          CASE WHEN EXISTS(SELECT 1 FROM vendor_product_variants pv WHERE pv.product_id=p.id) THEN EXISTS(SELECT 1 FROM vendor_product_variants pv WHERE pv.product_id=p.id AND LOWER(COALESCE(pv.status,'active'))='active' AND COALESCE(pv.stock,0)>0) ELSE COALESCE(p.stock,0)>0 END in_stock
+        FROM vendor_products p JOIN vendor_profiles v ON v.id=p.vendor_profile_id JOIN users u ON u.id=v.user_id
+        WHERE p.id::text=$2 AND p.status='published' AND p.archived_at IS NULL AND (p.published_at IS NULL OR p.published_at<=NOW()) AND COALESCE(v.status,'active')='active'
+          AND COALESCE(UPPER((SELECT m.status FROM howdi_shop_product_moderation_v162c m WHERE m.product_id=p.id ORDER BY m.created_at DESC, m.id DESC LIMIT 1)),'APPROVED')='APPROVED'
+          AND COALESCE(u.is_active,TRUE)=TRUE AND UPPER(COALESCE(u.account_status,'ACTIVE'))='ACTIVE' AND NOT (${blockedSql('$1::bigint', 'v.user_id')})`, [vid, String(k.entity_key)])).rows[0];
+      if (!r) return null;
+      const price = money(r.price), mrp = r.mrp != null ? money(r.mrp) : null;
+      return { type, ref, title: line(r.name, 100), subtitle: [line(r.category, 40), line(r.store, 60)].filter(Boolean).join(' · '), price, mrp: mrp && mrp > price ? mrp : null, image_url: firstImg(r.image_urls), in_stock: r.in_stock === true, route: `/shop/products/${ref}`, actions: r.in_stock === true ? ['view', 'buy'] : ['view'] };
+    }
+    if (type === 'worker') {
+      if (!isPublicWorkerCode(ref)) return null;
+      const r = (await pool.query(`SELECT w.full_name, w.city, w.rating, w.completed_jobs, ps.name service
+        FROM works_workers w JOIN works_worker_services pws ON pws.worker_id=w.id AND pws.is_primary=TRUE AND LOWER(TRIM(pws.status))='approved'
+          JOIN works_services ps ON ps.id=pws.service_id AND ps.active=TRUE AND ps.customer_visible=TRUE LEFT JOIN users u ON u.id=w.user_id
+        WHERE w.worker_code=$2 AND LOWER(TRIM(w.kyc_status))='verified' AND LOWER(TRIM(w.skill_status))='verified' AND LOWER(TRIM(w.account_status))='active' AND COALESCE(w.active,TRUE)=TRUE
+          AND (w.user_id IS NULL OR (COALESCE(u.is_active,TRUE)=TRUE AND UPPER(COALESCE(u.account_status,'ACTIVE'))='ACTIVE' AND NOT (${blockedSql('$1::bigint', 'w.user_id')})))`, [vid, ref])).rows[0];
+      if (!r) return null;
+      const rating = Number(r.rating);
+      return { type, ref, title: line(r.full_name, 80), subtitle: [line(r.service, 60), line(r.city, 40)].filter(Boolean).join(' · '), rating: Number.isFinite(rating) && rating > 0 ? Math.round(Math.min(5, rating) * 10) / 10 : null, jobs: Number(r.completed_jobs) || 0, verified: true, route: `/works/workers/${encodeURIComponent(ref)}`, actions: ['view', 'book'] };
+    }
+    const [slug, invite] = String(ref).split('#');
+    const r = (await pool.query(`SELECT sp.slug, sp.name, sp.space_type, sp.privacy, sp.avatar_data, sp.cover_data, sp.category, meta.invite_code,
+        (SELECT COUNT(*) FROM howdi_connect_social_space_members m WHERE m.space_id=sp.id AND m.status='ACTIVE') members,
+        (SELECT m.status FROM howdi_connect_social_space_members m WHERE m.space_id=sp.id AND m.user_id=$1::bigint) my_status
+      FROM howdi_connect_social_spaces sp LEFT JOIN howdi_v8_community_meta meta ON meta.space_id=sp.id
+      WHERE sp.slug=$2 AND COALESCE(sp.is_archived,FALSE)=FALSE AND (sp.owner_user_id=$1::bigint OR NOT (${blockedSql('$1::bigint', 'sp.owner_user_id')}))`, [vid, slug])).rows[0];
+    if (!r) return null;
+    const member = r.my_status === 'ACTIVE';
+    const inviteOk = Boolean(invite) && r.invite_code === invite; // an invite-only group appears only through its current invite link
+    if (!['PUBLIC', 'PRIVATE'].includes(r.privacy) && !member && !inviteOk) return null;
+    return { type, ref, title: line(r.name, 80), subtitle: [r.space_type === 'CHANNEL' ? 'Channel' : 'Group', r.privacy === 'PUBLIC' ? 'Public' : r.privacy === 'PRIVATE' ? 'Private · approval needed' : 'Invite only', `${Number(r.members) || 0} members`].join(' · '),
+      image_url: mediaUrl(r.cover_data || r.avatar_data) || null, kind: r.space_type === 'CHANNEL' ? 'channel' : 'group', privacy: r.privacy === 'PUBLIC' ? 'public' : r.privacy === 'PRIVATE' ? 'private' : 'invite',
+      membership: member ? 'member' : r.my_status === 'PENDING' ? 'pending' : 'none',
+      route: inviteOk && !member ? `/connect/communities/invite/${invite}` : `/connect/communities/${r.slug}`, actions: member ? ['open'] : r.my_status === 'PENDING' ? ['view'] : ['join'] };
+  }
   const expired = (p) => p.kind === 'REQUEST' && p.status === 'PENDING' && p.expires_at && new Date(p.expires_at) <= new Date();
   async function msgDtos(rows, vid, ms) {
     const refs = await issue('CMSG', rows.map((r) => r.id));
@@ -148,25 +209,36 @@ function createConnectV8Messages(deps) {
       // delivery state for my own messages: read when every other member has read past it
       const readBy = mine ? others.filter((o) => o.last_read_at && new Date(o.last_read_at) >= new Date(r.created_at)).length : 0;
       const pay = r.payment_id ? await payDto((await pool.query(`SELECT * FROM howdi_v8_chat_payments WHERE id=$1`, [r.payment_id])).rows[0], vid) : null;
+      const card = r.card_type && !r.deleted_at ? (await cardDto(r.card_type, r.card_ref, vid)) || { type: r.card_type, unavailable: true } : null;
+      const util = r.utility_id && hooks.utilityDto ? await hooks.utilityDto(Number(r.utility_id), vid) : null;
+      let vo = null;
+      if (r.view_once && !r.deleted_at) {
+        const opens = (await pool.query(`SELECT user_id FROM howdi_v8_message_opens WHERE message_id=$1`, [r.id])).rows.map((x) => Number(x.user_id));
+        vo = { media: r.attachment_type === 'vo-video' ? 'video' : 'photo', opened: mine ? others.length > 0 && others.every((o) => opens.includes(o.uid)) : opens.includes(vid), opened_count: mine ? opens.length : undefined };
+      }
       out.push({
         public_key: code, kind: r.deleted_at ? 'deleted' : r.kind, author: a, mine,
-        text: r.deleted_at ? null : text(r.message_text, 4000), image_url: r.deleted_at ? null : (r.attachment_type === 'image' && /^\/api\/v8\/media\//.test(String(r.attachment_data || '')) ? r.attachment_data : null),
+        text: r.deleted_at ? null : text(r.message_text, 4000), image_url: r.deleted_at || r.view_once ? null : (r.attachment_type === 'image' && /^\/api\/v8\/media\//.test(String(r.attachment_data || '')) ? r.attachment_data : null),
+        card, utility: util, view_once: vo, expires_at: iso(r.expires_at),
         created_at: iso(r.created_at), edited: Boolean(r.edited_at) && !r.deleted_at, can_edit: mine && !r.deleted_at && r.kind === 'text' && Date.now() - new Date(r.created_at).getTime() < EDIT_WINDOW_MS,
         status: mine ? (others.length && readBy === others.length ? 'read' : 'delivered') : null, payment: pay,
       });
     }
     return out;
   }
+  const MSG_COLS = `m.id, m.sender_user_id, m.message_text, m.created_at, m.edited_at, m.deleted_at, m.kind, m.payment_id, m.attachment_type, m.attachment_data, m.view_once, m.expires_at, m.card_type, m.card_ref, m.utility_id`;
+  const LIVE = `(m.expires_at IS NULL OR m.expires_at>NOW())`; // auto-erased messages are gone for everyone
   async function pageOf(cid, vid, before, limit = 40) {
-    const rows = (await pool.query(`SELECT m.id, m.sender_user_id, m.message_text, m.created_at, m.edited_at, m.deleted_at, m.kind, m.payment_id, m.attachment_type, m.attachment_data, ${authorCols('a_u.id', 'a_')}
+    const rows = (await pool.query(`SELECT ${MSG_COLS}, ${authorCols('a_u.id', 'a_')}
       FROM howdi_connect_messages m ${authorJoins('m.sender_user_id', 'a_')}
-      WHERE m.conversation_id=$1 AND ($2::bigint IS NULL OR m.id<$2) AND (m.sender_user_id=$3::bigint OR NOT (${blockedSql('$3::bigint', 'm.sender_user_id')}))
+      WHERE m.conversation_id=$1 AND ($2::bigint IS NULL OR m.id<$2) AND ${LIVE} AND (m.sender_user_id=$3::bigint OR NOT (${blockedSql('$3::bigint', 'm.sender_user_id')}))
       ORDER BY m.id DESC LIMIT $4`, [cid, before || null, vid, limit + 1])).rows;
     return { rows: rows.slice(0, limit).reverse(), more: rows.length > limit };
   }
   async function addMessage(client, cid, uid, t, extra = {}) {
-    const r = (await client.query(`INSERT INTO howdi_connect_messages(conversation_id,sender_user_id,message_text,kind,payment_id,attachment_type,attachment_data,idem_key) VALUES($1,$2,$3,$4,$5,$6,$7,$8)
-      ON CONFLICT (sender_user_id, idem_key) WHERE idem_key IS NOT NULL DO NOTHING RETURNING id`, [cid, uid, t, extra.kind || 'text', extra.payment || null, extra.attachmentType || null, extra.attachment || null, extra.idem || null])).rows[0];
+    const r = (await client.query(`INSERT INTO howdi_connect_messages(conversation_id,sender_user_id,message_text,kind,payment_id,attachment_type,attachment_data,idem_key,view_once,card_type,card_ref,utility_id,expires_at)
+      VALUES($1,$2,$3,$4::varchar,$5,$6,$7,$8,$9,$10,$11,$12,CASE WHEN $4::varchar IN ('text','image','card','viewonce') THEN (SELECT NOW()+make_interval(hours=>c.auto_erase_hours) FROM howdi_connect_conversations c WHERE c.id=$1) END)
+      ON CONFLICT (sender_user_id, idem_key) WHERE idem_key IS NOT NULL DO NOTHING RETURNING id`, [cid, uid, t, extra.kind || 'text', extra.payment || null, extra.attachmentType || null, extra.attachment || null, extra.idem || null, extra.viewOnce === true, extra.cardType || null, extra.cardRef || null, extra.utility || null])).rows[0];
     await client.query(`UPDATE howdi_connect_conversations SET updated_at=NOW() WHERE id=$1`, [cid]);
     await client.query(`UPDATE howdi_connect_conversation_members SET last_read_at=NOW() WHERE conversation_id=$1 AND user_id=$2`, [cid, uid]);
     return r ? Number(r.id) : null;
@@ -190,18 +262,18 @@ function createConnectV8Messages(deps) {
   }
 
   // ------------------------------------------------------------ money movement (one transaction, double entry, sandbox wallet)
-  async function transfer(client, payer, payee, amount, note, refCode) {
+  async function transfer(client, payer, payee, amount, note, refCode, kind = 'CHAT_PAYMENT') {
     const w = await wallet(payer, client);
     if (!w) return { error: [503, 'PAYMENT_PROVIDER_REQUIRED', 'HPay isn’t connected in this environment, so no money can move.'] };
-    const today = Number((await client.query(`SELECT COALESCE(SUM(amount),0) s FROM howdi_v8_ledger WHERE user_id=$1 AND direction='DEBIT' AND kind='CHAT_PAYMENT' AND created_at>NOW()-interval '1 day'`, [payer])).rows[0].s);
-    if (today + amount > DAY_MAX) return { error: [422, 'DAILY_LIMIT', `You can send up to ₹${DAY_MAX.toLocaleString('en-IN')} a day in chat.`] };
+    const today = Number((await client.query(`SELECT COALESCE(SUM(amount),0) s FROM howdi_v8_ledger WHERE user_id=$1 AND direction='DEBIT' AND kind IN ('CHAT_PAYMENT','QR_PAYMENT','UTILITY') AND created_at>NOW()-interval '1 day'`, [payer])).rows[0].s);
+    if (today + amount > DAY_MAX) return { error: [422, 'DAILY_LIMIT', `You can pay up to ₹${DAY_MAX.toLocaleString('en-IN')} a day with HPay in this preview.`] };
     const up = await client.query(`UPDATE howdi_v8_wallets SET balance=balance-$2, updated_at=NOW() WHERE user_id=$1 AND balance>=$2 RETURNING balance`, [payer, amount]);
     if (!up.rows[0]) return { error: [402, 'INSUFFICIENT_BALANCE', 'Not enough HPay balance. Nothing was sent.'] };
     await wallet(payee, client);
     await client.query(`UPDATE howdi_v8_wallets SET balance=balance+$2, updated_at=NOW() WHERE user_id=$1`, [payee, amount]);
     const txn = 'HPM-' + crypto.randomBytes(5).toString('hex').toUpperCase();
-    await client.query(`INSERT INTO howdi_v8_ledger(txn_code,user_id,direction,amount,kind,counterparty_user_id,reference,note) VALUES($1,$2,'DEBIT',$3,'CHAT_PAYMENT',$4,$5,$6),($1,$4,'CREDIT',$3,'CHAT_PAYMENT',$2,$5,$6)`,
-      [txn, payer, amount, payee, refCode, line(note, 190) || 'Payment in Messages']);
+    await client.query(`INSERT INTO howdi_v8_ledger(txn_code,user_id,direction,amount,kind,counterparty_user_id,reference,note) VALUES($1,$2,'DEBIT',$3,$7,$4,$5,$6),($1,$4,'CREDIT',$3,$7,$2,$5,$6)`,
+      [txn, payer, amount, payee, refCode, line(note, 190) || (kind === 'QR_PAYMENT' ? 'QR payment' : 'Payment in Messages'), kind]);
     return { txn, balance: money(up.rows[0].balance) };
   }
 
@@ -248,15 +320,16 @@ function createConnectV8Messages(deps) {
         const ms = await members(c.id, vid);
         const others = ms.filter((x) => !x.me);
         if (c.conversation_type !== 'GROUP' && others[0] && (await pool.query(`SELECT ${blockedSql('$1::bigint', '$2::bigint')} b`, [vid, others[0].uid])).rows[0].b) continue;
-        const last = (await pool.query(`SELECT m.message_text, m.kind, m.deleted_at, m.created_at, m.sender_user_id, m.payment_id FROM howdi_connect_messages m WHERE m.conversation_id=$1 ORDER BY m.id DESC LIMIT 1`, [c.id])).rows[0];
-        const unread = Number((await pool.query(`SELECT COUNT(*) n FROM howdi_connect_messages WHERE conversation_id=$1 AND sender_user_id<>$2 AND ($3::timestamptz IS NULL OR created_at>$3)`, [c.id, vid, c.my_read])).rows[0].n);
+        const last = (await pool.query(`SELECT m.message_text, m.kind, m.deleted_at, m.created_at, m.sender_user_id, m.payment_id, m.card_type, m.attachment_type FROM howdi_connect_messages m WHERE m.conversation_id=$1 AND ${LIVE} ORDER BY m.id DESC LIMIT 1`, [c.id])).rows[0];
+        const unread = Number((await pool.query(`SELECT COUNT(*) n FROM howdi_connect_messages m WHERE m.conversation_id=$1 AND m.sender_user_id<>$2 AND ($3::timestamptz IS NULL OR m.created_at>$3) AND ${LIVE}`, [c.id, vid, c.my_read])).rows[0].n);
         const dto = await convDto(c, vid, refs.get(String(c.id)), ms);
-        let preview = last ? (last.deleted_at ? 'Message deleted' : last.kind === 'payment' || last.kind === 'request' ? line(last.message_text, 80) : last.kind === 'image' ? '📷 Photo' : line(last.message_text, 80)) : 'No messages yet';
+        let preview = last ? (last.deleted_at ? 'Message deleted' : last.kind === 'image' ? '📷 Photo' : last.kind === 'viewonce' ? (last.attachment_type === 'vo-video' ? 'View-once video' : 'View-once photo')
+          : last.kind === 'card' ? `${{ product: 'Shared a product', community: 'Shared a group', worker: 'Shared a worker' }[last.card_type] || 'Shared a card'}${last.message_text ? ` · ${line(last.message_text, 50)}` : ''}` : line(last.message_text, 80)) : 'No messages yet';
         if (last && Number(last.sender_user_id) === vid && last.kind === 'text') preview = `You: ${preview}`;
         if (q && !`${dto.title} ${dto.members.map((x) => x.public_username).join(' ')} ${preview}`.toLowerCase().includes(q)) continue;
         if (filter === 'unread' && !unread) continue;
         if (filter === 'groups' && c.conversation_type !== 'GROUP') continue;
-        if (filter === 'payments' && !(await pool.query(`SELECT 1 FROM howdi_v8_chat_payments WHERE conversation_id=$1 LIMIT 1`, [c.id])).rowCount) continue;
+        if (filter === 'payments' && !(await pool.query(`SELECT 1 FROM howdi_connect_messages WHERE conversation_id=$1 AND (payment_id IS NOT NULL OR utility_id IS NOT NULL) UNION ALL SELECT 1 FROM howdi_v8_chat_payments WHERE conversation_id=$1 LIMIT 1`, [c.id])).rowCount) continue;
         items.push({ ...dto, preview, last_at: iso(last ? last.created_at : c.updated_at), unread });
       }
       const requests = Number((await pool.query(`SELECT COUNT(*) n FROM howdi_connect_conversations c JOIN howdi_connect_conversation_members me ON me.conversation_id=c.id AND me.user_id=$1 AND me.left_at IS NULL WHERE c.request_status='PENDING' AND c.requested_by<>$1`, [vid])).rows[0].n);
@@ -313,14 +386,33 @@ function createConnectV8Messages(deps) {
       ok(res, { conversation: { public_key: code, route: `/connect/messages/${code}`, request: e.can === 'request' && created ? 'sent' : null } }, created ? 201 : 200); return true;
     }
 
+    // ---- MSG-007 view-once: the recipient gets the media inline exactly once (it is never served from a public URL)
+    if ((m = p.match(/^\/api\/v8\/chat-messages\/(CMS-[0-9A-F]{12})\/open$/)) && req.method === 'POST') {
+      const k = await resolve(m[1], 'CMSG');
+      const row = k ? (await pool.query(`SELECT m.* FROM howdi_connect_messages m JOIN howdi_connect_conversation_members x ON x.conversation_id=m.conversation_id AND x.user_id=$2 AND x.left_at IS NULL
+        WHERE m.id=$1 AND m.view_once=TRUE AND m.deleted_at IS NULL AND ${LIVE} AND NOT (${blockedSql('$2::bigint', 'm.sender_user_id')})`, [k, vid])).rows[0] : null;
+      if (!row) { fail(res, 404, 'NOT_FOUND', 'That photo isn’t available.'); return true; }
+      if (Number(row.sender_user_id) === vid) { fail(res, 403, 'NOT_ALLOWED', 'View-once media can only be opened by the people you sent it to.'); return true; }
+      const first = await pool.query(`INSERT INTO howdi_v8_message_opens(message_id,user_id) VALUES($1,$2) ON CONFLICT DO NOTHING RETURNING opened_at`, [k, vid]);
+      if (!first.rowCount) { fail(res, 410, 'ALREADY_OPENED', 'You’ve already opened this. View-once media can be opened only once.'); return true; }
+      const f = readPrivate(row.attachment_data);
+      if (!f) { fail(res, 410, 'GONE', 'This media is no longer available.'); return true; }
+      // once every recipient has opened it, the file itself is deleted
+      const left = Number((await pool.query(`SELECT COUNT(*) n FROM howdi_connect_conversation_members x WHERE x.conversation_id=$1 AND x.left_at IS NULL AND x.user_id<>$2 AND NOT EXISTS(SELECT 1 FROM howdi_v8_message_opens o WHERE o.message_id=$3 AND o.user_id=x.user_id)`, [row.conversation_id, row.sender_user_id, k])).rows[0].n);
+      if (!left) deletePrivate(row.attachment_data);
+      ok(res, { media: { type: row.attachment_type === 'vo-video' ? 'video' : 'photo', data: `data:${f.mime};base64,${f.buf.toString('base64')}` }, notice: 'This closes for good when you leave it.' }); return true;
+    }
+
     // ---- single message edit / delete
     if ((m = p.match(/^\/api\/v8\/chat-messages\/(CMS-[0-9A-F]{12})$/)) && (req.method === 'PATCH' || req.method === 'DELETE')) {
       const k = await resolve(m[1], 'CMSG');
       const row = k ? (await pool.query(`SELECT m.*, (SELECT 1 FROM howdi_connect_conversation_members x WHERE x.conversation_id=m.conversation_id AND x.user_id=$2 AND x.left_at IS NULL) member FROM howdi_connect_messages m WHERE m.id=$1`, [k, vid])).rows[0] : null;
       if (!row || !row.member || Number(row.sender_user_id) !== vid || row.deleted_at) { fail(res, 404, 'NOT_FOUND', 'That message isn’t available.'); return true; }
       if (req.method === 'DELETE') {
-        if (row.kind !== 'text' && row.kind !== 'image') { fail(res, 400, 'NOT_ALLOWED', 'Payment messages can’t be deleted.'); return true; }
-        await pool.query(`UPDATE howdi_connect_messages SET deleted_at=NOW() WHERE id=$1`, [k]); ok(res, { deleted: true }); return true;
+        if (!['text', 'image', 'card', 'viewonce'].includes(row.kind)) { fail(res, 400, 'NOT_ALLOWED', 'Payment and receipt messages can’t be deleted.'); return true; }
+        await pool.query(`UPDATE howdi_connect_messages SET deleted_at=NOW() WHERE id=$1`, [k]);
+        if (row.view_once) deletePrivate(row.attachment_data);
+        ok(res, { deleted: true }); return true;
       }
       if (row.kind !== 'text') { fail(res, 400, 'NOT_ALLOWED', 'Only text messages can be edited.'); return true; }
       if (Date.now() - new Date(row.created_at).getTime() >= EDIT_WINDOW_MS) { fail(res, 409, 'EDIT_WINDOW_CLOSED', 'Messages can be edited for 15 minutes after sending.'); return true; }
@@ -422,13 +514,31 @@ function createConnectV8Messages(deps) {
       if (limited(res, `v8-msg:${vid}`, 60, 60000)) return true;
       const b = (await getBody(req)) || {}; const t = text(b.text, 2000);
       const idem = /^[A-Za-z0-9_-]{8,64}$/.test(String(b.idempotency_key || '')) ? String(b.idempotency_key) : null;
-      let img = null;
-      if (b.imageData) { try { img = saveMedia(b.imageData, { videos: false, maxImage: 5 * 1024 * 1024 }); } catch (e) { fail(res, 400, e.code || 'MEDIA_INVALID', e.message); return true; } }
-      if (!t && !img) { fail(res, 400, 'VALIDATION', 'Write a message first.'); return true; }
-      const id = await addMessage(pool, cid, vid, t, { kind: img ? 'image' : 'text', attachmentType: img ? 'image' : null, attachment: img ? img.url : null, idem });
-      const row = (await pool.query(`SELECT m.id, m.sender_user_id, m.message_text, m.created_at, m.edited_at, m.deleted_at, m.kind, m.payment_id, m.attachment_type, m.attachment_data, ${authorCols('a_u.id', 'a_')} FROM howdi_connect_messages m ${authorJoins('m.sender_user_id', 'a_')} WHERE ${id ? 'm.id=$1' : 'm.sender_user_id=$2 AND m.idem_key=$1'}`, id ? [id] : [idem, vid])).rows[0];
+      if (idem) { const dup = (await pool.query(`SELECT id FROM howdi_connect_messages WHERE sender_user_id=$1 AND idem_key=$2`, [vid, idem])).rows[0]; if (dup) { const row0 = (await pool.query(`SELECT ${MSG_COLS}, ${authorCols('a_u.id', 'a_')} FROM howdi_connect_messages m ${authorJoins('m.sender_user_id', 'a_')} WHERE m.id=$1`, [dup.id])).rows[0]; ok(res, { message: (await msgDtos([row0], vid, ms))[0], replayed: true }); return true; } }
+      let img = null; let vo = null; let card = null;
+      if (b.card) {
+        const type = String(b.card.type || ''); const ref = String(b.card.ref || '');
+        if (!CARD_RE[type]) { fail(res, 400, 'VALIDATION', 'Choose a product, group or worker to share.'); return true; }
+        // an invite-only group can be shared only by its moderators, with its current invite link
+        let cref = ref;
+        if (type === 'community') {
+          const [slug] = ref.split('#');
+          const own = (await pool.query(`SELECT sp.privacy, meta.invite_code, (SELECT m.role FROM howdi_connect_social_space_members m WHERE m.space_id=sp.id AND m.user_id=$1 AND m.status='ACTIVE') role FROM howdi_connect_social_spaces sp LEFT JOIN howdi_v8_community_meta meta ON meta.space_id=sp.id WHERE sp.slug=$2`, [vid, slug])).rows[0];
+          cref = own && !['PUBLIC', 'PRIVATE'].includes(own.privacy) && ['OWNER', 'ADMIN', 'MODERATOR'].includes(String(own.role || '').toUpperCase()) && own.invite_code ? `${slug}#${own.invite_code}` : slug;
+        }
+        card = await cardDto(type, cref, vid);
+        if (!card) { fail(res, 404, 'NOT_FOUND', 'That isn’t available to share.'); return true; }
+        card.ref = cref;
+      } else if (b.viewOnce && b.imageData) {
+        try { vo = savePrivate(b.imageData, { videos: true, maxImage: 5 * 1024 * 1024, maxVideo: 8 * 1024 * 1024 }); } catch (e) { fail(res, 400, e.code || 'MEDIA_INVALID', e.message); return true; }
+      } else if (b.imageData) { try { img = saveMedia(b.imageData, { videos: false, maxImage: 5 * 1024 * 1024 }); } catch (e) { fail(res, 400, e.code || 'MEDIA_INVALID', e.message); return true; } }
+      if (!t && !img && !vo && !card) { fail(res, 400, 'VALIDATION', 'Write a message first.'); return true; }
+      const id = card ? await addMessage(pool, cid, vid, t, { kind: 'card', cardType: card.type, cardRef: card.ref, idem })
+        : vo ? await addMessage(pool, cid, vid, '', { kind: 'viewonce', viewOnce: true, attachmentType: vo.type === 'video' ? 'vo-video' : 'vo-photo', attachment: vo.file, idem })
+          : await addMessage(pool, cid, vid, t, { kind: img ? 'image' : 'text', attachmentType: img ? 'image' : null, attachment: img ? img.url : null, idem });
+      const row = (await pool.query(`SELECT ${MSG_COLS}, ${authorCols('a_u.id', 'a_')} FROM howdi_connect_messages m ${authorJoins('m.sender_user_id', 'a_')} WHERE ${id ? 'm.id=$1' : 'm.sender_user_id=$2 AND m.idem_key=$1'}`, id ? [id] : [idem, vid])).rows[0];
       if (id) for (const x of ms) if (!x.me && !(await pool.query(`SELECT muted FROM howdi_connect_conversation_members WHERE conversation_id=$1 AND user_id=$2`, [cid, x.uid])).rows[0]?.muted)
-        await notify(x.uid, 'MESSAGE', c.conversation_type === 'GROUP' ? `@${await handleOf(vid)} in ${dto.title}` : `New message from @${await handleOf(vid)}`, img && !t ? '📷 Photo' : line(t, 100), route, vid);
+        await notify(x.uid, 'MESSAGE', c.conversation_type === 'GROUP' ? `@${await handleOf(vid)} in ${dto.title}` : `New message from @${await handleOf(vid)}`, vo ? `View-once ${vo.type === 'video' ? 'video' : 'photo'}` : card ? `Shared ${card.title}` : img && !t ? '📷 Photo' : line(t, 100), route, vid);
       ok(res, { message: (await msgDtos([row], vid, ms))[0], replayed: !id }, id ? 201 : 200); return true;
     }
     if (sub === 'call-log' && req.method === 'POST') {
@@ -445,6 +555,18 @@ function createConnectV8Messages(deps) {
       const id = await addMessage(pool, cid, vid, line2, { kind: 'call', idem: `call-${call.id}` });
       if (id && !call.started_at) await notify(other.uid, 'CALL_MISSED', `Missed ${kind.toLowerCase()} from @${await handleOf(vid)}`, 'Call back from Messages.', route, vid);
       ok(res, { logged: Boolean(id), text: line2 }); return true;
+    }
+    // ---- MSG-008 per-chat auto-erase (24 h). Either person in a 1:1 chat, admins in a group; everyone sees the change.
+    if (sub === 'auto-erase' && req.method === 'POST') {
+      if (!dto.can_auto_erase) { fail(res, 403, 'NOT_ALLOWED', 'Only group admins can change auto-erase.'); return true; }
+      if (dto.blocked || dto.request) { fail(res, 409, 'INVALID_STATE', 'Auto-erase is available once you can chat.'); return true; }
+      const b = (await getBody(req)) || {}; const hours = Number(b.hours) === 24 ? 24 : 0;
+      if ((Number(c.auto_erase_hours) || 0) === hours) { ok(res, { auto_erase: hours ? { hours } : null, unchanged: true }); return true; }
+      await pool.query(`UPDATE howdi_connect_conversations SET auto_erase_hours=$2, auto_erase_by=$3, updated_at=NOW() WHERE id=$1`, [cid, hours || null, hours ? vid : null]);
+      const me = await handleOf(vid);
+      await addMessage(pool, cid, vid, hours ? `@${me} turned on auto-erase. New messages disappear 24 hours after they’re sent.` : `@${me} turned off auto-erase. New messages stay.`, { kind: 'system' });
+      await notifyOthers(ms, vid, 'CHAT_AUTO_ERASE', hours ? `@${me} turned on 24-hour auto-erase` : `@${me} turned off auto-erase`, dto.title, route);
+      ok(res, { auto_erase: hours ? { hours } : null }); return true;
     }
     if (sub === 'read' && req.method === 'POST') { await pool.query(`UPDATE howdi_connect_conversation_members SET last_read_at=NOW() WHERE conversation_id=$1 AND user_id=$2`, [cid, vid]); ok(res, { read: true }); return true; }
     if (sub === 'mute' && req.method === 'POST') { const b = (await getBody(req)) || {}; await pool.query(`UPDATE howdi_connect_conversation_members SET muted=$3 WHERE conversation_id=$1 AND user_id=$2`, [cid, vid, b.on === true]); ok(res, { muted: b.on === true }); return true; }
@@ -558,6 +680,6 @@ function createConnectV8Messages(deps) {
     }
     fail(res, 404, 'NOT_FOUND', 'Not found.'); return true;
   }
-  return { ensureSchema, handle };
+  return { ensureSchema, handle, _internal: { issue, resolve, convFor, members, convDto, payDto, addMessage, handleOf, checkPin, pinState, transfer, eligibility, money, line, text, iso, LIVE, hooks, PAY_MIN, PAY_MAX } };
 }
 module.exports = { createConnectV8Messages };

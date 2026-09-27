@@ -260,6 +260,18 @@ function createConnectV8(deps) {
     fs.writeFileSync(path.join(MEDIA_DIR, name), raw);
     return { url: `/api/v8/media/${name}`, mime, size: raw.length, type: mime.startsWith('video/') ? 'video' : 'image', sha256: crypto.createHash('sha256').update(raw).digest('hex') };
   }
+  // View-once media lives outside the served media folder: it is only ever read back through an authorised API call.
+  const PRIVATE_DIR = path.join(mediaDir, 'v8-private');
+  function savePrivate(dataUrl, opts) {
+    const r = saveMedia(dataUrl, opts); const name = r.url.split('/').pop();
+    fs.mkdirSync(PRIVATE_DIR, { recursive: true }); fs.renameSync(path.join(MEDIA_DIR, name), path.join(PRIVATE_DIR, name));
+    return { file: name, mime: r.mime, size: r.size, type: r.type };
+  }
+  function readPrivate(name) {
+    if (!/^[0-9a-f]{32}\.(jpg|png|webp|mp4|webm|mov)$/.test(String(name || ''))) return null;
+    try { return { buf: fs.readFileSync(path.join(PRIVATE_DIR, name)), mime: EXT_MIME[path.extname(name)] }; } catch { return null; }
+  }
+  function deletePrivate(name) { if (/^[0-9a-f]{32}\.(jpg|png|webp|mp4|webm|mov)$/.test(String(name || ''))) fs.rm(path.join(PRIVATE_DIR, name), { force: true }, () => {}); }
   function serveMedia(req, res, file) {
     if (!/^[0-9a-f]{32}\.(jpg|png|webp|mp4|webm|mov)$/.test(file)) { fail(res, 404, 'NOT_FOUND', 'Not found'); return; }
     const full = path.join(MEDIA_DIR, file);
@@ -1225,7 +1237,7 @@ function createConnectV8(deps) {
     }
   }
 
-  return { ensureSchema, handle, _internal: { issue, resolve, saveMedia, stripInternal, authorCols, authorJoins, authorDto, blockedSql, privateOkSql, viewer, limited, ok, fail, userIdByHandle, setHooks: (h) => Object.assign(hooks, h) } };
+  return { ensureSchema, handle, _internal: { issue, resolve, saveMedia, savePrivate, readPrivate, deletePrivate, stripInternal, authorCols, authorJoins, authorDto, blockedSql, privateOkSql, viewer, limited, ok, fail, userIdByHandle, setHooks: (h) => Object.assign(hooks, h) } };
 }
 
 module.exports = { createConnectV8, stripInternal, CODE_RE };

@@ -222,4 +222,4 @@ const thread = async (m, c) => ((await api('GET', `/api/v8/conversations/${c}/me
   check('B cannot send to A after block', (await api('POST', `/api/v8/conversations/${CV}/messages`, { token: B.token, body: { text: 'hello?' } })).status === 403);
   check('blocked chat hidden from inbox', !((await api('GET', '/api/v8/conversations', { token: A.token })).json.items || []).some((x) => x.public_key === CV));
   await finish(LABEL);
-})().catch(async (e) => { console.log('FAIL crashed', e && e.stack); await finish(LABEL); });
+})().catch(async (e) => { check('suite ran to the end', false, e && e.stack); await finish(LABEL); });

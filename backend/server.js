@@ -21392,7 +21392,12 @@ async function ensureVibeReleaseReadinessV140LSchema(){
     // V8 Messages with in-chat HPay (./connect-v8-messages.cjs): inbox, requests, groups, send money / payment requests.
     const connectV8Messages = require("./connect-v8-messages.cjs").createConnectV8Messages({
       pool, getBody, clientIp: howdiRateLimitClientIp, helpers: connectV8._internal, notify: connectV8Community._internal.notify,
-      wallet: connectV8Rooms._internal.wallet, sandboxEnabled: () => accessV8.sandboxEnabled(),
+      wallet: connectV8Rooms._internal.wallet, sandboxEnabled: () => accessV8.sandboxEnabled(), resolveK5ARef: connectHomeK5A._internal.resolveRef,
+    });
+    // HPay utilities + QR pay (./hpay-v8-utilities.cjs): recharge, bills, tickets, gift cards, QR, history — Preview/Test catalogue.
+    const hpayV8Utilities = require("./hpay-v8-utilities.cjs").createHpayV8Utilities({
+      pool, getBody, helpers: connectV8._internal, messages: connectV8Messages._internal, notify: connectV8Community._internal.notify,
+      wallet: connectV8Rooms._internal.wallet, sandboxEnabled: () => accessV8.sandboxEnabled(), secret: process.env.HOWDI_CONNECT_REF_SECRET || "",
     });
     const v8SafeHandle = async (mod, req, res, url) => {
       try { return await mod.handle(req, res, url); }
@@ -21467,6 +21472,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
           if (await v8SafeHandle(connectV8Rooms, req, res, url)) return;
           if (await v8SafeHandle(connectV8Community, req, res, url)) return;
           if (await v8SafeHandle(connectV8Creator, req, res, url)) return;
+          if (await v8SafeHandle(hpayV8Utilities, req, res, url)) return;
           if (await v8SafeHandle(connectV8Messages, req, res, url)) return;
 
           const pathname =
@@ -57246,6 +57252,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
         await connectV8Community.ensureSchema();
         await connectV8Creator.ensureSchema();
         await connectV8Messages.ensureSchema();
+        await hpayV8Utilities.ensureSchema();
         await backfillMissingOrderShipments();
         console.log("✅ HOWDI database initialization completed before accepting requests");
       console.log("✅ HOWDI Works Customer + Admin Separation V31 loaded");
