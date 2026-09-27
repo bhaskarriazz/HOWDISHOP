@@ -21404,6 +21404,10 @@ async function ensureVibeReleaseReadinessV140LSchema(){
       pool, getBody, helpers: connectV8._internal, messages: connectV8Messages._internal, notify: connectV8Community._internal.notify,
       wallet: connectV8Rooms._internal.wallet, sandboxEnabled: () => accessV8.sandboxEnabled(),
     });
+    // V8 Become a Worker + HOWDI Admin verification (./works-v8-onboarding.cjs).
+    const worksV8Onboarding = require("./works-v8-onboarding.cjs").createWorksV8Onboarding({
+      pool, getBody, helpers: connectV8._internal, messages: connectV8Messages._internal, notify: connectV8Community._internal.notify, auditAdmin: auditAdminSecurity,
+    });
     const v8SafeHandle = async (mod, req, res, url) => {
       try { return await mod.handle(req, res, url); }
       catch (e) { console.error("[V8 API]", e && e.message); if (!res.headersSent) sendJSON(res, 500, { status: "error", code: "SERVER_ERROR", message: "Something went wrong. Please try again." }); return true; }
@@ -21478,6 +21482,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
           if (await v8SafeHandle(connectV8Community, req, res, url)) return;
           if (await v8SafeHandle(connectV8Creator, req, res, url)) return;
           if (await v8SafeHandle(hpayV8Utilities, req, res, url)) return;
+          if (await v8SafeHandle(worksV8Onboarding, req, res, url)) return;
           if (await v8SafeHandle(worksV8, req, res, url)) return;
           if (await v8SafeHandle(connectV8Messages, req, res, url)) return;
 
@@ -57260,6 +57265,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
         await connectV8Messages.ensureSchema();
         await hpayV8Utilities.ensureSchema();
         await worksV8.ensureSchema();
+        await worksV8Onboarding.ensureSchema();
         await backfillMissingOrderShipments();
         console.log("✅ HOWDI database initialization completed before accepting requests");
       console.log("✅ HOWDI Works Customer + Admin Separation V31 loaded");
