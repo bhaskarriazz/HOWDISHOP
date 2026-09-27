@@ -7,6 +7,8 @@ import { V8Rail, V8Header, V8BottomBar, V8BuildLabel } from "./v8/V8Shell";
 import V8Home from "./v8/V8Home";
 import V8Profile from "./v8/V8Profile";
 import V8Access from "./v8/V8Access";
+import V8Connect from "./v8/connect/V8Connect";
+import V8Notifications, { useV8Unread } from "./v8/V8Notifications";
 import { V8Appearance, V8Permissions, V8IdentityBadges } from "./v8/V8Settings";
 import { V8Confirm, V8OfflineBanner, V8SessionExpired, loadV8Prefs, applyV8Prefs, useV8Ui } from "./v8/V8System";
 import HowdiFor from "./howdi-for/HowdiFor";
@@ -2664,6 +2666,9 @@ function App() {
   const [v8AskMode,setV8AskMode]=useState(false);
   // V8 S2: settings pages (profile hub), public profile route, appearance prefs, session-expiry dialog
   const [v8MeView,setV8MeView]=useState("appearance");
+  // V8 Connect feature hub: sub-path under /connect (""=hub, "vibe", "vibe/VIB-…", "live", "spaces", "articles", "communities/slug" …)
+  const [v8ConnectPath,setV8ConnectPath]=useState("");
+  const [v8NotifOpen,setV8NotifOpen]=useState(false);
   const [v8ProfileHandle,setV8ProfileHandle]=useState("");
   const [v8Prefs,setV8Prefs]=useState(()=>loadV8Prefs());
   const [v8SessionExpired,setV8SessionExpired]=useState(false);
@@ -9903,6 +9908,14 @@ return () => window.clearInterval(timer);
       return;
     }
     if(next==="connect"){
+      // V8: Connect is the rebuilt feature hub. Only Messages (and the HPay utility) still use the legacy Connect workspace
+      // until their own V8 slices ship. "p:<path>" opens an exact V8 Connect sub-path.
+      if(String(subview||"").startsWith("p:")||!["messages","hpay"].includes(view)){
+        const raw=String(subview||"").startsWith("p:")?String(subview).slice(2):({home:"",dashboard:"",feed:"",vibe:"vibe",stories:"",communities:"communities",explore:"",discover:"",live:"live",spaces:"spaces",articles:"articles"}[view]??"");
+        setV8ConnectPath(raw.replace(/^\/+/,"").slice(0,160));
+        setConnectView("v8");setConnectContentMode("posts");setConnectModalOpen(false);
+        return;
+      }
       const connectTarget=view==="vibe"?"feed":view==="home"?"dashboard":view==="explore"?"discover":view;
       setConnectView(connectTarget);
       setConnectContentMode(view==="vibe"?"vibe":"posts");
@@ -12654,6 +12667,7 @@ const removeNotification = async (notificationId) => {
   // V8 NAV-005 — URL routing: selected destination, browser back/forward, preserved scroll, deep-link return.
   // Only V8 routes are claimed here; /posts|/articles|/stories (K5A viewer) and /for/* (HOWDI FOR) keep their handlers.
   // ============================================================
+  const [v8Unread,refreshV8Unread]=useV8Unread(SHOP_API_BASE,customerSessionHeaders,Boolean(currentUser));
   const v8OwnHandle=String((currentUser&&currentUser.public_username)||"");
   const V8_CONNECT_VIEWS={vibe:"vibe",messages:"messages",explore:"explore",stories:"stories",communities:"communities"};
   const v8PathForState=()=>{
@@ -12661,6 +12675,7 @@ const removeNotification = async (notificationId) => {
     if(navigationOSArea==="profile")return v8ProfileHandle?`/@${v8ProfileHandle}`:"/";
     if(navigationOSArea==="me")return `/me/${v8MeView}`;
     if(navigationOSArea==="connect"){
+      if(connectView==="v8")return v8ConnectPath?`/connect/${v8ConnectPath}`:"/connect";
       if(connectView==="hpay")return "/hpay";
       if(connectView==="feed"&&connectContentMode==="vibe")return "/connect/vibe";
       if(connectView==="messages")return "/connect/messages";
@@ -12682,7 +12697,8 @@ const removeNotification = async (notificationId) => {
     let m;
     if(p==="/"){openNavigationOSArea("home");return true;}
     if(p==="/hpay"){openNavigationOSArea("hpay","home");return true;}
-    if((m=p.match(/^\/connect(?:\/([a-z]+))?$/))){const v=m[1];if(v&&!V8_CONNECT_VIEWS[v])return false;openNavigationOSArea("connect",v?V8_CONNECT_VIEWS[v]:"home");return true;}
+    if(p==="/connect/messages"){openNavigationOSArea("connect","messages");return true;}
+    if((m=p.match(/^\/connect(?:\/([A-Za-z0-9/_.-]{1,160}))?$/))){openNavigationOSArea("connect","p:"+(m[1]||"")+(window.location.search||""));return true;}
     if(p==="/shop"){openNavigationOSArea("shop","catalogue");return true;}
     if(p==="/shop/crochet"){openNavigationOSArea("shop","crochet");return true;}
     if(p==="/shop/cart"){openNavigationOSArea("shop","cart");return true;}
@@ -12722,14 +12738,20 @@ const removeNotification = async (notificationId) => {
     const fromPop=v8FromPop.current;v8FromPop.current=false;
     const first=v8FirstSync.current;v8FirstSync.current=false;
     // the first sync only corrects the address bar (e.g. "/" while a signed-in session lands on Connect): no extra history entry
-    if(path!==window.location.pathname&&!fromPop){try{window.history[first?"replaceState":"pushState"]({howdiV8:path},"",path);}catch{/* ignore */}}
+    if(path!==window.location.pathname+(path.includes("?")?window.location.search:"")&&!fromPop){try{window.history[first?"replaceState":"pushState"]({howdiV8:path},"",path);}catch{/* ignore */}}
     else if(first){try{window.history.replaceState({howdiV8:path},"",path);}catch{/* ignore */}}
     v8LastPath.current=path;
     const restore=fromPop?(v8ScrollMemo.current[path]||0):0;
     // content may still be loading: retry the restore a few times until the page is tall enough
     [60,300,800,1500].forEach((ms)=>window.setTimeout(()=>{const el=document.querySelector(".v8-page")||document.querySelector(".howdi-os-workspace");if(el&&v8LastPath.current===path&&Math.abs(el.scrollTop-restore)>2)el.scrollTop=restore;},ms));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[v8RouterOn,navigationOSArea,connectView,connectContentMode,shopOSView,shopCollection,worksExperienceTab,learningPortalView,v8MeView,v8ProfileHandle]);
+  },[v8RouterOn,navigationOSArea,connectView,connectContentMode,v8ConnectPath,shopOSView,shopCollection,worksExperienceTab,learningPortalView,v8MeView,v8ProfileHandle]);
+  useEffect(()=>{
+    // V8 Connect sheets (e.g. Share → Messages) ask the shell to open another area.
+    const onOpen=(e)=>{const d=e&&e.detail;if(d&&typeof d.area==="string")openNavigationOSArea(d.area,d.view||"home");};
+    window.addEventListener("howdi:v8-open",onOpen);return()=>window.removeEventListener("howdi:v8-open",onOpen);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[]);
   useEffect(()=>{
     // "System" theme follows the device setting live
     applyV8Prefs(v8Prefs);
@@ -13054,6 +13076,10 @@ const removeNotification = async (notificationId) => {
           V8 SHELL — NAV-001 rail · NAV-002 header · NAV-003 floating bar · build label
           (replaces the legacy announcement bar, header, master sidebar and mobile nav)
       ====================================== */}
+      <V8Notifications open={v8NotifOpen} apiBase={SHOP_API_BASE} getAuthHeaders={customerSessionHeaders} onClose={() => { setV8NotifOpen(false); refreshV8Unread(); }}
+        legacyCount={unreadNotificationCount + worksNotificationUnread}
+        onOpenLegacy={() => { loadNotifications(); loadWorksNotifications(); setNotificationOpen(true); }}
+        onRoute={(r) => { const s = String(r || ""); if (s.startsWith("/connect")) openNavigationOSArea("connect", "p:" + s.replace(/^\/connect\/?/, "")); else if (s.startsWith("/@")) openNavigationOSArea("profile", s.slice(2)); else v8ApplyPath(s.split("?")[0]); }} />
       <a className="v8-skip" href="#v8-main" onClick={(e) => { e.preventDefault(); const m = document.querySelector(".v8-page") || document.getElementById("v8-main"); if (m) { m.setAttribute("tabindex", "-1"); m.focus(); } }}>Skip to content</a>
       <V8Rail active={v8ActivePillar} onNavigate={v8Navigate} />
       <V8Header
@@ -13070,8 +13096,8 @@ const removeNotification = async (notificationId) => {
         location={customerLocation}
         onLocation={() => toggleHeaderPanel("location")}
         locationOpen={locationPickerOpen}
-        unread={currentUser ? (unreadNotificationCount + worksNotificationUnread) : 0}
-        onNotifications={() => { if (!currentUser) { openLogin(); return; } setAccountMenuOpen(false); loadNotifications(); loadWorksNotifications(); setNotificationOpen(true); }}
+        unread={currentUser ? (unreadNotificationCount + worksNotificationUnread + v8Unread) : 0}
+        onNotifications={() => { if (!currentUser) { openLogin(); return; } setAccountMenuOpen(false); setV8NotifOpen(true); }}
         showCart={navigationOSArea === "shop"}
         cartCount={cart.reduce((n, it) => n + Math.max(1, Number(it?.quantity) || 1), 0)}
         onCart={() => openNavigationOSArea("shop", "cart")}
@@ -18002,6 +18028,13 @@ const removeNotification = async (notificationId) => {
           <V8IdentityBadges apiBase={SHOP_API_BASE} getAuthHeaders={customerSessionHeaders} handle={String(currentUser?.public_username || v8OwnHandle || "")}
             onBack={() => { try { window.history.back(); } catch { v8Navigate("home"); } }} onViewProfile={() => openNavigationOSArea("profile", String(currentUser?.public_username || v8OwnHandle || ""))} />
         )}
+        {/* V8 Connect feature hub (boards 06, 07, 14, 17, 32): hub, Vibe, Stories, Live, Spaces, Articles, Communities. */}
+        {navigationOSArea === "connect" && connectView === "v8" && (
+          <V8Connect apiBase={SHOP_API_BASE} getAuthHeaders={customerSessionHeaders} user={currentUser} path={v8ConnectPath}
+            onNavigate={(p) => openNavigationOSArea("connect", "p:" + String(p || ""))}
+            onRequireLogin={openLogin} onOpenProfile={(h) => openNavigationOSArea("profile", String(h || ""))}
+            onOpenArea={(area, view) => openNavigationOSArea(area, view)} />
+        )}
         {/* V8 HOME-001: the one Common Home (board 04/15). */}
         {navigationOSArea === "home" && (
           <V8Home
@@ -20231,7 +20264,7 @@ const removeNotification = async (notificationId) => {
 
         </>)}
 
-      {navigationOSArea==="connect" && (
+      {navigationOSArea==="connect" && connectView!=="v8" && (
         <div className="howdi-os-workspace howdi-os-connect" aria-label="HOWDI Connect">
           <style>{`
             .howdi-connect-tool-overlay{font-family:inherit}

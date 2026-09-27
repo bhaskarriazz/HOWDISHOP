@@ -723,3 +723,18 @@ body:has(.howdi-app.v8) .v8-build { font-family: ui-monospace, SFMono-Regular, M
 }
 /* S3: on phones the full-screen sign-in sheet has no bottom bar, so the preview build label sits flush at the bottom edge instead of over form content */
 @media (max-width: 760px) { body:has(.v8a-shell) .v8-build { bottom: 4px; left: 50%; transform: translateX(-50%); font-size: 9px; padding: 3px 7px; opacity: .8; } }
+
+/* ---------- V8 Notifications flyout (board 15) ---------- */
+.v8n-scrim { position: fixed; inset: 0; z-index: 9500; background: rgba(8,14,32,.18); }
+.v8n { position: fixed; z-index: 9501; top: calc(var(--v8-header-h) - 6px); right: 20px; width: min(420px, calc(100vw - 32px)); max-height: calc(100dvh - var(--v8-header-h) - 20px); display: flex; flex-direction: column;
+  background: var(--v8-surface); color: var(--v8-ink); border: 1px solid var(--v8-line); border-radius: 18px; box-shadow: 0 24px 60px rgba(8,14,32,.22); overflow: hidden; }
+.v8n-head { display: flex; align-items: center; gap: 8px; padding: 14px 16px; border-bottom: 1px solid var(--v8-line); }
+.v8n-head h2 { flex: 1; margin: 0; font: 700 18px var(--v8-font); } .v8n-back { display: none; }
+.v8n-list { overflow-y: auto; padding: 6px; }
+.v8n-item { display: flex; align-items: flex-start; gap: 12px; width: 100%; padding: 12px 10px; border: 0; border-radius: 12px; background: none; text-align: left; cursor: pointer; font: inherit; color: inherit; }
+.v8n-item:hover { background: var(--v8-bg); } .v8n-item.unread { background: color-mix(in srgb, var(--v8-primary-soft) 55%, transparent); }
+.v8n-ico { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; background: var(--v8-primary-soft); color: var(--v8-primary); flex: 0 0 auto; }
+.v8n-text { flex: 1; display: grid; gap: 2px; min-width: 0; } .v8n-text b { font-size: 14.5px; line-height: 1.35; } .v8n-text small { color: var(--v8-faint); font-size: 12px; } .v8n-text span { color: var(--v8-muted); font-size: 13.5px; }
+.v8n-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--v8-primary); margin-top: 6px; flex: 0 0 auto; }
+.v8n-foot { padding: 10px 12px 14px; border-top: 1px solid var(--v8-line); }
+@media (max-width: 760px) { .v8n { top: 0; right: 0; left: 0; bottom: 0; width: auto; max-height: none; border-radius: 0; } .v8n-back { display: inline-grid; } .v8n-scrim { display: none; } }

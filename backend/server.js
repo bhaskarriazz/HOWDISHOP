@@ -9661,6 +9661,19 @@
       await pool.query(`UPDATE howdi_admin_sessions SET last_seen_at=NOW() WHERE id=$1::uuid`,[row.id]).catch(()=>{});
       return row;
     }
+    const V8_ADMIN_PATH_RE=/^\/api\/(?:admin(?:\/|$)|(?:[a-z0-9-]+\/){1,4}admin(?:\/|$))/i;
+    async function v8AdminGuard(req,res){
+      let pathname="";try{pathname=new URL(req.url,"http://localhost").pathname;}catch{return false;}
+      if(!V8_ADMIN_PATH_RE.test(pathname))return false;
+      if(req.method==="POST"&&pathname.replace(/\/+$/,"")==="/api/admin/login")return false;
+      let session=null;try{session=await getAdminSessionFromRequest(req);}catch{session=null;}
+      if(session){req.howdiAdminSession=session;return false;}
+      const supplied=String(req.headers["x-howdi-admin-token"]||"");const configured=String(process.env.HOWDI_ADMIN_TOKEN||process.env.ADMIN_TOKEN||"");
+      if(configured&&supplied.length===configured.length){try{if(crypto.timingSafeEqual(Buffer.from(supplied),Buffer.from(configured)))return false;}catch{}}
+      res.writeHead(401,{"Content-Type":"application/json","Cache-Control":"no-store"});
+      res.end(JSON.stringify({status:"error",code:"ADMIN_SESSION_REQUIRED",message:"HOWDI admin sign-in required."}));
+      return true;
+    }
     async function auditAdminSecurity(req,session,action,metadata={}){
       await pool.query(`
         INSERT INTO howdi_admin_security_audit(session_id,username,action,method,path,ip_address,metadata)
@@ -21271,6 +21284,9 @@ async function ensureVibeReleaseReadinessV140LSchema(){
       return {status:403,body:{ok:false,error:"This endpoint is retired. Use the authenticated HOWDI Shop APIs."}};
     }
 
+    const V8_PUBLIC_APP_ROUTE_RE=/^\/api\/(?:health\/(?:live|ready)|public\/daily-quote|[a-z0-9/-]*\/?(?:capabilities|final-capabilities))\/?$/;
+    const V8_ACTOR_KEYS=new Set(["userId","user_id","senderUserId","payerUserId","customerUserId","buyerUserId","creatorUserId","actorUserId","ownerUserId","requesterUserId","subscriberUserId","learnerUserId","studentUserId","memberUserId"]);
+    const V8_DROP_KEYS=new Set(["workerId","worker_id","actorId","actor_id"]);
     async function howdiDispatchAppRouteR2(req,res){
       const u=new URL(req.url,"http://localhost");
       const pathname=u.pathname;
@@ -21297,6 +21313,23 @@ async function ensureVibeReleaseReadinessV140LSchema(){
           return true;
         }
       }else req.body=req.body||{};
+
+      // V8 SECURITY (coverage audit P0): these compatibility routes never had session middleware, so handlers read the acting
+      // user from `req.query.userId` / `req.body.senderUserId` etc. Every non-public route now needs a Bearer session; the actor
+      // fields are overwritten with the session user and caller-supplied worker ids are dropped. Admin paths were already
+      // gated by v8AdminGuard.
+      if(!req.howdiAdminSession && !(req.method==="GET" && V8_PUBLIC_APP_ROUTE_RE.test(pathname))){
+        let sessionUser=null;try{sessionUser=await getSessionUserFromRequest(req);}catch{sessionUser=null;}
+        if(!sessionUser||!Number(sessionUser.id)){howdiEnhanceResponseR2(res);res.status(401).json({ok:false,code:"SIGN_IN_REQUIRED",error:"Please sign in."});return true;}
+        req.user={id:String(sessionUser.id)};
+        for(const bag of [req.query,req.body]){
+          if(!bag||typeof bag!=="object")continue;
+          for(const k of Object.keys(bag)){
+            if(V8_ACTOR_KEYS.has(k))bag[k]=String(sessionUser.id);
+            else if(V8_DROP_KEYS.has(k))delete bag[k];
+          }
+        }
+      }
 
       howdiEnhanceResponseR2(res);
       try{
@@ -21337,6 +21370,22 @@ async function ensureVibeReleaseReadinessV140LSchema(){
       pool, sendJSON, getBody, getSessionUserFromRequest, hashPassword,
       clientIp: howdiRateLimitClientIp, rateLimit: vibeRateLimitV151B,
     });
+    // V8 Connect feature hub API (see ./connect-v8.cjs): public-code DTOs for Connect hub, Vibe, Stories and later Live/Spaces/Articles/Communities.
+    const connectV8 = require("./connect-v8.cjs").createConnectV8({
+      pool, sendJSON, getBody, getSessionUserFromRequest, rateLimit: vibeRateLimitV151B, clientIp: howdiRateLimitClientIp,
+      mediaDir: VIBE_MEDIA_DIR, issueK5ARefs: connectHomeK5A._internal.issueRefs, resolveK5ARef: connectHomeK5A._internal.resolveRef,
+    });
+    const connectV8Rooms = require("./connect-v8-rooms.cjs").createConnectV8Rooms({
+      pool, getBody, rateLimit: vibeRateLimitV151B, clientIp: howdiRateLimitClientIp, helpers: connectV8._internal, sandboxEnabled: () => accessV8.sandboxEnabled(),
+    });
+    const connectV8Community = require("./connect-v8-community.cjs").createConnectV8Community({
+      pool, getBody, clientIp: howdiRateLimitClientIp, helpers: connectV8._internal,
+      issueK5ARefs: connectHomeK5A._internal.issueRefs, resolveK5ARef: connectHomeK5A._internal.resolveRef,
+    });
+    const v8SafeHandle = async (mod, req, res, url) => {
+      try { return await mod.handle(req, res, url); }
+      catch (e) { console.error("[V8 API]", e && e.message); if (!res.headersSent) sendJSON(res, 500, { status: "error", code: "SERVER_ERROR", message: "Something went wrong. Please try again." }); return true; }
+    };
     const searchK5B = require("./search-k5b.cjs").createSearchK5B({
       pool, getSessionUserFromRequest, sendJSON, k5ePrivateProfileOkSql,
       issuePublicRefs: connectHomeK5A._internal.issueRefs,
@@ -21382,6 +21431,10 @@ async function ensureVibeReleaseReadinessV140LSchema(){
           }
 
 
+          // V8 SECURITY (coverage audit P0): every admin API — /api/admin/* and any /api/<module>/.../admin/... — requires a
+          // live admin session (howdi_admin_sessions) or the configured automation token (timing-safe). Before this guard,
+          // several admin routes (e.g. /api/admin/works/applications approve/reject) had no check at all.
+          if (await v8AdminGuard(req,res)) return;
           // V16 app.* compatibility routes are checked first.
           if (await howdiDispatchAppRouteR2(req,res)) return;
 
@@ -21397,6 +21450,10 @@ async function ensureVibeReleaseReadinessV140LSchema(){
           if (await searchK5B.handle(req, res, url)) return;
           // V8 S3: dispatched before the request logger so reset tokens / e-mail addresses are never logged.
           if (await accessV8.handle(req, res, url)) return;
+          // V8 Connect hub / Vibe / Stories API (public codes, allow-listed DTOs).
+          if (await connectV8.handle(req, res, url)) return;
+          if (await v8SafeHandle(connectV8Rooms, req, res, url)) return;
+          if (await v8SafeHandle(connectV8Community, req, res, url)) return;
 
           const pathname =
             url.pathname;
@@ -28385,6 +28442,10 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   body.password || ""
                 );
 
+              // V8 SECURITY: no built-in admin/admin in production — both must be configured.
+              if (process.env.NODE_ENV === "production" && (!process.env.ADMIN_USERNAME || !process.env.ADMIN_PASSWORD)) {
+                return sendJSON(res, 503, { status: "error", message: "Admin sign-in is not configured." });
+              }
               const adminUsername =
                 process.env.ADMIN_USERNAME ||
                 "admin";
@@ -52106,6 +52167,9 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             }
 
             if(req.method==="POST" && pathname==="/api/wallet/credit"){
+              // V8 SECURITY (audit P0): adding balance without a payment provider is free money. Allowed only in the labelled
+              // Preview/Test sandbox (HOWDI_PREVIEW_SANDBOX=1 on a *_preview database); otherwise refused.
+              if(!accessV8.sandboxEnabled())return sendJSON(res,503,{status:"error",code:"PAYMENT_PROVIDER_REQUIRED",message:"Adding money needs a connected payment provider."});
               // STAGE 2B SECURITY FIX (found during the sweep, not in the original audit list, and not
               // called by the current frontend): this had NO auth check at all — any anonymous caller
               // could credit ANY account's wallet by an arbitrary amount just by supplying its user_id
@@ -53097,6 +53161,9 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             }
 
             if(req.method==="POST" && pathname==="/api/wallet/add-money"){
+              // V8 SECURITY (audit P0): adding balance without a payment provider is free money. Allowed only in the labelled
+              // Preview/Test sandbox (HOWDI_PREVIEW_SANDBOX=1 on a *_preview database); otherwise refused.
+              if(!accessV8.sandboxEnabled())return sendJSON(res,503,{status:"error",code:"PAYMENT_PROVIDER_REQUIRED",message:"Adding money needs a connected payment provider."});
               // STAGE 2B SECURITY FIX: session-derived actor, body.user_id is no longer trusted
               const userId=await k5eRequireSelf(req,res);
               if(userId===null) return;
@@ -57157,6 +57224,9 @@ async function ensureVibeReleaseReadinessV140LSchema(){
         await ensureConnectHomeV166K5ASchema();
         await connectHomeK5A.ensureSchema();
         await accessV8.ensureSchema();
+        await connectV8.ensureSchema();
+        await connectV8Rooms.ensureSchema();
+        await connectV8Community.ensureSchema();
         await backfillMissingOrderShipments();
         console.log("✅ HOWDI database initialization completed before accepting requests");
       console.log("✅ HOWDI Works Customer + Admin Separation V31 loaded");
