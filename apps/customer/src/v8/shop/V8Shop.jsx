@@ -20,9 +20,10 @@ export default function V8Shop({ apiBase, getAuthHeaders, user, path, onNavigate
   const need = (el) => (user ? el : <SignInCard title="Sign in to continue" message="Your bag and orders are saved to your HOWDI account." onSignIn={onRequireLogin} />);
   return (
     <div className="v8-page v8s" id="v8-main">
-      <nav className="v8s-top" aria-label="Shop"><button type="button" className="v8-link" onClick={() => onNavigate("home")}>← Shop</button><span /><button type="button" className="v8-btn" onClick={() => onNavigate("bag")}><V8Icon name="cart" size={16} />Bag</button><button type="button" className="v8-btn" onClick={() => onNavigate("orders")}><V8Icon name="box" size={16} />My orders</button></nav>
+      <nav className="v8s-top" aria-label="Shop"><button type="button" className="v8-link" onClick={() => onNavigate("home")}>← Shop</button><span /><button type="button" className="v8-btn" onClick={() => onNavigate("wishlist")}><V8Icon name="heart" size={16} />Wishlist</button><button type="button" className="v8-btn" onClick={() => onNavigate("bag")}><V8Icon name="cart" size={16} />Bag</button><button type="button" className="v8-btn" onClick={() => onNavigate("orders")}><V8Icon name="box" size={16} />My orders</button></nav>
       {(m = p.match(/^products\/(PRD-[0-9A-F]{12})$/)) ? <Product key={m[1]} api={api} code={m[1]} user={user} nav={onNavigate} onRequireLogin={onRequireLogin} />
         : p === "bag" ? need(<Bag api={api} nav={onNavigate} />)
+        : p === "wishlist" ? need(<Wishlist api={api} nav={onNavigate} />)
           : p === "checkout" ? need(<Checkout api={api} nav={onNavigate} />)
             : (m = p.match(/^orders\/(ORD-[0-9A-F]{12})$/)) ? need(<Order key={m[1]} api={api} code={m[1]} nav={onNavigate} />)
               : need(<Orders api={api} nav={onNavigate} />)}
@@ -36,13 +37,15 @@ function Product({ api, code, user, nav, onRequireLogin }) {
   if (!d) return <Skel h={420} r={16} />;
   if (d.error) return <V8State icon="shop" title="This product isn’t available" message={d.error} actionLabel="Back to Shop" onAction={() => nav("home")} />;
   const pr = d.product;
+  const save = async () => { if (!user) { onRequireLogin(); return; } const r = await api(d.saved ? "DELETE" : "POST", "/api/v8/shop/wishlist", { product: code }); if (!r.ok) { ui?.toast({ kind: "error", title: r.json.message }); return; } setD((x) => ({ ...x, saved: r.json.saved })); ui?.toast({ title: r.json.saved ? "Saved to your wishlist" : "Removed from your wishlist" }); };
   const add = async (buy) => { if (!user) { onRequireLogin(); return; } setBusy(true); const r = await api("POST", "/api/v8/shop/cart", { product: code, qty }); setBusy(false); if (!r.ok) { ui?.toast({ kind: "error", title: r.json.message }); return; } if (buy) nav("checkout"); else ui?.toast({ title: "Added to your bag" }); };
-  return (
+  return (<>
     <section className="v8-card v8s-product">
       <div className="v8s-pimg">{safeImg(pr.image_url) ? <img src={pr.image_url} alt={pr.name} /> : <V8Icon name="image" size={40} />}</div>
       <div className="v8s-pinfo">
         <small className="v8s-store">{pr.store.name} · {pr.store.city}</small>
-        <h1>{pr.name}</h1>
+        <div className="v8s-titlerow"><h1>{pr.name}</h1>{!d.mine ? <button type="button" className={`v8s-heart ${d.saved ? "on" : ""}`} aria-pressed={d.saved} aria-label={d.saved ? "Remove from wishlist" : "Save to wishlist"} onClick={save}><V8Icon name="heart" size={22} fill={d.saved} /></button> : null}</div>
+        {pr.rating?.count ? <a className="v8s-rating" href="#reviews"><Stars n={pr.rating.average} /> <b>{pr.rating.average}</b> · {pr.rating.count} review{pr.rating.count === 1 ? "" : "s"}</a> : <small className="v8c-muted">No reviews yet</small>}
         <p className="v8s-price"><b>{inr(pr.price)}</b>{pr.mrp > pr.price ? <><s>{inr(pr.mrp)}</s><em>{Math.round((1 - pr.price / pr.mrp) * 100)}% off</em></> : null}</p>
         <p className={pr.in_stock ? "v8s-stock" : "v8s-stock out"}>{pr.in_stock ? (pr.stock <= 3 ? `Only ${pr.stock} left` : "In stock") : "Out of stock"}</p>
         {pr.description ? <p>{pr.description}</p> : null}
@@ -52,6 +55,60 @@ function Product({ api, code, user, nav, onRequireLogin }) {
           <div className="v8w-row"><button type="button" className="v8-btn" disabled={busy} onClick={() => add(false)}>Add to bag</button><button type="button" className="v8-btn v8-btn-primary" disabled={busy} onClick={() => add(true)}>Buy now</button></div>
         </>) : null}
       </div>
+    </section>
+    <Reviews api={api} code={code} user={user} onRequireLogin={onRequireLogin} />
+  </>);
+}
+
+const Stars = ({ n }) => <span className="v8s-stars" aria-label={`${n} out of 5 stars`}>{[1, 2, 3, 4, 5].map((i) => <V8Icon key={i} name="star" size={14} fill={i <= Math.round(n)} />)}</span>;
+function Reviews({ api, code, user, onRequireLogin }) {
+  const ui = useV8Ui(); const [d, setD] = useState(null); const [rating, setRating] = useState(0); const [body, setBody] = useState(""); const [edit, setEdit] = useState(false); const [reply, setReply] = useState({});
+  const load = useCallback(async () => { const r = await api("GET", `/api/v8/shop/products/${code}/reviews`); setD(r.ok ? r.json : { error: r.json.message }); }, [api, code]);
+  useEffect(() => { load(); }, [load]);
+  if (!d) return <Skel h={160} r={16} />;
+  if (d.error) return null;
+  const mine = d.items.find((x) => x.mine);
+  const submit = async () => { const r = await api("POST", `/api/v8/shop/products/${code}/reviews`, { rating, body }); if (!r.ok) { ui?.toast({ kind: "error", title: r.json.message }); return; } ui?.toast({ title: r.json.updated ? "Review updated" : "Thanks — your review is live. The seller was notified." }); setEdit(false); load(); };
+  const remove = async () => { const r = await api("DELETE", `/api/v8/shop/products/${code}/reviews`); if (r.ok) { ui?.toast({ title: "Review deleted" }); setRating(0); setBody(""); load(); } };
+  const sendReply = async (h) => { const r = await api("POST", `/api/v8/shop/products/${code}/reviews/${h}/reply`, { body: reply[h] }); if (!r.ok) { ui?.toast({ kind: "error", title: r.json.message }); return; } ui?.toast({ title: "Reply posted — the buyer was notified" }); setReply((x) => ({ ...x, [h]: undefined })); load(); };
+  const form = (d.can_review && (!mine || edit)) ? (
+    <div className="v8s-rform"><b>{mine ? "Edit your review" : "Rate this product"}</b>
+      <div className="v8s-rpick" role="radiogroup" aria-label="Your rating">{[1, 2, 3, 4, 5].map((i) => <button key={i} type="button" role="radio" aria-checked={rating === i} aria-label={`${i} star${i > 1 ? "s" : ""}`} className={i <= rating ? "on" : ""} onClick={() => setRating(i)}><V8Icon name="star" size={26} fill={i <= rating} /></button>)}</div>
+      <label className="v8c-field"><span>Your review (optional)</span><textarea rows={3} maxLength={1000} value={body} onChange={(e) => setBody(e.target.value)} placeholder="Quality, size, colour, packing…" /></label>
+      <div className="v8w-row"><button type="button" className="v8-btn v8-btn-primary" disabled={!rating} onClick={submit}>{mine ? "Save" : "Post review"}</button>{edit ? <button type="button" className="v8-btn" onClick={() => setEdit(false)}>Cancel</button> : null}</div></div>) : null;
+  return (
+    <section className="v8-card v8w-block v8s-reviews" id="reviews" aria-label="Reviews">
+      <h2>Ratings & reviews</h2>
+      {d.summary.count ? <div className="v8s-rsum"><div><b className="v8s-ravg">{d.summary.average}</b><Stars n={d.summary.average} /><small>{d.summary.count} verified review{d.summary.count === 1 ? "" : "s"}</small></div>
+        <ol className="v8s-hist">{d.summary.histogram.map((c, i) => <li key={i}><span>{5 - i}★</span><span className="v8l-bar"><i style={{ width: `${d.summary.count ? (100 * c) / d.summary.count : 0}%` }} /></span><small>{c}</small></li>)}</ol></div> : <p className="v8c-muted">No reviews yet.{d.can_review ? " Be the first to review it." : ""}</p>}
+      {form}
+      {!d.can_review && !d.is_seller ? <p className="v8c-muted"><V8Icon name="shield" size={14} /> Only buyers who received this product can review it{!d.signed_in ? <> — <button type="button" className="v8-link" onClick={onRequireLogin}>sign in</button></> : null}.</p> : null}
+      <ul className="v8s-rlist">{d.items.map((r) => { const h = r.author?.public_username; return (
+        <li key={h || r.at}><header><b>@{h || "buyer"}</b><Stars n={r.rating} /><small>{new Date(r.at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}{r.edited ? " · edited" : ""} · verified purchase</small></header>
+          {r.body ? <p>{r.body}</p> : null}
+          {r.mine && !edit ? <div className="v8w-row"><button type="button" className="v8-link" onClick={() => { setRating(r.rating); setBody(r.body || ""); setEdit(true); }}>Edit</button><button type="button" className="v8-link" onClick={remove}>Delete</button></div> : null}
+          {r.reply ? <div className="v8s-reply"><b>{r.reply.store} (seller)</b><p>{r.reply.body}</p></div>
+            : d.is_seller ? (reply[h] !== undefined ? <div className="v8s-reply"><label className="v8c-field"><span>Reply publicly as the seller</span><textarea rows={2} maxLength={600} value={reply[h]} onChange={(e) => setReply((x) => ({ ...x, [h]: e.target.value }))} /></label><div className="v8w-row"><button type="button" className="v8-btn v8-btn-primary" disabled={!String(reply[h]).trim()} onClick={() => sendReply(h)}>Post reply</button><button type="button" className="v8-btn" onClick={() => setReply((x) => ({ ...x, [h]: undefined }))}>Cancel</button></div></div>
+              : <button type="button" className="v8-link" onClick={() => setReply((x) => ({ ...x, [h]: "" }))}>Reply</button>) : null}
+        </li>); })}</ul>
+    </section>
+  );
+}
+
+function Wishlist({ api, nav }) {
+  const ui = useV8Ui(); const [d, setD] = useState(null);
+  const load = useCallback(async () => { const r = await api("GET", "/api/v8/shop/wishlist"); setD(r.ok ? r.json : { error: r.json.message }); }, [api]);
+  useEffect(() => { load(); }, [load]);
+  if (!d) return <Skel h={240} r={16} />;
+  if (d.error) return <V8State kind="error" title="Your wishlist didn’t load" message={d.error} actionLabel="Retry" onAction={load} />;
+  if (!d.items.length) return <V8State icon="heart" title="Your wishlist is empty" message="Tap the heart on any product to save it here." actionLabel="Browse Shop" onAction={() => nav("home")} />;
+  const remove = async (c) => { const r = await api("DELETE", "/api/v8/shop/wishlist", { product: c }); if (r.ok) { ui?.toast({ title: "Removed from your wishlist" }); load(); } };
+  const move = async (c) => { const r = await api("POST", "/api/v8/shop/cart", { product: c, qty: 1 }); if (!r.ok) { ui?.toast({ kind: "error", title: r.json.message }); return; } await api("DELETE", "/api/v8/shop/wishlist", { product: c }); ui?.toast({ title: "Moved to your bag" }); load(); };
+  return (
+    <section className="v8-card v8w-block"><h2>Wishlist · {d.items.length}</h2>
+      {d.items.map((p) => <div key={p.public_key} className="v8me-prod">{safeImg(p.image_url) ? <img src={p.image_url} alt="" /> : <span className="v8me-prod-ph"><V8Icon name="image" size={20} /></span>}
+        <span><button type="button" className="v8-link v8s-wname" onClick={() => nav(`products/${p.public_key}`)}>{p.name}</button><small>{p.store.name} · {inr(p.price)}{!p.in_stock ? " · out of stock" : ""}</small></span>
+        <span className="v8me-prod-act"><button type="button" className="v8-btn v8-btn-primary" disabled={!p.in_stock} onClick={() => move(p.public_key)}>Move to bag</button><button type="button" className="v8-btn" onClick={() => remove(p.public_key)}>Remove</button></span></div>)}
     </section>
   );
 }

@@ -13,6 +13,7 @@ import V8CallCenter from "./v8/connect/Calls";
 import V8Works from "./v8/works/V8Works";
 import V8Roles from "./v8/me/V8Roles";
 import V8Learn from "./v8/learn/V8Learn";
+import { Wallet as V8Wallet, Photo as V8Photo } from "./v8/me/V8Wallet";
 import V8Shop from "./v8/shop/V8Shop";
 import { V8Appearance, V8Permissions, V8IdentityBadges } from "./v8/V8Settings";
 import { V8Confirm, V8OfflineBanner, V8SessionExpired, loadV8Prefs, applyV8Prefs, useV8Ui } from "./v8/V8System";
@@ -9932,7 +9933,7 @@ return () => window.clearInterval(timer);
     if(next==="shop"){
       setActiveSection("shop");
       // V8 Shop purchase journey pages keep their case-sensitive public codes (PRD-…, ORD-…)
-      if(/^(products\/PRD-[0-9A-Fa-f]{12}|bag|checkout|orders(\/ORD-[0-9A-Fa-f]{12})?)$/.test(String(subview||""))){setV8ShopPath(String(subview));setShopOSView("v8");setNavigationOSArea("shop");window.setTimeout(()=>{const m=document.querySelector(".v8-page");if(m)m.scrollTop=0;},30);return;}
+      if(/^(products\/PRD-[0-9A-Fa-f]{12}|bag|wishlist|checkout|orders(\/ORD-[0-9A-Fa-f]{12})?)$/.test(String(subview||""))){setV8ShopPath(String(subview));setShopOSView("v8");setNavigationOSArea("shop");window.setTimeout(()=>{const m=document.querySelector(".v8-page");if(m)m.scrollTop=0;},30);return;}
       // V8 SHP-001: one Shop. Legacy "home", "categories", "discovery" and "crochet" entries all land on the catalogue.
       if(view==="crochet")setShopCollection("crochet");
       else if(view==="catalogue"||view==="home")setShopCollection("");
@@ -12719,10 +12720,10 @@ const removeNotification = async (notificationId) => {
     if(p==="/shop"){openNavigationOSArea("shop","catalogue");return true;}
     if(p==="/shop/crochet"){openNavigationOSArea("shop","crochet");return true;}
     if(p==="/shop/cart"){openNavigationOSArea("shop","cart");return true;}
-    if((m=p.match(/^\/shop\/(products\/PRD-[0-9A-F]{12}|bag|checkout|orders(?:\/ORD-[0-9A-F]{12})?)$/))){openNavigationOSArea("shop",m[1]);return true;}
+    if((m=p.match(/^\/shop\/(products\/PRD-[0-9A-F]{12}|bag|wishlist|checkout|orders(?:\/ORD-[0-9A-F]{12})?)$/))){openNavigationOSArea("shop",m[1]);return true;}
     if((m=p.match(/^\/works(?:\/([A-Za-z0-9/_.@-]{1,120}))?$/))){openNavigationOSArea("works",m[1]||"find");return true;}
     if((m=p.match(/^\/learn(?:\/([a-z-]{2,24}))?$/))){openNavigationOSArea("learn",m[1]||"discover");return true;}
-    if((m=p.match(/^\/me\/(appearance|privacy|badges|roles|vendor|vendor\/store)$/))){openNavigationOSArea("me",m[1]);return true;}
+    if((m=p.match(/^\/me\/(appearance|privacy|badges|roles|vendor|vendor\/store|wallet|photo)$/))){openNavigationOSArea("me",m[1]);return true;}
     if((m=p.match(/^\/me\/apply\/(teacher|institute|startup)$/))){openNavigationOSArea("learn","apply/"+m[1]);return true;}
     if((m=p.match(/^\/learn\/(courses(?:\/CRS-[0-9A-F]{12})?|lessons\/LSN-[0-9A-F]{12}|mine|teach(?:\/CRS-[0-9A-F]{12})?|certificates\/[A-Z0-9-]{6,80})$/))){openNavigationOSArea("learn",m[1]);return true;}
     if((m=p.match(/^\/@([a-z0-9._]{3,30})$/i))){openNavigationOSArea("profile",m[1].toLowerCase());return true;}
@@ -13270,6 +13271,9 @@ const removeNotification = async (notificationId) => {
               <div className="mh-grid">
                 {v8OwnHandle ? <button type="button" onClick={() => openNavigationOSArea("profile", v8OwnHandle)}><i>◉</i><b>View profile</b></button> : null}
                 <button type="button" onClick={() => { setAccountMenuOpen(false); openNavigationOSArea("me", "roles"); }}><i>◈</i><b>My roles</b></button>
+                <button type="button" onClick={() => { setAccountMenuOpen(false); openNavigationOSArea("me", "wallet"); }}><i>₹</i><b>HPay wallet</b></button>
+                <button type="button" onClick={() => { setAccountMenuOpen(false); openNavigationOSArea("shop", "wishlist"); }}><i>♡</i><b>Wishlist</b></button>
+                <button type="button" onClick={() => { setAccountMenuOpen(false); openNavigationOSArea("me", "photo"); }}><i>◉</i><b>Profile photo</b></button>
                 <button type="button" onClick={() => openNavigationOSArea("me", "badges")}><i>✓</i><b>Identity & badges</b></button>
                 <button type="button" onClick={() => openNavigationOSArea("me", "appearance")}><i>◐</i><b>Appearance</b></button>
                 <button type="button" onClick={() => openNavigationOSArea("me", "privacy")}><i>⚿</i><b>Privacy & permissions</b></button>
@@ -18048,6 +18052,8 @@ const removeNotification = async (notificationId) => {
           <V8Roles key={v8MeView} apiBase={SHOP_API_BASE} getAuthHeaders={customerSessionHeaders} view={v8MeView === "vendor/store" ? "store" : v8MeView}
             onRoute={(r) => { if (!v8ApplyPath(String(r || "/"))) openNavigationOSArea("home"); }} onBack={() => { try { window.history.back(); } catch { v8Navigate("home"); } }} />
         )}
+        {navigationOSArea === "me" && v8MeView === "wallet" && <V8Wallet apiBase={SHOP_API_BASE} getAuthHeaders={customerSessionHeaders} onRoute={(r) => { if (!v8ApplyPath(String(r || "/"))) openNavigationOSArea("home"); }} onBack={() => { try { window.history.back(); } catch { v8Navigate("home"); } }} />}
+        {navigationOSArea === "me" && v8MeView === "photo" && <V8Photo apiBase={SHOP_API_BASE} getAuthHeaders={customerSessionHeaders} onBack={() => { try { window.history.back(); } catch { v8Navigate("home"); } }} />}
         {navigationOSArea === "me" && v8MeView === "appearance" && <V8Appearance prefs={v8Prefs} setPrefs={setV8Prefs} onBack={() => { try { window.history.back(); } catch { v8Navigate("home"); } }} />}
         {navigationOSArea === "me" && v8MeView === "privacy" && <V8Permissions onBack={() => { try { window.history.back(); } catch { v8Navigate("home"); } }} onOpenPrivacy={() => { openNavigationOSArea("connect", "home"); window.setTimeout(() => openConnectSocial(), 0); }} />}
         {navigationOSArea === "me" && v8MeView === "badges" && (
