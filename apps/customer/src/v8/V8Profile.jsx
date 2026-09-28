@@ -123,7 +123,7 @@ export default function V8Profile({ apiBase, handle, getAuthHeaders, signedIn, i
                 <HighlightsRow api={api} handle={p.public_username || handle} signedIn={signedIn} onRequireLogin={onRequireLogin} onOpenProfile={() => {}} />
                 <div className="v8-profile-offer"><MembershipOffer api={api} handle={handle} signedIn={signedIn} onRequireLogin={onRequireLogin} compact onNav={(v) => openConnect(v)} /></div>
                 <nav className="v8-tabs" aria-label="Profile content">
-                  {[["posts", "Posts", (d.recent_posts || []).length], ["vibes", "Vibes", (d.vibes || []).length], ["articles", "Articles", (d.articles || []).length]].map(([id, label]) => (
+                  {[["posts", "Posts", (d.recent_posts || []).length], ["vibes", "Vibes", (d.vibes || []).length], ["tagged", "Tagged", (d.tagged || []).length], ["articles", "Articles", (d.articles || []).length]].map(([id, label]) => (
                     <button key={id} type="button" aria-pressed={tab === id} onClick={() => setTab(id)}>{label}</button>
                   ))}
                 </nav>
@@ -141,6 +141,9 @@ export default function V8Profile({ apiBase, handle, getAuthHeaders, signedIn, i
                   <ul className="v8-vibe-grid">{d.vibes.map((v) => (
                     <li key={v.vibe_code} className="v8-card"><div className="v8-vibe-cover">{safeImg(v.cover_url) ? <img src={v.cover_url} alt="" /> : <V8Icon name="play" size={28} fill />}</div><small>{String(v.caption || "").slice(0, 70)}</small></li>))}</ul>
                 ) : <div className="v8-card"><V8State icon="play" title="No Vibes yet" message="Short videos from this profile will appear here." /></div>) : null}
+                {tab === "tagged" ? ((d.tagged || []).length ? (
+                  <ul className="v8-profile-list">{d.tagged.map((item, i) => <li key={item.public_key || `tag${i}`} className="v8-card v8-profile-item"><div><b>{item.title || "Tagged post"}</b><p>{String(item.text_excerpt || item.caption || "").slice(0, 220)}</p><small className="v8-muted">Visible only when the original audience and tag approval permit it.</small></div></li>)}</ul>
+                ) : <div className="v8-card"><V8State icon="tag" title="No approved tagged content" message="Tags appear here only after approval and while the original post remains visible to you." /></div>) : null}
                 {tab === "articles" ? ((d.articles || []).length ? (
                   <ul className="v8-profile-list">{d.articles.map((a, i) => (
                     <li key={`a${i}`} className="v8-card v8-profile-item">
