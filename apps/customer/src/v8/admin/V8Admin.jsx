@@ -131,7 +131,9 @@ function Operations({ token }) {
     const reason = window.prompt("Manual dispatch reason:");
     if (!reason) return;
     const r = await api(token,"POST",`/api/admin/v8/move/rides/${ride.public_ride_code}/dispatch`,{driver_id,reason});
-    setMsg(r.ok ? r.json.message : (r.json.error || "Dispatch failed"));
+    const resultMessage = r.ok ? r.json.message : (r.json.error || "Dispatch failed");
+    setMsg(resultMessage);
+    window.alert(resultMessage);
     if(r.ok) load();
   }
 
