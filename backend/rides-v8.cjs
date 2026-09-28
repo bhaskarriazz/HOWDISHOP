@@ -11,7 +11,16 @@ function createRidesV8(deps) {
   let schemaReadyPromise = null;
   const ensureReady = () => (schemaReadyPromise ||= ensureSchema());
 
+  const setCors = (res) => {
+    if (!res.headersSent) {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-howdi-admin-token, x-howdi-worker-id');
+    }
+  };
+
   const ok = (res, data, code = 200) => {
+    setCors(res);
     res.statusCode = code;
     res.setHeader('Content-Type', 'application/json');
     res.end(JSON.stringify({ ok: true, ...data }));
@@ -19,6 +28,7 @@ function createRidesV8(deps) {
   };
 
   const fail = (res, code, error, details = null) => {
+    setCors(res);
     res.statusCode = code;
     res.setHeader('Content-Type', 'application/json');
     res.end(JSON.stringify({ ok: false, error, details }));
