@@ -21,6 +21,7 @@ const clean = (raw) => ({
   favoriteDock: Array.isArray(raw?.favoriteDock) ? raw.favoriteDock.filter((x) => V8_DEFAULT_DOCK.includes(x)) : [],
   hiddenModules: Array.isArray(raw?.hiddenModules) ? raw.hiddenModules.filter((x) => V8_HOME_MODULES.some(([id]) => id === x)) : [],
   pinnedModules: Array.isArray(raw?.pinnedModules) ? raw.pinnedModules.filter((x) => V8_HOME_MODULES.some(([id]) => id === x)) : [],
+  moduleOrder: [...new Set([...(Array.isArray(raw?.moduleOrder) ? raw.moduleOrder : []), ...V8_HOME_MODULES.map(([id]) => id)])].filter((x) => V8_HOME_MODULES.some(([id]) => id === x)),
 });
 export function useV8CommonHomePrefs(accountKey) {
   const key = `${KEY}:${String(accountKey || "guest")}`;
@@ -41,6 +42,7 @@ export function V8CustomizeHome({ open, prefs, onSave, onClose }) {
     return { ...p, dock };
   });
   const toggle = (field, id, locked) => setDraft((p) => locked ? p : ({ ...p, [field]: p[field].includes(id) ? p[field].filter((x) => x !== id) : [...p[field], id] }));
+  const moveModule = (id, delta) => setDraft((p) => { const order = [...p.moduleOrder], at = order.indexOf(id), target = at + delta; if (target < 0 || target >= order.length) return p; [order[at], order[target]] = [order[target], order[at]]; return { ...p, moduleOrder: order }; });
   const reset = () => setDraft(clean(null));
   return <V8Dialog open={open} title="Customize Home" onClose={onClose} wide>
     <p className="v8-muted">Your saved choices stay with this account. Pinned and hidden choices take priority over recommendations.</p>
@@ -48,7 +50,7 @@ export function V8CustomizeHome({ open, prefs, onSave, onClose }) {
       {draft.dock.map((id, index) => <div className="v8-customize-row" key={id}><b>{V8_DEFAULT_DOCK.find((x) => x === id) === "works" ? "Work" : id[0].toUpperCase() + id.slice(1)}</b><span>{id === "home" ? "Fixed first" : draft.hiddenDock.includes(id) ? "Hidden" : "Visible"}</span><button type="button" disabled={id === "home" || index < 2} onClick={() => move(id, -1)}>Move left</button><button type="button" disabled={id === "home" || index === draft.dock.length - 1} onClick={() => move(id, 1)}>Move right</button><button type="button" disabled={id === "home"} onClick={() => toggle("hiddenDock", id, id === "home")}>{draft.hiddenDock.includes(id) ? "Show" : "Hide"}</button><button type="button" disabled={id === "home"} onClick={() => toggle("favoriteDock", id, id === "home")}>{draft.favoriteDock.includes(id) ? "Unfavorite" : "Favorite"}</button></div>)}
       <small>{visible.length} of 6 dock destinations visible. Hidden destinations remain available through search and Customize Home.</small>
     </section>
-    <section className="v8-customize-section"><h3>Show on Home Screen</h3>{V8_HOME_MODULES.map(([id, label]) => <div className="v8-customize-row" key={id}><b>{label}</b><span>{draft.pinnedModules.includes(id) ? "Pinned" : draft.hiddenModules.includes(id) ? "Hidden" : "Eligible"}</span><button type="button" onClick={() => toggle("pinnedModules", id)}> {draft.pinnedModules.includes(id) ? "Unpin" : "Pin"}</button><button type="button" onClick={() => toggle("hiddenModules", id)}>{draft.hiddenModules.includes(id) ? "Show" : "Hide"}</button></div>)}</section>
+    <section className="v8-customize-section"><h3>Show on Home Screen</h3>{draft.moduleOrder.map((id, index) => { const label = V8_HOME_MODULES.find(([key]) => key === id)?.[1] || id; return <div className="v8-customize-row" key={id}><b>{label}</b><span>{draft.pinnedModules.includes(id) ? "Pinned" : draft.hiddenModules.includes(id) ? "Hidden" : "Eligible"}</span><button type="button" disabled={index === 0} onClick={() => moveModule(id, -1)}>Move up</button><button type="button" disabled={index === draft.moduleOrder.length - 1} onClick={() => moveModule(id, 1)}>Move down</button><button type="button" onClick={() => toggle("pinnedModules", id)}>{draft.pinnedModules.includes(id) ? "Unpin" : "Pin"}</button><button type="button" onClick={() => toggle("hiddenModules", id)}>{draft.hiddenModules.includes(id) ? "Show" : "Hide"}</button></div>; })}</section>
     <div className="v8-confirm-actions"><button type="button" className="v8-btn" onClick={reset}>Reset</button><span className="v8-spacer"/><button type="button" className="v8-btn" onClick={onClose}>Cancel</button><button type="button" className="v8-btn v8-btn-primary" onClick={() => { onSave(draft); onClose(); }}>Done</button></div>
   </V8Dialog>;
 }
