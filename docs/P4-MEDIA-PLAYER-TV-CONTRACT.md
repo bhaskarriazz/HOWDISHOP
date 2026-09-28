@@ -176,3 +176,62 @@ Reuse `vibe_view_history` and add `resume_position_ms BIGINT NOT NULL DEFAULT 0`
 - Test V8 public-code resolution, no UUID/storage-path leakage, cross-account history isolation, private/block matrix, retention cleanup, pagination, clear-one/all idempotency, allow/deny/revoked/expired download outcomes, and audit records with secrets redacted.
 
 No Founder visual PASS can be inferred from this contract; real runtime, provider and hardware evidence remain required.
+
+## P5C — music and audio integration contract
+
+### Audited existing behavior
+
+- `apps/customer/src/v8/connect/VibeCapture.jsx` requests `{ audio: true }` when recording a Vibe. The captured video can therefore retain embedded original audio.
+- `VibeCreate.jsx` and `Studio.jsx` select/upload Vibe media and pass it through the existing V8 rights declaration/review path in `backend/connect-v8.cjs`.
+- The current `vibe_media` DTO carries video/image URLs, thumbnails and duration. It has no audio reference, audio metadata, mix setting, reuse permission or attribution object.
+- `howdi_connect_stories.music_track` appears only in a preview seed fixture. It is a typed field, not a provider track identity or license record, and must not be reused as music functionality.
+- No licensed music provider adapter, API credential/configuration, audio catalogue, track search route, audio-only upload route, provider webhook, or V8 music table exists in the audited stack.
+
+### What can be stated and supported now
+
+An uploaded or recorded Vibe's embedded sound is **original audio only**. The server may describe it as `{ kind: "original", attribution: { public_username: "…" } }` only after it confirms the Vibe remains visible to the requesting viewer. Reuse requires an explicit uploader setting, a rights-clear state, and the same audience/private-profile/block/moderation/deletion checks used for the source Vibe. Until a separate audio model exists, there is no source-backed original-audio reuse endpoint or UI control.
+
+The existing rights declaration (`original`, `licensed`, `third_party`) is reused as a publication safety gate. It is not proof of a commercial music licence, and a typed song title or a client-supplied `track_id` must never produce licensed attribution, playback, search results, or download permission.
+
+### Licensed-provider boundary
+
+Do not implement a music selector until an approved provider adapter is configured. Its minimum server-owned track record must include:
+
+```json
+{
+  "provider": "approved-provider-key",
+  "provider_track_id": "provider-safe-track-id",
+  "title": "string",
+  "artist": "string",
+  "artwork_url": "provider-authorized-url-or-null",
+  "availability": {"territory":"IN","usable":true,"reason":null},
+  "rights_status": "cleared|unavailable|revoked|takedown",
+  "allowed_clip_ms": 30000,
+  "selected_start_ms": 0,
+  "selected_end_ms": 30000,
+  "attribution_text": "string",
+  "preview_url": "provider-authorized-url-or-null"
+}
+```
+
+The provider adapter, not the browser, must search catalogues, verify territory and intended social-video usage, validate the selected segment, and resolve takedown/revocation. The V8 API should expose only approved DTOs: `GET /api/v8/music/search`, `GET /api/v8/music/:public_track_code`, and a server-side publish selection. Provider IDs, credentials, raw provider responses, signed stream URLs and rights evidence stay server-side.
+
+### Required persistence and publication behavior
+
+Add a dedicated Vibe-audio selection table only after a provider exists. It must store provider key/track ID, selected range, rights snapshot/reference, attribution text, status, revocation/takedown timestamps, and an audit reference. It must not replace `vibe_media` or store a browser-provided licence claim as authoritative.
+
+On Vibe publish, the backend validates the selected provider track at that moment. On later provider revocation/takedown, mark the audio selection unavailable, preserve the Vibe's privacy rules and return a safe degraded DTO such as `{ "audio": { "state":"unavailable", "attribution_text":"Audio unavailable" } }`. Do not silently substitute a different track, expose a removed preview URL, or make the underlying Vibe public.
+
+### Future UI contract
+
+Only after those APIs are live may Studio/VibeCreate show search, selection, clip trim, remove/change, attribution preview, original-audio plus music mix controls, or an unavailable/rights-restricted state. The UI must render provider-returned attribution on a published Vibe, use an honest unavailable state when revoked, and never display a manually typed song name as licensed music.
+
+### Targeted test plan
+
+- Recorded/uploaded Vibe reports original-audio attribution only when its source Vibe is visible; private, blocked, restricted, deleted and moderated sources are never reusable.
+- Provider adapter: valid track/region/clip succeeds; invalid track ID, unavailable territory, over-length segment, revoked/taken-down track and unauthorized preview fail safely.
+- Publication: provider ID and segment persist; typed title alone produces no licensed music DTO; attribution contains only approved public metadata.
+- Playback: revoked audio degrades without leaking provider URL or making the Vibe inaccessible rules weaker.
+- Audit: selection, revocation and takedown records contain no credentials, raw provider payload or signed URLs.
+
+**P5C dependency:** an approved licensed-music provider, server-side credentials and usage/territory terms, a provider webhook or reconciliation mechanism, and an approved audio-data migration. Until those exist, no music catalogue, track selection, mixing, or reuse runtime can be truthfully enabled.
