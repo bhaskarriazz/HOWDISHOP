@@ -105,4 +105,8 @@ Cast playback and screen mirroring are separate capabilities.
 - Download: allow, deny, revoked, expired and music-rights-denied responses.
 - TV: no sender, no receiver, connection failure, real receiver play/pause/seek/disconnect, then separate manual mirroring guidance.
 
+## P5A implementation note (video player foundation)
+
+The current `GET /api/v8/vibes` and `GET /api/v8/vibes/{code}` DTO provides one direct `media[]` URL with type, poster and duration only. It does **not** provide a rendition manifest or caption/subtitle tracks. The customer player therefore keeps using the direct URL under the existing Vibe visibility, block and private-account checks. It now supports playback speed, loading/buffering, source-error retry and browser-gated Picture in Picture. Quality, caption and data-saver controls become available only when a future media object supplies verified `renditions[]`, `caption_tracks[]` and a `data_saver` rendition; until then they state that the capability is unavailable. The existing `captions` Boolean belongs to a linked Vibe item and is not treated as proof that a video caption track exists.
+
 No Founder visual PASS can be inferred from this contract; real runtime, provider and hardware evidence remain required.

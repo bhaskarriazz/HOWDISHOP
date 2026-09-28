@@ -13,27 +13,56 @@ const loadPrefs = () => { try { return { blurSensitive: true, autoplayMuted: tru
 const savePrefs = (p) => { try { localStorage.setItem(PREF_KEY, JSON.stringify(p)); } catch { /* private mode */ } };
 const LINK_ICON = { product: "shop", course: "learn", community: "users", profile: "user", service: "works" };
 
-function Player({ vibe, active, muted, onToggleMute, prefs, onDouble }) {
+function Player({ vibe, active, muted, onToggleMute, prefs, onPrefsChange, onDouble }) {
   const ref = useRef(null); const [paused, setPaused] = useState(false); const [progress, setProgress] = useState(0); const [revealed, setRevealed] = useState(false);
+  const [phase, setPhase] = useState("loading"); const [menu, setMenu] = useState(false); const [pip, setPip] = useState(false); const [speed, setSpeed] = useState(1);
   const m = vibe.media[0] || {};
   const isVideo = m.type === "video" && safeVideo(m.url);
+  // The current API returns one direct URL. These optional fields deliberately remain
+  // absent until a playback manifest supplies real renditions/tracks.
+  const renditions = (Array.isArray(m.renditions) ? m.renditions : []).filter((x) => x && safeVideo(x.url));
+  const captions = (Array.isArray(m.caption_tracks) ? m.caption_tracks : []).filter((x) => x && /^(https?:\/\/|\/)/.test(String(x.url || "")));
+  const sources = [{ url: m.url, label: "Auto" }, ...renditions];
+  const [source, setSource] = useState(m.url);
+  const canPip = isVideo && typeof document !== "undefined" && Boolean(document.pictureInPictureEnabled && ref.current?.requestPictureInPicture);
   useEffect(() => {
     const el = ref.current; if (!el || !isVideo) return;
     if (active && !paused) { el.play().catch(() => setPaused(true)); } else el.pause();
   }, [active, paused, isVideo]);
   useEffect(() => { if (!active) { setPaused(false); } }, [active]);
+  useEffect(() => { const el = ref.current; if (el) el.playbackRate = speed; }, [speed, isVideo]);
   const blurred = vibe.sensitive && prefs.blurSensitive && !revealed;
+  const retry = () => { const el = ref.current; if (!el) return; setPhase("loading"); el.load(); if (active) el.play().catch(() => setPaused(true)); };
+  const openPip = async () => {
+    const el = ref.current; if (!el || !canPip) return;
+    try { await el.requestPictureInPicture(); } catch { /* browser declined or changed capability */ }
+  };
+  const dataSaverAvailable = renditions.some((x) => x.data_saver === true);
   return (
     <div className="v8v-player" onDoubleClick={onDouble}>
       {isVideo ? (
-        <video ref={ref} src={m.url} poster={safeImg(m.poster) || safeImg(vibe.cover_url) || undefined} muted={muted} loop playsInline preload="metadata" className={blurred ? "blur" : ""}
-          onTimeUpdate={(e) => { const v = e.currentTarget; if (v.duration) setProgress(v.currentTime / v.duration); }} onClick={() => setPaused((p) => !p)} aria-label={vibe.caption.slice(0, 80) || "Vibe video"} />
+        <video ref={ref} src={source} poster={safeImg(m.poster) || safeImg(vibe.cover_url) || undefined} muted={muted} loop playsInline preload="metadata" className={blurred ? "blur" : ""}
+          onLoadStart={() => setPhase("loading")} onWaiting={() => setPhase("buffering")} onCanPlay={() => setPhase("ready")} onPlaying={() => setPhase("ready")}
+          onError={() => setPhase("error")} onEnterPictureInPicture={() => setPip(true)} onLeavePictureInPicture={() => setPip(false)}
+          onTimeUpdate={(e) => { const v = e.currentTarget; if (v.duration) setProgress(v.currentTime / v.duration); }} onClick={() => setPaused((p) => !p)} aria-label={vibe.caption.slice(0, 80) || "Vibe video"}>
+          {captions.map((track, i) => <track key={`${track.url}-${i}`} kind={track.kind || "subtitles"} src={track.url} srcLang={track.language || "en"} label={track.label || track.language || "Captions"} default={track.default === true} />)}
+        </video>
       ) : <img src={safeImg(m.url) || safeImg(vibe.cover_url)} alt={vibe.caption.slice(0, 80)} className={blurred ? "blur" : ""} />}
       {blurred ? <div className="v8v-sensitive"><V8Icon name="eyeoff" size={26} /><b>Sensitive content</b><p>This Vibe may not be suitable for everyone.</p><button type="button" className="v8-btn v8-btn-soft" onClick={() => setRevealed(true)}>View Vibe</button></div> : null}
       {isVideo && paused && !blurred ? <button type="button" className="v8v-bigplay" aria-label="Play" onClick={() => setPaused(false)}><V8Icon name="play" size={34} fill /></button> : null}
+      {isVideo && ["loading", "buffering"].includes(phase) && !blurred ? <span className="v8v-player-state" role="status">{phase === "buffering" ? "Buffering…" : "Loading…"}</span> : null}
+      {isVideo && phase === "error" && !blurred ? <div className="v8v-player-error" role="alert"><b>Video unavailable</b><button type="button" onClick={retry}>Retry</button></div> : null}
       {isVideo ? <div className="v8v-progress" aria-hidden="true"><i style={{ width: `${Math.round(progress * 100)}%` }} /></div> : null}
       {isVideo ? <button type="button" className="v8v-mute" onClick={onToggleMute} aria-label={muted ? "Unmute" : "Mute"}><V8Icon name={muted ? "mute" : "volume"} size={18} /></button> : null}
-      {vibe.captions && isVideo ? <span className="v8v-cc" title="Captions available"><V8Icon name="cc" size={16} /></span> : null}
+      {isVideo ? <button type="button" className="v8v-player-menu" aria-label="Video controls" aria-expanded={menu} onClick={() => setMenu((x) => !x)}><V8Icon name="sliders" size={18} /></button> : null}
+      {menu && isVideo ? <div className="v8v-player-controls" role="group" aria-label="Video settings">
+        <label>Playback speed<select value={speed} onChange={(e) => setSpeed(Number(e.target.value))}>{[0.5, 0.75, 1, 1.25, 1.5, 2].map((x) => <option key={x} value={x}>{x}×</option>)}</select></label>
+        {renditions.length ? <label>Quality<select aria-label="Video quality" value={source} onChange={(e) => setSource(e.target.value)}>{sources.map((x, i) => <option key={x.url} value={x.url}>{x.label || (x.height ? `${x.height}p` : `Source ${i + 1}`)}</option>)}</select></label> : <p>Quality options are unavailable for this video.</p>}
+        {captions.length ? <p><V8Icon name="cc" size={15} /> Captions are available in the player.</p> : <p>Caption tracks are unavailable for this video.</p>}
+        <label className="v8v-player-switch"><span>Data saver{dataSaverAvailable ? "" : " unavailable"}</span><input type="checkbox" role="switch" checked={Boolean(prefs.dataSaver)} disabled={!dataSaverAvailable} onChange={(e) => { onPrefsChange({ dataSaver: e.target.checked }); const saver = renditions.find((x) => x.data_saver === true); if (e.target.checked && saver) setSource(saver.url); }} /></label>
+        {canPip ? <button type="button" onClick={openPip}>{pip ? "Picture in Picture active" : "Picture in Picture"}</button> : <p>Picture in Picture is not available in this browser.</p>}
+        <p>Background playback follows your browser or device controls.</p>
+      </div> : null}
     </div>
   );
 }
@@ -277,7 +306,7 @@ export default function VibeScreen({ api, user, focus, onNav, onRequireLogin, on
             <div className="v8v-list" ref={listRef} onScroll={onScroll} tabIndex={-1} aria-label="Vibes — use arrow keys to move">
               {items.map((v, i) => (
                 <VibeCard key={v.public_key} vibe={v} active={i === active} api={api} signedIn={signedIn} onRequireLogin={onRequireLogin} onOpenProfile={onOpenProfile} onRoute={onRoute}
-                  muted={muted} onToggleMute={() => setMuted((m) => !m)} prefs={prefs} onChange={change}
+                  muted={muted} onToggleMute={() => setMuted((m) => !m)} prefs={prefs} onPrefsChange={(patch) => { const p = { ...prefs, ...patch }; setPrefs(p); savePrefs(p); }} onChange={change}
                   onComments={(x) => setSheet({ kind: "comments", vibe: x })} onShare={(x) => setSheet({ kind: "share", vibe: x })} onMore={(x) => setSheet({ kind: "more", vibe: x })}
                   onRemix={(x) => onNav(`vibe/create?remix=${x.public_key}`)} />
               ))}
