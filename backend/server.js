@@ -20388,7 +20388,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               await auditAdminSecurity(req, null, "ADMIN_ROUTE_DENIED", { scope: "HOWDI_MOVE_V8" });
               return sendJSON(res, 401, { status: "error", message: "Admin session expired or invalid. Please sign in again.", code: "ADMIN_SESSION_REQUIRED" });
             }
-            if (await ridesV8.handle(req, res, url, moveAdminSession)) return;
+            const moveHandled = await ridesV8.handle(req, res, url, moveAdminSession);
+            if (moveHandled || res.writableEnded) return;
           }
           console.log(
             `${req.method} ${req.url}`
