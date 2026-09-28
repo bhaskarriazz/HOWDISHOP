@@ -67,53 +67,44 @@ function Metric({icon,title,value,detail,tone='blue'}){
   return <article className="ma-metric"><span className={`ma-icon ${tone}`}>{icon}</span><div><small>{title}</small><strong>{value}</strong><p>{detail}</p></div></article>;
 }
 
-function ControlTower({token,onNavigate}){
-  const [state,setState]=useState({loading:true,drivers:[],ops:null,cases:[],error:''});
-  const load=useCallback(async()=>{
-    setState(s=>({...s,loading:true,error:''}));
-    try{
-      const [drivers,ops,cases]=await Promise.all([
-        request(token,'/api/admin/v8/move/drivers?class=ALL'),
-        request(token,'/api/admin/v8/move/operations'),
-        request(token,'/api/admin/v8/move/cases')
-      ]);
-      setState({loading:false,drivers:drivers.drivers||[],ops,cases:cases.cases||[],error:''});
-    }catch(e){setState(s=>({...s,loading:false,error:e.message||'Live data unavailable'}));}
-  },[token]);
-  useEffect(()=>{load();},[load]);
-  const pending=state.drivers.filter(x=>!['APPROVED','REJECTED'].includes(String(x.application_status))).length;
-  const activeIncidents=state.cases.filter(x=>String(x.status)!=='RESOLVED').length;
-  return <>
-    <div className="ma-urgent"><b>Founder review build</b><span>Approved visual boards are the source of truth.</span><span>Move runtime gates connected.</span><button onClick={()=>onNavigate('move')}>Open Move →</button></div>
-    {state.error&&<div className="ma-alert warning">Live Move summary: {state.error}</div>}
-    <section className="ma-metric-grid">
-      <Metric icon="☷" title="Move review queue" value={state.loading?'—':pending} detail="Driver decisions awaiting action"/>
-      <Metric icon="⌁" title="Active Move requests" value={state.loading?'—':(state.ops?.metrics?.activeRequests??0)} detail="Current matching requests"/>
-      <Metric icon="⚠" title="Safety incidents" value={state.loading?'—':activeIncidents} detail="Open Move support / safety cases" tone="red"/>
-      <Metric icon="◷" title="Average Move match" value={state.loading?'—':`${state.ops?.metrics?.avgMatchTimeSeconds??0}s`} detail="Current review data" tone="aqua"/>
+function ControlTower({onNavigate}){
+  const pulse=[
+    ['♙','People & access','72','12','Review user signups, role changes','access'],
+    ['▣','Shop operations','48','8','Approve vendor KYC, resolve listings','shop'],
+    ['⌕','Works operations','116','30','Assign jobs, review safety flags','works'],
+    ['▤','Learn & Earn','36','6','Approve batches, review content','learn'],
+    ['▰','Finance & HPay','28','8','Verify payouts, check exceptions','finance'],
+    ['⬡','Trust & safety','42','18','Review reports, take moderation action','trust'],
+    ['▧','Audit','14','4','Review logs, compliance items','audit'],
+  ];
+  const approvals=[
+    ['User access','Regional Manager role','Delhi NCR · 3 team members','Neha Singh','People Ops','12 Oct 2024','10:24'],
+    ['Finance','HPay payout release','₹2,48,000 · 12 vendors','Arjun Mehta','Finance','12 Oct 2024','09:40'],
+    ['Vendor access','New shop vendor (KYC)','Sharma Electricals · Jaipur','Ravi Kumar','Shop Ops','11 Oct 2024','18:12'],
+    ['Policy','Content exception','Learn & Earn batch material','Priya Nair','Trust & Safety','11 Oct 2024','16:55'],
+    ['Finance','High-value refund','₹1,12,000 · Order #WD7842','Karan Malhotra','Customer Support','11 Oct 2024','14:20'],
+    ['Safety','Works incident closure','Site #BLR-447 · Review report','S. Iqbal','Works Ops','11 Oct 2024','12:05'],
+  ];
+  const exceptions=[
+    ['Shop & vendor exceptions','▣',[['Vendor KYC pending','28'],['Document expiry (PAN/GST)','14'],['Policy violations (listings)','8'],['Shop deactivations (review)','6']]],
+    ['Works safety / job operations','⌕',[['Jobs overdue','30'],['Jobs at risk (delayed)','86'],['Safety incidents (open)','5'],['Vendor compliance expiry','12']]],
+    ['Learn & Earn batch quality','▤',[['Batches awaiting approval','18'],['Content under review','9'],['Trainer verification pending','6'],['Learner complaints','4']]],
+  ];
+  return <div className="b02">
+    <div className="b02-urgent"><span className="b02-alert">!</span><b>4 urgent items</b><span><strong>12</strong> high-risk user signups</span><span><strong>8</strong> payment exceptions (HPay)</span><span><strong>5</strong> safety incidents (Works)</span><span><strong>9</strong> policy reports (Trust & safety)</span><button>Review queue →</button></div>
+    <section className="b02-kpis">
+      <article><div className="b02-kpi-icon">☷</div><div className="b02-kpi-body"><h3>Review queue</h3><div className="b02-kpi-row"><div><strong className="b02-big">134</strong><span className="b02-up">▲ +48</span><p>Items awaiting review</p></div><ul><li><b>72</b>User approvals</li><li><b>28</b>Payment checks</li><li><b>18</b>Policy reports</li><li><b>16</b>Vendor verifications</li></ul></div><button>Review queue →</button></div></article>
+      <article><div className="b02-kpi-icon">▰</div><div className="b02-kpi-body"><h3>HPay health</h3><div className="b02-kpi-row"><div><strong className="b02-big">99.2%</strong><p>Payment success rate</p></div><ul><li><b>1,248</b>Today's transactions</li><li><b>6</b>Payment exceptions</li><li><b>2</b>Payouts on hold</li><li><b>0</b>Bank partner issues</li></ul></div><button onClick={()=>onNavigate('finance')}>View HPay →</button></div></article>
+      <article><div className="b02-kpi-icon">⌕</div><div className="b02-kpi-body"><h3>Works live jobs</h3><div className="b02-kpi-row"><div><strong className="b02-big">612</strong><p>Active jobs across India</p></div><ul><li><b>496</b>On track</li><li className="hot"><b>86</b>At risk</li><li className="hot"><b>30</b>Overdue</li></ul></div><button onClick={()=>onNavigate('works')}>View works →</button></div></article>
+      <article><div className="b02-kpi-icon">♧</div><div className="b02-kpi-body"><h3>Support SLA</h3><div className="b02-kpi-row"><div><strong className="b02-big">92%</strong><p>Within SLA (24h)</p></div><ul><li><b>328</b>Open tickets</li><li><b>302</b>Within SLA</li><li className="hot"><b>26</b>Breaching</li><li className="hot"><b>18</b>Overdue</li></ul></div><button onClick={()=>onNavigate('support')}>View support →</button></div></article>
     </section>
-    <section className="ma-two-col">
-      <article className="ma-card">
-        <div className="ma-cardhead"><div><h3>Operating pulse</h3><p>Master Admin board migration status</p></div></div>
-        <div className="ma-table-wrap"><table className="ma-table"><thead><tr><th>Area</th><th>Board</th><th>Runtime state</th><th></th></tr></thead><tbody>
-          <tr><td><b>People & access</b></td><td>ADM-B01</td><td><span className="ma-pill amber">Visual migration</span></td><td><button onClick={()=>onNavigate('access')}>View →</button></td></tr>
-          <tr><td><b>Move operations</b></td><td>ADM-RIDE</td><td><span className="ma-pill green">Runtime connected</span></td><td><button onClick={()=>onNavigate('move')}>View →</button></td></tr>
-          <tr><td><b>Support & incidents</b></td><td>ADM-B16</td><td><span className="ma-pill blue">Move data connected</span></td><td><button onClick={()=>onNavigate('support')}>View →</button></td></tr>
-          <tr><td><b>Audit</b></td><td>ADM-B11</td><td><span className="ma-pill blue">Move audit connected</span></td><td><button onClick={()=>onNavigate('audit')}>View →</button></td></tr>
-          <tr><td><b>Shop / Works / Learn / HPay / Trust</b></td><td>ADM-B05–B13</td><td><span className="ma-pill gray">Migration queued</span></td><td></td></tr>
-        </tbody></table></div>
-      </article>
-      <article className="ma-card">
-        <div className="ma-cardhead"><div><h3>Founder approvals</h3><p>High-risk actions stay blocked until their real approval flows are wired.</p></div></div>
-        <div className="ma-empty-approval"><span>♙</span><b>No synthetic approvals</b><p>This review build will not invent payout, access or policy approvals. Each queue will appear only when connected to a real scoped backend flow.</p></div>
-      </article>
+    <section className="b02-main-grid">
+      <article className="b02-panel"><header><div><h2><span>▥</span> Operating pulse</h2><p>Key queues and actions across HOWDI operations</p></div><button>View all departments →</button></header><div className="b02-tablewrap"><table><thead><tr><th>Department</th><th>Pending / Open</th><th>High priority</th><th>Action needed</th><th>View</th></tr></thead><tbody>{pulse.map(([icon,name,pending,high,action,dest])=><tr key={name}><td><span className="rowicon">{icon}</span><b>{name}</b></td><td><b>{pending}</b></td><td className="hot"><b>{high}</b></td><td>{action}</td><td><button onClick={()=>onNavigate(dest)}>View →</button></td></tr>)}</tbody></table></div></article>
+      <article className="b02-panel"><header><div><h2><span>♙</span> Founder approvals</h2><p>User access, finance and policy approvals requiring founder action</p></div><button>View all approvals →</button></header><div className="b02-tablewrap"><table className="approval-table"><thead><tr><th>Type</th><th>Item</th><th>Requested by</th><th>Date</th><th>Action</th></tr></thead><tbody>{approvals.map((r,i)=><tr key={r[1]}><td><span className={`b02-tag t${i%3}`}>{r[0]}</span></td><td><b>{r[1]}</b><small>{r[2]}</small></td><td><b>{r[3]}</b><small>{r[4]}</small></td><td><b>{r[5]}</b><small>{r[6]}</small></td><td><div className="b02-actions"><button className="approve">Approve</button><button>Reject</button></div></td></tr>)}</tbody></table></div></article>
     </section>
-    <section className="ma-three-col">
-      {['Shop & vendor exceptions','Works safety / job operations','Learn & Earn quality'].map((t,i)=><article className="ma-card compact" key={t}><div className="ma-cardhead"><div><h3>{t}</h3><p>{['ADM-B07','ADM-B08/B12','ADM-B09'][i]}</p></div><span className="ma-pill gray">Queued</span></div><p className="ma-muted">Old Admin functionality is being migrated here only after the matching approved board and gate are verified.</p></article>)}
-    </section>
-  </>;
+    <section className="b02-exceptions">{exceptions.map(([title,icon,rows])=><article className="b02-panel" key={title}><header><div><h2><span>{icon}</span> {title}</h2><p>{title==='Shop & vendor exceptions'?'Vendors and listings needing attention':title==='Works safety / job operations'?'Live job and safety exceptions':'Training batches and content moderation'}</p></div><button>View all →</button></header><div className="exception-list">{rows.map(([name,count])=><div key={name}><span>{name}</span><b>{count}</b><i>›</i></div>)}</div></article>)}</section>
+  </div>;
 }
-
 function SecureAccess(){
   return <>
     <div className="ma-tabs"><button className="active">Sign-in methods</button><button>Team access</button><button>Requests</button><button>Sessions & devices</button><button>Security events</button><button>Recovery</button></div>
