@@ -12,13 +12,15 @@ function createRidesV8(deps) {
   const ensureReady = () => (schemaReadyPromise ||= ensureSchema());
 
   const ok = (res, data, code = 200) => {
-    res.writeHead(code, { 'Content-Type': 'application/json' });
+    res.statusCode = code;
+    res.setHeader('Content-Type', 'application/json');
     res.end(JSON.stringify({ ok: true, ...data }));
     return true;
   };
 
   const fail = (res, code, error, details = null) => {
-    res.writeHead(code, { 'Content-Type': 'application/json' });
+    res.statusCode = code;
+    res.setHeader('Content-Type', 'application/json');
     res.end(JSON.stringify({ ok: false, error, details }));
     return true;
   };
