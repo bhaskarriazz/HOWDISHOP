@@ -111,6 +111,7 @@ function Drivers({ token }) {
 function Operations({ token }) {
   const [data, setData] = useState({ zones:[], classes:[], rides:[], metrics:{} });
   const [msg,setMsg] = useState("");
+  const [gateBusy,setGateBusy] = useState(false);
   const load = useCallback(async () => {
     const r = await api(token,"GET","/api/admin/v8/move/operations");
     if (r.status === 401) return location.reload();
@@ -137,9 +138,41 @@ function Operations({ token }) {
     if(r.ok) load();
   }
 
+  async function runWomenSpecialNegativeGate() {
+    if (!import.meta.env.DEV) return;
+    setGateBusy(true);
+    let resultMessage = "";
+    try {
+      const prep = await api(token,"POST","/api/admin/v8/move/review/prepare-women-special-negative",{});
+      if (!prep.ok) throw new Error(prep.json.error || "Could not prepare review fixture");
+
+      const attempt = await api(token,"POST","/api/admin/v8/move/rides/HR-334W/dispatch",{
+        driver_id:"APP-RD-TEST-MALE",
+        reason:"Founder Women Special negative gate verification"
+      });
+
+      if (attempt.ok) {
+        resultMessage = "FAIL: Women Special ride incorrectly allowed a male/non-eligible driver.";
+      } else if (String(attempt.json.error || "").includes("Women Special")) {
+        resultMessage = "PASS: Women Special non-fallback gate blocked the male/non-eligible driver.\n\n" + attempt.json.error;
+      } else {
+        resultMessage = "BLOCKED, but by an unexpected rule: " + (attempt.json.error || "Unknown error");
+      }
+    } catch (e) {
+      resultMessage = "Founder gate setup failed: " + (e?.message || String(e));
+    } finally {
+      const cleanup = await api(token,"POST","/api/admin/v8/move/review/cleanup-women-special-negative",{}).catch(()=>null);
+      if (cleanup && !cleanup.ok) resultMessage += "\nCleanup warning: " + (cleanup.json?.error || "failed");
+      setGateBusy(false);
+      setMsg(resultMessage);
+      window.alert(resultMessage);
+      load();
+    }
+  }
+
   const m=data.metrics||{};
   return <section>
-    <div className="section-head"><div><div className="eyebrow">ADM-RIDE-002</div><h2>Instant dispatch & controls</h2><p className="muted">Zone/class pause controls and guarded manual dispatch.</p></div></div>
+    <div className="section-head"><div><div className="eyebrow">ADM-RIDE-002</div><h2>Instant dispatch & controls</h2><p className="muted">Zone/class pause controls and guarded manual dispatch.</p></div>{import.meta.env.DEV && <button className="primary" onClick={runWomenSpecialNegativeGate} disabled={gateBusy}>{gateBusy ? "Running founder gate..." : "Run Women Special founder gate"}</button>}</div>
     {msg && <p className={msg.toLowerCase().includes("failed") ? "error" : "ok"}>{msg}</p>}
     <div className="metrics"><div><b>{m.activeRequests ?? 0}</b><span>Active requests</span></div><div><b>{m.activeOffers ?? 0}</b><span>Active offers</span></div><div><b>{m.autoDisabledDrivers ?? 0}</b><span>Auto-disabled</span></div><div><b>{m.avgMatchTimeSeconds ?? "—"}s</b><span>Avg match</span></div></div>
     <h3>Zones</h3><div className="control-grid">{data.zones.map(z=><div className="move-card compact" key={z.id}><b>{z.name}</b><small>{z.id}</small><span className={"status "+(z.is_paused?"rejected":"approved")}>{z.is_paused?"PAUSED":"ACTIVE"}</span><button onClick={()=>pause("ZONE",z.id,!z.is_paused)}>{z.is_paused?"Resume":"Pause"}</button></div>)}</div>
