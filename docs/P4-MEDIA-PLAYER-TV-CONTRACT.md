@@ -115,4 +115,64 @@ The current `GET /api/v8/vibes` and `GET /api/v8/vibes/{code}` DTO provides one 
 
 The V1 Vibe model has an uploader `allow_download` field, but the V8 DTO does not return that setting and neither backend has a V8 download authorization endpoint that checks visibility, blocks, revocation or expiry. The V8 Download panel reports unavailable rather than deriving permission from UI. Required additions remain: `GET /api/v8/me/watch-history`, `DELETE /api/v8/me/watch-history/:code`, `DELETE /api/v8/me/watch-history`, and `GET /api/v8/vibes/:code/download`, all authenticated and rechecking the existing Vibe audience/block rules.
 
+## P5B backend contract — V8 public-code history and download authorization
+
+### Existing V1 to V8 mapping
+
+| Existing source | Reuse in V8 | Gap to close |
+| --- | --- | --- |
+| `vibe_view_history` | Per-account aggregate and last-view ordering | Add a resumable position and expose only a resolved V8 public code. |
+| `vibe_watch_session_items` | Actual play/pause/resume/position signals | Keep analytics internal; it is not a customer history list. |
+| `POST /api/v1/vibes/events/batch` | Bounded event semantics and server-side aggregation | V1 accepts internal UUID Vibe IDs; V8 must resolve `VIB-…` server-side before writing. |
+| `vibes.allow_download` | Uploader's initial allow/deny source | V8 creation/read DTO and a server authorization decision are absent. |
+| `vibeRowByCode`, `VIBE_VISIBLE`, `blockedSql`, `privateOkSql` in `backend/connect-v8.cjs` | V8 code resolution and audience/block/private checks | Apply the same predicate again for every history row and download request. |
+
+### Proposed V8 endpoints and DTOs
+
+All endpoints require the authenticated session resolved by `viewer(req)`. A public URL contains only a V8 `VIB-…` code; the server resolves it to the internal UUID and never returns that UUID.
+
+`POST /api/v8/vibes/:code/watch-progress`
+
+```json
+{"position_ms": 42100, "duration_ms": 90000, "event": "play|pause|resume|complete", "source_feed": "for-you"}
+```
+
+The server clamps values, rejects unknown events, resolves the code, checks current access, updates analytics and a per-viewer resume row, then returns `{ "recorded": true, "resume_position_ms": 42100 }`. It must not return a success response if the Vibe is no longer accessible.
+
+`GET /api/v8/me/watch-history?cursor=…&limit=…`
+
+Returns an owner-only cursor page:
+
+```json
+{"items":[{"public_key":"VIB-…","route":"/connect/vibe/VIB-…","cover_url":"…","caption":"…","author":{"public_username":"…"},"resume_position_ms":42100,"duration_ms":90000,"last_viewed_at":"ISO-8601"}],"next_cursor":null}
+```
+
+Each candidate is rechecked with the current V8 visibility, moderation, deletion, block and private-profile predicates before serializing. Inaccessible rows are silently omitted. Empty history returns `items: []`; transient database failure returns the normal V8 error shape so the client can retry.
+
+`DELETE /api/v8/me/watch-history/:code` clears only the authenticated viewer's resolved Vibe row and returns `{ "cleared": true }`. `DELETE /api/v8/me/watch-history` clears that viewer's complete history and returns `{ "cleared_count": n }`. Both are idempotent and create a privacy audit event without exposing a Vibe UUID.
+
+`GET /api/v8/vibes/:code/download`
+
+The endpoint resolves the code and runs authorization on every request. On success it returns only an opaque, short-lived delivery URL and expiry: `{ "state":"allowed", "download_url":"/api/v8/media/download/TOKEN", "expires_at":"ISO-8601" }`. The token endpoint rechecks revocation and expiry before streaming/redirecting. It never returns `media_url`, a filesystem path, bucket name, UUID, or provider credential. Expected denied states use the normal V8 error shape with safe codes: `DOWNLOAD_DISABLED`, `NOT_AVAILABLE`, `DOWNLOAD_REVOKED`, `DOWNLOAD_EXPIRED`.
+
+### Authorization, retention and audit rules
+
+- History writes require a valid viewer, a resolved Vibe, current visibility access and a bounded actual playback event. The client cannot supply a user ID or an internal Vibe ID.
+- History reads and clears are owner-only. A blocked, private, deleted, moderated or revoked Vibe never remains visible in the returned list; its old row can be purged asynchronously.
+- Retention must be a product-approved server configuration. The current source has no approved retention duration, so the migration must not invent one; cleanup should use that configuration and log aggregate purge counts only.
+- Download requires all of: uploader `allow_download`, currently accessible Vibe, no viewer/creator block in either direction, non-deleted/non-revoked media, no unresolved rights restriction, and a deliverable asset. A missing asset is `NOT_AVAILABLE`, never a successful empty file.
+- Record security audit events for history-clear and download authorization decisions: actor account, public Vibe code or a one-way audit reference, action, outcome/reason, and timestamp. Never log bearer delivery tokens, storage paths, raw media URLs or internal IDs in customer-visible logs.
+
+### Minimal migration
+
+Reuse `vibe_view_history` and add `resume_position_ms BIGINT NOT NULL DEFAULT 0`, `duration_ms BIGINT`, and `updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`; update them transactionally from V8 progress events. Reuse the existing `vibes.allow_download` column only after the V8 create/edit and read paths explicitly own it. Add a dedicated `vibe_download_authorizations` table for opaque-token digest, viewer, Vibe UUID, issued/expiry/revoked timestamps and decision reason; never store a raw delivery token. Add a focused index for active authorization lookup and an expiry cleanup job.
+
+### Edge cases and test plan
+
+- Report progress after a Vibe becomes private, deleted, rights-blocked or mutually blocked: return a safe unavailable response and do not write history.
+- Clamp negative, future or greater-than-duration positions; treat a changed media duration as a safe resume-at-zero/near-end rule defined by the service.
+- Clear history concurrently with a progress event: a later real playback event may create a new row; audit both actions.
+- Revoke uploader download permission after issuance, expire a token, remove the source asset and change visibility: all must deny delivery on the final token request.
+- Test V8 public-code resolution, no UUID/storage-path leakage, cross-account history isolation, private/block matrix, retention cleanup, pagination, clear-one/all idempotency, allow/deny/revoked/expired download outcomes, and audit records with secrets redacted.
+
 No Founder visual PASS can be inferred from this contract; real runtime, provider and hardware evidence remain required.
