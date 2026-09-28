@@ -141,6 +141,24 @@ function createConnectV8(deps) {
       decision_note VARCHAR(300), decided_by VARCHAR(120), decided_at TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), UNIQUE(kind, entity_key))`);
     await pool.query(`CREATE INDEX IF NOT EXISTS howdi_v8_rights_checks_status_idx ON howdi_v8_rights_checks(status, created_at)`);
     await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS howdi_connect_highlights_src_uq ON howdi_connect_highlights(user_id, source_story_id, title) WHERE source_story_id IS NOT NULL`);
+    // P5B: reuse the V1 aggregate history table, but retain an actual resume point for V8.
+    await pool.query(`CREATE TABLE IF NOT EXISTS vibe_view_history(
+      id BIGSERIAL PRIMARY KEY, user_id TEXT NOT NULL, vibe_id UUID NOT NULL REFERENCES vibes(id) ON DELETE CASCADE,
+      first_viewed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), last_viewed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), view_count INTEGER NOT NULL DEFAULT 1,
+      total_watch_ms BIGINT NOT NULL DEFAULT 0, max_completion_percent NUMERIC(6,2) NOT NULL DEFAULT 0, source_feed VARCHAR(60), UNIQUE(user_id,vibe_id))`);
+    await pool.query(`ALTER TABLE vibe_view_history ADD COLUMN IF NOT EXISTS resume_position_ms BIGINT NOT NULL DEFAULT 0`);
+    await pool.query(`ALTER TABLE vibe_view_history ADD COLUMN IF NOT EXISTS duration_ms BIGINT`);
+    await pool.query(`ALTER TABLE vibe_view_history ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS vibe_view_history_v8_user_idx ON vibe_view_history(user_id,last_viewed_at DESC)`);
+    // Only digests of bearer download tokens are persisted. Raw tokens never enter the database or audit log.
+    await pool.query(`CREATE TABLE IF NOT EXISTS howdi_v8_download_authorizations(
+      id BIGSERIAL PRIMARY KEY, token_digest CHAR(64) NOT NULL UNIQUE, viewer_user_id BIGINT NOT NULL, vibe_id UUID NOT NULL REFERENCES vibes(id) ON DELETE CASCADE,
+      media_file VARCHAR(40) NOT NULL, issued_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), expires_at TIMESTAMPTZ NOT NULL, revoked_at TIMESTAMPTZ, used_at TIMESTAMPTZ,
+      decision_reason VARCHAR(32) NOT NULL DEFAULT 'allowed')`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS howdi_v8_download_auth_active_idx ON howdi_v8_download_authorizations(token_digest,expires_at) WHERE revoked_at IS NULL`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS howdi_v8_media_audit(
+      id BIGSERIAL PRIMARY KEY, actor_user_id BIGINT NOT NULL, vibe_id UUID, action VARCHAR(32) NOT NULL, outcome VARCHAR(24) NOT NULL, reason VARCHAR(48), created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
+    await pool.query(`ALTER TABLE vibes ADD COLUMN IF NOT EXISTS allow_download BOOLEAN NOT NULL DEFAULT FALSE`);
   }
   // late-bound hooks from sibling modules (notifications live in the community module)
   const hooks = { notify: async () => {} };
@@ -294,7 +312,7 @@ function createConnectV8(deps) {
 
   // ---------------------------------------------------------------- VIBES
   // v is the vibes alias; creator_user_id is TEXT holding a numeric users.id.
-  const VIBE_SELECT = `v.id::text AS vkey, v.caption, v.cover_url, v.published_at, v.allow_comments, v.allow_remix, v.allow_share, v.is_learning_vibe, v.sensitive_content,
+  const VIBE_SELECT = `v.id::text AS vkey, v.caption, v.cover_url, v.published_at, v.allow_comments, v.allow_remix, v.allow_share, v.allow_download, v.is_learning_vibe, v.sensitive_content,
       COALESCE(s.likes,0) likes, COALESCE(s.comments,0) comments, COALESCE(s.saves,0) saves, COALESCE(s.shares,0) shares, COALESCE(s.plays,0) plays,
       COALESCE((SELECT json_agg(json_build_object('type',m.media_type,'url',m.media_url,'thumbnail',m.thumbnail_url,'durationMs',m.duration_ms) ORDER BY m.position) FROM vibe_media m WHERE m.vibe_id=v.id),'[]'::json) media,
       COALESCE((SELECT json_agg(json_build_object('name',c.name,'slug',c.slug) ORDER BY cm.is_primary DESC,c.sort_order) FROM vibe_category_map cm JOIN vibe_categories c ON c.id=cm.category_id WHERE cm.vibe_id=v.id),'[]'::json) cats,
@@ -369,6 +387,21 @@ function createConnectV8(deps) {
     if (!key) return null;
     return (await pool.query(`SELECT ${VIBE_SELECT}, v.creator_user_id AS owner_text ${VIBE_FROM} WHERE v.id=$2::uuid AND ${VIBE_VISIBLE}`, [vid || 0, key])).rows[0] || null;
   }
+  async function mediaAudit(actorId, vibeId, action, outcome, reason = null) {
+    await pool.query(`INSERT INTO howdi_v8_media_audit(actor_user_id,vibe_id,action,outcome,reason) VALUES($1,$2::uuid,$3,$4,$5)`, [actorId, vibeId || null, action, outcome, reason]).catch(() => {});
+  }
+  function localMediaFile(url) {
+    const m = String(url || '').match(/^\/api\/v8\/media\/([0-9a-f]{32}\.(?:jpg|png|webp|mp4|webm|mov))$/);
+    return m ? m[1] : null;
+  }
+  function serveAuthorizedDownload(req, res, file) {
+    if (!/^[0-9a-f]{32}\.(jpg|png|webp|mp4|webm|mov)$/.test(String(file || ''))) { fail(res, 404, 'NOT_FOUND', 'Download unavailable.'); return; }
+    const full = path.join(MEDIA_DIR, file); let stat;
+    try { stat = fs.statSync(full); } catch { fail(res, 404, 'NOT_AVAILABLE', 'Download unavailable.'); return; }
+    res.writeHead(200, { 'Content-Type': EXT_MIME[path.extname(file)] || 'application/octet-stream', 'Content-Length': stat.size, 'Content-Disposition': `attachment; filename="howdi-vibe${path.extname(file)}"`, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+    if (req.method === 'HEAD') { res.end(); return; }
+    fs.createReadStream(full).pipe(res);
+  }
   async function bumpStat(vibeKey, col, delta) {
     if (!['likes', 'saves', 'comments', 'shares'].includes(col)) return;
     await pool.query(`INSERT INTO vibe_stats(vibe_id,${col}) VALUES($1::uuid,GREATEST(0,$2::bigint)) ON CONFLICT(vibe_id) DO UPDATE SET ${col}=GREATEST(0,COALESCE(vibe_stats.${col},0)+$2::bigint), updated_at=NOW()`, [vibeKey, delta]);
@@ -441,9 +474,9 @@ function createConnectV8(deps) {
       await client.query('BEGIN');
       const n = (await client.query(`SELECT COALESCE(MAX(NULLIF(regexp_replace(vibe_code,'\\D','','g'),'')::bigint),0)+1 n FROM vibes`)).rows[0].n;
       const name = (await client.query(`SELECT COALESCE(NULLIF(u.full_name,''),'HOWDI member') n FROM users u WHERE u.id=$1`, [v.id])).rows[0]?.n || 'HOWDI member';
-      vibeKey = (await client.query(`INSERT INTO vibes(vibe_code,creator_user_id,creator_name,vibe_type,caption,visibility,status,content_type,allow_comments,allow_remix,allow_share,cover_url,published_at,remix_source_vibe_id,moderation_status)
-        VALUES($1,$2,$3,$4,$5,$6,$11,'general',$7,$8,TRUE,$9,NOW(),$10,'approved') RETURNING id::text`,
-        [`VIBE-${String(n).padStart(6, '0')}`, String(v.id), name, media.type === 'video' ? 'video' : 'photo', caption, audience, body.allowComments !== false, body.allowRemix !== false, cover ? cover.url : (media.type === 'image' ? media.url : null), remixId, vHold ? 'rights_review' : 'published'])).rows[0].id;
+      vibeKey = (await client.query(`INSERT INTO vibes(vibe_code,creator_user_id,creator_name,vibe_type,caption,visibility,status,content_type,allow_comments,allow_remix,allow_share,allow_download,cover_url,published_at,remix_source_vibe_id,moderation_status)
+        VALUES($1,$2,$3,$4,$5,$6,$12,'general',$7,$8,TRUE,$9,$10,NOW(),$11,'approved') RETURNING id::text`,
+        [`VIBE-${String(n).padStart(6, '0')}`, String(v.id), name, media.type === 'video' ? 'video' : 'photo', caption, audience, body.allowComments !== false, body.allowRemix !== false, body.allowDownload === true, cover ? cover.url : (media.type === 'image' ? media.url : null), remixId, vHold ? 'rights_review' : 'published'])).rows[0].id;
       await fingerprint(v.id, 'vibe', vibeKey, vHashes, client);
       if (vHold) await client.query(`INSERT INTO howdi_v8_rights_checks(user_id,kind,entity_key,reason,declared,note,target_status) VALUES($1,'vibe',$2,$3,$4,$5,'published')`, [v.id, vibeKey, vHold.reason, vHold.declared, vHold.note || null]);
       await client.query(`INSERT INTO vibe_media(vibe_id,media_type,media_url,thumbnail_url,mime_type,file_size_bytes,position,processing_status) VALUES($1::uuid,$2,$3,$4,$5,$6,0,'ready')`,
@@ -801,6 +834,22 @@ function createConnectV8(deps) {
         return true;
       }
       if ((m = p.match(/^\/api\/v8\/media\/([0-9a-f]{32}\.[a-z0-9]{3,4})$/)) && (req.method === 'GET' || req.method === 'HEAD')) { serveMedia(req, res, m[1]); return true; }
+      if ((m = p.match(/^\/api\/v8\/media\/download\/([A-Za-z0-9_-]{32,128})$/)) && (req.method === 'GET' || req.method === 'HEAD')) {
+        const v = await viewer(req);
+        if (!v) { fail(res, 401, 'SIGN_IN_REQUIRED', 'Sign in to download.'); return true; }
+        const digest = crypto.createHash('sha256').update(m[1]).digest('hex');
+        const auth = (await pool.query(`SELECT d.vibe_id::text vkey,d.media_file FROM howdi_v8_download_authorizations d WHERE d.token_digest=$1 AND d.viewer_user_id=$2 AND d.revoked_at IS NULL AND d.expires_at>NOW()`, [digest, v.id])).rows[0];
+        if (!auth) { fail(res, 403, 'DOWNLOAD_EXPIRED', 'This download link has expired or is unavailable.'); return true; }
+        const code = (await issue('VIBE', [auth.vkey])).get(auth.vkey);
+        const row = code ? await vibeRowByCode(code, v.id) : null;
+        if (!row || row.allow_download !== true || localMediaFile((Array.isArray(row.media) ? row.media[0] : {}).url) !== auth.media_file) {
+          await pool.query(`UPDATE howdi_v8_download_authorizations SET revoked_at=NOW() WHERE token_digest=$1`, [digest]).catch(() => {});
+          await mediaAudit(v.id, auth.vkey, 'DOWNLOAD_DELIVERY', 'DENIED', 'REVOKED');
+          fail(res, 403, 'DOWNLOAD_REVOKED', 'This download is no longer available.'); return true;
+        }
+        await pool.query(`UPDATE howdi_v8_download_authorizations SET used_at=COALESCE(used_at,NOW()) WHERE token_digest=$1`, [digest]).catch(() => {});
+        await mediaAudit(v.id, auth.vkey, 'DOWNLOAD_DELIVERY', 'ALLOWED'); serveAuthorizedDownload(req, res, auth.media_file); return true;
+      }
 
       if (p === '/api/v8/connect/hub' && req.method === 'GET') {
         const v = await viewer(req); const vid = v ? v.id : 0;
@@ -1133,6 +1182,54 @@ function createConnectV8(deps) {
         const v = await viewer(req);
         if (!v) { fail(res, 401, 'SIGN_IN_REQUIRED', 'Sign in to post a Vibe.'); return true; }
         await createVibe(req, res, v); return true;
+      }
+      if (p === '/api/v8/me/watch-history' && req.method === 'GET') {
+        const v = await viewer(req); if (!v) { fail(res, 401, 'SIGN_IN_REQUIRED', 'Sign in to view watch history.'); return true; }
+        const limit = Math.max(1, Math.min(40, Number(url.searchParams.get('limit')) || 20));
+        const rows = (await pool.query(`SELECT ${VIBE_SELECT}, h.resume_position_ms,h.duration_ms h_duration_ms,h.last_viewed_at ${VIBE_FROM}
+          JOIN vibe_view_history h ON h.vibe_id=v.id WHERE h.user_id=$2::text AND ${VIBE_VISIBLE} ORDER BY h.last_viewed_at DESC LIMIT $3`, [v.id, String(v.id), limit])).rows;
+        const refs = await issue('VIBE', rows.map((r) => r.vkey));
+        const items = rows.map((r) => {
+          const key = refs.get(String(r.vkey)); const dto = key ? vibeDto(r, key) : null; if (!dto) return null;
+          return { public_key: dto.public_key, route: dto.route, cover_url: dto.cover_url, caption: dto.caption, author: dto.author, resume_position_ms: Math.max(0, Number(r.resume_position_ms || 0)), duration_ms: r.h_duration_ms == null ? null : Math.max(0, Number(r.h_duration_ms)), last_viewed_at: iso(r.last_viewed_at) };
+        }).filter(Boolean);
+        ok(res, { items, next_cursor: null }); return true;
+      }
+      if (p === '/api/v8/me/watch-history' && req.method === 'DELETE') {
+        const v = await viewer(req); if (!v) { fail(res, 401, 'SIGN_IN_REQUIRED', 'Sign in to clear watch history.'); return true; }
+        const del = await pool.query(`DELETE FROM vibe_view_history WHERE user_id=$1::text`, [String(v.id)]);
+        await mediaAudit(v.id, null, 'WATCH_HISTORY_CLEAR_ALL', 'ALLOWED'); ok(res, { cleared_count: del.rowCount }); return true;
+      }
+      if ((m = p.match(/^\/api\/v8\/me\/watch-history\/(VIB-[0-9A-F]{12})$/)) && req.method === 'DELETE') {
+        const v = await viewer(req); if (!v) { fail(res, 401, 'SIGN_IN_REQUIRED', 'Sign in to clear watch history.'); return true; }
+        const key = await resolve(m[1], 'VIBE'); if (!key) { ok(res, { cleared: true }); return true; }
+        await pool.query(`DELETE FROM vibe_view_history WHERE user_id=$1::text AND vibe_id=$2::uuid`, [String(v.id), key]);
+        await mediaAudit(v.id, key, 'WATCH_HISTORY_CLEAR_ONE', 'ALLOWED'); ok(res, { cleared: true }); return true;
+      }
+      if ((m = p.match(/^\/api\/v8\/vibes\/(VIB-[0-9A-F]{12})\/watch-progress$/)) && req.method === 'POST') {
+        const v = await viewer(req); if (!v) { fail(res, 401, 'SIGN_IN_REQUIRED', 'Sign in to save playback progress.'); return true; }
+        if (limited(res, `v8-watch-progress:${v.id}`, 120, 60000)) return true;
+        const row = await vibeRowByCode(m[1], v.id); if (!row) { fail(res, 404, 'NOT_FOUND', 'This Vibe isn’t available.'); return true; }
+        const body = (await getBody(req)) || {}; const event = String(body.event || '');
+        if (!['play', 'pause', 'resume', 'complete'].includes(event)) { fail(res, 400, 'VALIDATION', 'Unknown playback event.'); return true; }
+        const duration = Math.max(0, Math.min(24 * 60 * 60 * 1000, Number(body.duration_ms || 0) || 0));
+        const position = Math.max(0, Math.min(duration || 24 * 60 * 60 * 1000, Number(body.position_ms || 0) || 0));
+        const completion = duration ? Math.min(100, (position / duration) * 100) : 0;
+        const source = ['for-you', 'following', 'explore', 'learn'].includes(String(body.source_feed || '')) ? String(body.source_feed) : null;
+        await pool.query(`INSERT INTO vibe_view_history(user_id,vibe_id,last_viewed_at,view_count,total_watch_ms,max_completion_percent,source_feed,resume_position_ms,duration_ms,updated_at)
+          VALUES($1,$2::uuid,NOW(),$3,$4,$5,$6,$7,$8,NOW()) ON CONFLICT(user_id,vibe_id) DO UPDATE SET last_viewed_at=NOW(),view_count=vibe_view_history.view_count+EXCLUDED.view_count,total_watch_ms=vibe_view_history.total_watch_ms+EXCLUDED.total_watch_ms,max_completion_percent=GREATEST(vibe_view_history.max_completion_percent,EXCLUDED.max_completion_percent),source_feed=COALESCE(EXCLUDED.source_feed,vibe_view_history.source_feed),resume_position_ms=EXCLUDED.resume_position_ms,duration_ms=EXCLUDED.duration_ms,updated_at=NOW()`,
+          [String(v.id), row.vkey, event === 'play' ? 1 : 0, event === 'complete' ? position : 0, completion, source, event === 'complete' ? 0 : Math.round(position), duration || null]);
+        ok(res, { recorded: true, resume_position_ms: event === 'complete' ? 0 : Math.round(position) }); return true;
+      }
+      if ((m = p.match(/^\/api\/v8\/vibes\/(VIB-[0-9A-F]{12})\/download$/)) && req.method === 'GET') {
+        const v = await viewer(req); if (!v) { fail(res, 401, 'SIGN_IN_REQUIRED', 'Sign in to download.'); return true; }
+        const row = await vibeRowByCode(m[1], v.id); if (!row) { fail(res, 404, 'NOT_AVAILABLE', 'Download unavailable.'); return true; }
+        if (row.allow_download !== true) { await mediaAudit(v.id, row.vkey, 'DOWNLOAD_AUTHORIZE', 'DENIED', 'DISABLED'); fail(res, 403, 'DOWNLOAD_DISABLED', 'The uploader has not enabled downloads.'); return true; }
+        const file = localMediaFile((Array.isArray(row.media) ? row.media[0] : {}).url);
+        if (!file) { await mediaAudit(v.id, row.vkey, 'DOWNLOAD_AUTHORIZE', 'DENIED', 'NOT_AVAILABLE'); fail(res, 409, 'NOT_AVAILABLE', 'A downloadable asset is not available.'); return true; }
+        const token = crypto.randomBytes(32).toString('base64url'); const digest = crypto.createHash('sha256').update(token).digest('hex');
+        await pool.query(`INSERT INTO howdi_v8_download_authorizations(token_digest,viewer_user_id,vibe_id,media_file,expires_at) VALUES($1,$2,$3::uuid,$4,NOW()+interval '10 minutes')`, [digest, v.id, row.vkey, file]);
+        await mediaAudit(v.id, row.vkey, 'DOWNLOAD_AUTHORIZE', 'ALLOWED'); ok(res, { state: 'allowed', download_url: `/api/v8/media/download/${token}`, expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString() }); return true;
       }
       if ((m = p.match(/^\/api\/v8\/vibes\/(VIB-[0-9A-F]{12})(?:\/([a-z-]+))?$/))) {
         const code = m[1]; const action = m[2] || '';
