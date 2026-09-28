@@ -1,7 +1,7 @@
 // HOWDI V8 shell — NAV-001 (desktop text rail), NAV-002 (desktop header, fixed order),
 // NAV-003 (one floating mobile bar), NAV-004 (quick actions live in the profile hub, never a second bar).
 // Pure presentation: every action is a callback owned by App, so no navigation logic is duplicated here.
-import { forwardRef } from "react";
+import { forwardRef, useRef } from "react";
 
 export const V8_PILLARS = [
   { area: "home", label: "Home" },
@@ -118,12 +118,12 @@ export function V8Icon({ name, size = 20, fill = false, stroke = 1.8, className,
   );
 }
 
-export function V8Rail({ active, onNavigate }) {
+export function V8Rail({ active, onNavigate, pillars = V8_PILLARS }) {
   return (
     <aside className="v8-rail" aria-label="HOWDI">
       <button type="button" className="v8-logo" onClick={() => onNavigate("home")} aria-label="HOWDI Home">HOWDI</button>
       <nav aria-label="Main">
-        {V8_PILLARS.map((p) => (
+        {pillars.map((p) => (
           <button key={p.area} type="button" aria-current={active === p.area ? "page" : undefined} onClick={() => onNavigate(p.area)}>{p.label}</button>
         ))}
       </nav>
@@ -184,11 +184,14 @@ export const V8Header = forwardRef(function V8Header({
   );
 });
 
-export function V8BottomBar({ active, onNavigate }) {
+export function V8BottomBar({ active, onNavigate, pillars = V8_PILLARS, onCustomize }) {
+  const hold = useRef(null), held = useRef(false);
+  const startHold = () => { held.current = false; if (onCustomize) hold.current = window.setTimeout(() => { held.current = true; onCustomize(); }, 2000); };
+  const endHold = () => { if (hold.current) window.clearTimeout(hold.current); hold.current = null; };
   return (
-    <nav className="v8-bottombar" aria-label="Main">
-      {V8_PILLARS.map((p) => (
-        <button key={p.area} type="button" aria-current={active === p.area ? "page" : undefined} onClick={() => onNavigate(p.area)}>
+    <nav className="v8-bottombar" aria-label="Main" onPointerDown={startHold} onPointerUp={endHold} onPointerCancel={endHold} onPointerLeave={endHold}>
+      {pillars.map((p) => (
+        <button key={p.area} type="button" aria-current={active === p.area ? "page" : undefined} onClick={() => { if (held.current) { held.current = false; return; } onNavigate(p.area); }}>
           <V8Icon name={p.area} size={22} /><span>{p.label}</span>
         </button>
       ))}

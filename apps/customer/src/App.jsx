@@ -3,7 +3,8 @@ import { createPortal } from "react-dom";
 import "./App.css";
 import ShopCatalogue from "./components/ShopCatalogue";
 import "./v8/v8.css";
-import { V8Rail, V8Header, V8BottomBar, V8BuildLabel } from "./v8/V8Shell";
+import { V8Rail, V8Header, V8BottomBar, V8BuildLabel, V8_PILLARS } from "./v8/V8Shell";
+import { useV8CommonHomePrefs, V8CustomizeHome } from "./v8/V8Personalization";
 import V8Home from "./v8/V8Home";
 import V8Profile from "./v8/V8Profile";
 import V8Access from "./v8/V8Access";
@@ -2813,6 +2814,8 @@ function App() {
       return null;
     }
   });
+  const [v8HomePrefs, setV8HomePrefs] = useV8CommonHomePrefs(currentUser?.public_username || "guest");
+  const [v8CustomizeOpen, setV8CustomizeOpen] = useState(false);
 
   // One single customer identity source for header, welcome and My HOWDI.
   useEffect(() => {
@@ -12669,6 +12672,10 @@ const removeNotification = async (notificationId) => {
   const pillarActive = (area) => navigationOSArea === area;
   // HPay is a global utility (header), not a pillar: no rail item is selected while it is open.
   const v8ActivePillar = navigationOSArea === "connect" && connectView === "hpay" ? "" : (["home", "connect", "shop", "move", "works", "learn"].includes(navigationOSArea) ? navigationOSArea : "");
+  const v8VisiblePillars = v8HomePrefs.dock
+    .filter((id) => !v8HomePrefs.hiddenDock.includes(id))
+    .map((id) => V8_PILLARS.find((pillar) => pillar.area === id))
+    .filter(Boolean);
   const V8_DEFAULT_VIEW = { home: "home", connect: "home", shop: "catalogue", move: "home", works: "find", learn: "discover" };
   const v8Navigate = (area) => {
     if (area === "home") v8HomeChosenRef.current = true;
@@ -13114,7 +13121,7 @@ const removeNotification = async (notificationId) => {
         onRoute={(r) => { const s = String(r || ""); if (s.startsWith("/connect")) openNavigationOSArea("connect", "p:" + s.replace(/^\/connect\/?/, "")); else if (s.startsWith("/@")) openNavigationOSArea("profile", s.slice(2)); else v8ApplyPath(s.split("?")[0]); }} />
       {currentUser ? <V8CallCenter apiBase={SHOP_API_BASE} getAuthHeaders={customerSessionHeaders} user={currentUser} /> : null}
       <a className="v8-skip" href="#v8-main" onClick={(e) => { e.preventDefault(); const m = document.querySelector(".v8-page") || document.getElementById("v8-main"); if (m) { m.setAttribute("tabindex", "-1"); m.focus(); } }}>Skip to content</a>
-      <V8Rail active={v8ActivePillar} onNavigate={v8Navigate} />
+      <V8Rail active={v8ActivePillar} onNavigate={v8Navigate} pillars={v8VisiblePillars} />
       <V8Header
         ref={headerRef}
         user={currentUser}
@@ -13140,7 +13147,8 @@ const removeNotification = async (notificationId) => {
         onSignIn={openLogin}
         onHome={() => v8Navigate("home")}
       />
-      <V8BottomBar active={v8ActivePillar} onNavigate={v8Navigate} />
+      <V8BottomBar active={v8ActivePillar} onNavigate={v8Navigate} pillars={v8VisiblePillars} onCustomize={() => setV8CustomizeOpen(true)} />
+      <V8CustomizeHome open={v8CustomizeOpen} prefs={v8HomePrefs} onSave={setV8HomePrefs} onClose={() => setV8CustomizeOpen(false)} />
       <V8BuildLabel />
       <V8OfflineBanner onRetry={() => window.dispatchEvent(new Event("online"))} />
       <V8SessionExpired open={v8SessionExpired} onCancel={() => setV8SessionExpired(false)}
@@ -18094,6 +18102,8 @@ const removeNotification = async (notificationId) => {
             onOpen={(area, view) => openNavigationOSArea(area, view)}
             onOpenProduct={(id) => { setShopCatalogueQuery(""); setShopCatalogueNotice(""); setShopCatalogueProductId(String(id)); openNavigationOSArea("shop", "crochet"); }}
             onCreatePost={() => { if (!currentUser) { openLogin(); return; } openNavigationOSArea("connect", "home"); setConnectCreateOpen(true); }}
+            prefs={v8HomePrefs}
+            onCustomize={() => setV8CustomizeOpen(true)}
           />
         )}
 

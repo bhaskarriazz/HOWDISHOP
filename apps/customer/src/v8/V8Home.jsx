@@ -29,7 +29,8 @@ function Ava({ src, name, small }) {
   return <span className={`v8-ava ${small ? "sm" : ""}`}>{img ? <img src={img} alt="" /> : initial(name)}</span>;
 }
 
-function Tile({ accent, icon, title, onSeeAll, seeAllLabel = "See all", children, compact }) {
+function Tile({ accent, icon, title, onSeeAll, seeAllLabel = "See all", children, compact, hidden }) {
+  if (hidden) return null;
   return (
     <section className="v8-card v8-tile" data-accent={accent} data-compact={compact ? "" : undefined} aria-labelledby={`v8-tile-${accent}`}>
       <header className="v8-tile-head">
@@ -52,7 +53,7 @@ function TileSkeleton({ media = true }) {
   );
 }
 
-export default function V8Home({ apiBase, getAuthHeaders, user, displayName, onOpen, onOpenProduct, onCreatePost }) {
+export default function V8Home({ apiBase, getAuthHeaders, user, displayName, onOpen, onOpenProduct, onCreatePost, prefs, onCustomize }) {
   const base = String(apiBase || "").replace(/\/+$/, "");
   const [home, setHome] = useState({ status: "loading", sections: {} });
   const [shop, setShop] = useState({ status: "loading", product: null });
@@ -100,6 +101,7 @@ export default function V8Home({ apiBase, getAuthHeaders, user, displayName, onO
   const tips = sec("trendingArticles");
   const tip = tips.items[0];
   const product = shop.product;
+  const hidden = (id) => Boolean(prefs?.hiddenModules?.includes(id));
   const errorNote = <p className="v8-muted" style={{ margin: 0 }}>This section isn’t available right now.</p>;
 
   return (
@@ -108,6 +110,7 @@ export default function V8Home({ apiBase, getAuthHeaders, user, displayName, onO
         <div className="v8-home-hello">
           <h1>{signedIn ? `Welcome back${first ? `, ${first}` : ""}` : "Welcome to HOWDI"}</h1>
           <p>People. Products. Services. Skills. A kinder, more useful everyday internet.</p>
+          {onCustomize ? <button type="button" className="v8-link" onClick={onCustomize}>Customize Home</button> : null}
         </div>
 
         {anyError ? (
@@ -119,7 +122,7 @@ export default function V8Home({ apiBase, getAuthHeaders, user, displayName, onO
         ) : null}
 
         <div className="v8-home-grid">
-          <Tile accent="community" icon="users" title="Community" onSeeAll={() => onOpen("connect", "home")}>
+          <Tile accent="community" icon="users" title="Community" onSeeAll={() => onOpen("connect", "home")} hidden={hidden("community")}>
             {community.state === "loading" ? <TileSkeleton media={false} /> : null}
             {community.state === "error" ? errorNote : null}
             {community.state === "empty" ? <V8State icon="comment" title="No posts yet" message="Be the first to share something with your community." actionLabel="Create a post" onAction={onCreatePost} /> : null}
@@ -143,7 +146,7 @@ export default function V8Home({ apiBase, getAuthHeaders, user, displayName, onO
             ) : null}
           </Tile>
 
-          <Tile accent="shop" icon="shop" title="Crochet Shop" onSeeAll={() => onOpen("shop", "crochet")}>
+          <Tile accent="shop" icon="shop" title="Crochet Shop" onSeeAll={() => onOpen("shop", "crochet")} hidden={hidden("shop")}>
             {shop.status === "loading" ? <TileSkeleton /> : null}
             {shop.status === "error" ? errorNote : null}
             {shop.status === "ready" && !product ? <V8State icon="shop" title="No crochet pieces listed yet" message="New handmade crochet from our makers will appear here." actionLabel="Browse the Shop" onAction={() => onOpen("shop", "catalogue")} /> : null}
@@ -164,7 +167,7 @@ export default function V8Home({ apiBase, getAuthHeaders, user, displayName, onO
             ) : null}
           </Tile>
 
-          <Tile accent="works" icon="works" title="Find a Worker" onSeeAll={() => onOpen("works", "find")}>
+          <Tile accent="works" icon="works" title="Find a Worker" onSeeAll={() => onOpen("works", "find")} hidden={hidden("works")}>
             {works.state === "loading" ? <TileSkeleton media={false} /> : null}
             {works.state === "error" ? errorNote : null}
             {works.state === "empty" ? <V8State icon="works" title="No verified workers nearby yet" message="We’re verifying local professionals. Try another location." actionLabel="Open Works" onAction={() => onOpen("works", "find")} /> : null}
@@ -192,10 +195,18 @@ export default function V8Home({ apiBase, getAuthHeaders, user, displayName, onO
               </>
             ) : null}
           </Tile>
+
+          <Tile accent="vibe" icon="video" title="Vibe" onSeeAll={() => onOpen("connect", "vibe")} hidden={hidden("vibe")}>
+            <V8State icon="video" title="Social video lives in Connect" message="Open Vibe to watch and share eligible community video." actionLabel="Open Vibe" onAction={() => onOpen("connect", "vibe")} />
+          </Tile>
+
+          <Tile accent="move" icon="move" title="Move" onSeeAll={() => onOpen("move", "home")} hidden={hidden("move")}>
+            <V8State icon="move" title="Plan your next ride" message="Request ride and Your rides stay in the dedicated Move experience." actionLabel="Open Move" onAction={() => onOpen("move", "home")} />
+          </Tile>
         </div>
 
         <div className="v8-home-grid v8-row2">
-          <Tile accent="learn" icon="learn" title={course ? "Continue Crochet" : "Learn Crochet"} onSeeAll={() => onOpen("learn", course ? "my-learning" : "discover")}>
+          <Tile accent="learn" icon="learn" title={course ? "Continue Crochet" : "Learn Crochet"} onSeeAll={() => onOpen("learn", course ? "my-learning" : "discover")} hidden={hidden("learn") && hidden("continue")}>
             {learn.state === "loading" ? <TileSkeleton media={false} /> : null}
             {learn.state === "error" && !course ? errorNote : null}
             {course ? (
@@ -227,7 +238,7 @@ export default function V8Home({ apiBase, getAuthHeaders, user, displayName, onO
             ) : learn.state === "empty" ? <V8State icon="learn" title="No courses published yet" message="Crochet classes are being prepared." /> : null}
           </Tile>
 
-          <Tile accent="hype" icon="trend" title="Hype" onSeeAll={() => onOpen("connect", "explore")}>
+          <Tile accent="hype" icon="trend" title="Hype" onSeeAll={() => onOpen("connect", "explore")} hidden={hidden("hype")}>
             {hype.state === "loading" ? <TileSkeleton media={false} /> : null}
             {hype.state === "error" ? errorNote : null}
             {hype.state === "empty" ? <V8State icon="trend" title="Nothing trending yet" message="Creators you might like will show up here." /> : null}
@@ -243,7 +254,11 @@ export default function V8Home({ apiBase, getAuthHeaders, user, displayName, onO
             ) : null}
           </Tile>
 
-          <Tile accent="tips" icon="bulb" title="Tips" onSeeAll={() => onOpen("connect", "explore")}>
+          <Tile accent="live" icon="live" title="Live Classes" onSeeAll={() => onOpen("learn", "live")} hidden={hidden("live")}>
+            <V8State icon="live" title="Find a live class" message="Availability and attendance are shown only by the Learn experience." actionLabel="Open Live Classes" onAction={() => onOpen("learn", "live")} />
+          </Tile>
+
+          <Tile accent="tips" icon="bulb" title="Tips" onSeeAll={() => onOpen("connect", "explore")} hidden={hidden("tips")}>
             {tips.state === "loading" ? <TileSkeleton /> : null}
             {tips.state === "error" ? errorNote : null}
             {tips.state === "empty" ? <V8State icon="bulb" title="No tips yet" message="Helpful articles from the community will appear here." /> : null}

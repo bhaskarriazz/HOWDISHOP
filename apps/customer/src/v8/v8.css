@@ -207,7 +207,9 @@ body:has(.howdi-app.v8) { background: var(--v8-bg); color: var(--v8-ink); font-f
   overflow-y: auto; overscroll-behavior: contain; background: var(--v8-bg);
 }
 .v8-page-inner { max-width: 1240px; margin: 0 auto; padding: 28px 28px 56px; }
+.v8-customize-section{margin:18px 0;padding:16px;border:1px solid var(--v8-line);border-radius:14px;background:var(--v8-bg)}.v8-customize-section h3{margin:0 0 5px;color:var(--v8-ink)}.v8-customize-section p,.v8-customize-section small{color:var(--v8-muted);font-size:13px}.v8-customize-row{display:flex;align-items:center;gap:8px;padding:10px 0;border-top:1px solid var(--v8-line);font-size:13px}.v8-customize-row:first-of-type{border-top:0}.v8-customize-row b{color:var(--v8-ink);min-width:140px}.v8-customize-row span{color:var(--v8-muted);margin-right:auto}.v8-customize-row button{border:1px solid var(--v8-line);border-radius:8px;padding:6px 8px;background:#fff;color:var(--v8-ink);font:inherit;cursor:pointer}.v8-customize-row button:disabled{opacity:.5;cursor:not-allowed}
 @media (max-width: 760px) { .v8-page { bottom: 0; } .v8-page-inner { padding: 16px 16px calc(var(--v8-bottom) + 28px); } }
+@media (max-width: 640px){.v8-customize-row{align-items:flex-start;flex-wrap:wrap}.v8-customize-row b{min-width:0;flex:1 1 56%}.v8-customize-row span{margin-right:0;flex:1 1 38%}.v8-customize-row button{font-size:12px}}
 
 /* ---------- common card + states (SYS-001..003) ---------- */
 .v8-card { background: var(--v8-surface); border: 1px solid var(--v8-line); border-radius: var(--v8-radius-lg); box-shadow: var(--v8-shadow); }
