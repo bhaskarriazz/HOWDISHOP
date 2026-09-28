@@ -154,6 +154,13 @@ export function V8Permissions({ onBack, onOpenPrivacy }) {
           })}
           <button type="button" className="v8-link" onClick={refresh} style={{ marginTop: 8 }}>Retry permissions</button>
         </section>
+        <section className="v8-card v8-settings-card" aria-labelledby="v8-discovery-h">
+          <h2 id="v8-discovery-h">People discovery</h2>
+          <p className="v8-muted">Contact matching is off. HOWDI will never upload an address book or send invitations until you explicitly choose supported contacts and can revoke that choice.</p>
+          <button type="button" className="v8-btn" disabled title="Contact matching service is not configured">Find from contacts unavailable</button>
+          <p className="v8-muted">Nearby people is off. It requires separate mutual consent, approved privacy policy and coarse city/area results. Exact live location and Move addresses are never used.</p>
+          <button type="button" className="v8-btn" disabled title="Nearby discovery policy and service are not configured">Nearby discovery unavailable</button>
+        </section>
       </div>
       <V8Confirm open={Boolean(helpFor)} icon="lock" title={helpFor ? `Turn on ${helpFor.label.toLowerCase()} access` : ""}
         body={helpFor ? `Your browser blocked ${helpFor.label.toLowerCase()} for HOWDI. Click the lock icon next to the address, choose “Site settings”, set ${helpFor.label} to Allow, then come back and tap Retry. You can keep using HOWDI without it.` : ""}
