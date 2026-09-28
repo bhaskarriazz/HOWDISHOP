@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import MoveAdmin from './MoveAdmin.jsx';
 
 const API = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '');
 
@@ -17,6 +18,7 @@ const NAV = [
   ['locations', '📍', 'Delivery & Locations'],
   ['coupons', '🎟️', 'Offers & Promotions'],
   ['works', '🛠️', 'Works'],
+  ['move', '🚕', 'Move'],
   ['vendors', '🤝', 'Vendors'],
   ['learnEarn', '🎓', 'Learn & Earn'],
   ['notifications', '🔔', 'Communication'],
@@ -4235,8 +4237,8 @@ function AdminApp() {
         <header className="topbar">
           <div>
             <div className="eyebrow">HOWDI.SHOP ADMIN</div>
-            <h1>{tab==='dashboard'?'Control Tower':tab==='users'?'Identity & Access Management':tab==='categories'?'Categories':tab==='subcategories'?'Subcategories':tab==='products'?'Products':tab==='variants'?'Variants & Stock':tab==='locations'?'Locations & Delivery':tab==='inventory'?'Inventory Movement & History':tab==='orders'?'Orders & Fulfilment':tab==='logistics'?'Logistics Control Center':tab==='payments'?'Payments & Transactions':tab==='hpay'?'HPay Control Tower':tab==='notifications'?'Notifications & Communication':tab==='moderation'?'Connect Safety & Moderation':tab==='settings'?'Platform Settings & Admin Control':tab==='coupons'?'Coupons & Promo Codes':tab==='works'?'Works & Service Operations':tab==='vendors'?'Vendor Network':'Future Dashboard Lab'}</h1>
-            <p>{tab==='dashboard'?'See what needs attention now — and what HOWDI can become next.':tab==='users'?'Manage HOWDI identity, master records, account types, lifecycle status and access foundations in one place.':tab==='future'?'Reserved capacity for ideas, branches, countries and future businesses.':tab==='locations'?'Control customer serviceability and delivery rules by pincode.':tab==='orders'?'Monitor every order from confirmation to delivery, cancellation and return.':tab==='hpay'?'Monitor HPay money movement, requests, QR/UPI activity, risk, limits and payment identities.':tab==='moderation'?'Review reports, protect customers and prepare HOWDI Connect for safe growth.':tab==='settings'?'Control platform access, feature readiness and operational safeguards from one place.':tab==='coupons'?'Create unique promo codes and prepare future campaign rules without disturbing the catalogue.':tab==='works'?'Create, review and manage local work opportunities, service requests and fulfilment status.':tab==='vendors'?'Onboard creators and sellers, review compliance and control catalogue access.':'Catalogue controls are the source of truth for customer discovery.'}</p>
+            <h1>{tab==='dashboard'?'Control Tower':tab==='users'?'Identity & Access Management':tab==='categories'?'Categories':tab==='subcategories'?'Subcategories':tab==='products'?'Products':tab==='variants'?'Variants & Stock':tab==='locations'?'Locations & Delivery':tab==='inventory'?'Inventory Movement & History':tab==='orders'?'Orders & Fulfilment':tab==='logistics'?'Logistics Control Center':tab==='payments'?'Payments & Transactions':tab==='hpay'?'HPay Control Tower':tab==='notifications'?'Notifications & Communication':tab==='moderation'?'Connect Safety & Moderation':tab==='settings'?'Platform Settings & Admin Control':tab==='coupons'?'Coupons & Promo Codes':tab==='works'?'Works & Service Operations':tab==='move'?'Move Operations':tab==='vendors'?'Vendor Network':'Future Dashboard Lab'}</h1>
+            <p>{tab==='dashboard'?'See what needs attention now — and what HOWDI can become next.':tab==='users'?'Manage HOWDI identity, master records, account types, lifecycle status and access foundations in one place.':tab==='future'?'Reserved capacity for ideas, branches, countries and future businesses.':tab==='locations'?'Control customer serviceability and delivery rules by pincode.':tab==='orders'?'Monitor every order from confirmation to delivery, cancellation and return.':tab==='hpay'?'Monitor HPay money movement, requests, QR/UPI activity, risk, limits and payment identities.':tab==='moderation'?'Review reports, protect customers and prepare HOWDI Connect for safe growth.':tab==='settings'?'Control platform access, feature readiness and operational safeguards from one place.':tab==='coupons'?'Create unique promo codes and prepare future campaign rules without disturbing the catalogue.':tab==='works'?'Create, review and manage local work opportunities, service requests and fulfilment status.':tab==='move'?'Verify drivers, control dispatch, enforce safety gates and resolve Move incidents.':tab==='vendors'?'Onboard creators and sellers, review compliance and control catalogue access.':'Catalogue controls are the source of truth for customer discovery.'}</p>
           </div>
           <div className="top-actions">
             <span className="live-pill"><span className="dot"/> Admin connected</span>
@@ -8599,7 +8601,11 @@ function AdminApp() {
           </div>
         )}
 
-{tab==='notifications' && (
+{tab==='move' && (
+          <div className="page move-admin-page"><MoveAdmin token={token} /></div>
+        )}
+
+        {tab==='notifications' && (
           <div className="page notifications-page">
             <section className="notifications-hero">
               <div>
