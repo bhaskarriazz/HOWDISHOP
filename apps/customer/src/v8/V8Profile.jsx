@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { V8Icon, V8State } from "./V8Shell";
 import { V8Badges, V8BadgeExplainer, useSingleFlight, useV8Ui } from "./V8System";
-import { useApi } from "./connect/common";
+import { Ava, Sheet, useApi } from "./connect/common";
 import { MembershipOffer } from "./connect/Membership";
 import { HighlightsRow } from "./connect/Stories";
 const openConnect = (view) => window.dispatchEvent(new CustomEvent("howdi:v8-open", { detail: { area: "connect", view: `p:${view}` } }));
@@ -21,6 +21,7 @@ export default function V8Profile({ apiBase, handle, getAuthHeaders, signedIn, i
   const [state, setState] = useState({ status: "loading", data: null });
   const [tab, setTab] = useState("posts");
   const [reload, setReload] = useState(0);
+  const [network, setNetwork] = useState(null);
   const [busy, run] = useSingleFlight();
   const api = useApi(apiBase, getAuthHeaders);
   const valid = HANDLE_RE.test(String(handle || ""));
@@ -55,6 +56,17 @@ export default function V8Profile({ apiBase, handle, getAuthHeaders, signedIn, i
       ui?.toast({ kind: "error", title: "Couldn’t update follow", message: "Please try again." });
     }
   }), [run, signedIn, state.data, base, handle, getAuthHeaders, ui, onRequireLogin]);
+
+  const openNetwork = useCallback(async (type) => {
+    setNetwork({ type, status: "loading", people: [] });
+    const r = await api("GET", `/api/connect/profile/username/${encodeURIComponent(handle)}/connections?type=${type}`);
+    setNetwork(r.ok ? { type, status: "ready", people: r.json.people || [] } : { type, status: "error", people: [], message: r.json.message || "Couldn’t load this list." });
+  }, [api, handle]);
+  const openPerson = (person) => {
+    if (!person?.public_username) return;
+    setNetwork(null);
+    window.dispatchEvent(new CustomEvent("howdi:v8-open", { detail: { area: "profile", view: person.public_username } }));
+  };
 
   const d = state.data || {};
   const p = d.profile || {};
@@ -94,8 +106,8 @@ export default function V8Profile({ apiBase, handle, getAuthHeaders, signedIn, i
                   </div>
                   <div className="v8-profile-side">
                     <div className="v8-profile-counts">
-                      <span><b>{d.canSeeFollowerList === false ? "—" : compact(p.follower_count)}</b> followers</span>
-                      <span><b>{d.canSeeFollowerList === false ? "—" : compact(p.following_count)}</b> following</span>
+                      <button type="button" disabled={d.canSeeFollowerList === false} onClick={() => openNetwork("followers")}><b>{d.canSeeFollowerList === false ? "—" : compact(p.follower_count)}</b> followers</button>
+                      <button type="button" disabled={d.canSeeFollowerList === false} onClick={() => openNetwork("following")}><b>{d.canSeeFollowerList === false ? "—" : compact(p.following_count)}</b> following</button>
                     </div>
                     {isMe ? (
                       <div className="v8-profile-actions"><button type="button" className="v8-btn v8-btn-primary" onClick={onEdit}>Edit profile</button></div>
@@ -141,6 +153,12 @@ export default function V8Profile({ apiBase, handle, getAuthHeaders, signedIn, i
             <aside className="v8-profile-aside"><V8BadgeExplainer /></aside>
           </div>
         ) : null}
+        <Sheet open={Boolean(network)} title={network?.type === "following" ? `Following @${p.public_username || handle}` : `Followers of @${p.public_username || handle}`} onClose={() => setNetwork(null)}>
+          {network?.status === "loading" ? <p className="v8c-muted" role="status">Loading…</p> : null}
+          {network?.status === "error" ? <p className="v8c-err" role="alert">{network.message}</p> : null}
+          {network?.status === "ready" && !network.people.length ? <V8State icon="empty" title="No one here yet" message={network.type === "following" ? "This member isn’t following anyone yet." : "This member has no followers yet."} /> : null}
+          {network?.status === "ready" ? network.people.map((person) => <button type="button" className="v8c-row" key={person.public_username} onClick={() => openPerson(person)}><Ava src={person.profile_image} name={person.full_name} size={40} /><span className="v8c-row-text"><b>{person.full_name}</b><small>@{person.public_username}{person.headline ? ` · ${person.headline}` : ""}</small></span><V8Icon name="chevr" size={18} /></button>) : null}
+        </Sheet>
       </div>
     </div>
   );

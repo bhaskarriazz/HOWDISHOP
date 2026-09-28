@@ -255,7 +255,7 @@ export default function VibeScreen({ api, user, focus, onNav, onRequireLogin, on
   return (
     <div className="v8v">
       <header className="v8v-top">
-        <div className="v8v-title"><h1>Vibe</h1><p>Short videos. Real people. Useful ideas.</p></div>
+        <div className="v8v-title">{focus ? <button type="button" className="v8-back" onClick={() => onNav("vibe")}><V8Icon name="back" size={18} />Back</button> : null}<h1>Vibe</h1><p>Short videos. Real people. Useful ideas.</p></div>
         <Tabs tabs={TABS} value={tab} onChange={(v) => { setTab(v); onNav("vibe"); }} label="Vibe feeds" />
         <div className="v8v-top-actions">
           <label className="v8v-cat"><span className="v8-sr">Category</span>

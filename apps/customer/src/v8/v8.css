@@ -562,6 +562,9 @@ body:has(.howdi-app.v8) .v8-build { font-family: ui-monospace, SFMono-Regular, M
 .v8-profile-side { padding-top: 14px; display: grid; gap: 12px; min-width: 250px; }
 .v8-profile-counts { display: flex; gap: 18px; color: var(--v8-muted); font-size: 15px; }
 .v8-profile-counts b { color: var(--v8-ink); font-size: 17px; }
+.v8-profile-counts button { appearance: none; border: 0; padding: 0; background: none; color: inherit; font: inherit; cursor: pointer; text-align: left; }
+.v8-profile-counts button:hover:not(:disabled) b, .v8-profile-counts button:focus-visible:not(:disabled) b { color: var(--v8-primary); text-decoration: underline; }
+.v8-profile-counts button:disabled { cursor: default; }
 .v8-profile-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .v8-premium-card { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--v8-line); border-radius: 12px; background: var(--v8-bg); }
 .v8-premium-card b { display: block; font-size: 15px; } .v8-premium-card small { color: var(--v8-muted); font-size: 13.5px; }
