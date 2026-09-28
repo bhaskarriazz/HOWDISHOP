@@ -21404,6 +21404,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
       pool, getBody, helpers: connectV8._internal, messages: connectV8Messages._internal, notify: connectV8Community._internal.notify,
       wallet: connectV8Rooms._internal.wallet, sandboxEnabled: () => accessV8.sandboxEnabled(),
     });
+    const ridesV8 = require("./rides-v8.cjs").createRidesV8({ pool, getBody, helpers: connectV8._internal, sandboxEnabled: () => accessV8.sandboxEnabled() });
     // V8 Become a Worker + HOWDI Admin verification (./works-v8-onboarding.cjs).
     const worksV8Onboarding = require("./works-v8-onboarding.cjs").createWorksV8Onboarding({
       pool, getBody, helpers: connectV8._internal, messages: connectV8Messages._internal, notify: connectV8Community._internal.notify, auditAdmin: auditAdminSecurity,
@@ -21509,6 +21510,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
           if (await v8SafeHandle(vendorV8, req, res, url)) return;
           if (await v8SafeHandle(learnV8, req, res, url)) return;
           if (await v8SafeHandle(meV8, req, res, url)) return;
+          if (await v8SafeHandle(ridesV8, req, res, url)) return;
           if (await v8SafeHandle(worksV8Onboarding, req, res, url)) return;
           if (await v8SafeHandle(worksV8, req, res, url)) return;
           if (await v8SafeHandle(connectV8Messages, req, res, url)) return;
@@ -57293,6 +57295,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
         await hpayV8Utilities.ensureSchema();
         await worksV8.ensureSchema();
         await worksV8Onboarding.ensureSchema();
+        await ridesV8.ensureSchema();
         await vendorV8.ensureSchema();
         await shopV8.ensureSchema();
         await learnV8.ensureSchema();

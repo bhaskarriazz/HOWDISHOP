@@ -11,6 +11,7 @@ import V8Connect from "./v8/connect/V8Connect";
 import V8Notifications, { useV8Unread } from "./v8/V8Notifications";
 import V8CallCenter from "./v8/connect/Calls";
 import V8Works from "./v8/works/V8Works";
+import V8Move from "./v8/move/V8Move";
 import V8Roles from "./v8/me/V8Roles";
 import V8Learn from "./v8/learn/V8Learn";
 import { Wallet as V8Wallet, Photo as V8Photo } from "./v8/me/V8Wallet";
@@ -7075,7 +7076,8 @@ function App() {
   // HOWDI V16.6H — one authenticated bridge for every Learn & Earn request.
   // Public learning endpoints still work when no token exists; protected routes
   // receive the exact same customer session used by My HOWDI.
-  const learningFetch=(url,options={})=>fetch(url,{
+  // Legacy learning requests must use the same configured backend/session as the V8 shell.
+  const learningFetch=(url,options={})=>fetch(typeof url === "string" ? url.replace(/^http:\/\/localhost:5000(?=\/api\/learning(?:\/|$))/, SHOP_API_BASE) : url,{
     ...options,
     headers:{...learningAuthHeaders(),...(options.headers||{})}
   });
@@ -9882,6 +9884,7 @@ return () => window.clearInterval(timer);
     if(!was&&currentUser&&navigationOSArea==="home"&&!v8HomeChosenRef.current)openNavigationOSArea("connect","home");
   },[currentUser]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const [v8MovePath, setV8MovePath] = useState("");
   const openNavigationOSArea=(area,subview="home")=>{
     const next=String(area||"connect").toLowerCase();
     const view=String(subview||"home").toLowerCase();
@@ -9956,6 +9959,7 @@ return () => window.clearInterval(timer);
       }
       return;
     }
+    if(next==="move"){ setV8MovePath(view === "home" ? "" : String(subview || "")); return; }
     if(next==="works"){
       // V8 Works paths carry case-sensitive public codes (BKG-…, worker codes): keep the original subview
       setWorksExperienceTab(view==="home"?"home":String(subview||"home"));
@@ -12662,8 +12666,8 @@ const removeNotification = async (notificationId) => {
   // V8: exactly one selected destination — Home, Connect, Shop, Works or Learn & Earn.
   const pillarActive = (area) => navigationOSArea === area;
   // HPay is a global utility (header), not a pillar: no rail item is selected while it is open.
-  const v8ActivePillar = navigationOSArea === "connect" && connectView === "hpay" ? "" : (["home", "connect", "shop", "works", "learn"].includes(navigationOSArea) ? navigationOSArea : "");
-  const V8_DEFAULT_VIEW = { home: "home", connect: "home", shop: "catalogue", works: "find", learn: "discover" };
+  const v8ActivePillar = navigationOSArea === "connect" && connectView === "hpay" ? "" : (["home", "connect", "shop", "move", "works", "learn"].includes(navigationOSArea) ? navigationOSArea : "");
+  const V8_DEFAULT_VIEW = { home: "home", connect: "home", shop: "catalogue", move: "home", works: "find", learn: "discover" };
   const v8Navigate = (area) => {
     if (area === "home") v8HomeChosenRef.current = true;
     if (area === "shop") { setShopCatalogueQuery(""); setShopCatalogueNotice(""); }
@@ -12707,6 +12711,7 @@ const removeNotification = async (notificationId) => {
       if(shopOSView==="cart")return "/shop/cart";
       return shopCollection==="crochet"?"/shop/crochet":"/shop";
     }
+    if(navigationOSArea==="move")return v8MovePath ? `/move/${v8MovePath}` : "/move";
     if(navigationOSArea==="works")return worksExperienceTab&&!["find","home"].includes(worksExperienceTab)?`/works/${worksExperienceTab}`:"/works";
     if(navigationOSArea==="learn"&&learningPortalView==="v8")return v8LearnPath.startsWith("apply/")?`/me/${v8LearnPath}`:`/learn/${v8LearnPath}`;
     if(navigationOSArea==="learn")return learningPortalView&&!["discover","home"].includes(learningPortalView)?`/learn/${learningPortalView}`:"/learn";
@@ -12722,6 +12727,8 @@ const removeNotification = async (notificationId) => {
     if(p==="/shop/crochet"){openNavigationOSArea("shop","crochet");return true;}
     if(p==="/shop/cart"){openNavigationOSArea("shop","cart");return true;}
     if((m=p.match(/^\/shop\/(products\/PRD-[0-9A-F]{12}|bag|wishlist|checkout|orders(?:\/ORD-[0-9A-F]{12})?)$/))){openNavigationOSArea("shop",m[1]);return true;}
+    if((m=p.match(/^\/move(?:\/([A-Za-z0-9/_.-]{1,120}))?$/))){openNavigationOSArea("move",m[1]||"home");return true;}
+    if((m=p.match(/^\/works\/rides(?:\/(.*))?$/))){openNavigationOSArea("move",m[1]||"home");return true;}
     if((m=p.match(/^\/works(?:\/([A-Za-z0-9/_.@-]{1,120}))?$/))){openNavigationOSArea("works",m[1]||"find");return true;}
     if((m=p.match(/^\/learn(?:\/([a-z-]{2,24}))?$/))){openNavigationOSArea("learn",m[1]||"discover");return true;}
     if(p==="/me"){openNavigationOSArea("me","hub");return true;}
@@ -12768,7 +12775,7 @@ const removeNotification = async (notificationId) => {
     // content may still be loading: retry the restore a few times until the page is tall enough
     [60,300,800,1500].forEach((ms)=>window.setTimeout(()=>{const el=document.querySelector(".v8-page")||document.querySelector(".howdi-os-workspace");if(el&&v8LastPath.current===path&&Math.abs(el.scrollTop-restore)>2)el.scrollTop=restore;},ms));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[v8RouterOn,navigationOSArea,connectView,connectContentMode,v8ConnectPath,v8ShopPath,v8LearnPath,shopOSView,shopCollection,worksExperienceTab,learningPortalView,v8MeView,v8ProfileHandle]);
+  },[v8RouterOn,navigationOSArea,v8MovePath,connectView,connectContentMode,v8ConnectPath,v8ShopPath,v8LearnPath,shopOSView,shopCollection,worksExperienceTab,learningPortalView,v8MeView,v8ProfileHandle]);
   useEffect(()=>{
     // V8 Connect sheets (e.g. Share → Messages) ask the shell to open another area.
     const onOpen=(e)=>{const d=e&&e.detail;if(d&&typeof d.area==="string")openNavigationOSArea(d.area,d.view||"home");};
@@ -18541,6 +18548,7 @@ const removeNotification = async (notificationId) => {
 
         </>)}
 
+        {navigationOSArea === "move" && <V8Move apiBase={SHOP_API_BASE} getAuthHeaders={customerSessionHeaders} user={currentUser} path={v8MovePath} onNavigate={p => openNavigationOSArea("move", p || "home")} onRequireLogin={openLogin} />}
         {navigationOSArea==="works"&&worksExperienceTab!=="classic"&&(
           <V8Works apiBase={SHOP_API_BASE} getAuthHeaders={customerSessionHeaders} user={currentUser} path={worksExperienceTab}
             onNavigate={(p)=>openNavigationOSArea("works",String(p||"find"))} onRequireLogin={openLogin}

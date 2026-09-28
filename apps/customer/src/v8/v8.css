@@ -179,7 +179,7 @@ body:has(.howdi-app.v8) { background: var(--v8-bg); color: var(--v8-ink); font-f
 @media (max-width: 760px) {
   .v8-bottombar {
     position: fixed; left: 12px; right: 12px; bottom: 12px; z-index: 9300; height: 64px;
-    display: grid; grid-template-columns: repeat(5, 1fr); align-items: center;
+    display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); align-items: center;
     background: var(--v8-surface); border: 1px solid var(--v8-line); border-radius: 22px;
     box-shadow: 0 10px 30px rgba(13, 26, 58, .12);
   }

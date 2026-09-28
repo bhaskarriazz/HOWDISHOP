@@ -10,6 +10,7 @@ import "./works.css";
 
 const WorkerDesk = lazy(() => import("./WorkerDesk"));
 const BecomeWorker = lazy(() => import("./BecomeWorker"));
+
 export const when = (iso) => { const d = new Date(iso); return Number.isFinite(d.getTime()) ? d.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }) : ""; };
 export const STATE_LABEL = { requested: ["warn", "Waiting for the worker"], accepted: ["warn", "Accepted — confirm details"], confirmed: ["ok", "Confirmed"], en_route: ["ok", "On the way"], arrived: ["ok", "Arrived"], in_progress: ["ok", "Job in progress"], completed: ["warn", "Done — please confirm"], closed: ["ok", "Completed"], declined: ["bad", "Declined"], expired: ["muted", "Expired"], cancelled: ["muted", "Cancelled"], disputed: ["bad", "Issue reported"] };
 export function StateChip({ state, worker }) {

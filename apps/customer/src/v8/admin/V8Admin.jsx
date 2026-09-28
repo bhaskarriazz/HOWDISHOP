@@ -5,6 +5,7 @@
 import { Fragment, useCallback, useEffect, useState } from "react";
 import { V8Icon } from "../V8Shell";
 import "./admin.css";
+import RidesAdmin from "./RidesAdmin";
 
 const API = (import.meta.env.VITE_API_BASE_URL || "http://localhost:5000").replace(/\/+$/, "");
 const KEY = "howdiAdminToken";
@@ -50,15 +51,18 @@ const QUEUES = [
 ];
 function Console({ call, token, onSignOut }) {
   const [q, setQ] = useState("workers");
+  const [ridesEnabled, setRidesEnabled] = useState(false);
+  useEffect(() => { call("GET", "/api/admin/v8/rides").then(r => setRidesEnabled(r.ok)).catch(() => {}); }, [call]);
   return (
     <div className="v8a">
       <aside className="v8a-nav" aria-label="Admin">
         <span className="v8a-brand">HOWDI <b>Admin</b></span>
         <h2>Verification</h2>
+        {ridesEnabled && <button type="button" onClick={() => setQ("rides")}>Rides · Preview</button>}
         {QUEUES.map((x) => <button key={x.key} type="button" className={q === x.key ? "on" : ""} aria-current={q === x.key ? "page" : undefined} onClick={() => setQ(x.key)}><V8Icon name={x.icon} size={18} />{x.label}{!x.live ? <small>next</small> : null}</button>)}
         <button type="button" className="v8a-out" onClick={onSignOut}><V8Icon name="back" size={16} />Sign out</button>
       </aside>
-      <main className="v8a-main">{q === "workers" ? <Workers key="w" kind="workers" call={call} token={token} /> : q === "vendors" ? <Workers key="v" kind="vendors" call={call} token={token} /> : ["teacher", "institute", "startup"].includes(q) ? <Workers key={q} kind={q} call={call} token={token} /> : q === "reviews" ? <Reports call={call} /> : <div className="v8a-card"><h1>{QUEUES.find((x) => x.key === q).label}</h1><p className="v8a-muted">This verification queue is being built next (same approve / reject / request-info journey as Workers).</p></div>}</main>
+      <main className="v8a-main">{q === "rides" ? <RidesAdmin call={call} /> : q === "workers" ? <Workers key="w" kind="workers" call={call} token={token} /> : q === "vendors" ? <Workers key="v" kind="vendors" call={call} token={token} /> : ["teacher", "institute", "startup"].includes(q) ? <Workers key={q} kind={q} call={call} token={token} /> : q === "reviews" ? <Reports call={call} /> : <div className="v8a-card"><h1>{QUEUES.find((x) => x.key === q).label}</h1><p className="v8a-muted">This verification queue is being built next (same approve / reject / request-info journey as Workers).</p></div>}</main>
     </div>
   );
 }

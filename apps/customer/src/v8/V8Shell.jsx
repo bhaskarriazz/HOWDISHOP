@@ -7,8 +7,9 @@ export const V8_PILLARS = [
   { area: "home", label: "Home" },
   { area: "connect", label: "Connect" },
   { area: "shop", label: "Shop" },
+  { area: "move", label: "Move" },
   { area: "works", label: "Works" },
-  { area: "learn", label: "Learn & Earn" },
+  { area: "learn", label: "Learn" },
 ];
 
 const PATHS = {
@@ -22,6 +23,7 @@ const PATHS = {
   home: "M3 11.5 12 4l9 7.5M5.5 10v10h13V10M10 20v-5h4v5",
   connect: "M16 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM8 12a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Zm-6 8c.4-3.3 3-5 6-5s5.6 1.7 6 5M14.5 15.2c.5-.1 1-.2 1.5-.2 2.6 0 4.6 1.5 5 4",
   shop: "M5 8h14l-1 12H6ZM9 8V6a3 3 0 0 1 6 0v2",
+  move: "M4 16V10l2-5h12l2 5v6M4 10h16M4 16h16M7 16v3M17 16v3M7 13h1M16 13h1",
   works: "M4 8h16v11H4ZM9 8V5h6v3M4 13h16",
   learn: "M3 9l9-4 9 4-9 4-9-4Zm4 2v5c0 1.5 2.2 3 5 3s5-1.5 5-3v-5",
   star: "M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.8-5.2 2.8 1-5.8-4.3-4.1 5.9-.9Z",
@@ -187,7 +189,7 @@ export function V8BottomBar({ active, onNavigate }) {
     <nav className="v8-bottombar" aria-label="Main">
       {V8_PILLARS.map((p) => (
         <button key={p.area} type="button" aria-current={active === p.area ? "page" : undefined} onClick={() => onNavigate(p.area)}>
-          <V8Icon name={p.area} size={22} /><span>{p.area === "learn" ? "Learn & Earn" : p.label}</span>
+          <V8Icon name={p.area} size={22} /><span>{p.label}</span>
         </button>
       ))}
     </nav>

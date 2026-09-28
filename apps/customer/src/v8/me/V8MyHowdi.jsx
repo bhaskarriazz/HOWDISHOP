@@ -23,6 +23,8 @@ const GROUPS = [
 export function Hub({ apiBase, getAuthHeaders, onRoute }) {
   const api = useApi(apiBase, getAuthHeaders); const [p, setP] = useState(null); const [rw, setRw] = useState(null); const [w, setW] = useState(null);
   useEffect(() => { api("GET", "/api/v8/me/profile").then((r) => setP(r.ok ? r.json.profile : null)); api("GET", "/api/v8/me/rewards").then((r) => setRw(r.ok ? r.json.summary : null)); api("GET", "/api/v8/hpay/history").then((r) => setW(r.ok ? r.json : null)); }, [api]);
+  const [rider, setRider] = useState(false);
+  useEffect(() => { api("GET", "/api/v8/rides").then(r => setRider(r.ok && r.json.applications?.some(a => a.state === "approved" && a.eligible_now))); }, [api]);
   return (
     <div className="v8-page v8me" id="v8-main">
       <section className="v8-card v8me-hubhead">
@@ -34,6 +36,7 @@ export function Hub({ apiBase, getAuthHeaders, onRoute }) {
         <button type="button" className="v8-card" onClick={() => onRoute("/me/wallet")}><small>HPay balance</small><b>{w?.balance == null ? "—" : inr(w.balance)}</b></button>
         <button type="button" className="v8-card" onClick={() => onRoute("/me/rewards")}><small>Reward points</small><b>{rw ? rw.available : "—"}</b>{rw?.pending ? <small>+{rw.pending} pending</small> : null}</button>
       </div>
+      {rider && <section className="v8-card v8me-block"><h3>Rider desk · Preview</h3><button className="v8-btn" onClick={() => onRoute("/move/desk")}>Open passenger trips in Move</button></section>}
       {GROUPS.map(([g, items]) => (
         <section key={g} className="v8-card v8me-block" aria-label={g}><h3>{g}</h3>
           <ul className="v8me-links">{items.map(([to, icon, label, sub]) => <li key={to}><button type="button" onClick={() => onRoute(to.startsWith("/") ? to : `/me/${to}`)}><V8Icon name={icon} size={20} /><span><b>{label}</b><small>{sub}</small></span><V8Icon name="chev" size={16} /></button></li>)}</ul>
