@@ -235,3 +235,72 @@ Only after those APIs are live may Studio/VibeCreate show search, selection, cli
 - Audit: selection, revocation and takedown records contain no credentials, raw provider payload or signed URLs.
 
 **P5C dependency:** an approved licensed-music provider, server-side credentials and usage/territory terms, a provider webhook or reconciliation mechanism, and an approved audio-data migration. Until those exist, no music catalogue, track selection, mixing, or reuse runtime can be truthfully enabled.
+
+## P5D — Watch on TV / Cast architecture contract
+
+### Audited infrastructure
+
+No customer or backend Cast sender SDK, Google Cast framework, Remote Playback API, Presentation API, Media Session integration, receiver application ID, receiver deployment, device-discovery code, or TV-control route exists in the current source. The existing V8 player has direct media playback and P5B authorized download delivery; neither is receiver authorization or a Cast session. No TV UI is justified at this stage.
+
+### Device discovery and sender states
+
+Only a real sender SDK may discover supported receivers. The web sender must expose these state transitions from SDK/browser events, never local guesses: `unavailable`, `ready`, `discovering`, `no_device`, `selecting`, `connecting`, `connected`, `reconnecting`, `failed`, `disconnected`.
+
+- `unavailable`: sender SDK/browser/platform support or required HTTPS context is absent.
+- `no_device`: a completed real discovery has no compatible receiver; this is not an empty mock list.
+- `failed`: retain only a safe error category such as sender initialization, permission/policy, network, timeout, receiver rejection, or media authorization failure.
+- `connected`: set only after the receiver/session callback supplies a real receiver identity. Display a provider-supplied friendly name only; never expose IP address, MAC address, local network identifiers, exact location, or raw receiver session data.
+
+The browser cannot silently grant local-network or receiver permission. It must direct the user to the relevant browser/OS/device flow when that platform requires it.
+
+### Connection and playback contract
+
+The sender selects a compatible receiver using the provider SDK and receives a session identifier held only in memory. It may request reconnect only through the SDK's resumable-session mechanism; an old browser-stored "connected" value is never proof of connection. Disconnect explicitly ends the receiver session and clears in-memory control state.
+
+After connection, controls are capability-driven from the receiver: play, pause, seek, current position, duration, volume/mute, ended and remote error. The sender sends a load request only after server media authorization succeeds. Each remote event must be treated as observational state; it cannot be invented by button presses. Timeout, network loss, receiver loss and a remote playback error return the UI to a truthful failed/disconnected state with retry only when the SDK permits it.
+
+### Authorized-media architecture
+
+`GET /api/v8/vibes/:code/cast` is required before a sender can load a Vibe. It requires an authenticated viewer and resolves the public VIB code server-side. It reapplies the V8 visibility, private-profile/follow, bidirectional block, moderation, deleted/revoked and rights checks. On success it creates a short-lived, receiver-scoped authorization record and returns only:
+
+```json
+{
+  "media": {"load_url":"https://howdi.example/api/v8/media/cast/TOKEN","content_type":"video/mp4","expires_at":"ISO-8601"},
+  "capabilities": {"seek":true,"volume":false,"captions":false}
+}
+```
+
+The receiver delivery endpoint validates expiry, receiver session binding and current Vibe access again before streaming. It never returns a direct media URL, bucket/filesystem path, user ID, session cookie, HPay token, Cast credential, or provider credential. A later private/block/moderation/deletion/rights change revokes delivery and results in a safe remote unavailable state.
+
+### Provider, receiver and deployment dependencies
+
+An implementation requires all of the following before any UI is enabled:
+
+1. An approved Cast/receiver provider and a registered receiver application ID.
+2. Sender SDK loading and initialization under HTTPS, plus tested browser/platform compatibility.
+3. A deployed receiver application with controlled origin allowlisting and a real receiver lifecycle.
+4. Sender and receiver access to the authorized media-delivery origin over the network; a local/private development URL is insufficient for remote receiver playback.
+5. A short-lived receiver-scoped media authorization store, expiry/revocation cleanup, and provider/session audit integration.
+6. Tested local-network, account, browser-policy and receiver hardware requirements.
+
+Provider configuration, receiver app IDs, certificates, session identifiers and device identifiers are secrets or operational configuration. They must not be committed, returned through a customer DTO, or written into generic application logs.
+
+### Cast media playback versus mirroring
+
+Cast media playback means HOWDI sends a separately authorized media-load request to a compatible receiver and observes that receiver's session. Full-screen/device mirroring is an OS/browser feature that may show any screen content. HOWDI cannot claim to control, discover, connect, or observe mirroring across all TVs. Any future help entry must label mirroring separately and cannot display a HOWDI connected-device state for it.
+
+### Audit and safety requirements
+
+Write server-side audit events for authorization issued, denied, expired, revoked and receiver delivery result. Store actor account, opaque Vibe audit reference, action/outcome/reason and timestamp only. Do not store raw media URLs, media tokens, receiver identity, IP/MAC/local-network data, Cast credentials, or private Vibe metadata in audit events.
+
+### Test plan
+
+- Sender unavailable, unsupported browser/device, SDK initialization failure and no receiver discovered.
+- Real receiver available, selection, connect success, reconnect, explicit disconnect, timeout, network loss and receiver loss.
+- Receiver-reported play/pause/seek/end/remote-error state; unavailable controls remain absent.
+- Authorization expiry, revocation after privacy/block/moderation/deletion/rights change, and delivery revalidation.
+- Private/follower-only, blocked and restricted viewers cannot authorize or infer receiver media availability.
+- Response/audit scans prove no internal IDs, storage paths, signed media URLs, device identifiers or raw tokens leak.
+- Manual physical-device tests on each supported receiver/browser/network combination before any visual or feature PASS.
+
+**P5D dependency:** no sender/receiver infrastructure is configured. Until the provider, receiver app ID, HTTPS deployment and real hardware tests exist, HOWDI must not show discovery, devices, connection, TV playback or a connected-TV state.
