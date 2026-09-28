@@ -20327,6 +20327,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
       return true;
     }
 
+    // HOWDI Move V8 review module — isolated integration, keeps legacy server intact.
+    const ridesV8 = require("./rides-v8.cjs").createRidesV8({ pool, getBody });
     // =====================================================
     // SERVER
     // =====================================================
@@ -20379,6 +20381,15 @@ async function ensureVibeReleaseReadinessV140LSchema(){
           // Older customer/logistics routes use `parsedUrl`; keep one request-scoped alias.
           const parsedUrl = url;
 
+          // HOWDI Move V8 admin routes: validate the real persistent admin session first.
+          if (pathname.startsWith("/api/admin/v8/move/")) {
+            const moveAdminSession = await getAdminSessionFromRequest(req);
+            if (!moveAdminSession) {
+              await auditAdminSecurity(req, null, "ADMIN_ROUTE_DENIED", { scope: "HOWDI_MOVE_V8" });
+              return sendJSON(res, 401, { status: "error", message: "Admin session expired or invalid. Please sign in again.", code: "ADMIN_SESSION_REQUIRED" });
+            }
+            if (await ridesV8.handle(req, res, url, moveAdminSession)) return;
+          }
           console.log(
             `${req.method} ${req.url}`
           );
