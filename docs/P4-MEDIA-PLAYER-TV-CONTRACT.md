@@ -109,4 +109,10 @@ Cast playback and screen mirroring are separate capabilities.
 
 The current `GET /api/v8/vibes` and `GET /api/v8/vibes/{code}` DTO provides one direct `media[]` URL with type, poster and duration only. It does **not** provide a rendition manifest or caption/subtitle tracks. The customer player therefore keeps using the direct URL under the existing Vibe visibility, block and private-account checks. It now supports playback speed, loading/buffering, source-error retry and browser-gated Picture in Picture. Quality, caption and data-saver controls become available only when a future media object supplies verified `renditions[]`, `caption_tracks[]` and a `data_saver` rendition; until then they state that the capability is unavailable. The existing `captions` Boolean belongs to a linked Vibe item and is not treated as proof that a video caption track exists.
 
+## P5B implementation note (history and downloads)
+
+`backend/server.js` contains the older `POST /api/v1/vibes/events/batch` watch-signal recorder and internal `vibe_view_history` table. It records V1 UUID Vibe IDs, but provides no V8 public-code history list, resume, clear-one or clear-all route. The V8 viewer does not send playback signals to that incompatible endpoint and does not present local state as account history. Its Watch history panel therefore reports the unavailable server contract.
+
+The V1 Vibe model has an uploader `allow_download` field, but the V8 DTO does not return that setting and neither backend has a V8 download authorization endpoint that checks visibility, blocks, revocation or expiry. The V8 Download panel reports unavailable rather than deriving permission from UI. Required additions remain: `GET /api/v8/me/watch-history`, `DELETE /api/v8/me/watch-history/:code`, `DELETE /api/v8/me/watch-history`, and `GET /api/v8/vibes/:code/download`, all authenticated and rechecking the existing Vibe audience/block rules.
+
 No Founder visual PASS can be inferred from this contract; real runtime, provider and hardware evidence remain required.

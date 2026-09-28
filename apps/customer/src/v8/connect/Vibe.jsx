@@ -217,7 +217,7 @@ export default function VibeScreen({ api, user, focus, onNav, onRequireLogin, on
   const [active, setActive] = useState(0);
   const [muted, setMuted] = useState(true);
   const [prefs, setPrefs] = useState(loadPrefs);
-  const [sheet, setSheet] = useState(null); // {kind:'comments'|'share'|'more'|'report'|'block'|'prefs', vibe}
+  const [sheet, setSheet] = useState(null); // {kind:'comments'|'share'|'more'|'report'|'block'|'prefs'|'history'|'download', vibe}
   const [reload, setReload] = useState(0);
   const listRef = useRef(null);
 
@@ -328,7 +328,17 @@ export default function VibeScreen({ api, user, focus, onNav, onRequireLogin, on
           <button type="button" className="v8c-row" onClick={async () => { if (!signedIn) { onRequireLogin(); return; } const v = s.vibe; setSheet(null); const r = await api("POST", `/api/v8/vibes/${v.public_key}/not-interested`); if (r.ok) { hide(v.public_key); ui?.toast({ title: "Got it — you’ll see fewer Vibes like this" }); } else ui?.toast({ kind: "error", title: "Couldn’t update" }); }}><span className="v8c-row-ico"><V8Icon name="eyeoff" size={20} /></span><span className="v8c-row-text"><b>Not interested</b><small>See fewer Vibes like this</small></span><V8Icon name="chevr" size={18} /></button>
         </>) : null}
         <button type="button" className="v8c-row" onClick={() => setSheet({ kind: "prefs" })}><span className="v8c-row-ico"><V8Icon name="sliders" size={20} /></span><span className="v8c-row-text"><b>Manage content preferences</b></span><V8Icon name="chevr" size={18} /></button>
+        <button type="button" className="v8c-row" onClick={() => setSheet({ kind: "history" })}><span className="v8c-row-ico"><V8Icon name="video" size={20} /></span><span className="v8c-row-text"><b>Watch history</b><small>History is server-controlled</small></span><V8Icon name="chevr" size={18} /></button>
+        {s && s.vibe ? <button type="button" className="v8c-row" onClick={() => setSheet({ kind: "download", vibe: s.vibe })}><span className="v8c-row-ico"><V8Icon name="box" size={20} /></span><span className="v8c-row-text"><b>Download</b><small>Available only when HOWDI authorizes it</small></span><V8Icon name="chevr" size={18} /></button> : null}
         {s && s.vibe && s.vibe.allow.remix ? <button type="button" className="v8c-row" onClick={() => { const v = s.vibe; setSheet(null); if (!signedIn) { onRequireLogin(); return; } onNav(`vibe/create?remix=${v.public_key}`); }}><span className="v8c-row-ico"><V8Icon name="remix" size={20} /></span><span className="v8c-row-text"><b>Remix this Vibe</b></span><V8Icon name="chevr" size={18} /></button> : null}
+      </Sheet>
+      <Sheet open={Boolean(s && s.kind === "history")} title="Watch history" onClose={() => setSheet(null)}>
+        <V8State icon="video" title="Watch history is unavailable" message="This V8 player is not connected to a server history, resume or clear endpoint. HOWDI will not present local playback as account history." />
+        <p className="v8c-muted">When the server contract is available, this screen will show only your eligible Vibes and provide server-confirmed clear controls.</p>
+      </Sheet>
+      <Sheet open={Boolean(s && s.kind === "download")} title="Download" onClose={() => setSheet(null)}>
+        <V8State icon="lock" title="Download is not authorized" message="HOWDI has not returned a download authorization for this Vibe, so the media is not available for download." />
+        <p className="v8c-muted">Uploader settings alone do not grant access. A server permission check is required for allowed, denied, revoked and expired states.</p>
       </Sheet>
       <ReportSheet open={Boolean(s && s.kind === "report")} what="Vibe" onClose={() => setSheet(null)} onSubmit={(reason, details) => api("POST", `/api/v8/vibes/${s.vibe.public_key}/report`, { reason, details })} />
       <V8Confirm open={Boolean(s && s.kind === "block")} danger title={s && s.vibe ? `Block @${s.vibe.author.public_username}?` : ""} body="They won’t be able to see your content, message you or find your profile, and you won’t see theirs. You can unblock from Privacy & safety." confirmLabel="Block"
