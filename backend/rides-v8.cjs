@@ -266,16 +266,16 @@ function createRidesV8(deps) {
 
         await pool.query(
           `UPDATE howdi_move_drivers SET 
-            application_status = $1, 
-            online_status = $2, 
-            checks = COALESCE($3, checks), 
-            vehicle_class = COALESCE($4, vehicle_class),
-            decided_by = $5,
+            application_status = $1::varchar, 
+            online_status = $2::varchar, 
+            checks = COALESCE($3::jsonb, checks), 
+            vehicle_class = COALESCE($4::varchar, vehicle_class),
+            decided_by = $5::varchar,
             decided_at = NOW(),
-            info_request_reason = CASE WHEN $1 = 'INFO_REQUESTED' THEN $6 ELSE info_request_reason END,
-            rejection_reason = CASE WHEN $1 = 'REJECTED' THEN $6 ELSE rejection_reason END,
+            info_request_reason = CASE WHEN $1::varchar = 'INFO_REQUESTED'::varchar THEN $6::text ELSE info_request_reason END,
+            rejection_reason = CASE WHEN $1::varchar = 'REJECTED'::varchar THEN $6::text ELSE rejection_reason END,
             updated_at = NOW()
-           WHERE id = $7`,
+           WHERE id = $7::varchar`,
           [newStatus, onlineStatus, checks ? JSON.stringify(checks) : null, target_class || null, staffHandle, reason, driverId]
         );
 
