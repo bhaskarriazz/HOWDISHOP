@@ -459,6 +459,93 @@ function createRidesV8(deps) {
     }
 
     // ---------------------------------------------------------------------------------
+    // REVIEW-ONLY DEVELOPMENT FIXTURE — Women Special negative dispatch gate
+    // Never available outside NODE_ENV=development.
+    // ---------------------------------------------------------------------------------
+    if (method === 'POST' && pathname === '/api/admin/v8/move/review/prepare-women-special-negative') {
+      try {
+        if (String(process.env.NODE_ENV || '').toLowerCase() !== 'development') {
+          return fail(res, 404, 'Review fixture unavailable');
+        }
+
+        await pool.query(`
+          INSERT INTO howdi_move_drivers
+            (id, public_handle, full_name, gender, women_special_opt_in, vehicle_class, vehicle_plate, zone_id,
+             application_status, online_status, checks, documents, decided_by, decided_at, updated_at)
+          VALUES
+            ('APP-RD-TEST-MALE', '@review_male', 'Review Male Driver', 'MALE', FALSE, 'AUTO', 'TS 09 RV 2026',
+             'KHAMMAM_PILOT', 'APPROVED', 'AVAILABLE',
+             '{"identity":true,"license":true,"registration":true,"insurance":true,"background":true,"womenSpecial":false,"consent":true,"classApproval":true}'::jsonb,
+             '[{"name":"Review Driving Licence","status":"VALID","expiry":"2032-12-31"},{"name":"Review Vehicle Registration","status":"VALID","expiry":"2032-12-31"},{"name":"Review Insurance","status":"VALID","expiry":"2032-12-31"}]'::jsonb,
+             $1::varchar, NOW(), NOW())
+          ON CONFLICT (id) DO UPDATE SET
+            public_handle=EXCLUDED.public_handle,
+            full_name=EXCLUDED.full_name,
+            gender=EXCLUDED.gender,
+            women_special_opt_in=EXCLUDED.women_special_opt_in,
+            vehicle_class=EXCLUDED.vehicle_class,
+            vehicle_plate=EXCLUDED.vehicle_plate,
+            zone_id=EXCLUDED.zone_id,
+            application_status='APPROVED',
+            online_status='AVAILABLE',
+            checks=EXCLUDED.checks,
+            documents=EXCLUDED.documents,
+            decided_by=$1::varchar,
+            decided_at=NOW(),
+            updated_at=NOW()
+        `, [staffHandle]);
+
+        await pool.query(`
+          UPDATE howdi_move_rides
+          SET status='MATCHING',
+              driver_id=NULL,
+              driver_handle=NULL,
+              vehicle_plate=NULL,
+              updated_at=NOW()
+          WHERE public_ride_code='HR-334W'
+        `);
+
+        await logAudit(staffHandle, 'REVIEW_FIXTURE_PREPARED', 'howdi_move_rides', 'HR-334W',
+          'Prepared development-only Women Special negative-gate fixture',
+          { driver_id: 'APP-RD-TEST-MALE' });
+
+        return ok(res, {
+          message: 'Women Special negative-gate fixture prepared',
+          ride: 'HR-334W',
+          driver_id: 'APP-RD-TEST-MALE'
+        });
+      } catch (err) {
+        return fail(res, 500, err.message);
+      }
+    }
+
+    if (method === 'POST' && pathname === '/api/admin/v8/move/review/cleanup-women-special-negative') {
+      try {
+        if (String(process.env.NODE_ENV || '').toLowerCase() !== 'development') {
+          return fail(res, 404, 'Review fixture unavailable');
+        }
+
+        await pool.query(`
+          UPDATE howdi_move_rides
+          SET status='MATCHING',
+              driver_id='APP-RD-205',
+              driver_handle='@meera',
+              vehicle_plate='KA 04 CD 5678',
+              updated_at=NOW()
+          WHERE public_ride_code='HR-334W'
+        `);
+        await pool.query(`DELETE FROM howdi_move_drivers WHERE id='APP-RD-TEST-MALE'`);
+
+        await logAudit(staffHandle, 'REVIEW_FIXTURE_CLEANED', 'howdi_move_rides', 'HR-334W',
+          'Removed development-only Women Special negative-gate fixture');
+
+        return ok(res, { message: 'Women Special review fixture cleaned' });
+      } catch (err) {
+        return fail(res, 500, err.message);
+      }
+    }
+
+    // ---------------------------------------------------------------------------------
     // 4. AUDIT TRAIL LOGS
     // ---------------------------------------------------------------------------------
     if (method === 'GET' && pathname === '/api/admin/v8/move/audits') {
