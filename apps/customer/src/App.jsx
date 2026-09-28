@@ -34,19 +34,21 @@ import {
 
 // ------------------------------------------------------------------
 // Navigation OS: one source for the desktop rail, the mobile bottom bar and the mobile section strip.
-// Connect (default Home) -> Shop -> Works -> Learn & Earn; HPay, Notifications and My HOWDI stay global utilities.
+// Home -> Connect -> Shop -> Move -> Work -> Learn; HPay, Notifications and My HOWDI stay global utilities.
 // ------------------------------------------------------------------
 const OS_PILLARS = [
   { area: "home", view: "home", label: "Home", short: "Home" },
   { area: "connect", view: "home", label: "Connect", short: "Connect" },
   { area: "shop", view: "catalogue", label: "Shop", short: "Shop" },
-  { area: "works", view: "find", label: "Works", short: "Works" },
-  { area: "learn", view: "discover", label: "Learn & Earn", short: "Learn" },
+  { area: "move", view: "home", label: "Move", short: "Move" },
+  { area: "works", view: "find", label: "Work", short: "Work" },
+  { area: "learn", view: "discover", label: "Learn", short: "Learn" },
 ];
 const NAV_ICON_PATHS = {
   home: "M3 11.5 12 4l9 7.5M5.5 10v9.5h13V10M10 19.5v-5h4v5",
   connect: "M4 5.5h16v10H12l-4.5 3.5v-3.5H4zM8 9.5h8M8 12.5h5",
   shop: "M5 8h14l-1 12H6zM9 8V6.5a3 3 0 0 1 6 0V8",
+  move: "M4 16V10l2-5h12l2 5v6M4 10h16M4 16h16M7 16v3M17 16v3M7 13h1M16 13h1",
   works: "M14.5 5a4 4 0 0 0-5 5.3L4.5 15.3a1.7 1.7 0 0 0 2.4 2.4l5-5A4 4 0 0 0 17.2 9.5l-2.4 2.4-2.2-.5-.5-2.2z",
   learn: "M2.5 9 12 4.5 21.5 9 12 13.5zM6.5 11.3v4.4c0 1.3 2.5 2.8 5.5 2.8s5.5-1.5 5.5-2.8v-4.4M21.5 9v5",
 };

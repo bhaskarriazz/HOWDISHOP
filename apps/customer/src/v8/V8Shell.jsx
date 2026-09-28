@@ -8,7 +8,7 @@ export const V8_PILLARS = [
   { area: "connect", label: "Connect" },
   { area: "shop", label: "Shop" },
   { area: "move", label: "Move" },
-  { area: "works", label: "Works" },
+  { area: "works", label: "Work" },
   { area: "learn", label: "Learn" },
 ];
 
