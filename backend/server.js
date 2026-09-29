@@ -29712,7 +29712,14 @@ async function ensureVibeReleaseReadinessV140LSchema(){
     const shopS1DetailMatch = pathname.match(/^\/api\/shop\/catalogue\/products\/([^/]+)\/?$/);
     if (req.method === "GET" && shopS1DetailMatch) {
       try {
-        const idText = shopS1DetailMatch[1];
+        let idText = shopS1DetailMatch[1];
+        // K5B: /shop/products/PRD-… links carry the public product code issued by K5A (howdi_public_refs); resolve it
+        // server-side so the browser never needs the internal id. Unknown and hidden codes look identical (404).
+        if (/^PRD-[0-9A-F]{12}$/.test(idText)) {
+          const ref = await connectHomeK5A._internal.resolveRef(idText, ["PRODUCT"]);
+          if (!ref || !/^\d{1,18}$/.test(String(ref.entity_key))) return sendJSON(res, 404, { status: "error", message: "Product not found" });
+          idText = String(ref.entity_key);
+        }
         if (!/^\d{1,18}$/.test(idText)) return sendJSON(res, 400, { status: "error", message: "Invalid product id" });
         const { rows, variantsByProduct } = await loadShopS1Rows({ id: idText });
         // Hidden / unpublished / archived / moderated / unknown all look identical to the caller.

@@ -79,5 +79,16 @@ const secrets=(...us)=>us.flatMap(u=>[u.id,u.email,u.phone,u.howdi,u.master]);
   // Routing
   for(const t of ['people','creators','posts','articles','vibes','groups','channels','products']){r=await L.search(t,'k5b');L.check('routing: type='+t+' accepted',ok(r)&&r.json?.type===t);}
   for(const t of ['storefronts','product','bogus']){r=await L.search(t,'k5b');L.check('routing: '+t+' => INVALID_TYPE',r.status===400&&r.json?.code==='INVALID_TYPE');}
+  // K5B direct links: /shop/products/PRD-… opens the existing catalogue product page; the server resolves the code
+  // through the same howdi_public_refs row search issued, and the S1 visibility gate still applies afterwards.
+  let d=await L.api('GET','/api/shop/catalogue/products/'+refs.visible);
+  L.check('direct link: search PRD code opens the catalogue product detail',d.status===200&&d.json?.product?.name===NAME.visible,d.status);
+  d=await L.api('GET','/api/shop/catalogue/products/PRD-000000000000');
+  L.check('direct link: unknown PRD code is a 404',d.status===404&&d.json?.message==='Product not found',d.status);
+  await L.pool.query(`UPDATE vendor_products SET archived_at=NOW() WHERE id=$1`,[P.approved.id]);
+  d=await L.api('GET','/api/shop/catalogue/products/'+refs.approved);
+  L.check('direct link: a product hidden after its PRD code was issued is a 404',!!refs.approved&&d.status===404,d.status);
+  d=await L.api('GET','/api/shop/catalogue/products/PST-'+refs.visible.slice(4));
+  L.check('direct link: non-product public codes are rejected before lookup',d.status===400,d.status);
   await L.finish('k5b shop search');
 })().catch(async e=>{console.error('K5B PG runtime error:',e);console.error('Backend log:',L.serverLog().slice(-3000));L.check('postgres shop search runtime completed without transport/server error',false,e?.message||String(e));await L.finish('k5b shop search');});

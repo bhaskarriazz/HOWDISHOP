@@ -83,8 +83,8 @@ const VISIBLE_NAMES=['Approved Pouch','Cream Clutch','Inactive Variants Blanket'
 const HIDDEN={3:'Draft Basket',4:'Archived Hat',5:'Hidden Scarf',6:'Rejected Rug',7:'Pending Pouch',8:'Suspended Toy',9:'Scheduled Shawl'};
 
 // ---------- harness ----------
-async function call(route,{db=seed()}={}){
-  const queries=[];const logged=[];
+async function call(route,{db=seed(),refs={}}={}){
+  const queries=[];const logged=[];const refLookups=[];
   const pool={query:async(rawSql,params=[])=>{
     const sql=String(rawSql).replace(/\s+/g,' ').trim();queries.push({sql,params});
     if(db.failWith)throw new Error(db.failWith);
@@ -105,9 +105,11 @@ async function call(route,{db=seed()}={}){
   const u=new URL(route,'http://shop.test');
   const context={pool,req:{method:'GET',headers:{}},res:{},url:u,pathname:u.pathname,URL,Buffer,
     console:{error:(...a)=>logged.push(a.map(String).join(' ')),log(){},warn(){}},
-    clean:x=>String(x??'').trim(),sendJSON:(_res,status,data)=>({status,data})};
+    clean:x=>String(x??'').trim(),sendJSON:(_res,status,data)=>({status,data}),
+    // K5B: PRD- public codes resolve through the K5A howdi_public_refs resolver (double keyed by code).
+    connectHomeK5A:{_internal:{resolveRef:async(code,types)=>{refLookups.push({code,types});const r=refs[code];return r&&types.includes(r.entity_type)?r:null;}}}};
   const out=await vm.runInNewContext(attachSrc+'\n(async()=>{'+shopSrc+'})()',context);
-  return {status:out&&out.status,data:out&&JSON.parse(JSON.stringify(out.data)),queries,logged,handled:Boolean(out)};
+  return {status:out&&out.status,data:out&&JSON.parse(JSON.stringify(out.data)),queries,logged,refLookups,handled:Boolean(out)};
 }
 const names=(r)=>r.data.products.map(p=>p.name);
 async function list(qs='',opts){const r=await call('/api/shop/catalogue/products'+(qs?'?'+qs:''),opts);assert.equal(r.status,200,JSON.stringify(r.data));return r;}
@@ -539,4 +541,29 @@ test('App wiring: only the Shop entry points open the catalogue and the legacy S
   // Connect entry points are untouched
   assert.match(app,/openNavigationOSArea\("connect","home"\)/);
   assert.match(app,/onOpenShop=\{\(\)=>openNavigationOSArea\("shop","home"\)\}/,'Connect → Shop keeps its original target');
+});
+
+// ---------- K5B: /shop/products/PRD-… direct links ----------
+const REFS={'PRD-AAAAAAAAAAAA':{entity_type:'PRODUCT',entity_key:'1'},'PRD-BBBBBBBBBBBB':{entity_type:'PRODUCT',entity_key:'3'},'PRD-CCCCCCCCCCCC':{entity_type:'POST',entity_key:'1'}};
+test('K5B: a public PRD- code opens the same visible product as its internal id, without echoing a new identifier',async()=>{
+  const byCode=await call('/api/shop/catalogue/products/PRD-AAAAAAAAAAAA',{refs:REFS});
+  assert.equal(byCode.status,200,JSON.stringify(byCode.data));
+  assert.equal(JSON.stringify(byCode.refLookups),JSON.stringify([{code:'PRD-AAAAAAAAAAAA',types:['PRODUCT']}]));
+  const byId=await call('/api/shop/catalogue/products/1');
+  assert.deepEqual(byCode.data.product,byId.data.product);
+  assertNoInternalIdentity(byCode.data,'PRD detail');
+  const withVariant=await call('/api/shop/catalogue/products/PRD-AAAAAAAAAAAA?variant=101',{refs:REFS});
+  assert.equal(withVariant.status,200);
+});
+test('K5B: unknown, hidden and wrong-type PRD- codes are indistinguishable 404s',async()=>{
+  for(const code of ['PRD-000000000000','PRD-BBBBBBBBBBBB','PRD-CCCCCCCCCCCC']){
+    const r=await call('/api/shop/catalogue/products/'+code,{refs:REFS});
+    assert.equal(r.status,404,code);assert.equal(r.data.message,'Product not found',code);
+  }
+});
+test('K5B: malformed product codes never reach the ref resolver or the database',async()=>{
+  for(const code of ['PRD-aaaaaaaaaaaa','PRD-AAAA','PST-AAAAAAAAAAAA','PRD-AAAAAAAAAAAAA','prd-AAAAAAAAAAAA']){
+    const r=await call('/api/shop/catalogue/products/'+code,{refs:REFS});
+    assert.equal(r.status,400,code);assert.equal(r.refLookups.length,0,code);assert.equal(r.queries.length,0,code);
+  }
 });
