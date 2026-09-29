@@ -21318,6 +21318,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
       pool, getSessionUserFromRequest, sendJSON, connectPostVisibleSql, k5ePrivateProfileOkSql,
       rateLimit: vibeRateLimitV151B, getRequestIp,
     });
+    const globalSearchK5B = require("./global-search-k5b.cjs").createGlobalSearchK5B({ pool, getSessionUserFromRequest, sendJSON, k5ePrivateProfileOkSql });
 
     // =====================================================
     // SERVER
@@ -21369,6 +21370,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
           if (await k5eLegacyNotificationGuard(req, res, url)) return;
           // K5A Phase 1: Connect Home manifest, For You feed and by-code reads (guest-safe, session-authoritative).
           if (await connectHomeK5A.handle(req, res, url)) return;
+          if (await globalSearchK5B.handle(req, res, url)) return;
 
           const pathname =
             url.pathname;
