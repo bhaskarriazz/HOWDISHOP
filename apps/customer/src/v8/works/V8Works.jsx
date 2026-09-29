@@ -1,3 +1,4 @@
+import { initialForSearch } from "../../howdi-for/routes.js";
 // HOWDI V8 WORKS — boards V8__09 (Find a Worker, profile, availability, booking, payment, confirmed, completed, safety),
 // V8__33 (consent before details are shared, Arrival & Job PIN, manage booking) and V8__20 (worker dashboard, see WorkerDesk).
 // Routes (inside the Works pillar): "" / find · workers/{ref} · bookings · bookings/{BKG} · saved · safety · worker…
@@ -92,7 +93,7 @@ export function WorkerCard({ w, onOpen, onSave }) {
   );
 }
 function Find({ api, user, nav, onRequireLogin }) {
-  const [services, setServices] = useState([]); const [svc, setSvc] = useState(""); const [q, setQ] = useState(""); const [sort, setSort] = useState("rating");
+  const [services, setServices] = useState([]); const [svc, setSvc] = useState(""); const [q, setQ] = useState(initialForSearch); const [sort, setSort] = useState("rating");
   const [d, setD] = useState({ status: "loading", items: [] });
   useEffect(() => { api("GET", "/api/v8/works/services").then((r) => r.ok && setServices(r.json.items || [])); }, [api]);
   const load = useCallback(async () => { setD((x) => ({ ...x, status: "loading" })); const r = await api("GET", `/api/v8/works/workers?sort=${sort}${svc ? `&service=${svc}` : ""}${q.trim() ? `&q=${encodeURIComponent(q.trim())}` : ""}`); setD(r.ok ? { status: "ready", items: r.json.items || [] } : { status: "error", items: [], message: r.json.message }); }, [api, svc, q, sort]);

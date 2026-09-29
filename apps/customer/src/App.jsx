@@ -22,7 +22,7 @@ import { V8Appearance, V8Permissions, V8IdentityBadges } from "./v8/V8Settings";
 import { V8Confirm, V8OfflineBanner, V8SessionExpired, loadV8Prefs, applyV8Prefs, useV8Ui } from "./v8/V8System";
 import HowdiFor from "./howdi-for/HowdiFor";
 import { HowdiForMenuRow, HowdiForFeedCard, HowdiForEmptyStateLink, insertFeedCard } from "./howdi-for/HowdiForEntryPoints";
-import { parseForPath } from "./howdi-for/routes";
+import { parseForPath, resolveForDestination } from "./howdi-for/routes";
 import {
   recordTasteEvent,
   rememberRecentlyViewed,
@@ -9886,11 +9886,12 @@ return () => window.clearInterval(timer);
   const v8PrevUserRef=useRef(currentUser);
   useEffect(()=>{
     const was=v8PrevUserRef.current; v8PrevUserRef.current=currentUser;
-    if(!was&&currentUser&&navigationOSArea==="home"&&!v8HomeChosenRef.current)openNavigationOSArea("connect","home");
+    if(!was&&currentUser&&!howdiForRoute&&!howdiForPendingTarget&&navigationOSArea==="home"&&!v8HomeChosenRef.current)openNavigationOSArea("connect","home");
   },[currentUser]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [v8MovePath, setV8MovePath] = useState("");
   const openNavigationOSArea=(area,subview="home")=>{
+    setHowdiForRoute(null);
     const next=String(area||"connect").toLowerCase();
     const view=String(subview||"home").toLowerCase();
     // V8 Gate: Home is the one mixed ecosystem Home; Connect opens Connect Home; Shop is the one canonical Shop.
@@ -9994,37 +9995,29 @@ return () => window.clearInterval(timer);
     }
   };
 
-  const navigateHowdiFor=(href,target)=>{
-    const url=new URL(String(href||"/for"),window.location.origin);
+  const navigateHowdiFor=(href)=>{
+    let url;
+    try { url=new URL(String(href||"/for"),window.location.origin); } catch { return; }
+    if(url.origin!==window.location.origin)return;
     const forRoute=parseForPath(url.pathname);
     if(forRoute){
+      setHowdiForPendingTarget(null);
       window.history.pushState({},"",`${url.pathname}${url.search}`);
       setHowdiForRoute(forRoute);
-      window.scrollTo({top:0,behavior:"smooth"});
       return;
     }
-    const needsLogin=target&&["learn.teach","shop.vendor","connect.create"].includes(`${target.pillar}.${target.view}`);
-    if(needsLogin&&!currentUser){
-      setHowdiForPendingTarget({href,target});
+    // Resolve from an allow-listed URL, never caller-supplied role/user/target data.
+    const destination=resolveForDestination(url.href,window.location.origin);
+    if(!destination)return;
+    if(destination.needsLogin&&!currentUser){
+      setHowdiForPendingTarget(destination.href);
       openLogin();
       return;
     }
+    window.history.pushState({},"",destination.href);
+    if(destination.pathname==="/shop")setShopCatalogueQuery(destination.q);
     setHowdiForRoute(null);
-    if(url.pathname==="/learn/teach"){
-      openRoleDestination("TEACHER");
-    }else if(url.pathname.startsWith("/learn/")){
-      openNavigationOSArea("learn",url.pathname.split("/")[2]||"discover");
-    }else if(url.pathname.startsWith("/works/")){
-      openNavigationOSArea("works",url.pathname.split("/")[2]||"find");
-    }else if(url.pathname==="/shop/vendor"){
-      openNavigationOSArea("shop","vendor");
-    }else if(url.pathname==="/connect/create"){
-      openNavigationOSArea("connect","home");
-      setConnectCreateType("post");
-      setConnectCreateOpen(true);
-    }else{
-      openNavigationOSArea("home");
-    }
+    v8ApplyPath(destination.pathname);
   };
 
   useEffect(()=>{
@@ -10036,11 +10029,11 @@ return () => window.clearInterval(timer);
   // Reuse the existing login surface; the deferred destination is short-lived
   // in memory and runs only after an authenticated user is available.
   useEffect(()=>{
-    if(!currentUser||!howdiForPendingTarget)return;
+    if(!currentUser||showLogin||howdiOnboardingPending||!howdiForPendingTarget)return;
     const pending=howdiForPendingTarget;
     setHowdiForPendingTarget(null);
-    navigateHowdiFor(pending.href,pending.target);
-  },[currentUser,howdiForPendingTarget]);
+    navigateHowdiFor(pending);
+  },[currentUser,showLogin,howdiOnboardingPending,howdiForPendingTarget]);
 
   const navigate = (section) => {
     if (["home", "connect", "shop", "works", "learn"].includes(section)) {
@@ -10090,6 +10083,7 @@ return () => window.clearInterval(timer);
 
   const closeAuth = () => {
     if (loginLoading) return;
+    setHowdiForPendingTarget(null);
 
     setShowLogin(false);
     setLoginMessage("");
@@ -12732,7 +12726,7 @@ const removeNotification = async (notificationId) => {
     if(p==="/"){openNavigationOSArea("home");return true;}
     if(p==="/hpay"){openNavigationOSArea("hpay","home");return true;}
     if((m=p.match(/^\/connect(?:\/([A-Za-z0-9/_.-]{1,160}))?$/))){openNavigationOSArea("connect","p:"+(m[1]||"")+(window.location.search||""));return true;}
-    if(p==="/shop"){openNavigationOSArea("shop","catalogue");return true;}
+    if(p==="/shop"){const context=resolveForDestination(window.location.href,window.location.origin);if(context)setShopCatalogueQuery(context.q);openNavigationOSArea("shop","catalogue");return true;}
     if(p==="/shop/crochet"){openNavigationOSArea("shop","crochet");return true;}
     if(p==="/shop/cart"){openNavigationOSArea("shop","cart");return true;}
     if((m=p.match(/^\/shop\/(products\/PRD-[0-9A-F]{12}|bag|wishlist|checkout|orders(?:\/ORD-[0-9A-F]{12})?)$/))){openNavigationOSArea("shop",m[1]);return true;}
@@ -12772,8 +12766,10 @@ const removeNotification = async (notificationId) => {
   },[]);
   useEffect(()=>{
     if(!v8RouterReady.current||homeItemViewer||howdiForRoute)return;
-    const path=v8PathForState();
+    let path=v8PathForState();
     if(!path)return;
+    const forContext=resolveForDestination(window.location.href,window.location.origin);
+    if(forContext&&path.split("?")[0]===forContext.pathname)path=forContext.href;
     const fromPop=v8FromPop.current;v8FromPop.current=false;
     const first=v8FirstSync.current;v8FirstSync.current=false;
     // the first sync only corrects the address bar (e.g. "/" while a signed-in session lands on Connect): no extra history entry
@@ -12784,7 +12780,7 @@ const removeNotification = async (notificationId) => {
     // content may still be loading: retry the restore a few times until the page is tall enough
     [60,300,800,1500].forEach((ms)=>window.setTimeout(()=>{const el=document.querySelector(".v8-page")||document.querySelector(".howdi-os-workspace");if(el&&v8LastPath.current===path&&Math.abs(el.scrollTop-restore)>2)el.scrollTop=restore;},ms));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[v8RouterOn,navigationOSArea,v8MovePath,connectView,connectContentMode,v8ConnectPath,v8ShopPath,v8LearnPath,shopOSView,shopCollection,worksExperienceTab,learningPortalView,v8MeView,v8ProfileHandle]);
+  },[howdiForRoute,v8RouterOn,navigationOSArea,v8MovePath,connectView,connectContentMode,v8ConnectPath,v8ShopPath,v8LearnPath,shopOSView,shopCollection,worksExperienceTab,learningPortalView,v8MeView,v8ProfileHandle]);
   useEffect(()=>{
     // V8 Connect sheets (e.g. Share → Messages) ask the shell to open another area.
     const onOpen=(e)=>{const d=e&&e.detail;if(d&&typeof d.area==="string")openNavigationOSArea(d.area,d.view||"home");};
@@ -13120,7 +13116,7 @@ const removeNotification = async (notificationId) => {
         onOpenLegacy={() => { loadNotifications(); loadWorksNotifications(); setNotificationOpen(true); }}
         onRoute={(r) => { const s = String(r || ""); if (s.startsWith("/connect")) openNavigationOSArea("connect", "p:" + s.replace(/^\/connect\/?/, "")); else if (s.startsWith("/@")) openNavigationOSArea("profile", s.slice(2)); else v8ApplyPath(s.split("?")[0]); }} />
       {currentUser ? <V8CallCenter apiBase={SHOP_API_BASE} getAuthHeaders={customerSessionHeaders} user={currentUser} /> : null}
-      <a className="v8-skip" href="#v8-main" onClick={(e) => { e.preventDefault(); const m = document.querySelector(".v8-page") || document.getElementById("v8-main"); if (m) { m.setAttribute("tabindex", "-1"); m.focus(); } }}>Skip to content</a>
+      <a className="v8-skip" href="#v8-main" onClick={(e) => { e.preventDefault(); const m = document.querySelector(".hf-page h1") || document.querySelector(".v8-page") || document.getElementById("v8-main"); if (m) { m.setAttribute("tabindex", "-1"); m.focus(); } }}>Skip to content</a>
       <V8Rail active={v8ActivePillar} onNavigate={v8Navigate} pillars={v8VisiblePillars} />
       <V8Header
         ref={headerRef}
@@ -18060,7 +18056,7 @@ const removeNotification = async (notificationId) => {
           MAIN
       ====================================== */}
 
-      <main id="v8-main" tabIndex={-1}>
+      <main id="v8-main" tabIndex={-1} inert={howdiForRoute&&!showLogin&&!howdiOnboardingPending ? true : undefined}>
         {/* V8 S2: public profile (ID-001..003) and profile-hub settings pages (MY-011, TRU-003, ID settings) */}
         {navigationOSArea === "profile" && (
           <V8Profile apiBase={SHOP_API_BASE} handle={v8ProfileHandle} getAuthHeaders={customerSessionHeaders} signedIn={Boolean(currentUser)}
@@ -18087,7 +18083,7 @@ const removeNotification = async (notificationId) => {
         )}
         {/* V8 Connect feature hub (boards 06, 07, 14, 17, 32): hub, Vibe, Stories, Live, Spaces, Articles, Communities. */}
         {navigationOSArea === "connect" && connectView === "v8" && (
-          <V8Connect apiBase={SHOP_API_BASE} getAuthHeaders={customerSessionHeaders} user={currentUser} path={v8ConnectPath}
+          <V8Connect key={resolveForDestination(window.location.href,window.location.origin)?.href||"connect"} apiBase={SHOP_API_BASE} getAuthHeaders={customerSessionHeaders} user={currentUser} path={v8ConnectPath}
             onNavigate={(p) => openNavigationOSArea("connect", "p:" + String(p || ""))}
             onRequireLogin={openLogin} onOpenProfile={(h) => openNavigationOSArea("profile", String(h || ""))}
             onOpenArea={(area, view) => openNavigationOSArea(area, view)} />
@@ -18562,7 +18558,7 @@ const removeNotification = async (notificationId) => {
 
         {navigationOSArea === "move" && <V8Move apiBase={SHOP_API_BASE} getAuthHeaders={customerSessionHeaders} user={currentUser} path={v8MovePath} onNavigate={p => openNavigationOSArea("move", p || "home")} onRequireLogin={openLogin} />}
         {navigationOSArea==="works"&&worksExperienceTab!=="classic"&&(
-          <V8Works apiBase={SHOP_API_BASE} getAuthHeaders={customerSessionHeaders} user={currentUser} path={worksExperienceTab}
+          <V8Works key={resolveForDestination(window.location.href,window.location.origin)?.href||"works"} apiBase={SHOP_API_BASE} getAuthHeaders={customerSessionHeaders} user={currentUser} path={worksExperienceTab}
             onNavigate={(p)=>openNavigationOSArea("works",String(p||"find"))} onRequireLogin={openLogin}
             onOpenProfile={(h)=>openNavigationOSArea("profile",String(h||""))} onOpenClassic={()=>openNavigationOSArea("works","classic")} />
         )}
@@ -21578,7 +21574,7 @@ const removeNotification = async (notificationId) => {
         {classroomIssueOpen&&activeClassroom&&<div className="classroom-issue-overlay"><div className="classroom-issue-modal"><button className="close" onClick={()=>setClassroomIssueOpen(false)}>×</button><small>HOWDI CLASSROOM SUPPORT</small><h3>Report a classroom issue</h3><p>This creates a tracked HOWDI incident linked to this class.</p><div className="issue-grid"><button onClick={()=>reportLearnerIssue("TEACHER_NOT_VISIBLE","Teacher video/audio is not available")}>Teacher not visible</button><button onClick={()=>reportLearnerIssue("AUDIO_VIDEO_PROBLEM","Audio or video problem")}>Audio / video problem</button><button onClick={()=>reportLearnerIssue("TEACHER_DISCONNECTED","Teacher disconnected")}>Teacher disconnected</button><button onClick={()=>reportLearnerIssue("DIRECT_PAYMENT_REQUEST","Teacher requested direct payment")}>Direct payment request</button><button onClick={()=>reportLearnerIssue("CLASS_QUALITY_ISSUE","Class quality issue")}>Class quality issue</button><button onClick={()=>reportLearnerIssue("OTHER_CLASSROOM_ISSUE","Other classroom issue")}>Other</button></div></div></div>}
 
         {navigationOSArea==="learn" && learningPortalView==="v8" && (
-          <V8Learn apiBase={SHOP_API_BASE} getAuthHeaders={customerSessionHeaders} user={currentUser} path={v8LearnPath} onRequireLogin={openLogin}
+          <V8Learn key={resolveForDestination(window.location.href,window.location.origin)?.href||"learn"} apiBase={SHOP_API_BASE} getAuthHeaders={customerSessionHeaders} user={currentUser} path={v8LearnPath} onRequireLogin={openLogin}
             onNavigate={(p)=>{const s=String(p||"courses");if(s.startsWith("/")){if(!v8ApplyPath(s))openNavigationOSArea("home");}else openNavigationOSArea("learn",s);}} />
         )}
         {navigationOSArea==="learn" && learningPortalView!=="v8" && (
@@ -22446,17 +22442,17 @@ const removeNotification = async (notificationId) => {
             setCurrentUser((u) => { const next = { ...(u || {}), full_name: profile?.display_name || u?.full_name, public_username: profile?.public_username || u?.public_username }; try { localStorage.setItem("howdiUser", JSON.stringify(next)); } catch { /* ignore */ } return next; });
             setHowdiOnboardingPending(false);
             v8HomeChosenRef.current = true;
-            openNavigationOSArea("home");
+            if(!howdiForPendingTarget)openNavigationOSArea("home");
             v8Ui?.toast({ title: "Welcome to HOWDI!", message: `Your profile @${profile?.public_username || ""} is ready.` });
           }}
         />
 
       </main>
 
-      {howdiForRoute&&<div className="hf-app-overlay" role="dialog" aria-modal="true" aria-label="HOWDI for">
+      {howdiForRoute&&<div className="hf-app-overlay" role="region" aria-label="HOWDI for">
         <header className="hf-app-overlay-head">
-          <span className="hf-brand" aria-hidden="true"><span className="hf-brand-mark">H</span><span className="hf-brand-copy"><b>HOWDI</b><small>Made by hand. Made with heart.</small></span></span>
-          <button type="button" onClick={()=>{window.history.pushState({},"","/");setHowdiForRoute(null);openNavigationOSArea("connect","home")}}>← Back to HOWDI</button>
+          <span className="hf-brand" aria-hidden="true"><span className="hf-brand-mark">H</span><span className="hf-brand-copy"><b>HOWDI for</b><small>Made by hand. Made with heart.</small></span></span>
+          <button type="button" onClick={()=>{window.history.pushState({},"","/");setHowdiForPendingTarget(null);setHowdiForRoute(null);openNavigationOSArea("home")}}>← Back to HOWDI</button>
         </header>
         <HowdiFor route={howdiForRoute} onNavigate={navigateHowdiFor}/>
       </div>}

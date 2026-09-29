@@ -103,7 +103,7 @@ test('segment page: one h1, breadcrumb, steps, action links with hrefs, other se
 });
 
 test('all three segment pages render without errors', () => {
-  for (const s of SEGMENT_SLUGS) assert.match(render(h(HowdiForSegment, { slug: s })), new RegExp(SEGMENTS[s].title));
+  for (const s of SEGMENT_SLUGS) assert.match(render(h(HowdiForSegment, { slug: s })), new RegExp(SEGMENTS[s].title.replaceAll("&", "&amp;")));
 });
 
 test('index lists all three segments', () => {

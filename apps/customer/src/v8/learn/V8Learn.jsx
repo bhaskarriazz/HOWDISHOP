@@ -1,3 +1,4 @@
+import { initialForSearch } from "../../howdi-for/routes.js";
 // HOWDI V8 LEARN & EARN — learner: catalogue → course → join (free, or HPay with PIN) → lessons (preview, progress, practice) →
 // certificate (+ public verify) → My learning. Teacher (approved role): My courses (learners, completions, HPay earned),
 // create + publish a course, see each learner's progress. Role applications: Teacher / Institute / Startup → HOWDI Admin.
@@ -11,6 +12,7 @@ import { PinStep, inr, newKey } from "../connect/HPayUtilities";
 import "../works/works.css";
 import "../shop/shop.css";
 import "./learn.css";
+import PartnerApplication from "./PartnerApplication";
 
 const day = (iso) => (iso ? new Date(iso).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" }) : "");
 const Bar = ({ v }) => <span className="v8l-bar" role="progressbar" aria-valuenow={v} aria-valuemin={0} aria-valuemax={100}><i style={{ width: `${v}%` }} /></span>;
@@ -47,7 +49,7 @@ function Card({ c, nav }) {
 }
 
 function Catalog({ api, nav }) {
-  const [q, setQ] = useState(""); const [cat, setCat] = useState(""); const [d, setD] = useState(null);
+  const [q, setQ] = useState(initialForSearch); const [cat, setCat] = useState(""); const [d, setD] = useState(null);
   const load = useCallback(async () => { const r = await api("GET", `/api/v8/learn/courses?q=${encodeURIComponent(q)}${cat ? `&category=${encodeURIComponent(cat)}` : ""}`); setD(r.ok ? r.json : { error: r.json.message, items: [] }); }, [api, q, cat]);
   useEffect(() => { const t = window.setTimeout(load, 250); return () => window.clearTimeout(t); }, [load]);
   return (<>
@@ -230,6 +232,8 @@ function RoleApply({ api, role, nav }) {
             : <input value={f[k] || ""} disabled={!editable} inputMode={kind === "num" ? "numeric" : undefined} onChange={(e) => setF((x) => ({ ...x, [k]: e.target.value }))} placeholder={ph} />}
     </label>);
   const st = a ? STATUS[a.status] : null;
+  if (role === "institute" || role === "startup") return <PartnerApplication key={role} role={role} fields={F.fields} values={f} renderInput={input} application={a} status={st} editable={editable} declaration={decl} onDeclaration={setDecl} error={err}
+    onSave={async () => { if (await save()) ui?.toast({ title: "Saved" }); }} onSubmit={submit} onBack={() => nav("/me/roles")} formatDate={day} />;
   return (<>
     <button type="button" className="v8-link" onClick={() => nav("/me/roles")}>← My roles</button>
     <section className="v8-card v8w-block v8l-apply">

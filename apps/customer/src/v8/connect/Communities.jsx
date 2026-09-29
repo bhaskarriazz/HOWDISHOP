@@ -1,3 +1,4 @@
+import { initialForSearch } from "../../howdi-for/routes.js";
 // HOWDI V8 Communities, Groups & Channels — board 17 (browser with type tiles, filters, featured cards, empty state,
 // group / channel pages, Request sent, member roles, report queue and moderation actions), board 06 panel 4 and
 // PRIOR-07 panel 6 (Groups · Channels · Live · Spaces tabs with clear badges). Live / Spaces tabs reuse those screens.
@@ -384,7 +385,7 @@ function Detail({ api, slug, user, onBack, onRequireLogin, onOpenProfile, initia
 export default function CommunitiesScreen({ api, user, focus, type, code, onNav, onRequireLogin, onOpenProfile }) {
   const signedIn = Boolean(user);
   const [tab, setTab] = useState(type === "groups" || type === "channels" || type === "spaces" || type === "mine" ? type : "all");
-  const [q, setQ] = useState(""); const [topic, setTopic] = useState(""); const [list, setList] = useState({ status: "loading", items: [], topics: [] });
+  const [q, setQ] = useState(initialForSearch); const [topic, setTopic] = useState(""); const [list, setList] = useState({ status: "loading", items: [], topics: [] });
   const ui = useV8Ui();
   const load = useCallback(async () => {
     if (tab === "spaces" || tab === "live") return;
