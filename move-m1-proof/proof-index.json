@@ -1,0 +1,187 @@
+{
+  "source": "real local Vite + HOWDI backend + disposable PostgreSQL preview database",
+  "scope": "M1 customer Move; synthetic local test account and address; no Founder visual PASS",
+  "captured_at": "2026-09-29T00:20:26.268Z",
+  "files": [
+    {
+      "name": "1440-home.png",
+      "width": 1440,
+      "screen": "home",
+      "sizes": {
+        "viewport": 1440,
+        "body": 1440,
+        "document": 1440
+      }
+    },
+    {
+      "name": "1440-quote.png",
+      "width": 1440,
+      "screen": "quote",
+      "sizes": {
+        "viewport": 1440,
+        "body": 1440,
+        "document": 1440
+      }
+    },
+    {
+      "name": "1440-quote-review.png",
+      "width": 1440,
+      "screen": "quote-review",
+      "sizes": {
+        "viewport": 1440,
+        "body": 1440,
+        "document": 1440
+      }
+    },
+    {
+      "name": "1440-no-driver.png",
+      "width": 1440,
+      "screen": "no-driver",
+      "sizes": {
+        "viewport": 1440,
+        "body": 1440,
+        "document": 1440
+      }
+    },
+    {
+      "name": "1440-no-driver-detail.png",
+      "width": 1440,
+      "screen": "no-driver-detail",
+      "sizes": {
+        "viewport": 1440,
+        "body": 1440,
+        "document": 1440
+      }
+    },
+    {
+      "name": "768-home.png",
+      "width": 768,
+      "screen": "home",
+      "sizes": {
+        "viewport": 768,
+        "body": 768,
+        "document": 768
+      }
+    },
+    {
+      "name": "768-quote.png",
+      "width": 768,
+      "screen": "quote",
+      "sizes": {
+        "viewport": 768,
+        "body": 768,
+        "document": 768
+      }
+    },
+    {
+      "name": "768-quote-review.png",
+      "width": 768,
+      "screen": "quote-review",
+      "sizes": {
+        "viewport": 768,
+        "body": 768,
+        "document": 768
+      }
+    },
+    {
+      "name": "768-no-driver.png",
+      "width": 768,
+      "screen": "no-driver",
+      "sizes": {
+        "viewport": 768,
+        "body": 768,
+        "document": 768
+      }
+    },
+    {
+      "name": "768-no-driver-detail.png",
+      "width": 768,
+      "screen": "no-driver-detail",
+      "sizes": {
+        "viewport": 768,
+        "body": 768,
+        "document": 768
+      }
+    },
+    {
+      "name": "390-home.png",
+      "width": 390,
+      "screen": "home",
+      "sizes": {
+        "viewport": 390,
+        "body": 390,
+        "document": 390
+      }
+    },
+    {
+      "name": "390-quote.png",
+      "width": 390,
+      "screen": "quote",
+      "sizes": {
+        "viewport": 390,
+        "body": 390,
+        "document": 390
+      }
+    },
+    {
+      "name": "390-quote-review.png",
+      "width": 390,
+      "screen": "quote-review",
+      "sizes": {
+        "viewport": 390,
+        "body": 390,
+        "document": 390
+      }
+    },
+    {
+      "name": "390-no-driver.png",
+      "width": 390,
+      "screen": "no-driver",
+      "sizes": {
+        "viewport": 390,
+        "body": 390,
+        "document": 390
+      }
+    },
+    {
+      "name": "390-no-driver-detail.png",
+      "width": 390,
+      "screen": "no-driver-detail",
+      "sizes": {
+        "viewport": 390,
+        "body": 390,
+        "document": 390
+      }
+    },
+    {
+      "name": "390-network-interrupted.png",
+      "width": 390,
+      "screen": "network-interrupted",
+      "sizes": {
+        "viewport": 390,
+        "body": 390,
+        "document": 390
+      }
+    },
+    {
+      "name": "390-women-special-unavailable.png",
+      "width": 390,
+      "screen": "women-special-unavailable",
+      "sizes": {
+        "viewport": 390,
+        "body": 390,
+        "document": 390
+      }
+    },
+    {
+      "name": "390-send-items-unavailable.png",
+      "width": 390,
+      "screen": "send-items-unavailable",
+      "sizes": {
+        "viewport": 390,
+        "body": 390,
+        "document": 390
+      }
+    }
+  ]
+}

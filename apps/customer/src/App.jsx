@@ -18560,7 +18560,7 @@ const removeNotification = async (notificationId) => {
 
         </>)}
 
-        {navigationOSArea === "move" && <V8Move apiBase={SHOP_API_BASE} getAuthHeaders={customerSessionHeaders} user={currentUser} path={v8MovePath} onNavigate={p => openNavigationOSArea("move", p || "home")} onRequireLogin={openLogin} />}
+        {navigationOSArea === "move" && <V8Move apiBase={SHOP_API_BASE} getAuthHeaders={customerSessionHeaders} user={currentUser} path={v8MovePath} onNavigate={p => openNavigationOSArea("move", p || "home")} onOpenAddresses={() => openNavigationOSArea("me", "addresses")} onRequireLogin={openLogin} />}
         {navigationOSArea==="works"&&worksExperienceTab!=="classic"&&(
           <V8Works apiBase={SHOP_API_BASE} getAuthHeaders={customerSessionHeaders} user={currentUser} path={worksExperienceTab}
             onNavigate={(p)=>openNavigationOSArea("works",String(p||"find"))} onRequireLogin={openLogin}

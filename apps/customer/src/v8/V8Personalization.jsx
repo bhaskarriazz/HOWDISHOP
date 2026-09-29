@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { V8Dialog, V8Icon } from "./V8Shell";
+import { V8Icon } from "./V8Shell";
+import { V8Dialog } from "./V8System";
 
 export const V8_DEFAULT_DOCK = ["home", "connect", "shop", "move", "works", "learn"];
 export const V8_HOME_MODULES = [
