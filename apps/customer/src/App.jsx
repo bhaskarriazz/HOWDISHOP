@@ -23,6 +23,7 @@ import { V8Confirm, V8OfflineBanner, V8SessionExpired, loadV8Prefs, applyV8Prefs
 import HowdiFor from "./howdi-for/HowdiFor";
 import { HowdiForMenuRow, HowdiForFeedCard, HowdiForEmptyStateLink, insertFeedCard } from "./howdi-for/HowdiForEntryPoints";
 import { parseForPath, resolveForDestination } from "./howdi-for/routes";
+import { discoverySearch, parseDiscoveryParams } from "./v8/learn/learnDiscovery";
 import {
   recordTasteEvent,
   rememberRecentlyViewed,
@@ -7406,7 +7407,7 @@ function App() {
       setLearningPortalView("my-learning");loadLearningData();return;
     }
     if(action==="JOURNEY"){setLearningPortalView("journey");loadSkillJourney();return;}
-    setLearningPortalView("discover");loadPublishedLearningCatalog();
+    openNavigationOSArea("learn","discover");
   };
   const learnerHomeClassDate=(value)=>{
     if(!value)return "Not scheduled";
@@ -12716,7 +12717,14 @@ const removeNotification = async (notificationId) => {
     }
     if(navigationOSArea==="move")return v8MovePath ? `/move/${v8MovePath}` : "/move";
     if(navigationOSArea==="works")return worksExperienceTab&&!["find","home"].includes(worksExperienceTab)?`/works/${worksExperienceTab}`:"/works";
-    if(navigationOSArea==="learn"&&learningPortalView==="v8")return v8LearnPath.startsWith("apply/")?`/me/${v8LearnPath}`:`/learn/${v8LearnPath}`;
+    if(navigationOSArea==="learn"&&learningPortalView==="v8"){
+      if(v8LearnPath==="courses"){
+        // P8: /learn/courses?… is shareable; only validated discovery keys survive, and only when already on the catalogue
+        const here=String(window.location.pathname||"").replace(/\/+$/,"");
+        return `/learn/courses${here==="/learn/courses"||here==="/learn"?discoverySearch(parseDiscoveryParams(window.location.search)):""}`;
+      }
+      return v8LearnPath.startsWith("apply/")?`/me/${v8LearnPath}`:`/learn/${v8LearnPath}`;
+    }
     if(navigationOSArea==="learn")return learningPortalView&&!["discover","home"].includes(learningPortalView)?`/learn/${learningPortalView}`:"/learn";
     return null;
   };
@@ -12769,7 +12777,7 @@ const removeNotification = async (notificationId) => {
     let path=v8PathForState();
     if(!path)return;
     const forContext=resolveForDestination(window.location.href,window.location.origin);
-    if(forContext&&path.split("?")[0]===forContext.pathname)path=forContext.href;
+    if(forContext&&path.split("?")[0]===forContext.pathname&&!(path.startsWith("/learn/courses?")&&parseDiscoveryParams(path.split("?")[1]).from))path=forContext.href;
     const fromPop=v8FromPop.current;v8FromPop.current=false;
     const first=v8FirstSync.current;v8FirstSync.current=false;
     // the first sync only corrects the address bar (e.g. "/" while a signed-in session lands on Connect): no extra history entry
@@ -21598,7 +21606,7 @@ const removeNotification = async (notificationId) => {
                             ["hpay","₹","HPay Rewards"],
                             ["earn","₹","Earn"]
                           ].map(([id,icon,label])=>
-                            <button type="button" key={id} className={learningPortalView===id?"active":""} onClick={()=>{if(id==="journey"){setLearningJourneyFocus("learn");loadSkillJourney();}if(id==="passport"){loadSkillPassport();loadSkillAssessments();}if(id==="access"){loadLearningAccessPlans();loadLearningAccessHealth();}if(id==="market"){loadLearningMarketIntelligence();}if(id==="community"){loadLearningCommunityPrograms();}if(id==="opportunities"){loadLearningOpportunities();}if(id==="hpay"){loadLearningHpay();}setLearningPortalView(id)}}>
+                            <button type="button" key={id} className={learningPortalView===id?"active":""} onClick={()=>{if(id==="discover"){openNavigationOSArea("learn","discover");return;}if(id==="journey"){setLearningJourneyFocus("learn");loadSkillJourney();}if(id==="passport"){loadSkillPassport();loadSkillAssessments();}if(id==="access"){loadLearningAccessPlans();loadLearningAccessHealth();}if(id==="market"){loadLearningMarketIntelligence();}if(id==="community"){loadLearningCommunityPrograms();}if(id==="opportunities"){loadLearningOpportunities();}if(id==="hpay"){loadLearningHpay();}setLearningPortalView(id)}}>
                               <i aria-hidden="true">{icon}</i><span>{label}</span>
                             </button>
                           )}
@@ -21741,9 +21749,9 @@ const removeNotification = async (notificationId) => {
                                     {learningCatalog.slice(0,8).map((course,index)=>{
                                       const alreadyAdded=learningCourses.some(item=>String(item.id)===String(course.id));
                                       return <article className="hle-course-card hla-course-card" key={course.id}>
-                                        <div className="hle-course-cover"><span>{course.icon||["🧶","🎨","💻","🌱"][index%4]}</span><em>{index===0?"BESTSELLER":index===1?"NEW":index===2?"POPULAR":"FEATURED"}</em><small>{course.language||"English"}</small></div>
+                                        <div className="hle-course-cover"><span>{course.icon||["🧶","🎨","💻","🌱"][index%4]}</span><small>{course.language||"English"}</small></div>
                                         <div className="hle-course-body"><small>{String(course.category||"Learning").toUpperCase()}</small><h3>{course.title}</h3><p>{course.tagline||course.description||"A practical HOWDI learning journey."}</p>
-                                          <div className="hle-course-meta"><span>★ {course.rating||"4.8"}</span><span>▶ {course.lessonsTotal||course.lesson_count||0} lessons</span></div>
+                                          <div className="hle-course-meta"><span>▶ {course.lessonsTotal||course.lesson_count||0} lessons</span></div>
                                           <div className="hle-course-price-line"><div>{Number(course.sale_price??course.price??0)>0?<b>{moneyLearning(course.sale_price??course.price,course.currency||"INR")}</b>:<b>Free</b>}</div><button onClick={()=>alreadyAdded?setLearningPortalView("my-learning"):openCourseDetails(course)}>{alreadyAdded?"Continue →":"View Course"}</button></div>
                                         </div>
                                       </article>

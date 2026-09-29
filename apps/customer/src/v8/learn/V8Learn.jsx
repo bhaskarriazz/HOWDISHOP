@@ -1,4 +1,3 @@
-import { initialForSearch } from "../../howdi-for/routes.js";
 // HOWDI V8 LEARN & EARN — learner: catalogue → course → join (free, or HPay with PIN) → lessons (preview, progress, practice) →
 // certificate (+ public verify) → My learning. Teacher (approved role): My courses (learners, completions, HPay earned),
 // create + publish a course, see each learner's progress. Role applications: Teacher / Institute / Startup → HOWDI Admin.
@@ -13,6 +12,7 @@ import "../works/works.css";
 import "../shop/shop.css";
 import "./learn.css";
 import PartnerApplication from "./PartnerApplication";
+import LearnDiscover, { CourseCard } from "./LearnDiscover";
 
 const day = (iso) => (iso ? new Date(iso).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" }) : "");
 const Bar = ({ v }) => <span className="v8l-bar" role="progressbar" aria-valuenow={v} aria-valuemin={0} aria-valuemax={100}><i style={{ width: `${v}%` }} /></span>;
@@ -22,43 +22,20 @@ export default function V8Learn({ apiBase, getAuthHeaders, user, path, onNavigat
   const api = useApi(apiBase, getAuthHeaders); const p = String(path || ""); let m;
   const need = (el) => (user ? el : <SignInCard title="Sign in to continue" message="Your courses, progress and certificates are saved to your HOWDI account." onSignIn={onRequireLogin} />);
   const apply = p.match(/^apply\/(teacher|institute|startup)$/);
+  const discover = !apply && !/^(courses\/|lessons\/|certificates\/|mine|teach)/.test(p);
   return (
-    <div className="v8-page v8s v8l" id="v8-main">
+    <div className={`v8-page v8s v8l${discover ? " v8l-wide" : ""}`} id="v8-main">
       {!apply ? <nav className="v8s-top" aria-label="Learn & Earn"><button type="button" className="v8-link" onClick={() => onNavigate("courses")}>Courses</button><span /><button type="button" className="v8-btn" onClick={() => onNavigate("mine")}><V8Icon name="learn" size={16} />My learning</button><button type="button" className="v8-btn" onClick={() => onNavigate("teach")}><V8Icon name="star" size={16} />Teach</button><button type="button" className="v8-link" onClick={() => onNavigate("/learn/live")}>Live classes & Passport</button></nav> : null}
       {(m = p.match(/^courses\/(CRS-[0-9A-F]{12})$/)) ? <Course key={m[1]} api={api} code={m[1]} user={user} nav={onNavigate} onRequireLogin={onRequireLogin} />
         : (m = p.match(/^lessons\/(LSN-[0-9A-F]{12})$/)) ? <Lesson key={m[1]} api={api} code={m[1]} user={user} nav={onNavigate} onRequireLogin={onRequireLogin} />
           : (m = p.match(/^certificates\/([A-Z0-9-]{6,80})$/)) ? <Verify api={api} code={m[1]} nav={onNavigate} />
-            : p === "mine" ? need(<Mine api={api} nav={onNavigate} />)
+            : p === "mine" ? need(<Mine api={api} apiBase={apiBase} nav={onNavigate} />)
               : (m = p.match(/^teach\/(CRS-[0-9A-F]{12})$/)) ? need(<TeachCourse api={api} code={m[1]} nav={onNavigate} />)
                 : p === "teach" ? need(<Teach api={api} nav={onNavigate} />)
                   : apply ? need(<RoleApply api={api} role={apply[1]} nav={onNavigate} />)
-                    : <Catalog api={api} nav={onNavigate} />}
+                    : <LearnDiscover api={api} apiBase={apiBase} user={user} nav={onNavigate} onRequireLogin={onRequireLogin} />}
     </div>
   );
-}
-
-function Card({ c, nav }) {
-  return (
-    <button type="button" className="v8-card v8l-card" onClick={() => nav(`courses/${c.public_key}`)}>
-      <span className="v8l-cover">{safeImg(c.image) ? <img src={c.image} alt="" /> : <V8Icon name="learn" size={30} />}<em>{c.free ? "Free" : inr(c.price)}</em></span>
-      <b>{c.title}</b>{c.tagline ? <small>{c.tagline}</small> : null}
-      <small><Who c={c} /> · {c.level} · {c.lessons} lessons · {c.minutes} min</small>
-      {c.enrolled ? <span className="v8l-prog"><Bar v={c.progress} /><small>{c.progress}%</small></span> : <small className="v8c-muted">{c.learners} learner{c.learners === 1 ? "" : "s"}</small>}
-    </button>
-  );
-}
-
-function Catalog({ api, nav }) {
-  const [q, setQ] = useState(initialForSearch); const [cat, setCat] = useState(""); const [d, setD] = useState(null);
-  const load = useCallback(async () => { const r = await api("GET", `/api/v8/learn/courses?q=${encodeURIComponent(q)}${cat ? `&category=${encodeURIComponent(cat)}` : ""}`); setD(r.ok ? r.json : { error: r.json.message, items: [] }); }, [api, q, cat]);
-  useEffect(() => { const t = window.setTimeout(load, 250); return () => window.clearTimeout(t); }, [load]);
-  return (<>
-    <header className="v8l-hero"><h1>Learn a skill. Earn with it.</h1><p>Short, practical courses from verified HOWDI teachers. Every lesson you finish counts toward a certificate.</p>
-      <label className="v8c-field v8l-search"><span className="v8-sr">Search courses</span><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search crochet, tailoring, cooking…" /></label></header>
-    <div className="v8l-chips" role="list">{["", ...(d?.categories || [])].map((c) => <button key={c || "all"} type="button" role="listitem" className={cat === c ? "on" : ""} onClick={() => setCat(c)}>{c || "All"}</button>)}</div>
-    {!d ? <Skel h={220} r={16} /> : d.error ? <p className="v8c-err">{d.error}</p> : !d.items.length ? <V8State icon="learn" title="No courses yet" message={q || cat ? "Try another search or category." : "Teachers are adding courses. Check back soon."} />
-      : <div className="v8l-grid">{d.items.map((c) => <Card key={c.public_key} c={c} nav={nav} />)}</div>}
-  </>);
 }
 
 function Course({ api, code, user, nav, onRequireLogin }) {
@@ -140,17 +117,18 @@ function Verify({ api, code, nav }) {
   );
 }
 
-function Mine({ api, nav }) {
+function Mine({ api, apiBase, nav }) {
   const [d, setD] = useState(null); const [tab, setTab] = useState("active");
   useEffect(() => { api("GET", "/api/v8/learn/me").then((r) => setD(r.ok ? r.json : { error: r.json.message })); }, [api]);
+  const unsave = async (c) => { const r = await api("POST", `/api/v8/learn/courses/${c.public_key}/save`, { saved: false }); if (r.ok) setD((x) => ({ ...x, saved: x.saved.filter((y) => y.public_key !== c.public_key) })); };
   if (!d) return <Skel h={260} r={16} />;
   if (d.error) return <p className="v8c-err">{d.error}</p>;
-  const items = tab === "active" ? d.active : d.completed;
+  const items = tab === "active" ? d.active : tab === "saved" ? (d.saved || []) : d.completed;
   return (<>
     <h1 className="v8l-h">My learning</h1>
-    <Tabs tabs={[{ value: "active", label: "In progress", count: d.active.length }, { value: "done", label: "Completed", count: d.completed.length }]} value={tab} onChange={setTab} label="My learning" />
-    {!items.length ? <V8State icon="learn" title={tab === "active" ? "No courses in progress" : "No certificates yet"} message={tab === "active" ? "Join a course to start learning." : "Finish every lesson in a course to earn its certificate."} actionLabel="Browse courses" onAction={() => nav("courses")} />
-      : <div className="v8l-grid">{items.map((c) => <div key={c.public_key} className="v8l-mine"><Card c={c} nav={nav} />{c.certificate ? <button type="button" className="v8-btn" onClick={() => nav(`certificates/${c.certificate.code}`)}><V8Icon name="star" size={16} />Certificate {c.certificate.code}</button> : null}</div>)}</div>}
+    <Tabs tabs={[{ value: "active", label: "In progress", count: d.active.length }, { value: "saved", label: "Saved", count: (d.saved || []).length }, { value: "done", label: "Completed", count: d.completed.length }]} value={tab} onChange={setTab} label="My learning" />
+    {!items.length ? <V8State icon="learn" title={tab === "active" ? "No courses in progress" : tab === "saved" ? "Nothing saved yet" : "No certificates yet"} message={tab === "active" ? "Join a course to start learning." : tab === "saved" ? "Tap the heart on a course to keep it here for later." : "Finish every lesson in a course to earn its certificate."} actionLabel="Browse courses" onAction={() => nav("courses")} />
+      : <div className="lx-grid">{items.map((c) => <div key={c.public_key} className="v8l-mine"><CourseCard c={c} apiBase={apiBase} nav={nav} onSave={tab === "saved" ? unsave : undefined} />{c.certificate ? <button type="button" className="v8-btn" onClick={() => nav(`certificates/${c.certificate.code}`)}><V8Icon name="star" size={16} />Certificate {c.certificate.code}</button> : null}</div>)}</div>}
   </>);
 }
 
@@ -158,14 +136,14 @@ function Mine({ api, nav }) {
 const blankLesson = () => ({ title: "", body: "", minutes: 10, tip: "", practice: "" });
 function Teach({ api, nav }) {
   const ui = useV8Ui(); const [d, setD] = useState(null); const [open, setOpen] = useState(false); const [err, setErr] = useState(""); const [busy, setBusy] = useState(false);
-  const [f, setF] = useState({ title: "", tagline: "", description: "", category: "", level: "beginner", price: 0, outcomes: "", lessons: [blankLesson()] });
+  const [f, setF] = useState({ title: "", tagline: "", description: "", category: "", level: "beginner", price: 0, outcomes: "", language: "English", materials: "", materials_cost: "", lessons: [blankLesson()] });
   const load = useCallback(async () => { const r = await api("GET", "/api/v8/learn/teach"); setD(r.ok ? r.json : { error: r.json.message, code: r.json.code }); }, [api]);
   useEffect(() => { load(); }, [load]);
   if (!d) return <Skel h={260} r={16} />;
   if (d.code === "TEACHER_ROLE_REQUIRED") return <V8State icon="learn" title="Teach on HOWDI" message="Apply as a Teacher. HOWDI checks your skill and experience, then you can create courses and get paid in HPay." actionLabel="Apply as a teacher" onAction={() => nav("/me/apply/teacher")} />;
   if (d.error) return <p className="v8c-err">{d.error}</p>;
   const set = (k, v) => setF((x) => ({ ...x, [k]: v })); const setL = (i, k, v) => setF((x) => ({ ...x, lessons: x.lessons.map((l, j) => (j === i ? { ...l, [k]: v } : l)) }));
-  const create = async (publish) => { setBusy(true); setErr(""); const r = await api("POST", "/api/v8/learn/teach/courses", { ...f, price: Number(f.price) || 0, outcomes: f.outcomes.split(/\n+/).filter(Boolean), publish }); setBusy(false); if (!r.ok) { setErr(r.json.message); return; } ui?.toast({ title: publish ? "Course published — learners can join now" : "Draft saved" }); setOpen(false); setF({ title: "", tagline: "", description: "", category: "", level: "beginner", price: 0, outcomes: "", lessons: [blankLesson()] }); load(); };
+  const create = async (publish) => { setBusy(true); setErr(""); const r = await api("POST", "/api/v8/learn/teach/courses", { ...f, price: Number(f.price) || 0, outcomes: f.outcomes.split(/\n+/).filter(Boolean), materials: f.materials.split(/\n+/).map((x) => x.trim()).filter(Boolean), materials_cost: f.materials_cost === "" ? null : Number(f.materials_cost), publish }); setBusy(false); if (!r.ok) { setErr(r.json.message); return; } ui?.toast({ title: publish ? "Course published — learners can join now" : "Draft saved" }); setOpen(false); setF({ title: "", tagline: "", description: "", category: "", level: "beginner", price: 0, outcomes: "", language: "English", materials: "", materials_cost: "", lessons: [blankLesson()] }); load(); };
   const toggle = async (c) => { const r = await api("POST", `/api/v8/learn/teach/courses/${c.public_key}/${c.status === "published" ? "unpublish" : "publish"}`); if (r.ok) { ui?.toast({ title: r.json.status === "published" ? "Published" : "Unpublished — hidden from the catalogue" }); load(); } };
   return (<>
     <header className="v8l-teachhead"><div><h1 className="v8l-h">My courses</h1><p className="v8c-muted">Learners pay you in HPay (Preview/Test). You see each learner by @username only.</p></div><button type="button" className="v8-btn v8-btn-primary" onClick={() => setOpen(true)}><V8Icon name="learn" size={16} />New course</button></header>
@@ -180,6 +158,9 @@ function Teach({ api, nav }) {
         <div className="v8u-two"><label className="v8c-field"><span>Category</span><select value={f.category} onChange={(e) => set("category", e.target.value)}><option value="">Choose…</option>{d.categories.map((c) => <option key={c}>{c}</option>)}</select></label>
           <label className="v8c-field"><span>Level</span><select value={f.level} onChange={(e) => set("level", e.target.value)}>{d.levels.map((c) => <option key={c}>{c}</option>)}</select></label></div>
         <label className="v8c-field"><span>Price (₹, 0 = free)</span><input inputMode="numeric" value={f.price} onChange={(e) => set("price", e.target.value.replace(/\D/g, "").slice(0, 5))} /></label>
+        <label className="v8c-field"><span>Language you teach in</span><input value={f.language} maxLength={40} onChange={(e) => set("language", e.target.value)} placeholder="e.g. Telugu" /></label>
+        <label className="v8c-field"><span>Materials learners need (one per line, optional)</span><textarea rows={2} value={f.materials} onChange={(e) => set("materials", e.target.value)} placeholder={"e.g. Cotton yarn 4-ply\n4 mm crochet hook"} /></label>
+        <label className="v8c-field"><span>Estimated materials cost, ₹ (optional — shown separately from the course price)</span><input inputMode="numeric" value={f.materials_cost} onChange={(e) => set("materials_cost", e.target.value.replace(/\D/g, "").slice(0, 5))} /></label>
         <label className="v8c-field"><span>What learners will be able to do (one per line)</span><textarea rows={2} value={f.outcomes} onChange={(e) => set("outcomes", e.target.value)} /></label>
         {f.lessons.map((l, i) => <fieldset key={i} className="v8l-lessonf"><legend>Lesson {i + 1}{i === 0 ? " · free preview" : ""}</legend>
           <label className="v8c-field"><span>Lesson title</span><input value={l.title} onChange={(e) => setL(i, "title", e.target.value)} /></label>

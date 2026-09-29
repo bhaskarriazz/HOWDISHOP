@@ -12,6 +12,7 @@
 // Only public codes (CRS/LSN/RAP) and @handles leave the server. The session decides who is acting.
 // =====================================================================================
 const crypto = require('node:crypto');
+const discovery = require('./learn-discovery-v8.cjs');
 const CATEGORIES = ['Crochet & Handmade', 'Tailoring & Textiles', 'Cooking', 'Digital skills', 'Business & Selling', 'Languages', 'Wellness'];
 const LEVELS = ['beginner', 'intermediate', 'advanced'];
 const ROLE_FORMS = {
@@ -39,6 +40,9 @@ function createLearnV8(deps) {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
     await pool.query(`CREATE INDEX IF NOT EXISTS howdi_v8_role_apps_user ON howdi_v8_role_apps(user_id, role, id DESC)`);
     await pool.query(`CREATE TABLE IF NOT EXISTS howdi_v8_role_app_events(id BIGSERIAL PRIMARY KEY, app_id BIGINT NOT NULL, actor VARCHAR(10) NOT NULL, admin_username VARCHAR(80), action VARCHAR(20) NOT NULL, reason VARCHAR(600), at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
+    // P8 Learn Discovery: estimated materials cost (never part of the course price) + per-learner saved courses
+    await pool.query(`ALTER TABLE learning_courses ADD COLUMN IF NOT EXISTS v8_materials_cost NUMERIC(12,2)`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS howdi_v8_learn_saves(user_id BIGINT NOT NULL, course_id UUID NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY(user_id, course_id))`);
     await pool.query(`CREATE TABLE IF NOT EXISTS howdi_v8_learn_payments(user_id BIGINT NOT NULL, course_id UUID NOT NULL, amount NUMERIC(12,2) NOT NULL, txn VARCHAR(32), idem_key VARCHAR(64), created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY(user_id, course_id))`);
   }
 
@@ -76,9 +80,21 @@ function createLearnV8(deps) {
     const n = Number((await pool.query(`SELECT COUNT(*) n FROM learning_course_lessons l JOIN learning_course_modules m ON m.id=l.module_id WHERE m.course_id=$1 AND l.is_active AND m.is_active`, [c.id])).rows[0].n);
     const st = await stateOf(uid, c.id, n);
     const learners = Number((await pool.query(`SELECT COUNT(*) n FROM learning_course_entitlements WHERE course_id=$1 AND entitlement_status='ACTIVE'`, [c.id])).rows[0].n);
+    // P8: card facts come only from real course/lesson columns; absent metadata is null, never guessed.
+    const kinds = (await pool.query(`SELECT BOOL_OR(UPPER(l.lesson_type)='VIDEO' AND COALESCE(l.content_url,'')<>'') video, BOOL_OR(UPPER(l.lesson_type)='TEXT') reading,
+      (ARRAY_AGG(l.id ORDER BY m.sort_order, l.sort_order, l.created_at) FILTER (WHERE l.is_preview))[1] preview
+      FROM learning_course_lessons l JOIN learning_course_modules m ON m.id=l.module_id WHERE m.course_id=$1 AND l.is_active AND m.is_active`, [c.id])).rows[0] || {};
+    const mats = Array.isArray(c.materials) ? c.materials.filter((x) => typeof x === 'string' && x.trim()).slice(0, 12) : [];
+    const matCost = Number(c.v8_materials_cost);
+    const outcomes = Array.isArray(c.outcomes) ? c.outcomes.filter((x) => typeof x === 'string' && x.trim()) : [];
+    const saved = uid ? Boolean((await pool.query(`SELECT 1 FROM howdi_v8_learn_saves WHERE user_id=$1 AND course_id=$2`, [uid, c.id])).rows[0]) : false;
     return { public_key: await code('LCRS', c.id), title: c.title, tagline: c.tagline || null, category: c.category, level: c.level, language: c.language, minutes: Number(c.duration_minutes) || 0,
       price: money(c.sale_price ?? c.price ?? 0), free: !(Number(c.sale_price ?? c.price) > 0), image: safeUrl(c.thumbnail_url), lessons: n, learners,
-      teacher: await teacherDto(c.v8_teacher_user_id), by_howdi: !c.v8_teacher_user_id, enrolled: st.enrolled, progress: st.progress };
+      teacher: await teacherDto(c.v8_teacher_user_id), by_howdi: !c.v8_teacher_user_id, enrolled: st.enrolled, progress: st.progress,
+      outcome: outcomes[0] || null, certificate_available: c.certificate_enabled !== false, project: c.project_required !== false, live_class: c.live_class_included === true,
+      formats: [kinds.video ? 'video' : null, kinds.reading ? 'reading' : null, c.live_class_included === true ? 'live' : null].filter(Boolean),
+      materials_count: mats.length, materials_cost: Number.isFinite(matCost) && matCost > 0 ? money(matCost) : null,
+      preview_lesson: kinds.preview ? await code('LLSN', kinds.preview) : null, saved };
   }
   const published = `is_active AND publish_status='PUBLISHED'`;
 
@@ -97,11 +113,21 @@ function createLearnV8(deps) {
     const uid = v ? v.id : null;
     // ------------------------------------------------ catalogue (browsable signed-out)
     if (p === '/api/v8/learn/courses' && req.method === 'GET') {
-      const q = line(url.searchParams.get('q') || '', 60); const cat = url.searchParams.get('category');
-      const rows = (await pool.query(`SELECT * FROM learning_courses WHERE ${published} AND ($1='' OR title ILIKE '%'||$1||'%' OR tagline ILIKE '%'||$1||'%') AND ($2::text IS NULL OR category=$2) ORDER BY created_at DESC LIMIT 60`, [q, CATEGORIES.includes(cat) ? cat : null])).rows;
-      ok(res, { categories: CATEGORIES, items: await Promise.all(rows.map((c) => courseCard(c, uid))) }); return true;
+      // P8 Learn Discovery: real filters, search, sort and paging over published courses only (see learn-discovery-v8.cjs).
+      const pub = `c.is_active AND c.publish_status='PUBLISHED'`;
+      const langRows = (await pool.query(`SELECT c.language AS v, COUNT(*)::int AS n FROM learning_courses c WHERE ${pub} AND COALESCE(c.language,'')<>'' GROUP BY c.language ORDER BY n DESC, c.language`)).rows;
+      const skillRows = (await pool.query(`SELECT c.category AS v, COUNT(*)::int AS n FROM learning_courses c WHERE ${pub} GROUP BY c.category`)).rows;
+      const params = new URLSearchParams(url.searchParams);
+      if (!params.has('skill') && params.get('category')) params.set('skill', params.get('category')); // pre-P8 clients
+      const f = discovery.parseDiscoveryQuery(params, { languages: langRows.map((r) => r.v) });
+      const sql = discovery.buildDiscoverySql(f, { published: pub });
+      const [total, rows] = await Promise.all([pool.query(sql.countSql, sql.countParams), pool.query(sql.listSql, sql.listParams)]);
+      const n = total.rows[0].n; const items = await Promise.all(rows.rows.map((c) => courseCard(c, uid)));
+      ok(res, { categories: CATEGORIES, items, total: n, offset: f.offset, limit: f.limit, has_more: f.offset + items.length < n, next_offset: f.offset + items.length < n ? f.offset + items.length : null,
+        applied: discovery.appliedFilters(f),
+        facets: { skills: CATEGORIES.map((v) => ({ value: v, count: Number(skillRows.find((r) => r.v === v)?.n || 0) })), languages: langRows.map((r) => ({ value: r.v, count: r.n })), levels: LEVELS } }); return true;
     }
-    if ((m = p.match(/^\/api\/v8\/learn\/courses\/(CRS-[0-9A-F]{12})(?:\/(enroll))?$/))) {
+    if ((m = p.match(/^\/api\/v8\/learn\/courses\/(CRS-[0-9A-F]{12})(?:\/(enroll|save))?$/))) {
       const cid = await key(m[1], 'LCRS'); const c = cid ? (await pool.query(`SELECT * FROM learning_courses WHERE id=$1`, [cid])).rows[0] : null;
       const mine = c && uid && Number(c.v8_teacher_user_id) === uid;
       if (!c || !(c.is_active && (c.publish_status === 'PUBLISHED' || mine))) { fail(res, 404, 'NOT_FOUND', 'This course isn’t available.'); return true; }
@@ -116,6 +142,14 @@ function createLearnV8(deps) {
         ok(res, { course: { ...(await courseCard(c, uid)), description: c.description, outcomes: Array.isArray(c.outcomes) ? c.outcomes.slice(0, 8) : [], materials: Array.isArray(c.materials) ? c.materials.slice(0, 12) : [],
           certificate_enabled: c.certificate_enabled !== false, modules: mods.map(({ key: _k, ...x }) => x), next_lesson: st.enrolled && next ? lc.get(String(next.id)) : null, done_count: st.done.length,
           certificate: uid ? await certOf(uid, c.id) : null, is_mine: Boolean(mine), sign_in_needed: !uid } }); return true;
+      }
+      if (m[2] === 'save' && req.method === 'POST') {
+        // Saved courses are private to the signed-in learner; the session decides who is saving.
+        if (!uid) { fail(res, 401, 'SIGN_IN_REQUIRED', 'Sign in to save courses.'); return true; }
+        const b = await getBody(req).catch(() => ({})); const on = b.saved !== false;
+        if (on) await pool.query(`INSERT INTO howdi_v8_learn_saves(user_id, course_id) VALUES($1,$2) ON CONFLICT DO NOTHING`, [uid, c.id]);
+        else await pool.query(`DELETE FROM howdi_v8_learn_saves WHERE user_id=$1 AND course_id=$2`, [uid, c.id]);
+        ok(res, { saved: on }); return true;
       }
       if (m[2] === 'enroll' && req.method === 'POST') {
         if (!uid) { fail(res, 401, 'SIGN_IN_REQUIRED', 'Sign in to join this course.'); return true; }
@@ -190,7 +224,9 @@ function createLearnV8(deps) {
     if (p === '/api/v8/learn/me' && req.method === 'GET') {
       const rows = (await pool.query(`SELECT c.* FROM learning_course_entitlements e JOIN learning_courses c ON c.id=e.course_id WHERE e.user_id=$1 AND e.entitlement_status='ACTIVE' AND c.is_active ORDER BY e.updated_at DESC LIMIT 60`, [uid])).rows;
       const items = await Promise.all(rows.map(async (c) => ({ ...(await courseCard(c, uid)), certificate: await certOf(uid, c.id) })));
-      ok(res, { active: items.filter((x) => !x.certificate), completed: items.filter((x) => x.certificate), teacher: await isTeacher(uid) }); return true;
+      const savedRows = (await pool.query(`SELECT c.* FROM howdi_v8_learn_saves s JOIN learning_courses c ON c.id=s.course_id WHERE s.user_id=$1 AND c.is_active AND c.publish_status='PUBLISHED' ORDER BY s.created_at DESC LIMIT 60`, [uid])).rows;
+      const saved = await Promise.all(savedRows.map((c) => courseCard(c, uid)));
+      ok(res, { active: items.filter((x) => !x.certificate), completed: items.filter((x) => x.certificate), saved, teacher: await isTeacher(uid) }); return true;
     }
     // ------------------------------------------------ teacher workspace
     if (p.startsWith('/api/v8/learn/teach')) {
@@ -206,14 +242,16 @@ function createLearnV8(deps) {
         const b = await getBody(req).catch(() => ({}));
         const title = line(b.title, 120); const lessons = (Array.isArray(b.lessons) ? b.lessons : []).slice(0, 30).map((x) => ({ title: line(x?.title, 120), body: text(x?.body, 4000), minutes: Math.max(1, Math.min(240, Number(x?.minutes) || 5)), tip: line(x?.tip, 300) || null, practice: line(x?.practice, 300) || null })).filter((x) => x.title && x.body);
         const price = Math.round(Number(b.price) || 0);
-        const bad = [!title && 'title', !CATEGORIES.includes(b.category) && 'category', !LEVELS.includes(b.level) && 'level', !(price >= 0 && price <= 20000) && 'price (₹0–₹20,000)', !lessons.length && 'at least one lesson with text'].filter(Boolean);
+        const materials = (Array.isArray(b.materials) ? b.materials : []).map((x) => line(x, 120)).filter(Boolean).slice(0, 12);
+        const matCost = b.materials_cost === '' || b.materials_cost == null ? null : Math.round(Number(b.materials_cost));
+        const bad = [!title && 'title', matCost !== null && !(matCost >= 0 && matCost <= 50000) && 'materials cost (₹0–₹50,000)', !CATEGORIES.includes(b.category) && 'category', !LEVELS.includes(b.level) && 'level', !(price >= 0 && price <= 20000) && 'price (₹0–₹20,000)', !lessons.length && 'at least one lesson with text'].filter(Boolean);
         if (bad.length) { fail(res, 400, 'INVALID_COURSE', `Add ${bad.join(', ')}.`); return true; }
         const client = await pool.connect(); let cid;
         try {
           await client.query('BEGIN');
-          cid = (await client.query(`INSERT INTO learning_courses(title,description,category,level,duration_minutes,tagline,language,publish_status,price,purchase_mode,v8_teacher_user_id,outcomes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb) RETURNING id`,
+          cid = (await client.query(`INSERT INTO learning_courses(title,description,category,level,duration_minutes,tagline,language,publish_status,price,purchase_mode,v8_teacher_user_id,outcomes,materials,v8_materials_cost) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13::jsonb,$14) RETURNING id`,
             [title, text(b.description, 2000) || null, b.category, b.level, lessons.reduce((s, x) => s + x.minutes, 0), line(b.tagline, 200) || null, line(b.language, 40) || 'English', b.publish ? 'PUBLISHED' : 'DRAFT', price, price > 0 ? 'PAID' : 'FREE', uid,
-              JSON.stringify((Array.isArray(b.outcomes) ? b.outcomes : []).map((x) => line(x, 140)).filter(Boolean).slice(0, 6))])).rows[0].id;
+              JSON.stringify((Array.isArray(b.outcomes) ? b.outcomes : []).map((x) => line(x, 140)).filter(Boolean).slice(0, 6)), JSON.stringify(materials), matCost || null])).rows[0].id;
           const mid = (await client.query(`INSERT INTO learning_course_modules(course_id,title,sort_order) VALUES($1,'Lessons',0) RETURNING id`, [cid])).rows[0].id;
           for (let k = 0; k < lessons.length; k++) { const x = lessons[k]; await client.query(`INSERT INTO learning_course_lessons(module_id,title,lesson_type,content_text,duration_minutes,grandma_tip,practice_task,sort_order,is_preview) VALUES($1,$2,'TEXT',$3,$4,$5,$6,$7,$8)`, [mid, x.title, x.body, x.minutes, x.tip, x.practice, k, k === 0]); }
           await client.query('COMMIT');
