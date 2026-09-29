@@ -1,0 +1,93 @@
+'use strict';
+const L=require('./lib.cjs');
+const res=(r)=>r.json?.results||[];
+const names=(r)=>res(r).map(x=>x.display_name);
+const ok=(r)=>r.status===200&&r.json?.status==='success';
+const keys=(o)=>JSON.stringify(Object.keys(o||{}).sort());
+const secrets=(...us)=>us.flatMap(u=>[u.id,u.email,u.phone,u.howdi,u.master]);
+let seq=0;
+const service=async(name,{active=true,visible=true}={})=>{const id=L.bigId(),code='SVC-K5BW-'+(++seq);await L.pool.query(`INSERT INTO works_services(id,service_code,name,active,customer_visible,sort_order) VALUES($1,$2,$3,$4,$5,$6)`,[id,code,name,active,visible,seq]);return{id,code,name};};
+const worker=async(user,{code,name,svc,kyc='verified',skill='verified',account='active',active=true,city='Warangal',rating=4.7,jobs=9,mapStatus='approved',primary=true}={})=>{
+  const w=await L.mkWorker(user,{id:L.bigId(),code,kyc,skill,account,active});
+  await L.pool.query(`UPDATE works_workers SET full_name=$2,city=$3,pincode='506002',rating=$4,completed_jobs=$5 WHERE id=$1`,[w.id,name||user.name,city,rating,jobs]);
+  if(svc)await L.pool.query(`INSERT INTO works_worker_services(worker_id,service_id,status,is_primary) VALUES($1,$2,$3,$4)`,[w.id,svc.id,mapStatus,primary]);
+  return w;
+};
+(async()=>{const started=await L.start();L.check('server starts on fresh database',started,L.serverLog().slice(-600));if(!started)return L.finish('k5b works search');
+  L.reserveIds(8000);
+  const A={isActive:true,accountStatus:'ACTIVE',discoverable:true,privateProfile:false};
+  const viewer=await L.member('K5BW Viewer',{...A,username:'k5bw_viewer'});
+  const uVisible=await L.member('K5BW Asha',{...A,username:'k5bw_asha'});
+  const uBlocked=await L.member('K5BW Blocked',{...A,username:'k5bw_blocked'});
+  const uBlocker=await L.member('K5BW Blocker',{...A,username:'k5bw_blocker'});
+  const uSusp=await L.member('K5BW Suspended',{...A,username:'k5bw_suspended',accountStatus:'SUSPENDED'});
+  const uInactive=await L.member('K5BW Inactive User',{...A,username:'k5bw_inactive_user',isActive:false});
+  const uKyc=await L.member('K5BW KYC',{...A,username:'k5bw_kyc'});
+  const uSkill=await L.member('K5BW Skill',{...A,username:'k5bw_skill'});
+  const uAccount=await L.member('K5BW Account',{...A,username:'k5bw_account'});
+  const uActive=await L.member('K5BW Disabled',{...A,username:'k5bw_disabled'});
+  const uInvisibleSvc=await L.member('K5BW Invisible Service',{...A,username:'k5bw_invis_service'});
+  const uInactiveSvc=await L.member('K5BW Inactive Service',{...A,username:'k5bw_inactive_service'});
+  const uPendingMap=await L.member('K5BW Pending Map',{...A,username:'k5bw_pending_map'});
+  const uNotPrimary=await L.member('K5BW Not Primary',{...A,username:'k5bw_not_primary'});
+  const uUuid=await L.member('K5BW UUID',{...A,username:'k5bw_uuid'});
+  const uNumeric=await L.member('K5BW Numeric',{...A,username:'k5bw_numeric'});
+  await L.block(viewer,uBlocked);await L.block(uBlocker,viewer);
+  const repair=await service('K5BW Kiln Repair');
+  const hiddenSvc=await service('K5BW Hidden Repair',{visible:false});
+  const inactiveSvc=await service('K5BW Retired Repair',{active:false});
+  const W={};
+  W.visible=await worker(uVisible,{code:'K5BW-VISIBLE',name:'K5BW Asha Repair',svc:repair});
+  W.blocked=await worker(uBlocked,{code:'K5BW-BLOCKED',name:'K5BW Blocked Repair',svc:repair});
+  W.blocker=await worker(uBlocker,{code:'K5BW-BLOCKER',name:'K5BW Blocker Repair',svc:repair});
+  W.suspUser=await worker(uSusp,{code:'K5BW-SUSPUSER',name:'K5BW Susp User Repair',svc:repair});
+  W.inactiveUser=await worker(uInactive,{code:'K5BW-INACTIVEUSER',name:'K5BW Inactive User Repair',svc:repair});
+  W.kyc=await worker(uKyc,{code:'K5BW-KYC',name:'K5BW KYC Pending',svc:repair,kyc:'pending'});
+  W.skill=await worker(uSkill,{code:'K5BW-SKILL',name:'K5BW Skill Pending',svc:repair,skill:'pending'});
+  W.account=await worker(uAccount,{code:'K5BW-ACCOUNT',name:'K5BW Account Pending',svc:repair,account:'registered'});
+  W.disabled=await worker(uActive,{code:'K5BW-DISABLED',name:'K5BW Disabled Worker',svc:repair,active:false});
+  W.hiddenSvc=await worker(uInvisibleSvc,{code:'K5BW-HIDDENSVC',name:'K5BW Hidden Service Worker',svc:hiddenSvc});
+  W.inactiveSvc=await worker(uInactiveSvc,{code:'K5BW-INACTIVESVC',name:'K5BW Inactive Service Worker',svc:inactiveSvc});
+  W.pendingMap=await worker(uPendingMap,{code:'K5BW-PENDINGMAP',name:'K5BW Pending Map Worker',svc:repair,mapStatus:'pending'});
+  W.notPrimary=await worker(uNotPrimary,{code:'K5BW-NOTPRIMARY',name:'K5BW Not Primary Worker',svc:repair,primary:false});
+  W.uuid=await worker(uUuid,{code:'550e8400-e29b-41d4-a716-446655440000',name:'K5BW UUID Worker',svc:repair});
+  W.numeric=await worker(uNumeric,{code:'123456789',name:'K5BW Numeric Worker',svc:repair});
+  const unlinkedId=L.bigId(),unlinkedPhone='9888888888';
+  await L.pool.query(`INSERT INTO works_workers(id,worker_code,full_name,phone,user_id,city,pincode,kyc_status,skill_status,account_status,active,rating,completed_jobs) VALUES($1,'K5BW-UNLINKED','K5BW Unlinked Worker',$2,NULL,'Warangal','506002','verified','verified','active',TRUE,4.2,4)`,[unlinkedId,unlinkedPhone]);
+  await L.pool.query(`INSERT INTO works_worker_services(worker_id,service_id,status,is_primary) VALUES($1,$2,'approved',TRUE)`,[unlinkedId,repair.id]);
+
+  let r=await L.search('workers','k5bw',{limit:20});
+  const guestNames=names(r),item=res(r).find(x=>x.public_key==='K5BW-VISIBLE');
+  L.check('workers: visible K5A-eligible worker returned',ok(r)&&!!item&&item.type==='worker'&&item.display_name==='K5BW Asha Repair'&&item.skill==='K5BW Kiln Repair'&&item.service_area==='Warangal'&&item.rating===4.7&&item.completed_jobs===9&&item.verified===true);
+  L.check('workers: worker_code is the only public key and route uses it',!!item&&item.public_key==='K5BW-VISIBLE'&&item.route==='/works/workers/K5BW-VISIBLE');
+  L.check('workers: DTO allow-list only',!!item&&keys(item)===JSON.stringify(['completed_jobs','display_name','public_key','rating','route','service_area','skill','type','verified']));
+  L.check('workers: guest includes unlinked eligible worker',res(r).some(x=>x.public_key==='K5BW-UNLINKED'));
+  L.check('workers: guest can see otherwise eligible blocked-direction workers',guestNames.includes('K5BW Blocked Repair')&&guestNames.includes('K5BW Blocker Repair'));
+  for(const [k,label] of [['suspUser','linked suspended user'],['inactiveUser','linked inactive user'],['kyc','unverified KYC'],['skill','unverified skill'],['account','inactive worker account'],['disabled','worker active=false'],['hiddenSvc','customer-hidden primary service'],['inactiveSvc','inactive primary service'],['pendingMap','unapproved primary mapping'],['notPrimary','non-primary mapping']]){
+    L.check('workers: '+label+' excluded',!res(r).some(x=>x.public_key===W[k].code),res(r).map(x=>x.public_key));
+  }
+  L.check('workers: UUID-shaped worker_code rejected by JS public-code gate',res(await L.search('workers','550e8400')).length===0);
+  L.check('workers: numeric-only worker_code rejected by JS public-code gate',res(await L.search('workers','123456789')).length===0);
+  r=await L.search('workers','k5bw',{token:viewer.token,limit:20});
+  L.check('workers: viewer-blocked worker excluded',ok(r)&&!res(r).some(x=>x.public_key==='K5BW-BLOCKED'));
+  L.check('workers: worker blocking viewer excluded',ok(r)&&!res(r).some(x=>x.public_key==='K5BW-BLOCKER'));
+  L.check('workers: visible worker remains after block filters',res(r).some(x=>x.public_key==='K5BW-VISIBLE'));
+  L.check('workers: search by public worker_code',res(await L.search('workers','K5BW-VISIBLE')).some(x=>x.public_key==='K5BW-VISIBLE'));
+  L.check('workers: search by worker name',res(await L.search('workers','Asha Repair')).some(x=>x.public_key==='K5BW-VISIBLE'));
+  L.check('workers: search by verified primary service',res(await L.search('workers','K5BW Kiln Repair',{limit:20})).some(x=>x.public_key==='K5BW-VISIBLE'));
+  L.check('workers: search by coarse city contains',res(await L.search('workers','Warangal',{limit:20})).some(x=>x.public_key==='K5BW-VISIBLE'));
+  L.check('workers: no private/internal keys or values leak',L.forbiddenKeys(res(r)).length===0&&L.leakedValues(r.text,[...secrets(viewer,uVisible,uBlocked,uBlocker,uSusp,uInactive,uKyc,uSkill,uAccount,uActive,uInvisibleSvc,uInactiveSvc,uPendingMap,uNotPrimary,uUuid,uNumeric),...Object.values(W).map(x=>x.id),repair.id,hiddenSvc.id,inactiveSvc.id,unlinkedId,unlinkedPhone,'506002']).length===0&&!/:\"(verified|pending|registered|active|SUSPENDED)\"/.test(r.text),r.text);
+
+  const rankSvc=await service('K5BW Ranking Service');
+  const rankExactUser=await L.member('Rank Exact',{...A,username:'k5bw_rank_exact'}),rankPrefixUser=await L.member('Rank Prefix',{...A,username:'k5bw_rank_prefix'}),rankContainsUser=await L.member('Rank Contains',{...A,username:'k5bw_rank_contains'}),rankDecoyUser=await L.member('Rank Decoy',{...A,username:'k5bw_rank_decoy'});
+  await worker(rankExactUser,{code:'K5BW_Pot',name:'Rank Exact Worker',svc:rankSvc,rating:1,jobs:1});
+  await worker(rankPrefixUser,{code:'K5BW_Pot-Extra',name:'Rank Prefix Worker',svc:rankSvc,rating:5,jobs:99});
+  await worker(rankContainsUser,{code:'Big-K5BW_Pot-Set',name:'Rank Contains Worker',svc:rankSvc,rating:5,jobs:99});
+  await worker(rankDecoyUser,{code:'K5BWXPot-Decoy',name:'Rank Decoy Worker',svc:rankSvc,rating:5,jobs:99});
+  r=await L.search('workers','K5BW_Pot');
+  L.check('workers ranking: exact special-character code > prefix > contains; underscore is literal',ok(r)&&JSON.stringify(res(r).map(x=>x.public_key))===JSON.stringify(['K5BW_Pot','K5BW_Pot-Extra','Big-K5BW_Pot-Set']),res(r).map(x=>x.public_key));
+
+  for(const type of ['people','creators','posts','articles','vibes','groups','channels','products','workers']){const x=await L.search(type,'k5b');L.check('routing: type='+type+' accepted',ok(x)&&x.json?.type===type);}
+  for(const type of ['services','storefronts','worker','bogus']){const x=await L.search(type,'k5b');L.check('routing: '+type+' => INVALID_TYPE',x.status===400&&x.json?.code==='INVALID_TYPE');}
+  await L.finish('k5b works search');
+})().catch(async e=>{console.error('K5B PG runtime error:',e);console.error('Backend log:',L.serverLog().slice(-3000));L.check('postgres works search runtime completed without transport/server error',false,e?.message||String(e));await L.finish('k5b works search');});

@@ -1,8 +1,9 @@
 'use strict';
 const {isPublicUsername,isPublicWorkerCode,isSlug,mediaUrl,excerpt,stripInternalKeys}=require('./connect-home-k5a.cjs');
-const TYPES=Object.freeze(['people','creators','posts','articles','vibes','groups','channels','products']);
+const TYPES=Object.freeze(['people','creators','posts','articles','vibes','groups','channels','products','workers']);
 // Shop helpers reproduced verbatim from connect-home-k5a.cjs (module-private there); the unit tests compare their source text.
 function money(value) { if (value === null || value === undefined || value === '') return null; const n = Number(value); return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : null; }
+function rating(value) { const n = Number(value); return Number.isFinite(n) && n > 0 ? Math.round(Math.min(5, n) * 10) / 10 : null; }
 function firstImage(list) {
   let arr = list;
   if (typeof arr === 'string') { try { arr = JSON.parse(arr); } catch { arr = [arr]; } }
@@ -45,11 +46,17 @@ function k5aFragments({connectPostVisibleSql,k5ePrivateProfileOkSql}){
         AND (CASE WHEN EXISTS(SELECT 1 FROM vendor_product_variants pv WHERE pv.product_id=p.id)
               THEN EXISTS(SELECT 1 FROM vendor_product_variants pv WHERE pv.product_id=p.id AND LOWER(COALESCE(pv.status,'active'))='active' AND COALESCE(pv.stock,0)>0)
               ELSE COALESCE(p.stock,0)>0 END)`;
-  return {AUTHOR_FLOOR,AVATAR,POST_WHERE,VIBE_WHERE,SPACE_WHERE,SHOP_CREATOR,SHOP_FROM,SHOP_WHERE};
+  const WORKS_FROM=`FROM works_workers w
+        JOIN works_worker_services pws ON pws.worker_id=w.id AND pws.is_primary=TRUE AND LOWER(TRIM(pws.status))='approved'
+        JOIN works_services ps ON ps.id=pws.service_id AND ps.active=TRUE AND ps.customer_visible=TRUE
+        LEFT JOIN users u ON u.id=w.user_id`;
+  const WORKS_WHERE=`LOWER(TRIM(w.kyc_status))='verified' AND LOWER(TRIM(w.skill_status))='verified' AND LOWER(TRIM(w.account_status))='active' AND COALESCE(w.active,TRUE)=TRUE
+        AND w.worker_code IS NOT NULL AND (w.user_id IS NULL OR (${ACTIVE_USER('u')} AND ${NOT_BLOCKED('w.user_id')}))`;
+  return {AUTHOR_FLOOR,AVATAR,POST_WHERE,VIBE_WHERE,SPACE_WHERE,SHOP_CREATOR,SHOP_FROM,SHOP_WHERE,WORKS_FROM,WORKS_WHERE};
 }
 // $1 viewer id, $2 lower-cased LIKE-escaped query (prefix/contains), $3 limit, $4 raw lower-cased query (exact). Ordering: exact > prefix > contains, then a stable tiebreak.
 function searchSql(deps){
-  const {AUTHOR_FLOOR,AVATAR,POST_WHERE,VIBE_WHERE,SPACE_WHERE,SHOP_CREATOR,SHOP_FROM,SHOP_WHERE}=k5aFragments(deps);
+  const {AUTHOR_FLOOR,AVATAR,POST_WHERE,VIBE_WHERE,SPACE_WHERE,SHOP_CREATOR,SHOP_FROM,SHOP_WHERE,WORKS_FROM,WORKS_WHERE}=k5aFragments(deps);
   const CREATOR=`(${SHOP_CREATOR})`;
   const EQ=(c)=>`LOWER(${c})=$4`,PRE=(c)=>`LOWER(${c}) LIKE $2||'%' ESCAPE '\\'`,HAS=(c)=>`LOWER(COALESCE(${c},'')) LIKE '%'||$2||'%' ESCAPE '\\'`;
   const PUBLISHED=`COALESCE(CASE WHEN p.post_status='SCHEDULED' THEN p.scheduled_for END,p.created_at)`;
@@ -65,6 +72,14 @@ function searchSql(deps){
         AND (${EQ('s.name')} OR ${EQ('s.slug')} OR ${PRE('s.name')} OR ${PRE('s.slug')} OR ${HAS('s.name')} OR ${HAS('s.slug')} OR ${HAS('s.category')})
       ORDER BY CASE WHEN ${EQ('s.name')} OR ${EQ('s.slug')} THEN 0 WHEN ${PRE('s.name')} OR ${PRE('s.slug')} THEN 1 ELSE 2 END,s.member_count DESC,s.slug LIMIT $3`;
   return {
+    workers:`SELECT w.worker_code,w.full_name,w.city,w.rating,w.completed_jobs,w.kyc_status,w.skill_status,w.account_status AS worker_account_status,
+        w.active AS worker_active,ps.name AS primary_service,u.is_active,u.account_status AS user_account_status,(w.user_id IS NOT NULL) AS has_user
+      ${WORKS_FROM}
+      WHERE ${WORKS_WHERE}
+        AND (${EQ('w.worker_code')} OR ${EQ('w.full_name')} OR ${EQ('ps.name')} OR ${PRE('w.worker_code')} OR ${PRE('w.full_name')} OR ${PRE('ps.name')}
+          OR ${HAS('w.worker_code')} OR ${HAS('w.full_name')} OR ${HAS('ps.name')} OR ${HAS('w.city')})
+      ORDER BY CASE WHEN ${EQ('w.worker_code')} OR ${EQ('w.full_name')} OR ${EQ('ps.name')} THEN 0 WHEN ${PRE('w.worker_code')} OR ${PRE('w.full_name')} OR ${PRE('ps.name')} THEN 1 ELSE 2 END,
+        w.rating DESC NULLS LAST,w.completed_jobs DESC NULLS LAST,w.worker_code LIMIT $3`,
     // Creator username is searchable only where K5A would display it (discoverable, non-private profile).
     products:`SELECT p.id AS internal_key,p.name,p.category,p.price,p.mrp,p.image_urls,p.status,p.archived_at,p.published_at,COALESCE(v.status,'active') AS vendor_status,
         (SELECT m.status FROM howdi_shop_product_moderation_v162c m WHERE m.product_id=p.id ORDER BY m.created_at DESC, m.id DESC LIMIT 1) AS moderation_status,
@@ -106,12 +121,17 @@ function createGlobalSearchK5B({pool,getSessionUserFromRequest,sendJSON,k5ePriva
   const isArticle=(r)=>String(r.post_type||'').toUpperCase()==='ARTICLE';
   const name=(r)=>excerpt(r.display_name||r.public_username,80);
   const count=(v)=>{const n=Math.floor(Number(v));return Number.isFinite(n)&&n>=0?n:0;};
+  const workerOk=(r)=>isPublicWorkerCode(r.worker_code)&&String(r.kyc_status||'').trim().toLowerCase()==='verified'&&String(r.skill_status||'').trim().toLowerCase()==='verified'
+    &&String(r.worker_account_status||'').trim().toLowerCase()==='active'&&r.worker_active!==false&&(!r.has_user||(r.is_active!==false&&String(r.user_account_status||'ACTIVE').toUpperCase()==='ACTIVE'));
   const spaceOk=(r,spaceType)=>r.space_type===spaceType&&r.is_archived===false&&r.privacy==='PUBLIC'&&isSlug(r.slug)&&userOk(r);
   async function spaces(vid,like,limit,exact,spaceType,kind){return (await pool.query(SQL[kind+'s'],[vid,like,limit,exact])).rows.filter(r=>spaceOk(r,spaceType)).map(x=>({type:kind,public_key:x.slug,name:excerpt(x.name,80),category:excerpt(x.category,60)||null,member_count:count(x.member_count),route:`/${kind}s/${x.slug}`}));}
   async function resolveViewer(req){const u=await getSessionUserFromRequest(req);if(!u||u.is_active===false||String(u.account_status||'ACTIVE').toUpperCase()!=='ACTIVE')return 0;const id=Number(u.id);return Number.isSafeInteger(id)&&id>0?id:0;}
   // K5A issueRefs is called only with rows that already passed both the SQL and the JS gate.
   async function withRefs(refType,prefix,rows){if(!rows.length)return [];const refs=await issueRefs(refType,rows.map(r=>r.internal_key));return rows.map(r=>({r,code:refs.get(String(r.internal_key))})).filter(x=>typeof x.code==='string'&&x.code.startsWith(prefix+'-'));}
   const run={
+    async workers(vid,like,limit,exact){return (await pool.query(SQL.workers,[vid,like,limit,exact])).rows.filter(workerOk).map(r=>({type:'worker',public_key:r.worker_code,
+      display_name:excerpt(r.full_name,80),skill:excerpt(r.primary_service,60)||null,service_area:excerpt(r.city,60)||null,rating:rating(r.rating),completed_jobs:count(r.completed_jobs),
+      verified:true,route:'/works/workers/'+encodeURIComponent(r.worker_code)}));},
     async creators(vid,like,limit,exact){return (await pool.query(SQL.creators,[vid,like,limit,exact])).rows.filter(authorOk).map(x=>({type:'creator',public_username:x.public_username,display_name:name(x),avatar_url:mediaUrl(x.avatar),headline:excerpt(x.headline,120),route:'/@'+x.public_username}));},
     async posts(vid,like,limit,exact){const rows=(await pool.query(SQL.posts,[vid,like,limit,exact])).rows.filter(r=>postOk(r,vid)&&!isArticle(r));
       return (await withRefs('POST','PST',rows)).map(({r,code})=>({type:'post',public_key:code,public_username:r.public_username,display_name:name(r),text_excerpt:excerpt(r.content,280),has_media:r.has_media===true,route:'/posts/'+code}));},
@@ -132,4 +152,4 @@ function createGlobalSearchK5B({pool,getSessionUserFromRequest,sendJSON,k5ePriva
     catch(error){console.error('[K5B search] '+type+' failed:',error&&error.message);if(!res.headersSent)sendJSON(res,500,{status:'error',code:'SEARCH_UNAVAILABLE',message:'Search is temporarily unavailable.'});}
     return true;}};
 }
-module.exports={createGlobalSearchK5B,SEARCH_TYPES:TYPES,_internal:{k5aFragments,searchSql,shopRowVisible,money,firstImage}};
+module.exports={createGlobalSearchK5B,SEARCH_TYPES:TYPES,_internal:{k5aFragments,searchSql,shopRowVisible,money,rating,firstImage}};
