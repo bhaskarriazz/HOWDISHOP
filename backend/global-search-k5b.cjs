@@ -1,6 +1,6 @@
 'use strict';
 const {isPublicUsername,isPublicWorkerCode,isSlug,mediaUrl,excerpt,stripInternalKeys}=require('./connect-home-k5a.cjs');
-const TYPES=Object.freeze(['people','creators','posts','articles','vibes','groups','channels','products','workers']);
+const TYPES=Object.freeze(['people','creators','posts','articles','vibes','groups','channels','products','workers','teachers']);
 // Shop helpers reproduced verbatim from connect-home-k5a.cjs (module-private there); the unit tests compare their source text.
 function money(value) { if (value === null || value === undefined || value === '') return null; const n = Number(value); return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : null; }
 function rating(value) { const n = Number(value); return Number.isFinite(n) && n > 0 ? Math.round(Math.min(5, n) * 10) / 10 : null; }
@@ -52,11 +52,19 @@ function k5aFragments({connectPostVisibleSql,k5ePrivateProfileOkSql}){
         LEFT JOIN users u ON u.id=w.user_id`;
   const WORKS_WHERE=`LOWER(TRIM(w.kyc_status))='verified' AND LOWER(TRIM(w.skill_status))='verified' AND LOWER(TRIM(w.account_status))='active' AND COALESCE(w.active,TRUE)=TRUE
         AND w.worker_code IS NOT NULL AND (w.user_id IS NULL OR (${ACTIVE_USER('u')} AND ${NOT_BLOCKED('w.user_id')}))`;
-  return {AUTHOR_FLOOR,AVATAR,POST_WHERE,VIBE_WHERE,SPACE_WHERE,SHOP_CREATOR,SHOP_FROM,SHOP_WHERE,WORKS_FROM,WORKS_WHERE};
+  const LEARN_TEACHER_FROM=`FROM learning_teacher_profiles tp
+        JOIN users u ON u.id=tp.user_id
+        JOIN howdi_connect_profiles cp ON cp.user_id=tp.user_id
+        LEFT JOIN user_profile_settings ps ON ps.user_id=tp.user_id`;
+  const LEARN_TEACHER_WHERE=`tp.application_status='APPROVED' AND tp.teacher_code IS NOT NULL AND ${AUTHOR_FLOOR('u','cp','tp.user_id')}
+        AND EXISTS(SELECT 1 FROM learning_teacher_course_assignments a
+          JOIN learning_courses c ON c.id=a.course_id
+          WHERE a.teacher_profile_id=tp.id AND a.status='ACTIVE' AND c.is_active=TRUE AND c.publish_status='PUBLISHED')`;
+  return {AUTHOR_FLOOR,AVATAR,POST_WHERE,VIBE_WHERE,SPACE_WHERE,SHOP_CREATOR,SHOP_FROM,SHOP_WHERE,WORKS_FROM,WORKS_WHERE,LEARN_TEACHER_FROM,LEARN_TEACHER_WHERE};
 }
 // $1 viewer id, $2 lower-cased LIKE-escaped query (prefix/contains), $3 limit, $4 raw lower-cased query (exact). Ordering: exact > prefix > contains, then a stable tiebreak.
 function searchSql(deps){
-  const {AUTHOR_FLOOR,AVATAR,POST_WHERE,VIBE_WHERE,SPACE_WHERE,SHOP_CREATOR,SHOP_FROM,SHOP_WHERE,WORKS_FROM,WORKS_WHERE}=k5aFragments(deps);
+  const {AUTHOR_FLOOR,AVATAR,POST_WHERE,VIBE_WHERE,SPACE_WHERE,SHOP_CREATOR,SHOP_FROM,SHOP_WHERE,WORKS_FROM,WORKS_WHERE,LEARN_TEACHER_FROM,LEARN_TEACHER_WHERE}=k5aFragments(deps);
   const CREATOR=`(${SHOP_CREATOR})`;
   const EQ=(c)=>`LOWER(${c})=$4`,PRE=(c)=>`LOWER(${c}) LIKE $2||'%' ESCAPE '\\'`,HAS=(c)=>`LOWER(COALESCE(${c},'')) LIKE '%'||$2||'%' ESCAPE '\\'`;
   const PUBLISHED=`COALESCE(CASE WHEN p.post_status='SCHEDULED' THEN p.scheduled_for END,p.created_at)`;
@@ -72,6 +80,19 @@ function searchSql(deps){
         AND (${EQ('s.name')} OR ${EQ('s.slug')} OR ${PRE('s.name')} OR ${PRE('s.slug')} OR ${HAS('s.name')} OR ${HAS('s.slug')} OR ${HAS('s.category')})
       ORDER BY CASE WHEN ${EQ('s.name')} OR ${EQ('s.slug')} THEN 0 WHEN ${PRE('s.name')} OR ${PRE('s.slug')} THEN 1 ELSE 2 END,s.member_count DESC,s.slug LIMIT $3`;
   return {
+    teachers:`SELECT tp.teacher_code,COALESCE(tp.display_name,u.full_name) AS display_name,${AVATAR('cp','ps')} AS avatar,tp.headline,
+        cp.public_username,u.is_active,u.account_status,cp.discoverable,tp.application_status,
+        (SELECT COUNT(DISTINCT a2.course_id)::int FROM learning_teacher_course_assignments a2
+          JOIN learning_courses c2 ON c2.id=a2.course_id
+          WHERE a2.teacher_profile_id=tp.id AND a2.status='ACTIVE' AND c2.is_active=TRUE AND c2.publish_status='PUBLISHED') AS public_course_count
+      ${LEARN_TEACHER_FROM}
+      WHERE ${LEARN_TEACHER_WHERE}
+        AND (${EQ('tp.teacher_code')} OR ${EQ('cp.public_username')} OR ${EQ("COALESCE(tp.display_name,u.full_name,'')")}
+          OR ${PRE('tp.teacher_code')} OR ${PRE('cp.public_username')} OR ${PRE("COALESCE(tp.display_name,u.full_name,'')")}
+          OR ${HAS('tp.teacher_code')} OR ${HAS('cp.public_username')} OR ${HAS("COALESCE(tp.display_name,u.full_name,'')")}
+          OR ${HAS('tp.headline')} OR ${HAS('tp.skills::text')} OR ${HAS('tp.specializations::text')} OR ${HAS('tp.city')})
+      ORDER BY CASE WHEN ${EQ('tp.teacher_code')} OR ${EQ('cp.public_username')} OR ${EQ("COALESCE(tp.display_name,u.full_name,'')")} THEN 0 WHEN ${PRE('tp.teacher_code')} OR ${PRE('cp.public_username')} OR ${PRE("COALESCE(tp.display_name,u.full_name,'')")} THEN 1 ELSE 2 END,
+        public_course_count DESC,LOWER(cp.public_username) LIMIT $3`,
     workers:`SELECT w.worker_code,w.full_name,w.city,w.rating,w.completed_jobs,w.kyc_status,w.skill_status,w.account_status AS worker_account_status,
         w.active AS worker_active,ps.name AS primary_service,u.is_active,u.account_status AS user_account_status,(w.user_id IS NOT NULL) AS has_user
       ${WORKS_FROM}
@@ -123,12 +144,15 @@ function createGlobalSearchK5B({pool,getSessionUserFromRequest,sendJSON,k5ePriva
   const count=(v)=>{const n=Math.floor(Number(v));return Number.isFinite(n)&&n>=0?n:0;};
   const workerOk=(r)=>isPublicWorkerCode(r.worker_code)&&String(r.kyc_status||'').trim().toLowerCase()==='verified'&&String(r.skill_status||'').trim().toLowerCase()==='verified'
     &&String(r.worker_account_status||'').trim().toLowerCase()==='active'&&r.worker_active!==false&&(!r.has_user||(r.is_active!==false&&String(r.user_account_status||'ACTIVE').toUpperCase()==='ACTIVE'));
+  const teacherOk=(r)=>authorOk(r)&&isPublicWorkerCode(r.teacher_code)&&String(r.application_status||'').trim().toUpperCase()==='APPROVED'&&count(r.public_course_count)>0;
   const spaceOk=(r,spaceType)=>r.space_type===spaceType&&r.is_archived===false&&r.privacy==='PUBLIC'&&isSlug(r.slug)&&userOk(r);
   async function spaces(vid,like,limit,exact,spaceType,kind){return (await pool.query(SQL[kind+'s'],[vid,like,limit,exact])).rows.filter(r=>spaceOk(r,spaceType)).map(x=>({type:kind,public_key:x.slug,name:excerpt(x.name,80),category:excerpt(x.category,60)||null,member_count:count(x.member_count),route:`/${kind}s/${x.slug}`}));}
   async function resolveViewer(req){const u=await getSessionUserFromRequest(req);if(!u||u.is_active===false||String(u.account_status||'ACTIVE').toUpperCase()!=='ACTIVE')return 0;const id=Number(u.id);return Number.isSafeInteger(id)&&id>0?id:0;}
   // K5A issueRefs is called only with rows that already passed both the SQL and the JS gate.
   async function withRefs(refType,prefix,rows){if(!rows.length)return [];const refs=await issueRefs(refType,rows.map(r=>r.internal_key));return rows.map(r=>({r,code:refs.get(String(r.internal_key))})).filter(x=>typeof x.code==='string'&&x.code.startsWith(prefix+'-'));}
   const run={
+    async teachers(vid,like,limit,exact){return (await pool.query(SQL.teachers,[vid,like,limit,exact])).rows.filter(teacherOk).map(r=>({type:'teacher',public_key:r.teacher_code,
+      public_username:r.public_username,display_name:name(r),avatar_url:mediaUrl(r.avatar),headline:excerpt(r.headline,120),course_count:count(r.public_course_count),route:'/@'+r.public_username}));},
     async workers(vid,like,limit,exact){return (await pool.query(SQL.workers,[vid,like,limit,exact])).rows.filter(workerOk).map(r=>({type:'worker',public_key:r.worker_code,
       display_name:excerpt(r.full_name,80),skill:excerpt(r.primary_service,60)||null,service_area:excerpt(r.city,60)||null,rating:rating(r.rating),completed_jobs:count(r.completed_jobs),
       verified:true,route:'/works/workers/'+encodeURIComponent(r.worker_code)}));},
