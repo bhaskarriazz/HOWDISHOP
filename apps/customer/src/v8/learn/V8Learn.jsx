@@ -12,7 +12,10 @@ import "../works/works.css";
 import "../shop/shop.css";
 import "./learn.css";
 import PartnerApplication from "./PartnerApplication";
-import LearnDiscover, { CourseCard } from "./LearnDiscover";
+import LearnDiscover from "./LearnDiscover";
+import CourseCard from "./CourseCard";
+import { mediaSrc } from "./learnDiscovery";
+import { JourneyTrack, MaterialsChecklist, NextStep, ReadyToSell, ShowMyWork, WorkReviews } from "./LearnJourney";
 
 const day = (iso) => (iso ? new Date(iso).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" }) : "");
 const Bar = ({ v }) => <span className="v8l-bar" role="progressbar" aria-valuenow={v} aria-valuemin={0} aria-valuemax={100}><i style={{ width: `${v}%` }} /></span>;
@@ -26,11 +29,11 @@ export default function V8Learn({ apiBase, getAuthHeaders, user, path, onNavigat
   return (
     <div className={`v8-page v8s v8l${discover ? " v8l-wide" : ""}`} id="v8-main">
       {!apply ? <nav className="v8s-top" aria-label="Learn & Earn"><button type="button" className="v8-link" onClick={() => onNavigate("courses")}>Courses</button><span /><button type="button" className="v8-btn" onClick={() => onNavigate("mine")}><V8Icon name="learn" size={16} />My learning</button><button type="button" className="v8-btn" onClick={() => onNavigate("teach")}><V8Icon name="star" size={16} />Teach</button><button type="button" className="v8-link" onClick={() => onNavigate("/learn/live")}>Live classes & Passport</button></nav> : null}
-      {(m = p.match(/^courses\/(CRS-[0-9A-F]{12})$/)) ? <Course key={m[1]} api={api} code={m[1]} user={user} nav={onNavigate} onRequireLogin={onRequireLogin} />
+      {(m = p.match(/^courses\/(CRS-[0-9A-F]{12})$/)) ? <Course key={m[1]} api={api} apiBase={apiBase} getAuthHeaders={getAuthHeaders} code={m[1]} user={user} nav={onNavigate} onRequireLogin={onRequireLogin} />
         : (m = p.match(/^lessons\/(LSN-[0-9A-F]{12})$/)) ? <Lesson key={m[1]} api={api} code={m[1]} user={user} nav={onNavigate} onRequireLogin={onRequireLogin} />
           : (m = p.match(/^certificates\/([A-Z0-9-]{6,80})$/)) ? <Verify api={api} code={m[1]} nav={onNavigate} />
             : p === "mine" ? need(<Mine api={api} apiBase={apiBase} nav={onNavigate} />)
-              : (m = p.match(/^teach\/(CRS-[0-9A-F]{12})$/)) ? need(<TeachCourse api={api} code={m[1]} nav={onNavigate} />)
+              : (m = p.match(/^teach\/(CRS-[0-9A-F]{12})$/)) ? need(<TeachCourse api={api} apiBase={apiBase} getAuthHeaders={getAuthHeaders} code={m[1]} nav={onNavigate} />)
                 : p === "teach" ? need(<Teach api={api} nav={onNavigate} />)
                   : apply ? need(<RoleApply api={api} role={apply[1]} nav={onNavigate} />)
                     : <LearnDiscover api={api} apiBase={apiBase} user={user} nav={onNavigate} onRequireLogin={onRequireLogin} />}
@@ -38,7 +41,31 @@ export default function V8Learn({ apiBase, getAuthHeaders, user, path, onNavigat
   );
 }
 
-function Course({ api, code, user, nav, onRequireLogin }) {
+// P8 learner journey on the course page: project journey, materials checklist → Shop, Show My Work, Ready to Sell.
+const openShopFor = (q) => { try { window.dispatchEvent(new CustomEvent("howdi:v8-open", { detail: { area: "shop", view: "catalogue", q } })); } catch { /* ignore */ } };
+function CourseJourney({ api, apiBase, getAuthHeaders, code, c, user, nav, onRequireLogin }) {
+  const [j, setJ] = useState(null);
+  const load = useCallback(async () => { if (!c.enrolled) return; const r = await api("GET", `/api/v8/learn/courses/${code}/journey`); if (r.ok) setJ(r.json); }, [api, code, c.enrolled]);
+  useEffect(() => { load(); }, [load]);
+  const accepted = Boolean(j?.milestones?.some((x) => x.key === "feedback" && x.done));
+  const showMats = c.materials_count > 0;
+  if (!c.enrolled && !showMats) return null;
+  return (
+    <div className="lj-course-grid">
+      <div className="lj-col">
+        {c.enrolled && c.project ? <ShowMyWork api={api} apiBase={apiBase} getAuthHeaders={getAuthHeaders} code={code} onChange={load} /> : null}
+        {accepted ? <ReadyToSell api={api} course={c} nav={nav} /> : null}
+        {!c.enrolled && showMats ? <MaterialsChecklist api={api} code={code} user={user} onRequireLogin={onRequireLogin} onShop={openShopFor} /> : null}
+      </div>
+      {c.enrolled ? <div className="lj-col">
+        {j ? <section className="v8-card lj-block" aria-label="Your project journey"><h3><V8Icon name="trend" size={18} />Your project journey</h3><JourneyTrack milestones={j.milestones} /></section> : null}
+        {showMats ? <MaterialsChecklist api={api} code={code} user={user} onRequireLogin={onRequireLogin} onShop={openShopFor} /> : null}
+      </div> : null}
+    </div>
+  );
+}
+
+function Course({ api, apiBase, getAuthHeaders, code, user, nav, onRequireLogin }) {
   const ui = useV8Ui(); const [c, setC] = useState(null); const [pay, setPay] = useState(false); const [key] = useState(newKey()); const [err, setErr] = useState("");
   const load = useCallback(async () => { const r = await api("GET", `/api/v8/learn/courses/${code}`); setC(r.ok ? r.json.course : { error: r.json.message }); }, [api, code]);
   useEffect(() => { load(); }, [load]);
@@ -52,7 +79,7 @@ function Course({ api, code, user, nav, onRequireLogin }) {
   const start = () => { if (!user) { onRequireLogin?.(); return; } if (c.free) join(); else setPay(true); };
   return (<>
     <section className="v8-card v8l-course">
-      <div className="v8l-cover big">{safeImg(c.image) ? <img src={c.image} alt="" /> : <V8Icon name="learn" size={44} />}</div>
+      <div className="v8l-cover big">{mediaSrc(apiBase, c.image) ? <img src={mediaSrc(apiBase, c.image)} alt="" /> : <V8Icon name="learn" size={44} />}</div>
       <div className="v8l-cinfo">
         <small className="v8l-cat">{c.category} · {c.level} · {c.language}</small>
         <h1>{c.title}</h1>{c.tagline ? <p className="v8l-tag">{c.tagline}</p> : null}
@@ -69,6 +96,7 @@ function Course({ api, code, user, nav, onRequireLogin }) {
       {c.modules.map((m) => <ol key={m.title} className="v8l-lessons">{m.lessons.map((l, i) => <li key={l.public_key}><button type="button" disabled={l.locked} onClick={() => nav(`lessons/${l.public_key}`)}>
         <i className={l.done ? "done" : ""}>{l.done ? <V8Icon name="check" size={14} /> : i + 1}</i><span><b>{l.title}</b><small>{l.minutes} min{l.preview && !c.enrolled ? " · free preview" : ""}</small></span>{l.locked ? <V8Icon name="lock" size={16} /> : <V8Icon name="play" size={16} />}</button></li>)}</ol>)}
     </section>
+    {!c.is_mine ? <CourseJourney api={api} apiBase={apiBase} getAuthHeaders={getAuthHeaders} code={code} c={c} user={user} nav={nav} onRequireLogin={onRequireLogin} /> : null}
     {pay ? <Sheet open title={`Join “${c.title}”`} onClose={() => setPay(false)}><PinStep api={api} amount={c.price} to={c.teacher ? `@${c.teacher.public_username}` : "HOWDI Learn"} onPay={join} onCancel={() => setPay(false)} label="Pay" /></Sheet> : null}
   </>);
 }
@@ -126,6 +154,7 @@ function Mine({ api, apiBase, nav }) {
   const items = tab === "active" ? d.active : tab === "saved" ? (d.saved || []) : d.completed;
   return (<>
     <h1 className="v8l-h">My learning</h1>
+    <NextStep api={api} apiBase={apiBase} nav={nav} />
     <Tabs tabs={[{ value: "active", label: "In progress", count: d.active.length }, { value: "saved", label: "Saved", count: (d.saved || []).length }, { value: "done", label: "Completed", count: d.completed.length }]} value={tab} onChange={setTab} label="My learning" />
     {!items.length ? <V8State icon="learn" title={tab === "active" ? "No courses in progress" : tab === "saved" ? "Nothing saved yet" : "No certificates yet"} message={tab === "active" ? "Join a course to start learning." : tab === "saved" ? "Tap the heart on a course to keep it here for later." : "Finish every lesson in a course to earn its certificate."} actionLabel="Browse courses" onAction={() => nav("courses")} />
       : <div className="lx-grid">{items.map((c) => <div key={c.public_key} className="v8l-mine"><CourseCard c={c} apiBase={apiBase} nav={nav} onSave={tab === "saved" ? unsave : undefined} />{c.certificate ? <button type="button" className="v8-btn" onClick={() => nav(`certificates/${c.certificate.code}`)}><V8Icon name="star" size={16} />Certificate {c.certificate.code}</button> : null}</div>)}</div>}
@@ -175,7 +204,7 @@ function Teach({ api, nav }) {
   </>);
 }
 
-function TeachCourse({ api, code, nav }) {
+function TeachCourse({ api, apiBase, getAuthHeaders, code, nav }) {
   const [d, setD] = useState(null);
   useEffect(() => { api("GET", `/api/v8/learn/teach/courses/${code}`).then((r) => setD(r.ok ? r.json : { error: r.json.message })); }, [api, code]);
   if (!d) return <Skel h={260} r={16} />;
@@ -187,6 +216,7 @@ function TeachCourse({ api, code, nav }) {
       {!d.learners.length ? <p className="v8c-muted">No learners yet. You’ll get a notification when someone joins.</p>
         : <ul className="v8l-learners">{d.learners.map((x, i) => <li key={i}><b>@{x.learner?.public_username || "learner"}</b><small>joined {day(x.joined_at)}</small><span className="v8l-prog"><Bar v={x.progress} /><small>{x.progress}%</small></span>{x.completed ? <span className="v8m-state ok"><i />Certificate issued</span> : null}</li>)}</ul>}
     </section>
+    <WorkReviews api={api} apiBase={apiBase} getAuthHeaders={getAuthHeaders} code={code} />
   </>);
 }
 

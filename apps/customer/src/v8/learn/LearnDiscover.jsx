@@ -5,13 +5,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { V8Icon } from "../V8Shell";
 import { Skel } from "../connect/common";
-import { inr } from "../connect/HPayUtilities";
 import {
-  FILTERS, FILTER_KEYS, MORE_FILTERS, PAGE_SIZE, PRIMARY_FILTERS, SKILLS, SORTS, activeCount, cardFacts, clearAll,
-  discoveryApiQuery, discoveryChips, discoverySearch, effectiveSort, mediaSrc, parseDiscoveryParams,
+  FILTERS, FILTER_KEYS, MORE_FILTERS, PAGE_SIZE, PRIMARY_FILTERS, SKILLS, SORTS, activeCount, clearAll,
+  discoveryApiQuery, discoveryChips, discoverySearch, effectiveSort, parseDiscoveryParams,
   reconcileApplied, recoverySuggestions, removeChip, toggleValue,
 } from "./learnDiscovery";
 import "./learn-discover.css";
+import CourseCard from "./CourseCard";
+import { PathFinder } from "./LearnJourney";
 
 const SKILL_ICON = { "Crochet & Handmade": "sparkles", "Tailoring & Textiles": "tag", Cooking: "fire", "Digital skills": "grid", "Business & Selling": "store", Languages: "globe", Wellness: "smile" };
 const COURSES_PATH = "/learn/courses";
@@ -21,13 +22,14 @@ function readUrlState() {
   return parseDiscoveryParams(window.location.search);
 }
 
-export default function LearnDiscover({ api, apiBase, user, nav, onRequireLogin, onFindPath }) {
+export default function LearnDiscover({ api, apiBase, user, nav, onRequireLogin }) {
   const [state, setState] = useState(readUrlState);
   const [draft, setDraft] = useState(state.q);
   const [data, setData] = useState({ status: "loading", items: [], total: 0, facets: null, hasMore: false, nextOffset: null });
   const [more, setMore] = useState(false);
   const [drawer, setDrawer] = useState(false);
   const [pop, setPop] = useState(null);
+  const [pathOpen, setPathOpen] = useState(false);
   const reqRef = useRef(0);
 
   // URL ← state (replace: filter tweaks are one history entry; Back leaves the page with its filters intact)
@@ -127,7 +129,7 @@ export default function LearnDiscover({ api, apiBase, user, nav, onRequireLogin,
           <input type="search" value={draft} maxLength={60} onChange={(e) => setDraft(e.target.value)} placeholder="Search a course, skill, project or teacher" aria-label="Search courses" enterKeyHint="search" />
           {draft ? <button type="button" className="lx-clear-q" aria-label="Clear search" onClick={() => { setDraft(""); set({ ...state, q: "", sort: state.sort === "relevance" ? "" : state.sort }); }}><V8Icon name="x" size={16} /></button> : null}
         </form>
-        {onFindPath ? <button type="button" className="lx-path-cta" onClick={onFindPath}><V8Icon name="sparkles" size={18} /><span><b>Find my learning path</b><small>3 quick questions</small></span><V8Icon name="chevr" size={16} /></button> : null}
+        <button type="button" className="lx-path-cta" onClick={() => setPathOpen(true)} aria-haspopup="dialog"><V8Icon name="sparkles" size={18} /><span><b>Find my learning path</b><small>3 quick questions</small></span><V8Icon name="chevr" size={16} /></button>
       </header>
 
       <nav className="lx-skills" aria-label="Skills">
@@ -182,6 +184,7 @@ export default function LearnDiscover({ api, apiBase, user, nav, onRequireLogin,
         </div>
       </div>
 
+      <PathFinder api={api} apiBase={apiBase} open={pathOpen} onClose={() => setPathOpen(false)} nav={nav} onApply={(s) => set({ ...s, from: state.from })} />
       {drawer && typeof document !== "undefined" ? createPortal(<div className="lx-drawer-back" onMouseDown={(e) => { if (e.target === e.currentTarget) setDrawer(false); }}>
         <div className="lx-drawer" role="dialog" aria-modal="true" aria-label="All filters" onKeyDown={(e) => { if (e.key === "Escape") setDrawer(false); }}>
           <header><b>Filters</b><button type="button" className="v8-icon-btn" aria-label="Close filters" onClick={() => setDrawer(false)}><V8Icon name="x" size={20} /></button></header>
@@ -208,35 +211,3 @@ function Empty({ state, set, nav }) {
     </div>
   );
 }
-
-export function CourseCard({ c, apiBase, nav, onSave, compact }) {
-  const f = cardFacts(c); const img = mediaSrc(apiBase, c.image);
-  return (
-    <article className={`lx-card ${compact ? "compact" : ""}`}>
-      <div className="lx-cover">
-        {img ? <img src={img} alt="" loading="lazy" /> : <span className="lx-cover-ph"><V8Icon name="learn" size={34} /><small>{c.category}</small></span>}
-        <em className="lx-price">{c.free ? "Free" : inr(c.price)}</em>
-        {onSave ? <button type="button" className={`lx-save ${c.saved ? "on" : ""}`} aria-pressed={Boolean(c.saved)} aria-label={c.saved ? `Remove ${c.title} from saved` : `Save ${c.title}`} onClick={() => onSave(c)}><V8Icon name="heart" size={18} fill={Boolean(c.saved)} /></button> : null}
-        {f.formats.length ? <span className="lx-formats">{f.formats.map((x) => <i key={x}>{x}</i>)}</span> : null}
-      </div>
-      <div className="lx-card-body">
-        <span className="lx-tags">{[c.category, f.level, c.language].filter(Boolean).map((t) => <i key={t}>{t}</i>)}</span>
-        <h3><button type="button" className="lx-title" onClick={() => nav(`courses/${c.public_key}`)}>{c.title}</button></h3>
-        {c.outcome ? <p className="lx-outcome"><V8Icon name="star" size={14} /><span><b>You’ll make:</b> {c.outcome}</span></p> : c.tagline ? <p className="lx-outcome plain">{c.tagline}</p> : null}
-        <p className="lx-teacher">{c.by_howdi ? "HOWDI Learn" : c.teacher ? <>@{c.teacher.public_username}{c.teacher.verified ? <V8Icon name="check" size={12} /> : null}</> : null}</p>
-        <ul className="lx-facts">
-          {f.duration ? <li><V8Icon name="clock" size={14} />{f.duration} · {c.lessons} lesson{c.lessons === 1 ? "" : "s"}</li> : null}
-          {f.support.length ? <li><V8Icon name="shield" size={14} />{f.support.join(" · ")}</li> : null}
-          <li><V8Icon name="box" size={14} />{f.materials}</li>
-        </ul>
-        {c.enrolled ? <span className="lx-prog"><span className="v8l-bar"><i style={{ width: `${c.progress}%` }} /></span><small>{c.progress}%</small></span> : null}
-        <div className="lx-card-actions">
-          <button type="button" className="v8-btn v8-btn-primary" onClick={() => nav(`courses/${c.public_key}`)}>{c.enrolled ? "Continue" : "View course"}</button>
-          {c.preview_lesson && !c.enrolled ? <button type="button" className="v8-btn" onClick={() => nav(`lessons/${c.preview_lesson}`)}><V8Icon name="play" size={14} />Preview</button> : null}
-          {c.learners ? <small className="lx-learners">{c.learners} learner{c.learners === 1 ? "" : "s"}</small> : null}
-        </div>
-      </div>
-    </article>
-  );
-}
-

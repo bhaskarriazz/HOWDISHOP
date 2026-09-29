@@ -13,6 +13,7 @@
 // =====================================================================================
 const crypto = require('node:crypto');
 const discovery = require('./learn-discovery-v8.cjs');
+const { createLearnJourneyV8 } = require('./learn-journey-v8.cjs');
 const CATEGORIES = ['Crochet & Handmade', 'Tailoring & Textiles', 'Cooking', 'Digital skills', 'Business & Selling', 'Languages', 'Wellness'];
 const LEVELS = ['beginner', 'intermediate', 'advanced'];
 const ROLE_FORMS = {
@@ -43,13 +44,14 @@ function createLearnV8(deps) {
     // P8 Learn Discovery: estimated materials cost (never part of the course price) + per-learner saved courses
     await pool.query(`ALTER TABLE learning_courses ADD COLUMN IF NOT EXISTS v8_materials_cost NUMERIC(12,2)`);
     await pool.query(`CREATE TABLE IF NOT EXISTS howdi_v8_learn_saves(user_id BIGINT NOT NULL, course_id UUID NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY(user_id, course_id))`);
+    await journey.ensureSchema();
     await pool.query(`CREATE TABLE IF NOT EXISTS howdi_v8_learn_payments(user_id BIGINT NOT NULL, course_id UUID NOT NULL, amount NUMERIC(12,2) NOT NULL, txn VARCHAR(32), idem_key VARCHAR(64), created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY(user_id, course_id))`);
   }
 
   // ---------------------------------------------------------------- codes (UUID keys → string resolve)
   const code = async (type, key) => (await issue(type, [String(key)])).get(String(key));
   const codes = async (type, keys) => issue(type, keys.map(String));
-  const PREFIX = { LCRS: 'CRS', LLSN: 'LSN', RAPP: 'RAP' };
+  const PREFIX = { LCRS: 'CRS', LLSN: 'LSN', RAPP: 'RAP', LEVD: 'EVD' };
   async function key(c, type) {
     if (!new RegExp(`^${PREFIX[type]}-[0-9A-F]{12}$`).test(String(c || ''))) return null;
     const r = (await pool.query(`SELECT entity_key FROM howdi_v8_refs2 WHERE public_code=$1 AND entity_type=$2`, [c, type])).rows[0]; return r ? String(r.entity_key) : null;
@@ -98,6 +100,9 @@ function createLearnV8(deps) {
   }
   const published = `is_active AND publish_status='PUBLISHED'`;
 
+  // P8 learner journey: next step, project journey, materials checklist, Show My Work (./learn-journey-v8.cjs)
+  const journey = createLearnJourneyV8({ pool, getBody, notify, H, M, key, code, lessonsOf, stateOf, certOf, courseCard });
+
   async function handle(req, res, url) {
     const p = url.pathname.replace(/\/+$/, '') || '/';
     if (p.startsWith('/api/admin/v8/roles/')) return admin(req, res, url, p);
@@ -111,6 +116,7 @@ function createLearnV8(deps) {
     }
     const v = await viewer(req);
     const uid = v ? v.id : null;
+    if (await journey.handle(req, res, p, uid)) return true;
     // ------------------------------------------------ catalogue (browsable signed-out)
     if (p === '/api/v8/learn/courses' && req.method === 'GET') {
       // P8 Learn Discovery: real filters, search, sort and paging over published courses only (see learn-discovery-v8.cjs).

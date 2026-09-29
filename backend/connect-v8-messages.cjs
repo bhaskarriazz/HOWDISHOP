@@ -77,8 +77,8 @@ function createConnectV8Messages(deps) {
   }
 
   // ------------------------------------------------------------ public codes (shared refs2 table)
-  const PFX = { CONV: 'CNV', CMSG: 'CMS', PAY: 'PAY', UTL: 'UTL', WBKG: 'BKG', WAPP: 'WAP', VAPP: 'VAP', SORD: 'ORD', SRET: 'RTN', LCRS: 'CRS', LLSN: 'LSN', RAPP: 'RAP', RRPT: 'RPT' };
-  const CODE = /^(CNV|CMS|PAY|UTL|BKG|WAP|VAP|ORD|RTN|CRS|LSN|RAP|RPT)-[0-9A-F]{12}$/;
+  const PFX = { CONV: 'CNV', CMSG: 'CMS', PAY: 'PAY', UTL: 'UTL', WBKG: 'BKG', WAPP: 'WAP', VAPP: 'VAP', SORD: 'ORD', SRET: 'RTN', LCRS: 'CRS', LLSN: 'LSN', RAPP: 'RAP', RRPT: 'RPT', LEVD: 'EVD' };
+  const CODE = /^(CNV|CMS|PAY|UTL|BKG|WAP|VAP|ORD|RTN|CRS|LSN|RAP|RPT|EVD)-[0-9A-F]{12}$/;
   async function issue(type, keys) {
     const uniq = [...new Set(keys.map(String))]; const out = new Map(); if (!uniq.length) return out;
     for (let a = 0; a < 4; a++) {

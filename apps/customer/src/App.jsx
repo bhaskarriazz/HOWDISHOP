@@ -22,7 +22,7 @@ import { V8Appearance, V8Permissions, V8IdentityBadges } from "./v8/V8Settings";
 import { V8Confirm, V8OfflineBanner, V8SessionExpired, loadV8Prefs, applyV8Prefs, useV8Ui } from "./v8/V8System";
 import HowdiFor from "./howdi-for/HowdiFor";
 import { HowdiForMenuRow, HowdiForFeedCard, HowdiForEmptyStateLink, insertFeedCard } from "./howdi-for/HowdiForEntryPoints";
-import { parseForPath, resolveForDestination } from "./howdi-for/routes";
+import { cleanTopic, parseForPath, resolveForDestination } from "./howdi-for/routes";
 import { discoverySearch, parseDiscoveryParams } from "./v8/learn/learnDiscovery";
 import {
   recordTasteEvent,
@@ -12791,7 +12791,10 @@ const removeNotification = async (notificationId) => {
   },[howdiForRoute,v8RouterOn,navigationOSArea,v8MovePath,connectView,connectContentMode,v8ConnectPath,v8ShopPath,v8LearnPath,shopOSView,shopCollection,worksExperienceTab,learningPortalView,v8MeView,v8ProfileHandle]);
   useEffect(()=>{
     // V8 Connect sheets (e.g. Share → Messages) ask the shell to open another area.
-    const onOpen=(e)=>{const d=e&&e.detail;if(d&&typeof d.area==="string")openNavigationOSArea(d.area,d.view||"home");};
+    const onOpen=(e)=>{const d=e&&e.detail;if(!d||typeof d.area!=="string")return;
+      // P8 LRN-MAT-001: Learn materials checklist → Shop search for one item name (no course/learner ids leave Learn)
+      if(d.area==="shop"&&typeof d.q==="string"&&cleanTopic(d.q)){const q=cleanTopic(d.q);setShopCatalogueQuery(q);setShopCatalogueNotice(`Shop results for “${q}” from your Learn materials checklist. Buying is optional.`);openNavigationOSArea("shop","catalogue");return;}
+      openNavigationOSArea(d.area,d.view||"home");};
     window.addEventListener("howdi:v8-open",onOpen);return()=>window.removeEventListener("howdi:v8-open",onOpen);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   },[]);
