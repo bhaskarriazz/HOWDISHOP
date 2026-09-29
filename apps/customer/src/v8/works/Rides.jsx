@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { groupCustomerRides, recentDestinations, savedAddressText } from '../move/rideHome.mjs';
 import { driverAvailability, driverOfferStatus, driverTripTitle } from '../move/driverMove.mjs';
+import SendItems from '../move/SendItems';
 import './rides.css';
 
 const BASE = '/api/v8/rides';
@@ -81,7 +82,7 @@ export default function Rides({ api, path = '', nav, onOpenAddresses }) {
         : selected ? <Trip ride={selected} call={call} onRepeat={repeatRide} onRefresh={() => load()} />
         : sub.startsWith('HR-') ? <RidePanel id="RIDE-002" title="Ride unavailable"><p>Permission denied or Ride not found. Open Your rides using the account that requested this trip.</p><button type="button" onClick={() => nav('rides/trips')}>Your rides</button></RidePanel>
         : sub === 'trips' ? <RidePanel id="RIDE-002" title="Your rides"><RideList rides={customerRides} nav={nav} onRepeat={repeatRide} /><button type="button" onClick={() => load()}>Refresh status</button></RidePanel>
-        : sub === 'items' ? <RidePanel id="MOVE-ITEMS" title="Send Items"><p>Send Items is not available in this pilot. A separate delivery flow and checks are still required.</p><button type="button" onClick={() => nav('rides')}>Return to Ride</button></RidePanel>
+        : sub === 'items' ? <SendItems onReturn={() => nav('rides')} />
         : <><div className="ride-home-intro"><div><h2>Where to?</h2><p>Request an Auto or Cab from the classes the pilot has enabled.</p></div><div className="ride-home-count"><b>{groups.current.length}</b><span>current rides</span></div></div><Quote key={repeat?.token || 'new'} config={config} call={call} nav={nav} seed={repeat} rides={customerRides} places={places} placesLoading={placesLoading} placesError={placesError} onRetryPlaces={loadPlaces} onOpenAddresses={onOpenAddresses} /></>}
       <details className="ride-panel ride-notifications"><summary>Preview ride updates ({data.notices?.length || 0})</summary>{data.notices?.map((n, i) => <p key={i}><b>{n.ref}</b> · {n.message}</p>)}{!data.notices?.length && <p>No ride updates yet.</p>}</details>
     </fieldset>}
