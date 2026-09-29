@@ -201,6 +201,15 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
   check('expiry removes eligible offers', !(await api(driver, 'GET', B)).json.offers.length);
   await expect('expiry disables via staff queue', 'admin', 'GET', A, undefined, 200);
   check('expired application persisted unavailable', (await K.pool.query('SELECT state,available FROM howdi_ride_applications WHERE code=$1', [app.code])).rows[0].state === 'expired');
+  const restrictedApp = 'RA-A3E57';
+  await K.pool.query("INSERT INTO howdi_ride_applications(code,user_id,vehicle_class,zone,state,details,checks,available) VALUES($1,$2,'Cab','Bengaluru preview','approved',$3,'{}',FALSE)", [restrictedApp, driver.id, JSON.stringify({ plate: 'KA 03 TEST 57', licence_until: future, permit_until: future, insurance_until: future, accessibility: 'none' })]);
+  await expect('restriction needs a reason', 'admin', 'POST', `${A}/applications/${restrictedApp}/restrict`, {}, 409);
+  await expect('staff restricts approved driver', 'admin', 'POST', `${A}/applications/${restrictedApp}/restrict`, { reason: 'Synthetic safety review' }, 200);
+  await expect('restricted driver cannot go online', driver, 'POST', `${B}/applications/${restrictedApp}/availability`, { available: true }, 409);
+  const m4Queue = await expect('staff Ride queue returns safe audit and RBAC gap', 'admin', 'GET', A, undefined, 200);
+  check('restriction audit has actor reason and transition', m4Queue.audit.some(e => e.ref === restrictedApp && e.action === 'restricted' && e.detail.from === 'approved' && e.detail.to === 'restricted' && e.detail.reason === 'Synthetic safety review'));
+  check('case resolution audit has transition and reason', m4Queue.audit.some(e => e.ref === ride.code && e.action === 'case_resolved' && e.detail.from === 'open' && e.detail.to === 'resolved' && e.detail.reason === 'Synthetic item returned'));
+  check('admin queue uses public identifiers and no secrets', m4Queue.rbac?.mode === 'staff_session_only' && !/"(?:id|user_id|driver_id|customer_id|token|password|email|phone)"\s*:/.test(JSON.stringify({ rides: m4Queue.rides, offers: m4Queue.offers, cases: m4Queue.cases, audit: m4Queue.audit })));
   if (process.env.RIDES_TEST_EVIDENCE) fs.writeFileSync(process.env.RIDES_TEST_EVIDENCE, JSON.stringify({ checks: count, public_code: ride.code, receipt, hpay_refunded_receipt: refunded, customer_notifications: noticesA, driver_notifications: noticesB, consent_events: events }, null, 2));
   if (process.env.RIDES_LOCAL_FIXTURE) fs.writeFileSync(process.env.RIDES_LOCAL_FIXTURE, JSON.stringify({ customer, driver, outsider, app: app.code, ride: ride.code, adminToken: login.json.token }));
   console.log(`${count} PostgreSQL integration checks passed; visual/approval gates are separate.`);

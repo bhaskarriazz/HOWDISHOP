@@ -275,11 +275,17 @@ function createRidesV8({ pool, getBody, helpers, sandboxEnabled }) {
             const apps = (await db.query('SELECT * FROM howdi_ride_applications ORDER BY created_at DESC LIMIT 100')).rows;
             const rides = (await db.query('SELECT * FROM howdi_rides ORDER BY created_at DESC LIMIT 100')).rows;
             await event(db, 'ADMIN', actor, 'queue_viewed');
-            return { applications: await Promise.all(apps.map(a => applicationDto(db, a))), rides: await Promise.all(rides.map(r => rideDto(db, r, null, true))), offers: (await db.query('SELECT o.code,o.ride_code,o.state,o.expires_at,p.public_username AS driver FROM howdi_ride_offers o JOIN howdi_connect_profiles p ON p.user_id=o.driver_id ORDER BY o.created_at DESC LIMIT 100')).rows, cases: (await db.query('SELECT code,ride_code,kind,reason,state,resolution FROM howdi_ride_cases ORDER BY created_at DESC LIMIT 100')).rows, zones: (await db.query('SELECT zone,vehicle_class,paused,reason,preview_checks FROM howdi_ride_zones')).rows, checks: CHECKS, pilot_checks: PILOT_CHECKS, zone };
+            const audit = (await db.query('SELECT ref,actor,action,detail,created_at FROM howdi_ride_events ORDER BY created_at DESC LIMIT 100')).rows;
+            return { applications: await Promise.all(apps.map(a => applicationDto(db, a))), rides: await Promise.all(rides.map(r => rideDto(db, r, null, true))), offers: (await db.query('SELECT o.code,o.ride_code,o.state,o.expires_at,p.public_username AS driver FROM howdi_ride_offers o JOIN howdi_connect_profiles p ON p.user_id=o.driver_id ORDER BY o.created_at DESC LIMIT 100')).rows, cases: (await db.query('SELECT code,ride_code,kind,reason,state,resolution FROM howdi_ride_cases ORDER BY created_at DESC LIMIT 100')).rows, zones: (await db.query('SELECT zone,vehicle_class,paused,reason,preview_checks FROM howdi_ride_zones')).rows, audit, checks: CHECKS, pilot_checks: PILOT_CHECKS, zone, rbac: { mode: 'staff_session_only', gap: 'Move capability roles are not configured server-side.' } };
           }
-          if ((m = p.match(/^\/api\/admin\/v8\/rides\/applications\/(RA-[A-F0-9]+)(?:\/(decide|documents))?$/))) {
+          if ((m = p.match(/^\/api\/admin\/v8\/rides\/applications\/(RA-[A-F0-9]+)(?:\/(decide|documents|restrict))?$/))) {
             const a = await one(db, 'SELECT * FROM howdi_ride_applications WHERE code=$1 FOR UPDATE', [m[1]]); requireThat(a, 404, 'NOT_FOUND', 'Application not found.');
             if (req.method === 'GET' && m[2] === 'documents') { await event(db, a.code, actor, 'evidence_viewed'); return { documents: (await db.query('SELECT kind,image FROM howdi_ride_documents WHERE application_code=$1', [a.code])).rows }; }
+            if (req.method === 'POST' && m[2] === 'restrict') {
+              requireThat(a.state === 'approved' && clean(b.reason), 409, 'RESTRICTION_INVALID', 'Only an approved driver can be restricted, with a reason.');
+              await db.query("UPDATE howdi_ride_applications SET state='restricted',available=FALSE,reason=$2 WHERE code=$1", [a.code, clean(b.reason)]);
+              await event(db, a.code, actor, 'restricted', { from: 'approved', to: 'restricted', reason: clean(b.reason) }); await notice(db, a.user_id, a.code, `Driver restricted from Move preview: ${clean(b.reason)}. Contact support for review.`); return { state: 'restricted' };
+            }
             requireThat(req.method === 'POST' && m[2] === 'decide' && a.state === 'submitted', 409, 'OUT_OF_ORDER', 'Only submitted applications can be decided.');
             const staffIdentity = await one(db, 'SELECT user_id FROM howdi_ride_staff_identity WHERE username=$1', [staff.username]);
             requireThat(staffIdentity, 403, 'STAFF_IDENTITY_REQUIRED', 'A trusted operator must link this staff login to its HOWDI account before verification decisions.');
@@ -310,7 +316,7 @@ function createRidesV8({ pool, getBody, helpers, sandboxEnabled }) {
               requireThat(r.payment_state === 'paid', 409, 'NOT_PAID', 'Only a recorded payment can be refunded.');
               await db.query('INSERT INTO howdi_ride_ledger(ride_code,kind,amount,payment,reference) VALUES($1,\'refund\',$2,$3,$4) ON CONFLICT DO NOTHING', [r.code, -r.quote.fare.total, r.quote.payment, code('RFTEST')]); await db.query("UPDATE howdi_rides SET payment_state='refunded',payout_state='held' WHERE code=$1", [r.code]);
             }
-            await db.query("UPDATE howdi_ride_cases SET state='resolved',resolution=$2 WHERE code=$1", [c.code, clean(b.reason)]); await event(db, r.code, actor, 'case_resolved', { case: c.code, reason: clean(b.reason), refund: b.refund === true }); await both(db, r, `Case ${c.code} resolved: ${clean(b.reason)}. You may appeal in support.`); return { saved: true };
+            await db.query("UPDATE howdi_ride_cases SET state='resolved',resolution=$2 WHERE code=$1", [c.code, clean(b.reason)]); await event(db, r.code, actor, 'case_resolved', { case: c.code, from: c.state, to: 'resolved', reason: clean(b.reason), refund: b.refund === true }); await both(db, r, `Case ${c.code} resolved: ${clean(b.reason)}. You may appeal in support.`); return { saved: true };
           }
         }
         throw error(404, 'NOT_FOUND', 'Rides route not found.');
