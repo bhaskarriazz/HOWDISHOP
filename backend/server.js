@@ -21318,7 +21318,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
       pool, getSessionUserFromRequest, sendJSON, connectPostVisibleSql, k5ePrivateProfileOkSql,
       rateLimit: vibeRateLimitV151B, getRequestIp,
     });
-    const globalSearchK5B = require("./global-search-k5b.cjs").createGlobalSearchK5B({ pool, getSessionUserFromRequest, sendJSON, k5ePrivateProfileOkSql });
+    const globalSearchK5B = require("./global-search-k5b.cjs").createGlobalSearchK5B({ pool, getSessionUserFromRequest, sendJSON, k5ePrivateProfileOkSql, connectPostVisibleSql, issueRefs: connectHomeK5A._internal.issueRefs });
 
     // =====================================================
     // SERVER
