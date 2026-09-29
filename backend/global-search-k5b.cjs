@@ -1,6 +1,24 @@
 'use strict';
 const {isPublicUsername,isPublicWorkerCode,isSlug,mediaUrl,excerpt,stripInternalKeys}=require('./connect-home-k5a.cjs');
-const TYPES=Object.freeze(['people','creators','posts','articles','vibes','groups','channels']);
+const TYPES=Object.freeze(['people','creators','posts','articles','vibes','groups','channels','products']);
+// Shop helpers reproduced verbatim from connect-home-k5a.cjs (module-private there); the unit tests compare their source text.
+function money(value) { if (value === null || value === undefined || value === '') return null; const n = Number(value); return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : null; }
+function firstImage(list) {
+  let arr = list;
+  if (typeof arr === 'string') { try { arr = JSON.parse(arr); } catch { arr = [arr]; } }
+  if (!Array.isArray(arr)) return null;
+  for (const item of arr) { const u = mediaUrl(typeof item === 'object' && item ? item.url : item); if (u) return u; }
+  return null;
+}
+// Same rule as the Shop S1 catalogue's JS gate (shopS1RowVisible), mirrored because that helper is request-scoped.
+const shopRowVisible = (r) => {
+  if (String(r.status || '').toLowerCase() !== 'published' || r.archived_at) return false;
+  if (String(r.vendor_status || 'active').toLowerCase() !== 'active') return false;
+  const at = r.published_at ? new Date(r.published_at).getTime() : null;
+  if (at && Number.isFinite(at) && at > Date.now()) return false;
+  if (r.moderation_status && String(r.moderation_status).trim().toUpperCase() !== 'APPROVED') return false;
+  return true;
+};
 // K5A visibility fragments, reproduced verbatim from connect-home-k5a.cjs ($1 is always the viewer id, 0 for guests).
 // Post/article viewer visibility is the injected server connectPostVisibleSql. tests/global-search-k5b.test.cjs asserts
 // these fragments stay identical to the K5A Home SQL, so search cannot drift from Home.
@@ -18,11 +36,21 @@ function k5aFragments({connectPostVisibleSql,k5ePrivateProfileOkSql}){
   const VIBE_WHERE=`v.status='published' AND v.visibility='public' AND v.deleted_at IS NULL AND v.vibe_code IS NOT NULL AND ${AUTHOR_FLOOR('u','cp','u.id')}
         AND ($1::bigint=0 OR NOT EXISTS(SELECT 1 FROM vibe_creator_blocks b WHERE (b.blocker_user_id=$1::text AND b.blocked_creator_user_id=v.creator_user_id) OR (b.blocker_user_id=v.creator_user_id AND b.blocked_creator_user_id=$1::text)))`;
   const SPACE_WHERE=`s.is_archived=FALSE AND s.privacy='PUBLIC' AND s.slug IS NOT NULL AND ${ACTIVE_USER('ou')} AND ${NOT_BLOCKED('s.owner_user_id')}`;
-  return {AUTHOR_FLOOR,AVATAR,POST_WHERE,VIBE_WHERE,SPACE_WHERE};
+  const SHOP_CREATOR=`CASE WHEN cp.user_id IS NOT NULL AND COALESCE(cp.private_profile,FALSE)=FALSE THEN cp.public_username END`;
+  const SHOP_FROM=`FROM vendor_products p JOIN vendor_profiles v ON v.id=p.vendor_profile_id JOIN users u ON u.id=v.user_id
+        LEFT JOIN howdi_connect_profiles cp ON cp.user_id=v.user_id AND cp.public_username IS NOT NULL AND COALESCE(cp.discoverable,TRUE)=TRUE`;
+  const SHOP_WHERE=`p.status='published' AND p.archived_at IS NULL AND (p.published_at IS NULL OR p.published_at<=NOW()) AND COALESCE(v.status,'active')='active'
+        AND COALESCE(UPPER((SELECT m.status FROM howdi_shop_product_moderation_v162c m WHERE m.product_id=p.id ORDER BY m.created_at DESC, m.id DESC LIMIT 1)),'APPROVED')='APPROVED'
+        AND ${ACTIVE_USER('u')} AND ${NOT_BLOCKED('v.user_id')}
+        AND (CASE WHEN EXISTS(SELECT 1 FROM vendor_product_variants pv WHERE pv.product_id=p.id)
+              THEN EXISTS(SELECT 1 FROM vendor_product_variants pv WHERE pv.product_id=p.id AND LOWER(COALESCE(pv.status,'active'))='active' AND COALESCE(pv.stock,0)>0)
+              ELSE COALESCE(p.stock,0)>0 END)`;
+  return {AUTHOR_FLOOR,AVATAR,POST_WHERE,VIBE_WHERE,SPACE_WHERE,SHOP_CREATOR,SHOP_FROM,SHOP_WHERE};
 }
 // $1 viewer id, $2 lower-cased LIKE-escaped query (prefix/contains), $3 limit, $4 raw lower-cased query (exact). Ordering: exact > prefix > contains, then a stable tiebreak.
 function searchSql(deps){
-  const {AUTHOR_FLOOR,AVATAR,POST_WHERE,VIBE_WHERE,SPACE_WHERE}=k5aFragments(deps);
+  const {AUTHOR_FLOOR,AVATAR,POST_WHERE,VIBE_WHERE,SPACE_WHERE,SHOP_CREATOR,SHOP_FROM,SHOP_WHERE}=k5aFragments(deps);
+  const CREATOR=`(${SHOP_CREATOR})`;
   const EQ=(c)=>`LOWER(${c})=$4`,PRE=(c)=>`LOWER(${c}) LIKE $2||'%' ESCAPE '\\'`,HAS=(c)=>`LOWER(COALESCE(${c},'')) LIKE '%'||$2||'%' ESCAPE '\\'`;
   const PUBLISHED=`COALESCE(CASE WHEN p.post_status='SCHEDULED' THEN p.scheduled_for END,p.created_at)`;
   const POST_SELECT=`SELECT p.id AS internal_key,p.post_type,p.content,p.post_status,p.audience_scope,p.subscribers_only,p.subscriber_only,
@@ -37,6 +65,16 @@ function searchSql(deps){
         AND (${EQ('s.name')} OR ${EQ('s.slug')} OR ${PRE('s.name')} OR ${PRE('s.slug')} OR ${HAS('s.name')} OR ${HAS('s.slug')} OR ${HAS('s.category')})
       ORDER BY CASE WHEN ${EQ('s.name')} OR ${EQ('s.slug')} THEN 0 WHEN ${PRE('s.name')} OR ${PRE('s.slug')} THEN 1 ELSE 2 END,s.member_count DESC,s.slug LIMIT $3`;
   return {
+    // Creator username is searchable only where K5A would display it (discoverable, non-private profile).
+    products:`SELECT p.id AS internal_key,p.name,p.category,p.price,p.mrp,p.image_urls,p.status,p.archived_at,p.published_at,COALESCE(v.status,'active') AS vendor_status,
+        (SELECT m.status FROM howdi_shop_product_moderation_v162c m WHERE m.product_id=p.id ORDER BY m.created_at DESC, m.id DESC LIMIT 1) AS moderation_status,
+        v.business_name AS store_name,${CREATOR} AS creator_public_username,u.is_active,u.account_status
+      ${SHOP_FROM}
+      WHERE ${SHOP_WHERE}
+        AND (${EQ('p.name')} OR ${EQ('v.business_name')} OR ${EQ(CREATOR)} OR ${PRE('p.name')} OR ${PRE('v.business_name')} OR ${PRE(CREATOR)}
+          OR ${HAS('p.name')} OR ${HAS('p.category')} OR ${HAS('v.business_name')} OR ${HAS(CREATOR)})
+      ORDER BY CASE WHEN ${EQ('p.name')} OR ${EQ('v.business_name')} OR ${EQ(CREATOR)} THEN 0 WHEN ${PRE('p.name')} OR ${PRE('v.business_name')} OR ${PRE(CREATOR)} THEN 1 ELSE 2 END,
+        p.published_at DESC NULLS LAST,p.id DESC LIMIT $3`,
     groups:SPACES('GROUP'),
     channels:SPACES('CHANNEL'),
     creators:`SELECT cp.public_username,u.full_name AS display_name,${AVATAR('cp','ps')} AS avatar,cp.headline,u.is_active,u.account_status,cp.discoverable
@@ -80,6 +118,10 @@ function createGlobalSearchK5B({pool,getSessionUserFromRequest,sendJSON,k5ePriva
     async articles(vid,like,limit,exact){const rows=(await pool.query(SQL.articles,[vid,like,limit,exact])).rows.filter(r=>postOk(r,vid)&&isArticle(r));
       return (await withRefs('ARTICLE','ART',rows)).map(({r,code})=>({type:'article',public_key:code,public_username:r.public_username,display_name:name(r),title:excerpt(r.article_title,160)||null,text_excerpt:excerpt(r.article_excerpt||r.content,280),cover_url:mediaUrl(r.cover),route:'/articles/'+code}));},
     async vibes(vid,like,limit,exact){return (await pool.query(SQL.vibes,[vid,like,limit,exact])).rows.filter(r=>authorOk(r)&&isPublicWorkerCode(r.vibe_code)).map(x=>({type:'vibe',public_key:x.vibe_code,caption:excerpt(x.caption,140)||null,cover_url:mediaUrl(x.cover_url),public_username:x.public_username,display_name:name(x),route:'/vibes/'+encodeURIComponent(x.vibe_code)}));},
+    async products(vid,like,limit,exact){const rows=(await pool.query(SQL.products,[vid,like,limit,exact])).rows.filter(r=>shopRowVisible(r)&&userOk(r));
+      return (await withRefs('PRODUCT','PRD',rows)).map(({r,code})=>{const price=money(r.price),mrp=money(r.mrp);return {type:'product',public_key:code,title:excerpt(r.name,120),image_url:firstImage(r.image_urls),price,
+        compare_at_price:mrp!==null&&price!==null&&mrp>price?mrp:null,currency:'INR',category:excerpt(r.category,60)||null,
+        store:{name:excerpt(r.store_name,80)||null,public_username:isPublicUsername(r.creator_public_username)?r.creator_public_username:null},route:'/shop/products/'+code};});},
     async groups(vid,like,limit,exact){return spaces(vid,like,limit,exact,'GROUP','group');},
     async channels(vid,like,limit,exact){return spaces(vid,like,limit,exact,'CHANNEL','channel');},
   };
@@ -90,4 +132,4 @@ function createGlobalSearchK5B({pool,getSessionUserFromRequest,sendJSON,k5ePriva
     catch(error){console.error('[K5B search] '+type+' failed:',error&&error.message);if(!res.headersSent)sendJSON(res,500,{status:'error',code:'SEARCH_UNAVAILABLE',message:'Search is temporarily unavailable.'});}
     return true;}};
 }
-module.exports={createGlobalSearchK5B,SEARCH_TYPES:TYPES,_internal:{k5aFragments,searchSql}};
+module.exports={createGlobalSearchK5B,SEARCH_TYPES:TYPES,_internal:{k5aFragments,searchSql,shopRowVisible,money,firstImage}};
