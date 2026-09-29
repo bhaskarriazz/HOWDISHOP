@@ -74,6 +74,13 @@ const secrets=(...us)=>us.flatMap(u=>[u.id,u.email,u.phone,u.howdi,u.master]);
   L.check('articles: not returned by posts search',!res(await L.search('posts','k5bart')).length);
   L.check('articles: DTO uses approved keys only',keys(av)===JSON.stringify(['cover_url','display_name','public_key','public_username','route','text_excerpt','title','type']));
   L.check('articles: no forbidden keys / private values',L.forbiddenKeys(res(r)).length===0&&L.leakedValues(r.text,[...secrets(pa,crPrivate),aVisible.id,aDraft.id]).length===0);
+  // Ranking regression: an OLDER exact title containing a LIKE metacharacter must outrank a NEWER prefix title.
+  // With exact equality on the LIKE-escaped query both land in the prefix bucket and recency puts the newer one first.
+  const rankExact=await L.post(pa,'k5b ranking body one',{type:'ARTICLE',title:'K5B_Rank',createdAgo:60});
+  const rankPrefix=await L.post(pa,'k5b ranking body two',{type:'ARTICLE',title:'K5B_Rank Extra',createdAgo:0});
+  r=await L.search('articles','K5B_Rank');
+  const rk=res(r),rkExact=await L.refFor('ARTICLE',rankExact.id),rkPrefix=await L.refFor('ARTICLE',rankPrefix.id);
+  L.check('articles ranking: older exact special-character title ranks above newer prefix title',ok(r)&&rk.length===2&&!!rkExact&&!!rkPrefix&&rk[0].public_key===rkExact&&rk[1].public_key===rkPrefix,rk.map(x=>x.title));
   // ---------------- VIBES
   const va=await L.member('K5B Vibe Author',{...A,username:'k5bvb_author'});
   const vaBlocked=await L.member('K5B Vibe Blocked',{...A,username:'k5bvb_blocked'});
