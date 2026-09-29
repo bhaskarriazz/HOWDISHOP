@@ -1,0 +1,44 @@
+name: K5B UI Validation
+on:
+  push:
+    branches: ["codex/k5b-global-search"]
+permissions:
+  contents: read
+jobs:
+  k5b-ui:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: howdi
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d howdi"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies
+        run: |
+          npm install --workspaces=false --omit=dev
+          npm install --prefix backend --omit=dev
+          npm install --prefix apps/customer
+      - name: K5B client tests and customer build
+        run: |
+          node --check apps/customer/src/globalSearchK5B.js
+          node --test apps/customer/src/globalSearchK5B.test.mjs
+          npm run build --prefix apps/customer
+      - name: K5B backend regression
+        run: node --test backend/tests/global-search-k5b.test.cjs
+      - name: K5B PostgreSQL regression
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/howdi
+        run: node backend/tests/k5b-pg/run-all.cjs
