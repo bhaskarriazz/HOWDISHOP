@@ -1,0 +1,35 @@
+{
+  "source": "real local Vite + HOWDI backend + disposable PostgreSQL preview database",
+  "scope": "M2 driver Move with synthetic local accounts; no Founder visual PASS",
+  "captured_at": "2026-09-29T00:41:16.213Z",
+  "files": [
+    {
+      "name": "1440-driver-offer.png",
+      "viewport": {
+        "width": 1440,
+        "scrollWidth": 1440
+      }
+    },
+    {
+      "name": "768-pickup-verification.png",
+      "viewport": {
+        "width": 768,
+        "scrollWidth": 768
+      }
+    },
+    {
+      "name": "390-active-trip.png",
+      "viewport": {
+        "width": 390,
+        "scrollWidth": 390
+      }
+    },
+    {
+      "name": "390-completed-settlement.png",
+      "viewport": {
+        "width": 390,
+        "scrollWidth": 390
+      }
+    }
+  ]
+}
