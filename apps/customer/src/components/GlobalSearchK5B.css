@@ -1,23 +1,57 @@
-.k5b-global-search{position:relative;min-width:0;z-index:80}
-.k5b-global-search-form{width:100%}
-.k5b-search-panel{position:absolute;top:calc(100% + 10px);left:0;width:min(620px,calc(100vw - 32px));max-height:min(72vh,680px);overflow:auto;background:#fffdf8;border:1px solid #e1ddd2;border-radius:18px;box-shadow:0 24px 70px rgba(24,40,31,.2);padding:10px;z-index:1000;color:#17251e}
-.k5b-search-scopes{display:flex;gap:6px;overflow-x:auto;padding:2px 2px 9px;border-bottom:1px solid #eee8dc;scrollbar-width:none}
-.k5b-search-scopes::-webkit-scrollbar{display:none}
-.k5b-search-scopes button{white-space:nowrap;border:1px solid #e2e7e3;background:#fff;color:#536159;border-radius:999px;padding:7px 10px;font-size:11px;font-weight:700;cursor:pointer}
-.k5b-search-scopes button.active{background:#315f49;color:#fff;border-color:#315f49}
-.k5b-search-results{padding:6px 0}
-.k5b-search-results>button{width:100%;display:grid;grid-template-columns:42px minmax(0,1fr) auto;gap:10px;align-items:center;text-align:left;border:0;background:transparent;color:#17251e;border-radius:12px;padding:9px;cursor:pointer}
-.k5b-search-results>button:hover,.k5b-search-results>button.active{background:#eef6f1}
+/* K5B global search. The root is the existing .howdi-ai-header-search form, so no layout
+   (width/flex/grid) rules live here: only the anchor for the dropdown and the dropdown itself.
+   Panel rules are prefixed with .k5b-global-search .k5b-search-panel to outrank App.css's
+   `.howdi-ai-header-search button` icon-button styling. The header uses backdrop-filter, which
+   breaks position:fixed, so the panel is always absolutely positioned against the form. */
+.k5b-global-search{position:relative}
+.k5b-global-search input[type="search"]{-webkit-appearance:none;appearance:none}
+.k5b-global-search input[type="search"]::-webkit-search-cancel-button,
+.k5b-global-search input[type="search"]::-webkit-search-decoration{-webkit-appearance:none;display:none}
+
+.k5b-global-search .k5b-search-panel{position:absolute;top:calc(100% + 10px);left:0;width:max(100%,min(600px,calc(100vw - 32px)));max-height:min(72vh,calc(100dvh - var(--howdi-header-bottom,80px) - 20px),680px);overflow:auto;overscroll-behavior:contain;background:#fffdf8;border:1px solid #e1ddd2;border-radius:18px;box-shadow:0 24px 70px rgba(24,40,31,.2);padding:10px;z-index:1000;color:#17251e;font-size:13px;text-align:left;cursor:default}
+.k5b-global-search .k5b-search-panel button{width:auto;height:auto;flex:none;box-shadow:none;font:inherit;transform:none}
+/* App.css forces 40x40 !important touch targets on every header-search button (<=900px / coarse
+   pointers); panel buttons are text controls, so undo that here with higher specificity. */
+.howdi-app .k5b-global-search .k5b-search-panel button{width:auto !important;height:auto !important;min-width:0 !important}
+.howdi-app .k5b-global-search .k5b-search-panel .k5b-search-all{width:100% !important}
+@media(pointer:coarse){.k5b-global-search .k5b-search-scopes button{min-height:36px}.k5b-global-search .k5b-search-panel .k5b-search-all{min-height:40px}}
+
+.k5b-global-search .k5b-search-scopes{display:flex;gap:6px;overflow-x:auto;padding:2px 2px 9px;border-bottom:1px solid #eee8dc;scrollbar-width:none}
+.k5b-global-search .k5b-search-scopes::-webkit-scrollbar{display:none}
+.k5b-global-search .k5b-search-scopes button{white-space:nowrap;border:1px solid #e2e7e3;background:#fff;color:#536159;border-radius:999px;padding:7px 11px;font-size:11px;font-weight:700;cursor:pointer}
+.k5b-global-search .k5b-search-scopes button:hover{border-color:#b9cbbf;color:#315f49}
+.k5b-global-search .k5b-search-scopes button.active{background:#315f49;color:#fff;border-color:#315f49}
+
+.k5b-search-results{padding:6px 0;transition:opacity .15s ease}
+.k5b-search-results.is-stale{opacity:.55}
+.k5b-search-option{width:100%;box-sizing:border-box;display:grid;grid-template-columns:42px minmax(0,1fr) auto;gap:10px;align-items:center;color:#17251e;border-radius:12px;padding:9px;cursor:pointer;outline:none}
+.k5b-search-option:hover,.k5b-search-option.active{background:#eef6f1}
+.k5b-search-option.active{box-shadow:inset 3px 0 0 #315f49}
 .k5b-search-icon{width:42px;height:42px;border-radius:12px;background:#f1eee4;display:grid;place-items:center;font-size:19px;overflow:hidden}
 .k5b-search-icon img{width:100%;height:100%;object-fit:cover}
 .k5b-search-copy{min-width:0;display:flex;flex-direction:column;gap:3px}
 .k5b-search-copy strong{font-size:13px;line-height:1.25;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .k5b-search-copy small{color:#718078;font-size:10.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.k5b-search-meta{text-align:right;display:flex;flex-direction:column;gap:4px;max-width:130px}
+.k5b-search-meta{text-align:right;display:flex;flex-direction:column;gap:4px;max-width:130px;min-width:0}
 .k5b-search-meta small{color:#8b6a32;font-size:9px;text-transform:uppercase;letter-spacing:.7px;font-weight:800}
 .k5b-search-meta b{color:#536159;font-size:10px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.k5b-search-state{padding:24px 12px;text-align:center;color:#6d7972;font-size:12px}
-.k5b-search-partial{margin:5px 4px 7px;padding:8px 10px;border-radius:10px;background:#fff7e8;color:#7a5d27;font-size:10px}
-.k5b-search-all{width:100%;border:0;border-top:1px solid #eee8dc;background:transparent;color:#315f49;padding:10px 8px 5px;text-align:left;font-size:11px;font-weight:800;cursor:pointer}
-@media(max-width:850px){.k5b-global-search{order:90;width:100%;flex-basis:100%}.k5b-search-panel{position:fixed;left:12px;right:12px;top:82px;width:auto;max-height:70vh}.k5b-search-meta{max-width:95px}}
-@media(max-width:520px){.k5b-search-panel{top:68px}.k5b-search-results>button{grid-template-columns:38px minmax(0,1fr)}.k5b-search-icon{width:38px;height:38px}.k5b-search-meta{grid-column:2;text-align:left;flex-direction:row;max-width:none}.k5b-search-scopes button{padding:6px 9px}}
+
+.k5b-search-state{padding:24px 12px;text-align:center;color:#6d7972;font-size:12px;display:flex;flex-direction:column;align-items:center;gap:10px}
+.k5b-search-loading{flex-direction:row;justify-content:center}
+.k5b-search-spinner{width:14px;height:14px;border-radius:50%;border:2px solid #d6e3da;border-top-color:#315f49;animation:k5b-spin .7s linear infinite}
+@keyframes k5b-spin{to{transform:rotate(360deg)}}
+.k5b-global-search .k5b-search-panel .k5b-search-retry{border:1px solid #315f49;background:#fff;color:#315f49;border-radius:999px;padding:6px 14px;font-size:11px;font-weight:800;cursor:pointer}
+.k5b-search-partial{margin:5px 4px 7px;padding:8px 10px;border-radius:10px;background:#fff7e8;color:#7a5d27;font-size:10.5px}
+.k5b-global-search .k5b-search-panel .k5b-search-all{display:block;width:100%;border:0;border-top:1px solid #eee8dc;border-radius:0;background:transparent;color:#315f49;padding:10px 8px 5px;text-align:left;font-size:11px;font-weight:800;cursor:pointer}
+
+/* Horizontal placement/width is set inline by globalSearchPanelBox() so the panel stays inside
+   the viewport even when the header gives the form a narrow slot; the CSS width is the fallback. */
+@media(max-width:1000px){.k5b-global-search .k5b-search-panel{max-height:min(70vh,calc(100dvh - var(--howdi-header-bottom,80px) - 16px))}.k5b-search-meta{max-width:95px}}
+@media(max-width:520px){
+  .k5b-global-search .k5b-search-panel{top:calc(100% + 6px);padding:8px;border-radius:14px}
+  .k5b-search-option{grid-template-columns:38px minmax(0,1fr);padding:8px}
+  .k5b-search-icon{width:38px;height:38px}
+  .k5b-search-meta{grid-column:2;text-align:left;flex-direction:row;align-items:baseline;max-width:none}
+  .k5b-global-search .k5b-search-scopes button{padding:6px 9px}
+}
+@media(prefers-reduced-motion:reduce){.k5b-search-spinner{animation:none}.k5b-search-results{transition:none}}

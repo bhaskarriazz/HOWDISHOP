@@ -3,6 +3,8 @@ import { createPortal } from "react-dom";
 import "./App.css";
 import HowdiAuthPortal from "./components/HowdiAuthPortal";
 import ShopCatalogue from "./components/ShopCatalogue";
+import GlobalSearchK5B from "./components/GlobalSearchK5B";
+import { safeGlobalSearchRoute } from "./globalSearchK5B";
 import HowdiFor from "./howdi-for/HowdiFor";
 import { HowdiForMenuRow, HowdiForFeedCard, HowdiForEmptyStateLink, insertFeedCard } from "./howdi-for/HowdiForEntryPoints";
 import { parseForPath } from "./howdi-for/routes";
@@ -9705,6 +9707,20 @@ return () => window.clearInterval(timer);
     navigate("search");
   };
 
+  // K5B: autocomplete results only navigate through the public route allow-list. Posts/articles open
+  // in the existing K5A in-app viewer (Back closes it); every other allow-listed route is a full navigation.
+  const navigateGlobalSearchResult = (route) => {
+    const safe = safeGlobalSearchRoute(route);
+    if (!safe) return;
+    const item = safe.match(HOME_ITEM_ROUTE_RE);
+    if (item && item[1] !== "stories") {
+      openNavigationOSArea("connect", "home");
+      openHomeItem(item[1] === "articles" ? "article" : "post", item[2], safe);
+      return;
+    }
+    window.location.assign(safe);
+  };
+
   const runDiscoverySearch = (event) => {
     event?.preventDefault();
     setSearchQuery(homeSearch.trim());
@@ -12948,11 +12964,17 @@ const removeNotification = async (notificationId) => {
             <button type="button" className={pillarActive("learn")?"active":""} onClick={()=>openNavigationOSArea("learn","discover")}>🎓 Learn & Earn</button>
           </nav>
 
-          <form className="howdi-ai-header-search" onSubmit={submitHomeSearch}>
-            <span className="howdi-ai-spark">✦</span>
-            <input ref={searchInputRef} aria-label="Search HOWDI people, products, services and learning" value={homeSearch} onChange={(event) => setHomeSearch(event.target.value)} placeholder="Search people, products, services, courses…" />
-            <button type="submit" aria-label="Search HOWDI" title="Search HOWDI">↗</button>
-          </form>
+          <GlobalSearchK5B
+            inputRef={searchInputRef}
+            value={homeSearch}
+            onChange={setHomeSearch}
+            onSubmit={submitHomeSearch}
+            onNavigate={navigateGlobalSearchResult}
+            getHeaders={customerSessionHeaders}
+            apiBase={SHOP_API_BASE}
+            ariaLabel="Search HOWDI people, creators, posts, groups, products, workers and teachers"
+            placeholder="Search people, posts, products, workers, teachers…"
+          />
 
           {/* HEADER ACTIONS */}
 
