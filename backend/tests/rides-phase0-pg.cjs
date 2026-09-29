@@ -60,6 +60,15 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
   const offers = await expect('eligible driver sees offer', driver, 'GET', B, undefined, 200);
   check('offer no precise addresses or plate', offers.offers.some(r => r.code === ride.code && !r.pickup && !r.destination && !r.plate));
   await expect('unapproved account cannot accept', outsider, 'POST', `${B}/${ride.code}/accept`, {}, 403);
+  await K.pool.query("UPDATE users SET account_status='SUSPENDED' WHERE id=$1", [driver.id]);
+  await expect('suspended driver session cannot accept', driver, 'POST', `${B}/${ride.code}/accept`, {}, 401);
+  await K.pool.query("UPDATE users SET account_status='ACTIVE' WHERE id=$1", [driver.id]);
+  await K.pool.query("UPDATE howdi_ride_applications SET vehicle_class='Cab' WHERE code=$1", [app.code]);
+  await expect('wrong vehicle class cannot accept', driver, 'POST', `${B}/${ride.code}/accept`, {}, 403);
+  await K.pool.query("UPDATE howdi_ride_applications SET vehicle_class='Auto' WHERE code=$1", [app.code]);
+  await K.pool.query('INSERT INTO howdi_connect_profile_blocks(blocker_user_id,blocked_user_id) VALUES($1,$2)', [customer.id, driver.id]);
+  await expect('blocked driver cannot accept', driver, 'POST', `${B}/${ride.code}/accept`, {}, 403);
+  await K.pool.query('DELETE FROM howdi_connect_profile_blocks WHERE blocker_user_id=$1 AND blocked_user_id=$2', [customer.id, driver.id]);
   await expect('zone pause requires reason', 'admin', 'POST', A + '/zone', { vehicle_class: 'Auto', paused: true }, 400);
   await expect('pause class', 'admin', 'POST', A + '/zone', { vehicle_class: 'Auto', paused: true, reason: 'Test pause' }, 200);
   await expect('paused class blocks accept', driver, 'POST', `${B}/${ride.code}/accept`, {}, 403);
@@ -107,6 +116,9 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
   check('audit consent only field names', events.length === 2 && !JSON.stringify(events).includes(bookingBody.pickup) && events.every(e => e.detail.fields));
   const receipt = (await api(customer, 'GET', `${B}/${ride.code}`)).json.ride;
   check('public DTO no internal identity', !/"(?:id|user_id|customer_id|driver_id|phone|email|uuid)"\s*:/.test(JSON.stringify(receipt)));
+  check('public receipt has no storage path', !/storage|s3:|file:\/\//i.test(JSON.stringify(receipt)));
+  const transitions = (await K.pool.query("SELECT action,detail FROM howdi_ride_events WHERE ref=$1 AND action IN ('accepted','started','completed','payment_recorded') ORDER BY created_at", [ride.code])).rows;
+  check('sensitive state audit has before and after without secrets', transitions.length === 4 && transitions.every(e => e.detail.from && e.detail.to && !/token|pin|phone|email/i.test(JSON.stringify(e.detail))));
   check('expiry boundary is exclusive', !validAt({ state: 'approved', zone: 'x', vehicle_class: 'Auto', details: { licence_until: future, permit_until: future, insurance_until: future } }, 'x', 'Auto', Date.parse(future)));
   const hq = await api(customer, 'POST', B + '/quote', { ...bookingBody, payment: 'hpay_test' });
   const hr = (await api(customer, 'POST', B + '/bookings', { quote_code: hq.json.code, request_key: 'preview-hpay-key-0001' })).json.ride;
@@ -124,6 +136,7 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
   await expect('HPay ride starts', driver, 'POST', `${B}/${hr.code}/start`, { pin: hp }, 200);
   await expect('HPay ride completes', driver, 'POST', `${B}/${hr.code}/complete`, {}, 200);
   await expect('test payment fails', customer, 'POST', `${B}/${hr.code}/pay`, { test_outcome: 'fail' }, 200);
+  await expect('client cannot declare payment success', customer, 'POST', `${B}/${hr.code}/pay`, { test_outcome: 'success', payment_state: 'paid', fare: 1 }, 400);
   check('failed payment no ledger debit', (await K.pool.query('SELECT * FROM howdi_ride_ledger WHERE ride_code=$1', [hr.code])).rowCount === 0);
   await Promise.all([api(customer, 'POST', `${B}/${hr.code}/pay`, {}), api(customer, 'POST', `${B}/${hr.code}/pay`, {})]);
   check('concurrent HPay retry exactly one collection', (await K.pool.query('SELECT * FROM howdi_ride_ledger WHERE ride_code=$1', [hr.code])).rowCount === 1);

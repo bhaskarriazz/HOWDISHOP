@@ -46,9 +46,18 @@ function createRidesV8({ pool, getBody, helpers, sandboxEnabled }) {
   async function event(db, ref, actor, action, detail = {}) { await db.query('INSERT INTO howdi_ride_events(ref,actor,action,detail) VALUES($1,$2,$3,$4)', [ref, actor, action, JSON.stringify(detail)]); }
   async function notice(db, uid, ref, message) { if (uid) await db.query('INSERT INTO howdi_ride_notices(user_id,ref,message) VALUES($1,$2,$3)', [uid, ref, message]); }
   async function both(db, r, message) { await notice(db, r.customer_id, r.code, message); if (r.driver_id) await notice(db, r.driver_id, r.code, message); }
-  async function allowed(db, a, cls, at, need) {
+  async function driverOperational(db, userId) {
+    const user = await one(db, "SELECT is_active,account_status FROM users WHERE id=$1", [userId]);
+    return !!user && user.is_active !== false && !['SUSPENDED', 'RESTRICTED', 'DISABLED', 'BANNED'].includes(String(user.account_status || '').toUpperCase());
+  }
+  async function blockedBetween(db, firstUserId, secondUserId) {
+    if (!firstUserId || !secondUserId) return false;
+    return !!(await one(db, `SELECT 1 FROM howdi_connect_profile_blocks
+      WHERE (blocker_user_id=$1 AND blocked_user_id=$2) OR (blocker_user_id=$2 AND blocked_user_id=$1) LIMIT 1`, [firstUserId, secondUserId]));
+  }
+  async function allowed(db, a, cls, at, need, customerId = null) {
     const gate = await one(db, 'SELECT paused,preview_checks FROM howdi_ride_zones WHERE zone=$1 AND vehicle_class=$2 FOR SHARE', [zone, cls]);
-    return gate && !gate.paused && PILOT_CHECKS.every(k => gate.preview_checks[k] === true) && validAt(a, zone, cls, Date.now(), need) && validAt(a, zone, cls, at, need);
+    return gate && !gate.paused && await driverOperational(db, a?.user_id) && !(await blockedBetween(db, a?.user_id, customerId)) && PILOT_CHECKS.every(k => gate.preview_checks[k] === true) && validAt(a, zone, cls, Date.now(), need) && validAt(a, zone, cls, at, need);
   }
   async function matchInstant(db, r) {
     if (r.state !== 'requested' || r.quote.mode !== 'instant' || Date.parse(r.match_until) <= Date.now()) return;
@@ -58,7 +67,7 @@ function createRidesV8({ pool, getBody, helpers, sandboxEnabled }) {
       AND NOT EXISTS(SELECT 1 FROM howdi_ride_offers o WHERE o.driver_id=a.user_id AND o.state='pending')
       AND NOT EXISTS(SELECT 1 FROM howdi_rides x WHERE x.driver_id=a.user_id AND (x.state='in_trip' OR (x.state='accepted' AND ABS(EXTRACT(EPOCH FROM ((x.quote->>'scheduled_at')::timestamptz-NOW())))<7200)))
       ORDER BY a.created_at,a.code`,[r.quote.vehicle_class,r.customer_id,r.offered_to,r.code])).rows;
-    for (const a of candidates) if (await allowed(db,a,r.quote.vehicle_class,Date.now(),r.quote.accessibility)) {
+    for (const a of candidates) if (await allowed(db,a,r.quote.vehicle_class,Date.now(),r.quote.accessibility,r.customer_id)) {
       const expires = new Date(Math.min(Date.now()+90000,Date.parse(r.match_until)));
       await db.query('INSERT INTO howdi_ride_offers(code,ride_code,driver_id,expires_at) VALUES($1,$2,$3,$4)',[code('RO'),r.code,a.user_id,expires]);
       await db.query('UPDATE howdi_rides SET offer_expires_at=$2 WHERE code=$1',[r.code,expires]);
@@ -86,7 +95,7 @@ function createRidesV8({ pool, getBody, helpers, sandboxEnabled }) {
     } else if (r.state === 'requested') {
       matching = 'no_eligible_driver';
       const candidates = (await db.query("SELECT a.* FROM howdi_ride_applications a WHERE available=TRUE AND vehicle_class=$1 AND user_id<>$2 AND NOT EXISTS(SELECT 1 FROM howdi_ride_declines d WHERE d.ride_code=$3 AND d.user_id=a.user_id)", [r.quote.vehicle_class, r.customer_id, r.code])).rows;
-      for (const candidate of candidates) if ((!r.offered_to || String(r.offered_to) === String(candidate.user_id)) && await allowed(db, candidate, r.quote.vehicle_class, Date.parse(r.quote.scheduled_at), r.quote.accessibility)) { matching = 'waiting_for_acceptance'; break; }
+      for (const candidate of candidates) if ((!r.offered_to || String(r.offered_to) === String(candidate.user_id)) && await allowed(db, candidate, r.quote.vehicle_class, Date.parse(r.quote.scheduled_at), r.quote.accessibility, r.customer_id)) { matching = 'waiting_for_acceptance'; break; }
     }
     return { code: r.code, state: r.state, matching, quote: safeQuote, customer: await handleOf(db, r.customer_id), driver: r.driver_id ? await handleOf(db, r.driver_id) : null,
       side: isCustomer ? 'customer' : 'driver', consent_fields: FIELDS[isCustomer ? 'customer' : 'driver'], customer_consent: r.customer_consent, driver_consent: r.driver_consent,
@@ -159,10 +168,11 @@ function createRidesV8({ pool, getBody, helpers, sandboxEnabled }) {
             const docs = (await db.query('SELECT kind FROM howdi_ride_documents WHERE application_code=$1', [a.code])).rows;
             requireThat(docs.length === 6 && a.details.age_confirmed && a.details.declaration && /^[A-Z0-9 -]{5,20}$/i.test(a.details.plate) && validAt({ ...a, state: 'approved' }, zone, a.vehicle_class), 400, 'EVIDENCE_REQUIRED', 'Provide all six documents, valid expiry dates, plate, age and declaration.');
             await db.query("UPDATE howdi_ride_applications SET state='submitted',available=FALSE WHERE code=$1", [a.code]);
-            await notice(db, uid, a.code, 'Driver application submitted for staff review.'); await event(db, a.code, 'applicant', 'submitted'); return { state: 'submitted' };
+            await notice(db, uid, a.code, 'Driver application submitted for staff review.'); await event(db, a.code, 'applicant', 'submitted', { from: a.state, to: 'submitted' }); return { state: 'submitted' };
           }
-          requireThat(b.available === false || await allowed(db, a, a.vehicle_class, now, 'none'), 409, 'INELIGIBLE', 'Approval, zone and documents must be valid.');
-          await db.query('UPDATE howdi_ride_applications SET available=$2 WHERE code=$1', [a.code, b.available === true]); return { available: b.available === true };
+          requireThat(b.available === false || await allowed(db, a, a.vehicle_class, now, 'none'), 409, 'INELIGIBLE', 'Approval, account, zone and documents must be valid.');
+          const available = b.available === true;
+          await db.query('UPDATE howdi_ride_applications SET available=$2 WHERE code=$1', [a.code, available]); await event(db, a.code, 'applicant', 'availability_changed', { from: a.available, to: available }); return { available };
         }
         if (p === '/api/v8/rides' && req.method === 'GET') {
           const applications = (await db.query('SELECT * FROM howdi_ride_applications WHERE user_id=$1', [uid])).rows;
@@ -171,7 +181,7 @@ function createRidesV8({ pool, getBody, helpers, sandboxEnabled }) {
           for (const r of (await db.query("SELECT * FROM howdi_rides WHERE state='requested' AND COALESCE(match_until,(quote->>'scheduled_at')::timestamptz) > NOW() AND customer_id<>$1 ORDER BY created_at LIMIT 100", [uid])).rows) {
             if(r.quote.mode==='instant' && !(await one(db,"SELECT 1 FROM howdi_ride_offers WHERE ride_code=$1 AND driver_id=$2 AND state='pending' AND expires_at>NOW()",[r.code,uid]))) continue;
             const a = applications.find(a => a.vehicle_class === r.quote.vehicle_class && a.available);
-            if ((!r.offered_to || String(r.offered_to) === String(uid)) && a && await allowed(db, a, r.quote.vehicle_class, Date.parse(r.quote.scheduled_at), r.quote.accessibility) && !(await one(db, 'SELECT 1 FROM howdi_ride_declines WHERE ride_code=$1 AND user_id=$2', [r.code, uid]))) offers.push(await rideDto(db, r, uid));
+            if ((!r.offered_to || String(r.offered_to) === String(uid)) && a && await allowed(db, a, r.quote.vehicle_class, Date.parse(r.quote.scheduled_at), r.quote.accessibility, r.customer_id) && !(await one(db, 'SELECT 1 FROM howdi_ride_declines WHERE ride_code=$1 AND user_id=$2', [r.code, uid]))) offers.push(await rideDto(db, r, uid));
           }
           return { applications: await Promise.all(applications.map(a => applicationDto(db, a))), rides: await Promise.all(rides.map(r => rideDto(db, r, uid))), offers, notices: (await db.query('SELECT ref,message,created_at FROM howdi_ride_notices WHERE user_id=$1 ORDER BY created_at DESC LIMIT 30', [uid])).rows };
         }
@@ -184,12 +194,12 @@ function createRidesV8({ pool, getBody, helpers, sandboxEnabled }) {
             if(r.quote.mode==='instant') requireThat(await one(db,"SELECT 1 FROM howdi_ride_offers WHERE ride_code=$1 AND driver_id=$2 AND state='pending' AND expires_at>NOW()",[r.code,uid]),409,'OFFER_EXPIRED','This timed offer is no longer available to you.');
             requireThat(!r.offered_to || String(r.offered_to) === String(uid), 403, 'OFFER_SCOPED', 'This scheduled offer was assigned to another driver.');
             const a = await one(db, 'SELECT * FROM howdi_ride_applications WHERE user_id=$1 AND vehicle_class=$2 FOR UPDATE', [uid, r.quote.vehicle_class]);
-            requireThat(a?.available && await allowed(db, a, r.quote.vehicle_class, Date.parse(r.quote.scheduled_at), r.quote.accessibility), 403, 'INELIGIBLE', 'Driver is not eligible for this zone, class, accessibility need or date.');
+            requireThat(a?.available && await allowed(db, a, r.quote.vehicle_class, Date.parse(r.quote.scheduled_at), r.quote.accessibility, r.customer_id), 403, 'INELIGIBLE', 'Driver is not eligible for this account, zone, class, accessibility need or date.');
             if (action === 'decline') { await db.query('INSERT INTO howdi_ride_declines(ride_code,user_id) VALUES($1,$2) ON CONFLICT DO NOTHING', [r.code, uid]); await db.query("UPDATE howdi_ride_offers SET state='declined',responded_at=NOW() WHERE ride_code=$1 AND driver_id=$2 AND state='pending'",[r.code,uid]); await event(db, r.code, 'driver', 'declined'); await notice(db,r.customer_id,r.code,'Driver declined. Matching may try another eligible driver in the same selected class.'); await matchInstant(db,r); return { declined: true }; }
             requireThat(!(await one(db, "SELECT 1 FROM howdi_rides WHERE driver_id=$1 AND (state='in_trip' OR (state='accepted' AND ABS(EXTRACT(EPOCH FROM ((quote->>'scheduled_at')::timestamptz-$2::timestamptz)))<7200))", [uid, r.quote.scheduled_at])), 409, 'SLOT_UNAVAILABLE', 'Another trip is active or overlaps this two-hour preview slot.');
             r.driver_id = uid; r.state = 'accepted';
             await db.query("UPDATE howdi_ride_offers SET state='accepted',responded_at=NOW() WHERE ride_code=$1 AND driver_id=$2 AND state='pending'",[r.code,uid]);
-            await db.query("UPDATE howdi_rides SET driver_id=$2,state='accepted' WHERE code=$1", [r.code, uid]); await event(db, r.code, 'driver', 'accepted'); await both(db, r, 'Driver accepted. Review field disclosure before pickup details are shared.');
+            await db.query("UPDATE howdi_rides SET driver_id=$2,state='accepted' WHERE code=$1", [r.code, uid]); await event(db, r.code, 'driver', 'accepted', { from: 'requested', to: 'accepted' }); await both(db, r, 'Driver accepted. Review field disclosure before pickup details are shared.');
             return { ride: await rideDto(db, r, uid) };
           }
           requireThat(isCustomer || isDriver, 404, 'NOT_FOUND', 'Ride not found.');
@@ -208,20 +218,21 @@ function createRidesV8({ pool, getBody, helpers, sandboxEnabled }) {
             requireThat(now < Date.parse(r.pin_expires_at), 409, 'PIN_EXPIRED', 'Pickup PIN expired. Contact support.');
             requireThat(r.pin_attempts < 5, 429, 'PIN_RATE_LIMIT', 'PIN attempt limit reached. Contact support.');
             if (typeof b.pin !== 'string' || !/^\d{4}$/.test(b.pin) || b.pin !== r.pin) { await db.query('UPDATE howdi_rides SET pin_attempts=pin_attempts+1 WHERE code=$1', [r.code]); await event(db, r.code, 'driver', 'pin_failed'); return { error: { status: 400, code: 'PIN_WRONG', message: 'Incorrect PIN. Check with the customer in person.' } }; }
-            r.state = 'in_trip'; await db.query("UPDATE howdi_rides SET state='in_trip',pin=NULL WHERE code=$1", [r.code]); await event(db, r.code, side, 'started'); await both(db, r, 'Trip started. No live location is collected in this preview.');
+            r.state = 'in_trip'; await db.query("UPDATE howdi_rides SET state='in_trip',pin=NULL WHERE code=$1", [r.code]); await event(db, r.code, side, 'started', { from: 'accepted', to: 'in_trip' }); await both(db, r, 'Trip started. No live location is collected in this preview.');
           } else if (action === 'complete') {
             requireThat(isDriver && ['in_trip', 'completed'].includes(r.state), 409, 'OUT_OF_ORDER', 'Only the assigned driver can complete a started ride.');
-            if (r.state !== 'completed') { r.state = 'completed'; await db.query("UPDATE howdi_rides SET state='completed' WHERE code=$1", [r.code]); await event(db, r.code, side, 'completed'); await both(db, r, 'Trip completed. Preview payment and receipt are ready.'); }
+            if (r.state !== 'completed') { r.state = 'completed'; await db.query("UPDATE howdi_rides SET state='completed' WHERE code=$1", [r.code]); await event(db, r.code, side, 'completed', { from: 'in_trip', to: 'completed' }); await both(db, r, 'Trip completed. Preview payment and receipt are ready.'); }
           } else if (action === 'cash' || action === 'pay') {
             requireThat(r.state === 'completed' && (action === 'cash' ? isDriver && r.quote.payment === 'cash' : isCustomer && r.quote.payment === 'hpay_test'), 409, 'PAYMENT_METHOD', 'Use the chosen payment method after completion.');
+            requireThat(action !== 'pay' || b.test_outcome === undefined || b.test_outcome === 'fail', 400, 'PAYMENT_OUTCOME_CLIENT_CONTROLLED', 'A client cannot declare a successful payment outcome.');
             if (r.payment_state !== 'paid' && r.payment_state !== 'refunded') {
-              if (action === 'pay' && b.test_outcome === 'fail') { r.payment_state = 'failed'; await db.query("UPDATE howdi_rides SET payment_state='failed' WHERE code=$1", [r.code]); await event(db, r.code, side, 'test_payment_failed'); return { ride: await rideDto(db, r, uid) }; }
+              if (action === 'pay' && b.test_outcome === 'fail') { const from = r.payment_state; r.payment_state = 'failed'; await db.query("UPDATE howdi_rides SET payment_state='failed' WHERE code=$1", [r.code]); await event(db, r.code, side, 'test_payment_failed', { from, to: 'failed', method: r.quote.payment }); return { ride: await rideDto(db, r, uid) }; }
               await db.query('INSERT INTO howdi_ride_ledger(ride_code,kind,amount,payment,reference) VALUES($1,$2,$3,$4,$5) ON CONFLICT(ride_code,kind) DO NOTHING', [r.code, 'collection', r.quote.fare.total, r.quote.payment, code(r.quote.payment === 'cash' ? 'CASH' : 'HPTEST')]);
-              r.payment_state = 'paid'; await db.query("UPDATE howdi_rides SET payment_state='paid' WHERE code=$1", [r.code]); await event(db, r.code, side, 'payment_recorded', { method: r.quote.payment }); await both(db, r, r.quote.payment === 'cash' ? 'Driver recorded test cash received. View receipt or dispute collection.' : 'HPay Test payment recorded; no real money moved.');
+              const from = r.payment_state; r.payment_state = 'paid'; await db.query("UPDATE howdi_rides SET payment_state='paid' WHERE code=$1", [r.code]); await event(db, r.code, side, 'payment_recorded', { from, to: 'paid', method: r.quote.payment }); await both(db, r, r.quote.payment === 'cash' ? 'Driver recorded test cash received. View receipt or dispute collection.' : 'HPay Test payment recorded; no real money moved.');
             }
           } else if (action === 'cancel') {
             requireThat(['requested', 'accepted', 'cancelled'].includes(r.state) && clean(b.reason) && b.confirm === true, 409, 'CANCEL_CONFIRM_REQUIRED', 'Confirm free cancellation with a reason.');
-            if (r.state !== 'cancelled') { r.state = 'cancelled'; r.reason = clean(b.reason); const pending=(await db.query("UPDATE howdi_ride_offers SET state='cancelled',responded_at=NOW() WHERE ride_code=$1 AND state='pending' RETURNING driver_id",[r.code])).rows;for(const o of pending)await notice(db,o.driver_id,r.code,'Customer cancelled this preview request. The offer is closed.'); await db.query("UPDATE howdi_rides SET state='cancelled',reason=$2,pin=NULL WHERE code=$1", [r.code, r.reason]); await event(db, r.code, side, 'cancelled', { reason: r.reason }); await both(db, r, `${side === 'driver' ? 'Driver' : 'Customer'} cancelled. No fee charged. Rebook explicitly if needed.`); }
+            if (r.state !== 'cancelled') { const from = r.state; r.state = 'cancelled'; r.reason = clean(b.reason); const pending=(await db.query("UPDATE howdi_ride_offers SET state='cancelled',responded_at=NOW() WHERE ride_code=$1 AND state='pending' RETURNING driver_id",[r.code])).rows;for(const o of pending)await notice(db,o.driver_id,r.code,'Customer cancelled this preview request. The offer is closed.'); await db.query("UPDATE howdi_rides SET state='cancelled',reason=$2,pin=NULL WHERE code=$1", [r.code, r.reason]); await event(db, r.code, side, 'cancelled', { from, to: 'cancelled', reason: r.reason }); await both(db, r, `${side === 'driver' ? 'Driver' : 'Customer'} cancelled. No fee charged. Rebook explicitly if needed.`); }
           } else if (['support', 'late', 'no-show'].includes(action)) {
             const kind = action === 'support' ? b.kind : action;
             requireThat(['support', 'lost_item', 'incident', 'refund', 'fee_review', 'appeal', 'late', 'no-show', 'cash_dispute'].includes(kind) && clean(b.reason), 400, 'REASON_REQUIRED', 'Choose a case type and give a reason.');
@@ -241,7 +252,7 @@ function createRidesV8({ pool, getBody, helpers, sandboxEnabled }) {
             const r = await one(db, 'SELECT * FROM howdi_rides WHERE code=$1 FOR UPDATE', [m[1]]);
             requireThat(r?.state === 'requested' && clean(b.reason), 409, 'ASSIGNMENT_INVALID', 'Choose a waiting booking and give an assignment reason.');
             const a = await one(db, 'SELECT a.* FROM howdi_ride_applications a JOIN howdi_connect_profiles p ON p.user_id=a.user_id WHERE p.public_username=$1 AND a.vehicle_class=$2 FOR UPDATE OF a', [clean(b.handle).replace(/^@/, ''), r.quote.vehicle_class]);
-            requireThat(a?.available && String(a.user_id) !== String(r.customer_id) && await allowed(db, a, r.quote.vehicle_class, Date.parse(r.quote.scheduled_at), r.quote.accessibility), 403, 'INELIGIBLE', 'Driver must be available and eligible for this scheduled trip.');
+            requireThat(a?.available && String(a.user_id) !== String(r.customer_id) && await allowed(db, a, r.quote.vehicle_class, Date.parse(r.quote.scheduled_at), r.quote.accessibility, r.customer_id), 403, 'INELIGIBLE', 'Driver must be available and eligible for this scheduled trip.');
             requireThat(!(await one(db,"SELECT 1 FROM howdi_rides WHERE driver_id=$1 AND (state='in_trip' OR (state='accepted' AND ABS(EXTRACT(EPOCH FROM ((quote->>'scheduled_at')::timestamptz-$2::timestamptz)))<7200))",[a.user_id,r.quote.scheduled_at])),409,'SLOT_UNAVAILABLE','Driver already has an active or overlapping trip.');
             if (r.quote.mode === 'instant') {
               const existing = await one(db,'SELECT * FROM howdi_ride_offers WHERE ride_code=$1 AND driver_id=$2',[r.code,a.user_id]);
@@ -255,7 +266,7 @@ function createRidesV8({ pool, getBody, helpers, sandboxEnabled }) {
               }
             }
             await db.query('UPDATE howdi_rides SET offered_to=$2 WHERE code=$1', [r.code, a.user_id]);
-            await event(db, r.code, actor, 'offer_assigned', { reason: clean(b.reason) }); await notice(db, a.user_id, r.code, 'Staff offered you a preview trip. Accept or decline from Rider desk.'); await notice(db, r.customer_id, r.code, 'Staff assisted with an offer. Awaiting driver acceptance.'); return { saved: true };
+            await event(db, r.code, actor, 'offer_assigned', { from: r.offered_to ? 'assigned' : 'unassigned', to: 'assigned', reason: clean(b.reason) }); await notice(db, a.user_id, r.code, 'Staff offered you a preview trip. Accept or decline from Rider desk.'); await notice(db, r.customer_id, r.code, 'Staff assisted with an offer. Awaiting driver acceptance.'); return { saved: true };
           }
           if (p === '/api/admin/v8/rides' && req.method === 'GET') {
             // Expired approval never remains available; offer/start checks also enforce expiry independently.
@@ -276,7 +287,7 @@ function createRidesV8({ pool, getBody, helpers, sandboxEnabled }) {
             requireThat(clean(b.reason) && ['approved', 'rejected', 'info_requested'].includes(b.decision), 400, 'REASON_REQUIRED', 'Choose a decision and give its reason.');
             if (b.decision === 'approved') requireThat(CHECKS.every(k => b.checks?.[k] === true) && validAt({ ...a, state: 'approved' }, zone, a.vehicle_class) && await one(db, "SELECT 1 FROM howdi_ride_events WHERE ref=$1 AND actor=$2 AND action='evidence_viewed'", [a.code, actor]), 400, 'CHECKS_REQUIRED', 'Open private evidence, complete every class-specific check and verify valid documents.');
             await db.query('UPDATE howdi_ride_applications SET state=$2,reason=$3,checks=$4,available=FALSE WHERE code=$1', [a.code, b.decision, clean(b.reason), JSON.stringify(Object.fromEntries(CHECKS.map(k => [k, b.checks?.[k] === true])))]);
-            await event(db, a.code, actor, b.decision, { reason: clean(b.reason), checks: CHECKS.filter(k => b.checks?.[k] === true) }); await notice(db, a.user_id, a.code, `Driver application ${b.decision}: ${clean(b.reason)}`); return { state: b.decision };
+            await event(db, a.code, actor, b.decision, { from: a.state, to: b.decision, reason: clean(b.reason), checks: CHECKS.filter(k => b.checks?.[k] === true) }); await notice(db, a.user_id, a.code, `Driver application ${b.decision}: ${clean(b.reason)}`); return { state: b.decision };
           }
           if (p === '/api/admin/v8/rides/zone' && req.method === 'POST') {
             requireThat(CLASSES.includes(b.vehicle_class) && clean(b.reason) && typeof b.paused === 'boolean', 400, 'REASON_REQUIRED', 'Choose a class, pause state and reason.');
@@ -289,7 +300,7 @@ function createRidesV8({ pool, getBody, helpers, sandboxEnabled }) {
             const r = await one(db, 'SELECT * FROM howdi_rides WHERE code=$1 FOR UPDATE', [m[1]]);
             requireThat(r && r.state === 'completed' && clean(b.reason) && ['held', 'released'].includes(b.state), 400, 'PAYOUT_INVALID', 'Completed ride, payout state and reason required.');
             if (b.state === 'released') requireThat(r.payment_state === 'paid' && r.payout_state === 'held' && r.held_by !== staff.username, 409, 'DUAL_REVIEW_REQUIRED', 'A different staff reviewer must release a reconciled held payout.');
-            await db.query('UPDATE howdi_rides SET payout_state=$2,held_by=CASE WHEN $2=\'held\' THEN $3 ELSE held_by END WHERE code=$1', [r.code, b.state, staff.username]); await event(db, r.code, actor, `payout_${b.state}`, { reason: clean(b.reason) }); await both(db, r, `Preview payout ${b.state}: ${clean(b.reason)}. Appeal through ride support.`); return { saved: true };
+            await db.query('UPDATE howdi_rides SET payout_state=$2,held_by=CASE WHEN $2=\'held\' THEN $3 ELSE held_by END WHERE code=$1', [r.code, b.state, staff.username]); await event(db, r.code, actor, `payout_${b.state}`, { from: r.payout_state, to: b.state, reason: clean(b.reason) }); await both(db, r, `Preview payout ${b.state}: ${clean(b.reason)}. Appeal through ride support.`); return { saved: true };
           }
           if ((m = p.match(/^\/api\/admin\/v8\/rides\/cases\/(RC-[A-F0-9]+)$/)) && req.method === 'POST') {
             const c = await one(db, 'SELECT * FROM howdi_ride_cases WHERE code=$1 FOR UPDATE', [m[1]]); requireThat(c && clean(b.reason), 400, 'REASON_REQUIRED', 'Case and resolution reason required.');
