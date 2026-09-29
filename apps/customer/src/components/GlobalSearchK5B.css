@@ -55,3 +55,44 @@
   .k5b-global-search .k5b-search-scopes button{padding:6px 9px}
 }
 @media(prefers-reduced-motion:reduce){.k5b-search-spinner{animation:none}.k5b-search-results{transition:none}}
+
+/* K5B full results page. Fixed under the approved header (header z-index is 8000+), independent of the
+   active pillar, so "See all results" is visible from any area. */
+.k5b-results-page{position:fixed;top:var(--howdi-header-bottom,80px);left:0;right:0;bottom:0;z-index:7000;overflow-y:auto;overscroll-behavior:contain;background:#f8faf9;color:#17251e}
+.k5b-results-inner{max-width:1180px;margin:0 auto;padding:24px 24px 110px;box-sizing:border-box}
+.k5b-results-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.k5b-results-head small{display:block;font-size:11px;font-weight:900;letter-spacing:.08em;color:#9a5b1f}
+.k5b-results-head h2{margin:5px 0 0;font-size:26px;line-height:1.2;color:#172033;outline:none;overflow-wrap:anywhere}
+.k5b-results-close{flex:0 0 40px;width:40px;height:40px;border:1px solid #d8e1dc;border-radius:12px;background:#fff;color:#365947;font-size:22px;cursor:pointer}
+.k5b-results-form{display:flex;gap:10px;margin-top:18px}
+.k5b-results-form input{flex:1;min-width:0;height:48px;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:12px;padding:0 14px;background:#fff;color:#172033;font:inherit;font-size:14px;-webkit-appearance:none;appearance:none}
+.k5b-results-form input:focus{outline:none;border-color:#53785e;box-shadow:0 0 0 3px #36594715}
+.k5b-results-form button{min-width:112px;border:0;border-radius:12px;background:#365947;color:#fff;font-weight:900;cursor:pointer}
+.k5b-results-scopes{display:flex;gap:8px;margin-top:14px;overflow-x:auto;scrollbar-width:none;padding-bottom:2px}
+.k5b-results-scopes::-webkit-scrollbar{display:none}
+.k5b-results-scopes button{white-space:nowrap;border:1px solid #d8e1dc;border-radius:999px;padding:8px 13px;min-height:36px;background:#fff;color:#172033;font-weight:800;font-size:12px;cursor:pointer}
+.k5b-results-scopes button.active{border:2px solid #365947;background:#edf6ef}
+.k5b-results-body{margin-top:18px}
+.k5b-results-state{padding:34px 18px;text-align:center;background:#fff;border:1px dashed #cbd5e1;border-radius:15px;color:#64748b;display:flex;flex-direction:column;align-items:center;gap:8px;font-size:13px}
+.k5b-results-state strong{color:#172033;font-size:14px}
+.k5b-results-state.is-error{border-style:solid;border-color:#f1d4c4;background:#fffaf6}
+.k5b-results-state button,.k5b-results-partial button,.k5b-results-more button{border:1px solid #365947;border-radius:999px;background:#fff;color:#365947;font-weight:800;padding:8px 16px;cursor:pointer}
+.k5b-results-partial{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:14px;padding:10px 12px;border-radius:12px;background:#fff7e8;color:#7a5d27;font-size:12px}
+.k5b-results-partial button{padding:5px 12px;font-size:11px}
+.k5b-results-family{margin-top:18px}
+.k5b-results-family h3{display:flex;align-items:center;gap:8px;margin:0 0 10px;font-size:15px;color:#172033}
+.k5b-results-family h3 span{font-size:11px;font-weight:800;color:#64748b;background:#eef2ef;border-radius:999px;padding:2px 8px}
+.k5b-results-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
+.k5b-results-card{display:grid;grid-template-columns:48px minmax(0,1fr);gap:12px;align-items:center;text-align:left;background:#fff;border:1px solid #e2e8f0;border-radius:15px;padding:14px;box-shadow:0 5px 16px rgba(23,32,25,.05);color:#17251e;font:inherit;cursor:pointer;transition:border-color .15s ease,box-shadow .15s ease}
+.k5b-results-card:hover,.k5b-results-card:focus-visible{border-color:#9fbeaa;box-shadow:0 8px 22px rgba(23,32,25,.09);outline:none}
+.k5b-results-card .k5b-search-icon{width:48px;height:48px}
+.k5b-results-card em{font-style:normal;color:#475569;font-size:11.5px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.k5b-results-type{color:#9a5b1f !important;font-size:10px !important;font-weight:900;text-transform:uppercase;letter-spacing:.06em}
+.k5b-results-more{display:flex;justify-content:center;margin-top:22px}
+.k5b-results-more button:disabled{opacity:.6;cursor:default}
+@media(max-width:640px){
+  .k5b-results-inner{padding:16px 16px 120px}
+  .k5b-results-head h2{font-size:21px}
+  .k5b-results-form button{min-width:84px}
+  .k5b-results-grid{grid-template-columns:minmax(0,1fr)}
+}

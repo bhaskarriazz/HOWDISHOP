@@ -133,7 +133,7 @@ export default function GlobalSearchK5B({
 
   const submitAll=(event)=>{
     close();
-    onSubmit?.(event);
+    onSubmit?.(event,{query:q,scope});
   };
 
   const submit=(event)=>{

@@ -4,7 +4,8 @@ import "./App.css";
 import HowdiAuthPortal from "./components/HowdiAuthPortal";
 import ShopCatalogue from "./components/ShopCatalogue";
 import GlobalSearchK5B from "./components/GlobalSearchK5B";
-import { safeGlobalSearchRoute } from "./globalSearchK5B";
+import GlobalSearchResultsK5B from "./components/GlobalSearchResultsK5B";
+import { buildGlobalSearchPageUrl, normalizeGlobalSearchQuery, normalizeGlobalSearchScope, parseGlobalSearchDirectRoute, parseGlobalSearchPageUrl, safeGlobalSearchRoute } from "./globalSearchK5B";
 import HowdiFor from "./howdi-for/HowdiFor";
 import { HowdiForMenuRow, HowdiForFeedCard, HowdiForEmptyStateLink, insertFeedCard } from "./howdi-for/HowdiForEntryPoints";
 import { parseForPath } from "./howdi-for/routes";
@@ -1007,7 +1008,8 @@ function HowdiVibeCore({legacyPosts=[],onCreate,onAddToCart,onBuyNow,onDirectChe
         const d=await r.json().catch(()=>({}));
         if(!r.ok)throw new Error(d.message||'Vibe unavailable');
         const rows=Array.isArray(d.items)?d.items:[];
-        const match=rows.find(x=>String(x.vibeCode||x.vibe_code||'').toLowerCase()===String(focusVibeCode).toLowerCase())||rows[0];
+        // Exact public-code match only: a /vibes/:code link must never open a different Vibe.
+        const match=rows.find(x=>String(x.vibeCode||x.vibe_code||'').toLowerCase()===String(focusVibeCode).toLowerCase());
         if(!cancelled&&match)applyDiscoveryItems([match],'Vibe');
       }catch{ /* fall back silently to the already-open generic Vibe feed */ }
       finally{ if(!cancelled)onFocusVibeConsumed?.(); }
@@ -2661,7 +2663,9 @@ function App() {
   // ==============================
   // CUSTOMER HOME / DISCOVERY
   // ==============================
-  const [homeSearch, setHomeSearch] = useState("");
+  const [homeSearch, setHomeSearch] = useState(() => {
+    try { return parseGlobalSearchPageUrl(window.location.pathname, window.location.search)?.query || ""; } catch { return ""; }
+  });
   const [dailyQuote, setDailyQuote] = useState("A kinder, brighter community — HOWDI");
   const [shopSearch, setShopSearch] = useState("");
   const [shopCategoryFilter,setShopCategoryFilter]=useState("All");
@@ -2672,10 +2676,10 @@ function App() {
   const [shopSizeFilter,setShopSizeFilter]=useState("All");
   const [shopAvailabilityFilter,setShopAvailabilityFilter]=useState("All");
   const [shopSort,setShopSort]=useState("Featured");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchType, setSearchType] = useState("all");
-  const [searchCategory, setSearchCategory] = useState("All");
-  const [searchSort, setSearchSort] = useState("relevance");
+  // K5B full results page ({query, scope} or null), mirrored in /search?q=&scope= so it is shareable and reloadable.
+  const [globalSearchPage, setGlobalSearchPage] = useState(() => {
+    try { return parseGlobalSearchPageUrl(window.location.pathname, window.location.search); } catch { return null; }
+  });
 
   const shopCategoryOptions=["All",...Array.from(new Set(products.map(p=>String(p.category||"Handmade")).filter(Boolean)))];
   const shopSubcategoryOptions=["All",...Array.from(new Set(products.map(p=>String(p.subcategory||p.productType||"")).filter(Boolean)))];
@@ -9697,78 +9701,166 @@ return () => window.clearInterval(timer);
     );
   };
 
-  const submitHomeSearch = (event) => {
-    event?.preventDefault();
-    const query = homeSearch.trim();
-    setSearchQuery(query);
-    setShopSearch(query);
-    setSearchCategory("All");
-    setSearchType("all");
-    navigate("search");
+  // K5B: the header search submits to the server-backed full results page (/search?q=&scope=).
+  const openGlobalSearchPage = ({ query, scope = "all" } = {}) => {
+    const page = { query: normalizeGlobalSearchQuery(query).slice(0, 80), scope: normalizeGlobalSearchScope(scope) };
+    const url = buildGlobalSearchPageUrl(page);
+    setHomeSearch(page.query);
+    setGlobalSearchPage(page);
+    closeHeaderPanels();
+    setMenuOpen(false);
+    try {
+      // Refining a search already on /search replaces the entry; arriving from elsewhere adds one so Back returns.
+      // "pushed" marks an entry this app added, so closing can safely go Back instead of leaving HOWDI.
+      if (parseGlobalSearchPageUrl(window.location.pathname, window.location.search)) window.history.replaceState({ howdiGlobalSearch: window.history.state?.howdiGlobalSearch === "pushed" ? "pushed" : "direct" }, "", url);
+      else window.history.pushState({ howdiGlobalSearch: "pushed" }, "", url);
+    } catch {}
   };
 
-  // K5B: autocomplete results only navigate through the public route allow-list. Posts/articles open
-  // in the existing K5A in-app viewer (Back closes it); every other allow-listed route is a full navigation.
-  const navigateGlobalSearchResult = (route) => {
-    const safe = safeGlobalSearchRoute(route);
-    if (!safe) return;
-    const item = safe.match(HOME_ITEM_ROUTE_RE);
-    if (item && item[1] !== "stories") {
+  const closeGlobalSearchPage = () => {
+    setGlobalSearchPage(null);
+    try {
+      if (!parseGlobalSearchPageUrl(window.location.pathname, window.location.search)) return;
+      if (window.history.state?.howdiGlobalSearch === "pushed") window.history.back();
+      else window.history.replaceState(null, "", "/");
+    } catch {}
+  };
+
+  const submitHomeSearch = (event, options) => {
+    event?.preventDefault?.();
+    openGlobalSearchPage({ query: homeSearch, scope: options?.scope || globalSearchPage?.scope || "all" });
+  };
+
+  // ---- K5B direct result routes: /@user, /groups/:slug, /channels/:slug, /shop/products/PRD-…, /vibes/:code and
+  // /works/workers/:code. Each opens the destination's EXISTING HOWDI viewer, addressed only by the public identifier
+  // in the URL. Posts/articles keep the K5A canonical viewer (openHomeItem / fetchHomeItem).
+  // globalRouteRef = { kind, route, area, shown, inArea } for the destination whose URL is currently in the address bar.
+  const globalRouteRef = useRef(null);
+  const leaveGlobalRoute = () => {
+    const active = globalRouteRef.current;
+    globalRouteRef.current = null;
+    if (!active) return;
+    try {
+      if (window.location.pathname !== active.route) return;
+      if (window.history.state?.howdiGlobalRoute === active.route) window.history.back();
+      else window.history.replaceState(null, "", "/");
+    } catch {}
+  };
+
+  const openGlobalSearchCommunity = (target) => {
+    const spaceType = target.kind === "channel" ? "CHANNEL" : "GROUP";
+    const listView = target.kind === "channel" ? "channels" : "groups";
+    // Groups & Channels are sign-in only today: a guest gets the existing login prompt and the space opens after login.
+    requireConnectLogin(async () => {
       openNavigationOSArea("connect", "home");
-      openHomeItem(item[1] === "articles" ? "article" : "post", item[2], safe);
-      return;
-    }
-    window.location.assign(safe);
+      setConnectView("communities");
+      setConnectCommunityView(listView);
+      setConnectContentMode("posts");
+      setConnectModalOpen(true);
+      try {
+        const listing = await connectApi(`/api/connect/groups-channels?type=${spaceType}`);
+        const spaces = listing.spaces || [];
+        setConnectGCSpaces(spaces);
+        const found = spaces.find((space) => space.slug === target.key && String(space.space_type || "").toUpperCase() === spaceType);
+        if (found) openConnectGCSpace(found);
+        else setConnectNotice(`This ${target.kind} is not available.`);
+      } catch (error) {
+        setConnectNotice(error.message || `Unable to open this ${target.kind}.`);
+      }
+    });
   };
 
-  const runDiscoverySearch = (event) => {
-    event?.preventDefault();
-    setSearchQuery(homeSearch.trim());
+  const openGlobalSearchWorker = async (code) => {
+    openNavigationOSArea("works", "find");
+    try {
+      const response = await fetch(`${WORKS_API_BASE}/api/works/workers`, { cache: "no-store" });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.message || "Works API unavailable");
+      const worker = (data.workers || []).find((w) => String(w.workerCode || "") === code);
+      if (worker) openWorksProfile(worker);
+      else setWorksCustomerNotice("This worker profile is not available.");
+    } catch (error) {
+      setWorksCustomerNotice(error.message || "Unable to open this worker profile.");
+    }
   };
 
-  const discoveryResults = (() => {
-    const q = searchQuery.trim().toLowerCase();
-    const category = searchCategory.toLowerCase();
-    const matches = [];
+  const openGlobalSearchDestination = (target, { fromUrl = false } = {}) => {
+    if (!target) return false;
+    setGlobalSearchPage(null);
+    if (target.kind === "post" || target.kind === "article") {
+      globalRouteRef.current = null;
+      openNavigationOSArea("connect", "home");
+      if (fromUrl) fetchHomeItem(target.kind, target.key);
+      else openHomeItem(target.kind, target.key, target.route);
+      return true;
+    }
+    if (!fromUrl) {
+      try { window.history.pushState({ howdiGlobalRoute: target.route }, "", target.route); } catch {}
+    }
+    globalRouteRef.current = { kind: target.kind, route: target.route, area: target.area, shown: false, inArea: navigationOSArea === target.area };
+    if (target.kind === "profile") {
+      openNavigationOSArea("connect", "home");
+      openConnectPublicProfile({ public_username: target.key });
+    } else if (target.kind === "vibe") {
+      setConnectVibeFocusCode(target.key);
+      openNavigationOSArea("connect", "vibe");
+    } else if (target.kind === "group" || target.kind === "channel") {
+      openGlobalSearchCommunity(target);
+    } else if (target.kind === "product") {
+      openCatalogueProduct(target.key);
+    } else if (target.kind === "worker") {
+      openGlobalSearchWorker(target.key);
+    }
+    return true;
+  };
 
-    if (searchType === "all" || searchType === "products") {
-      products.forEach((product) => {
-        const haystack = `${product.name} ${product.shop} ${product.category} ${product.artisan || ""}`.toLowerCase();
-        const categoryMatch = searchCategory === "All" || String(product.category || "").toLowerCase() === category;
-        if ((!q || haystack.includes(q)) && categoryMatch) {
-          matches.push({ type: "product", title: product.name, subtitle: `${product.shop} · ${product.category}`, meta: `${product.price} · ⭐ ${product.rating}`, icon: product.icon, item: product });
-        }
-      });
-    }
+  // K5B: every result click (autocomplete or full page) goes through the public route allow-list.
+  const navigateGlobalSearchResult = (route) => {
+    const target = parseGlobalSearchDirectRoute(safeGlobalSearchRoute(route));
+    if (target) openGlobalSearchDestination(target);
+  };
 
-    if (searchType === "all" || searchType === "workers") {
-      workers.forEach((worker) => {
-        const haystack = `${worker.name} ${worker.service}`.toLowerCase();
-        const categoryMatch = searchCategory === "All" || worker.service.toLowerCase() === category;
-        if ((!q || haystack.includes(q)) && categoryMatch) {
-          matches.push({ type: "worker", title: worker.name, subtitle: `${worker.service} · ${customerLocation}`, meta: `${worker.price} starting · ⭐ ${worker.rating}`, icon: "👷", item: worker });
-        }
-      });
-    }
+  // History listeners are registered once; they call the latest render's handlers through this ref.
+  const globalRouteHandlersRef = useRef(null);
+  globalRouteHandlersRef.current = { openGlobalSearchDestination };
 
-    if (searchType === "all" || searchType === "shops") {
-      [...new Set(products.map((product) => product.shop))].forEach((shop) => {
-        if (!q || shop.toLowerCase().includes(q)) {
-          const sample = products.find((product) => product.shop === shop);
-          matches.push({ type: "shop", title: shop, subtitle: `Local shop · ${customerLocation}`, meta: `${products.filter((product) => product.shop === shop).length} products`, icon: "🏪", item: sample });
-        }
-      });
-    }
+  useEffect(() => {
+    // Direct load / reload of a result URL. Posts and articles are opened by the K5A HOME_ITEM effect above.
+    const target = parseGlobalSearchDirectRoute(window.location.pathname);
+    if (target && target.kind !== "post" && target.kind !== "article") globalRouteHandlersRef.current.openGlobalSearchDestination(target, { fromUrl: true });
+    const onPop = () => {
+      const page = parseGlobalSearchPageUrl(window.location.pathname, window.location.search);
+      if (page) { globalRouteRef.current = null; setHomeSearch(page.query); setGlobalSearchPage(page); return; }
+      setGlobalSearchPage(null);
+      const next = parseGlobalSearchDirectRoute(window.location.pathname);
+      if (next && next.kind !== "post" && next.kind !== "article") { globalRouteHandlersRef.current.openGlobalSearchDestination(next, { fromUrl: true }); return; }
+      const active = globalRouteRef.current;
+      globalRouteRef.current = null;
+      if (active?.kind === "profile") setConnectPublicProfile(null);
+      else if (active?.kind === "group" || active?.kind === "channel") setConnectGCSelected(null);
+      else if (active?.kind === "worker") setWorksProfileOpen(false);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-    if (searchSort === "price-low" && searchType !== "workers" && searchType !== "shops") {
-      return matches.sort((a, b) => Number(String(a.item?.price || "").replace(/[^0-9]/g, "")) - Number(String(b.item?.price || "").replace(/[^0-9]/g, "")));
-    }
-    if (searchSort === "rating") {
-      return matches.sort((a, b) => Number(b.item?.rating || 0) - Number(a.item?.rating || 0));
-    }
-    return matches;
-  })();
-  const discoveryCategories = ["All", ...new Set(products.map((product) => product.category))];
+  // Closing the destination's viewer, or leaving its pillar, drops its public URL so a reload does not reopen it.
+  const trackGlobalRouteViewer = (kinds, open) => {
+    const active = globalRouteRef.current;
+    if (!active || !kinds.includes(active.kind)) return;
+    if (open) active.shown = true;
+    else if (active.shown) leaveGlobalRoute();
+  };
+  useEffect(() => trackGlobalRouteViewer(["profile"], Boolean(connectPublicProfile)), [connectPublicProfile]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => trackGlobalRouteViewer(["group", "channel"], Boolean(connectGCSelected)), [connectGCSelected]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => trackGlobalRouteViewer(["worker"], Boolean(worksProfileOpen)), [worksProfileOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const active = globalRouteRef.current;
+    if (!active) return;
+    if (active.area === navigationOSArea) active.inArea = true;
+    else if (active.inArea) leaveGlobalRoute();
+  }, [navigationOSArea]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const clearShopSearch = () => {
     setShopSearch("");
@@ -13095,6 +13187,16 @@ const removeNotification = async (notificationId) => {
         )}
 
       </header>
+
+      {globalSearchPage && <GlobalSearchResultsK5B
+        query={globalSearchPage.query}
+        scope={globalSearchPage.scope}
+        onSearch={openGlobalSearchPage}
+        onNavigate={navigateGlobalSearchResult}
+        onClose={closeGlobalSearchPage}
+        getHeaders={customerSessionHeaders}
+        apiBase={SHOP_API_BASE}
+      />}
 
       {/* HOWDI APPROVED PERSISTENT ECOSYSTEM SIDEBAR */}
       <aside className="howdi-master-sidebar" aria-label="HOWDI ecosystem">
@@ -18308,75 +18410,6 @@ const removeNotification = async (notificationId) => {
         {/* ====================================
             SEARCH & DISCOVERY
         ==================================== */}
-
-        {currentUser && activeSection === "search" && (
-          <section id="search" style={{ padding: "26px 24px 30px", background: "#f8faf9", borderBottom: "1px solid #e6ece8" }}>
-            <div style={{ maxWidth: "1180px", margin: "0 auto" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: "14px", alignItems: "flex-start", flexWrap: "wrap" }}>
-                <div>
-                  <div style={{ fontSize: "11px", fontWeight: 900, letterSpacing: ".08em", color: "#9a5b1f" }}>SEARCH • DISCOVER NEAR YOU</div>
-                  <h2 style={{ margin: "5px 0 4px", fontSize: "27px", color: "#172033" }}>Find handmade crochet & creators 🔎</h2>
-                  <p style={{ margin: 0, color: "#64748b", fontSize: "13px" }}>Results are focused on <strong style={{ color: "#365947" }}>📍 {customerLocation}</strong>.</p>
-                </div>
-              </div>
-
-              <form onSubmit={runDiscoverySearch} style={{ display: "flex", gap: "10px", marginTop: "18px" }}>
-                <input value={homeSearch} onChange={(e) => setHomeSearch(e.target.value)} placeholder={`Search in ${customerLocation}`} style={{ flex: 1, minWidth: 0, height: "48px", boxSizing: "border-box", border: "1px solid #cbd5e1", borderRadius: "12px", padding: "0 14px", background: "#fff", color: "#172033", fontSize: "14px" }} />
-                <button type="submit" style={{ minWidth: "112px", border: 0, borderRadius: "12px", background: "#365947", color: "#fff", fontWeight: 900, cursor: "pointer" }}>Search</button>
-              </form>
-
-              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "14px" }}>
-                {[['all','Everything'],['products','Crochet'],['shops','Creators']].map(([value,label]) => (
-                  <button key={value} type="button" onClick={() => setSearchType(value)} style={{ border: searchType === value ? "2px solid #365947" : "1px solid #d8e1dc", borderRadius: "999px", padding: "8px 13px", background: searchType === value ? "#edf6ef" : "#fff", color: "#172033", fontWeight: 800, cursor: "pointer" }}>{label}</button>
-                ))}
-              </div>
-
-              <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap", marginTop: "12px" }}>
-                <span style={{ fontSize: "12px", fontWeight: 900, color: "#64748b" }}>CATEGORY</span>
-                {discoveryCategories.map((category) => (
-                  <button key={category} type="button" onClick={() => setSearchCategory(category)} style={{ border: searchCategory === category ? "1px solid #365947" : "1px solid #e2e8f0", borderRadius: "9px", padding: "7px 10px", background: searchCategory === category ? "#f0f7f2" : "#fff", color: searchCategory === category ? "#365947" : "#475569", fontSize: "12px", fontWeight: 800, cursor: "pointer" }}>{category}</button>
-                ))}
-                <select value={searchSort} onChange={(e) => setSearchSort(e.target.value)} style={{ marginLeft: "auto", border: "1px solid #cbd5e1", borderRadius: "9px", padding: "8px 10px", background: "#fff", color: "#172033", fontWeight: 700 }}>
-                  <option value="relevance">Sort: Relevance</option>
-                  <option value="rating">Sort: Rating</option>
-                  <option value="price-low">Sort: Price low</option>
-                </select>
-              </div>
-
-              <div style={{ marginTop: "18px", display: "flex", justifyContent: "space-between", gap: "10px", alignItems: "center" }}>
-                <strong style={{ color: "#172033" }}>{discoveryResults.length} result{discoveryResults.length === 1 ? "" : "s"}</strong>
-                {searchQuery && <span style={{ fontSize: "12px", color: "#64748b" }}>for “{searchQuery}”</span>}
-              </div>
-
-              {discoveryResults.length ? (
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(245px,1fr))", gap: "12px", marginTop: "12px" }}>
-                  {discoveryResults.map((result, index) => (
-                    <article key={`${result.type}-${result.title}-${index}`} style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: "15px", padding: "15px", boxShadow: "0 5px 16px rgba(23,32,25,.05)" }}>
-                      <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
-                        <div style={{ width: 48, height: 48, borderRadius: 13, background: "#f4f7f5", display: "grid", placeItems: "center", fontSize: 25 }}>{result.icon}</div>
-                        <div style={{ minWidth: 0, flex: 1 }}>
-                          <div style={{ fontSize: "11px", fontWeight: 900, color: "#9a5b1f", textTransform: "uppercase" }}>{result.type}</div>
-                          <strong style={{ display: "block", marginTop: 2, color: "#172033" }}>{result.title}</strong>
-                          <div style={{ marginTop: 3, fontSize: "12px", color: "#64748b" }}>{result.subtitle}</div>
-                        </div>
-                      </div>
-                      <div style={{ marginTop: 12, fontSize: "12px", color: "#475569", fontWeight: 800 }}>{result.meta}</div>
-                      {result.type === "product" && <button type="button" onClick={() => openProductDetails(result.item)} style={{ width: "100%", marginTop: 12, border: 0, borderRadius: 10, padding: "10px", background: "#365947", color: "#fff", fontWeight: 900, cursor: "pointer" }}>View product</button>}
-                      {result.type === "shop" && <button type="button" onClick={() => { setShopSearch(result.title); navigate("shop"); }} style={{ width: "100%", marginTop: 12, border: "1px solid #365947", borderRadius: 10, padding: "10px", background: "#f7faf8", color: "#365947", fontWeight: 900, cursor: "pointer" }}>View shop products</button>}
-                      {result.type === "worker" && <button type="button" onClick={() => openWorksExperience("find")} style={{ width: "100%", marginTop: 12, border: "1px solid #365947", borderRadius: 10, padding: "10px", background: "#f7faf8", color: "#365947", fontWeight: 900, cursor: "pointer" }}>View workers</button>}
-                    </article>
-                  ))}
-                </div>
-              ) : (
-                <div style={{ marginTop: "14px", padding: "30px 18px", textAlign: "center", background: "#fff", border: "1px dashed #cbd5e1", borderRadius: "15px", color: "#64748b" }}>
-                  <div style={{ fontSize: 30 }}>🔎</div>
-                  <strong style={{ display: "block", marginTop: 8, color: "#172033" }}>No matching results yet</strong>
-                  <span style={{ display: "block", marginTop: 4, fontSize: "13px" }}>Try another keyword, category or result type.</span>
-                </div>
-              )}
-            </div>
-          </section>
-        )}
 
         {/* ====================================
             QUICK NAVIGATION

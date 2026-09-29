@@ -17,10 +17,10 @@ const SIMPLE_ROUTES=[
   /^\/@[a-z0-9._]{3,30}$/i,
   /^\/posts\/PST-[0-9A-F]{12}$/,
   /^\/articles\/ART-[0-9A-F]{12}$/,
-  /^\/groups\/[a-z0-9]+(?:-[a-z0-9]+)*$/,
-  /^\/channels\/[a-z0-9]+(?:-[a-z0-9]+)*$/,
   /^\/shop\/products\/PRD-[0-9A-F]{12}$/,
 ];
+// Mirrors the backend isSlug(): lowercase words joined by single hyphens, <=80 chars, never all digits (id-like).
+function isPublicSlug(value){const v=String(value||"");return v.length<=80&&/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(v)&&!/^[0-9]+$/.test(v.replace(/-/g,""));}
 function isPublicCode(value){const v=String(value||"");return /^[A-Za-z0-9][A-Za-z0-9_-]{2,63}$/.test(v)&&!/^[0-9]+$/.test(v.replace(/[-_]/g,""))&&!/[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}/i.test(v);}
 export function normalizeGlobalSearchQuery(value){return String(value??"").normalize("NFKC").replace(/\s+/g," ").trim();}
 export function isGlobalSearchQueryValid(value){const q=normalizeGlobalSearchQuery(value);return q.length>=2&&q.length<=80;}
@@ -28,10 +28,50 @@ export function typesForGlobalSearchScope(scope){const row=GLOBAL_SEARCH_SCOPE_O
 export function safeGlobalSearchRoute(value){
   const route=String(value??"").trim();if(!route||route.length>180||route.includes("?")||route.includes("#"))return null;
   if(SIMPLE_ROUTES.some(re=>re.test(route)))return route;
+  const space=route.match(/^\/(?:groups|channels)\/([^/]+)$/);if(space&&isPublicSlug(space[1]))return route;
   const vibe=route.match(/^\/vibes\/([^/]+)$/);if(vibe&&isPublicCode(vibe[1]))return route;
   const worker=route.match(/^\/works\/workers\/([^/]+)$/);if(worker&&isPublicCode(worker[1]))return route;
   return null;
 }
+
+// Direct-load / reload of a K5B result URL. Only routes that pass safeGlobalSearchRoute() are recognised,
+// and every key is a public identifier (username, public code or slug) — never an internal numeric id.
+// `area` is the HOWDI pillar that owns the destination.
+const DIRECT_ROUTES=Object.freeze([
+  {re:/^\/@([^/]+)$/,kind:"profile",area:"connect"},
+  {re:/^\/posts\/([^/]+)$/,kind:"post",area:"connect"},
+  {re:/^\/articles\/([^/]+)$/,kind:"article",area:"connect"},
+  {re:/^\/vibes\/([^/]+)$/,kind:"vibe",area:"connect"},
+  {re:/^\/groups\/([^/]+)$/,kind:"group",area:"connect"},
+  {re:/^\/channels\/([^/]+)$/,kind:"channel",area:"connect"},
+  {re:/^\/shop\/products\/([^/]+)$/,kind:"product",area:"shop"},
+  {re:/^\/works\/workers\/([^/]+)$/,kind:"worker",area:"works"},
+]);
+export function parseGlobalSearchDirectRoute(pathname){
+  let path=String(pathname??"").trim();
+  if(path.length>1&&path.endsWith("/"))path=path.slice(0,-1);
+  const route=safeGlobalSearchRoute(path);if(!route)return null;
+  for(const {re,kind,area} of DIRECT_ROUTES){const m=route.match(re);if(m)return {kind,key:m[1],route,area};}
+  return null;
+}
+
+// Shareable full-results page: /search?q=<query>&scope=<scope>. Only these two parameters are read or written.
+export const GLOBAL_SEARCH_PAGE_PATH="/search";
+export function normalizeGlobalSearchScope(scope){const v=String(scope??"").toLowerCase();return GLOBAL_SEARCH_SCOPE_OPTIONS.some(x=>x.value===v)?v:"all";}
+export function buildGlobalSearchPageUrl({query,scope}={}){
+  const q=normalizeGlobalSearchQuery(query).slice(0,80),sc=normalizeGlobalSearchScope(scope),params=new URLSearchParams();
+  if(q)params.set("q",q);
+  if(sc!=="all")params.set("scope",sc);
+  const qs=params.toString();
+  return GLOBAL_SEARCH_PAGE_PATH+(qs?"?"+qs:"");
+}
+export function parseGlobalSearchPageUrl(pathname,search=""){
+  const path=String(pathname??"").replace(/\/+$/,"")||"/";
+  if(path!==GLOBAL_SEARCH_PAGE_PATH)return null;
+  let params;try{params=new URLSearchParams(String(search??""));}catch{params=new URLSearchParams();}
+  return {query:normalizeGlobalSearchQuery(params.get("q")).slice(0,80),scope:normalizeGlobalSearchScope(params.get("scope"))};
+}
+
 function cleanText(value,max=160){const s=String(value??"").replace(/\s+/g," ").trim();return s?s.slice(0,max):"";}
 function count(value){const n=Math.floor(Number(value));return Number.isFinite(n)&&n>=0?n:0;}
 function money(value,currency="INR"){const n=Number(value);if(!Number.isFinite(n)||n<0)return "";return String(currency||"INR").toUpperCase()==="INR"?"₹"+n.toLocaleString("en-IN",{maximumFractionDigits:2}):String(currency)+" "+n;}
@@ -56,7 +96,7 @@ export async function fetchGlobalSearchK5B({fetchImpl=globalThis.fetch,apiBase="
   if(typeof fetchImpl!=="function")throw new TypeError("fetchImpl is required");
   const q=normalizeGlobalSearchQuery(query);if(!isGlobalSearchQueryValid(q))return {query:q,results:[],failed_types:[],requested_types:[]};
   const selected=[...new Set((Array.isArray(types)?types:[]).map(x=>String(x).toLowerCase()).filter(x=>TYPES.includes(x)))];
-  const safeTypes=selected.length?selected:[...TYPES],safeLimit=Math.max(1,Math.min(20,Math.floor(Number(limit)||5))),cap=Math.max(1,Math.min(100,Math.floor(Number(maxResults)||50)));
+  const safeTypes=selected.length?selected:[...TYPES],safeLimit=Math.max(1,Math.min(20,Math.floor(Number(limit)||5))),cap=Math.max(1,Math.min(200,Math.floor(Number(maxResults)||50)));
   const base=String(apiBase||"").replace(/\/+$/,"");
   const rows=await Promise.all(safeTypes.map(async type=>{
     const url=base+"/api/search?q="+encodeURIComponent(q)+"&type="+encodeURIComponent(type)+"&limit="+safeLimit;
@@ -64,11 +104,14 @@ export async function fetchGlobalSearchK5B({fetchImpl=globalThis.fetch,apiBase="
       const response=await fetchImpl(url,{headers,cache:"no-store",signal});
       const data=await response.json().catch(()=>({}));
       if(!response.ok||data?.status!=="success"||data?.type!==type)throw new Error(data?.message||"Search unavailable");
-      return {type,ok:true,items:Array.isArray(data.results)?data.results:[]};
+      return {type,ok:true,items:Array.isArray(data.results)?data.results:[],has_more:data.has_more===true};
     }catch(error){if(error?.name==="AbortError")throw error;return {type,ok:false,items:[]};}
   }));
   // Round-robin the type buckets so autocomplete cannot be monopolized by the first entity families.
   const seen=new Set(),results=[];
-  outer:for(let i=0;i<safeLimit;i++)for(const row of rows){const item=row.items[i];if(!item)continue;const normalized=normalizeGlobalSearchResult(item,row.type);if(!normalized||seen.has(normalized.key))continue;seen.add(normalized.key);results.push(normalized);if(results.length>=cap)break outer;}
-  return {query:q,results,failed_types:rows.filter(x=>!x.ok).map(x=>x.type),requested_types:safeTypes};
+  outer:for(let i=0;i<safeLimit;i++)for(const row of rows){const item=row.items[i];if(!item)continue;const normalized=normalizeGlobalSearchResult(item,row.type);if(!normalized||seen.has(normalized.key))continue;seen.add(normalized.key);results.push({...normalized,family:row.type});if(results.length>=cap)break outer;}
+  // family_counts/has_more_types let a full-results page decide whether a larger per-type limit can reveal more.
+  const family_counts=Object.fromEntries(rows.map(x=>[x.type,x.items.length]));
+  const has_more_types=rows.filter(x=>x.ok&&(x.has_more||x.items.length>=safeLimit)).map(x=>x.type);
+  return {query:q,limit:safeLimit,results,failed_types:rows.filter(x=>!x.ok).map(x=>x.type),requested_types:safeTypes,family_counts,has_more_types};
 }
