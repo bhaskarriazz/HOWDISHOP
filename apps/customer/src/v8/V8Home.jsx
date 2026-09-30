@@ -202,7 +202,12 @@ export default function V8Home({ apiBase, getAuthHeaders, user, displayName, onO
           </Tile>
 
           <Tile accent="move" icon="move" title="Move" onSeeAll={() => onOpen("move", "home")} hidden={hidden("move")} order={rank("move")}>
-            <V8State icon="move" title="Plan your next ride" message="Request ride and Your rides stay in the dedicated Move experience." actionLabel="Open Move" onAction={() => onOpen("move", "home")} />
+            {/* Founder-approved MOVE mobile reference: Move entry card. Send Items is not open yet, so it is not advertised. */}
+            <button type="button" className="v8-move-entry" data-move-entry onClick={() => onOpen("move", "home")} aria-label="Open HOWDI Move: request a ride">
+              <span className="v8-move-entry-copy"><b>Move around easily</b><small>Rides · Your rides · Drive with HOWDI</small></span>
+              <span className="v8-move-entry-go" aria-hidden="true"><V8Icon name="chevr" size={20} /></span>
+              <span className="v8-move-entry-art" aria-hidden="true"><i>🛺</i><i>🚕</i><i>🏍️</i></span>
+            </button>
           </Tile>
         </div>
 

@@ -68,9 +68,15 @@ export default function Rides({ api, path = '', nav, onOpenAddresses }) {
   const customerRides = data?.rides || [];
   const groups = groupCustomerRides(customerRides);
   const repeatRide = ride => { setRepeat({ ...ride, token: crypto.randomUUID() }); nav('rides'); };
-  return <div className="rides"><div className="ride-banner">LOCAL SANDBOX · PREVIEW / TEST ONLY</div>
-    <header className="ride-header"><div><span className="ride-eyebrow">HOWDI Move</span><h1>Ride where you need to go.</h1><p>Choose a pickup and destination in {config?.zone || 'the preview pilot'}.</p></div><span className="ride-symbol" aria-hidden="true">↗</span></header>
-    <nav className="ride-tabs" aria-label="Move sections"><button className={!sub ? 'ride-tab-active' : ''} aria-current={!sub ? 'page' : undefined} onClick={() => { setRepeat(null); nav('rides'); }}>Ride</button><button className={sub === 'trips' ? 'ride-tab-active' : ''} aria-current={sub === 'trips' ? 'page' : undefined} onClick={() => nav('rides/trips')}>Your rides</button><button onClick={() => nav('rides/items')}>Send Items</button><button className={sub === 'apply' ? 'ride-tab-active' : ''} onClick={() => nav('rides/apply')}>Drive with HOWDI</button>{data?.applications?.some(a => a.state === 'approved') && <button className={sub === 'desk' ? 'ride-tab-active' : ''} onClick={() => nav('rides/desk')}>Driver desk</button>}</nav>
+  // Founder-approved MOVE mobile reference: compact Move header + Ride / Send items switch. Confirm and trip screens
+  // carry their own app bar, so the header is hidden there. Presentation only; every call and state above is unchanged.
+  const [stage, setStage] = useState('main');
+  const customerTrip = selected && selected.side === 'customer';
+  const showHead = !customerTrip && !(stage === 'confirm' && !sub);
+  return <div className={`rides mv${showHead ? '' : ' mv-full'}`}>
+    {showHead && <><header className="mv-head"><div><h1>HOWDI <span>MOVE</span></h1><p>Ride. Send. Go Anywhere.</p></div><span className="mv-preview" title={`Local sandbox · ${config?.zone || 'preview pilot'}`}>Preview / Test</span></header>
+    <nav className="mv-seg" aria-label="Move sections"><button type="button" className={sub !== 'items' ? 'on' : ''} aria-current={!sub ? 'page' : undefined} onClick={() => { setRepeat(null); nav('rides'); }}><span aria-hidden="true">🚖</span>Ride</button><button type="button" className={sub === 'items' ? 'on' : ''} aria-current={sub === 'items' ? 'page' : undefined} onClick={() => nav('rides/items')}><span aria-hidden="true">📦</span>Send items</button></nav>
+    <nav className="mv-links" aria-label="More in Move"><button type="button" className={sub === 'trips' ? 'on' : ''} aria-current={sub === 'trips' ? 'page' : undefined} onClick={() => nav('rides/trips')}>Your rides</button><button type="button" className={sub === 'apply' ? 'on' : ''} onClick={() => nav('rides/apply')}>Drive with HOWDI</button>{data?.applications?.some(a => a.state === 'approved') && <button type="button" className={sub === 'desk' ? 'on' : ''} onClick={() => nav('rides/desk')}>Driver desk</button>}</nav></>}
     {!online && <p className="ride-alert" role="alert">Network interrupted. Last confirmed Ride status is shown; actions are paused until reconnection.</p>}
     {stale && online && data && <p className="ride-alert" role="alert">Ride status could not be refreshed. Actions are paused until the server responds.</p>}
     {error && <p className="ride-alert" role="alert">{error} <button type="button" onClick={() => { load(); loadPlaces(); }}>Retry</button></p>}
@@ -79,29 +85,42 @@ export default function Rides({ api, path = '', nav, onOpenAddresses }) {
       {busy && <p role="status">Checking with HOWDI… Please wait.</p>}
       {sub === 'apply' ? <Application applications={data.applications} call={call} zone={config.zone} />
         : sub === 'desk' ? <DriverDesk data={data} call={call} nav={nav} />
-        : selected ? <Trip ride={selected} call={call} onRepeat={repeatRide} onRefresh={() => load()} />
+        : selected ? (customerTrip ? <CustomerTrip ride={selected} call={call} onRepeat={repeatRide} onRefresh={() => load()} nav={nav} /> : <Trip ride={selected} call={call} onRepeat={repeatRide} onRefresh={() => load()} />)
         : sub.startsWith('HR-') ? <RidePanel id="RIDE-002" title="Ride unavailable"><p>Permission denied or Ride not found. Open Your rides using the account that requested this trip.</p><button type="button" onClick={() => nav('rides/trips')}>Your rides</button></RidePanel>
         : sub === 'trips' ? <RidePanel id="RIDE-002" title="Your rides"><RideList rides={customerRides} nav={nav} onRepeat={repeatRide} /><button type="button" onClick={() => load()}>Refresh status</button></RidePanel>
         : sub === 'items' ? <SendItems onReturn={() => nav('rides')} />
-        : <><div className="ride-home-intro"><div><h2>Where to?</h2><p>Request an Auto or Cab from the classes the pilot has enabled.</p></div><div className="ride-home-count"><b>{groups.current.length}</b><span>current rides</span></div></div><Quote key={repeat?.token || 'new'} config={config} call={call} nav={nav} seed={repeat} rides={customerRides} places={places} placesLoading={placesLoading} placesError={placesError} onRetryPlaces={loadPlaces} onOpenAddresses={onOpenAddresses} /></>}
+        : <>{groups.current.length ? <button type="button" className="mv-current" onClick={() => nav(groups.current.length === 1 ? 'rides/' + groups.current[0].code : 'rides/trips')}><b>{groups.current.length}</b><span>{groups.current.length === 1 ? 'current ride' : 'current rides'} · View</span></button> : null}<Quote key={repeat?.token || 'new'} config={config} call={call} nav={nav} seed={repeat} rides={customerRides} places={places} placesLoading={placesLoading} placesError={placesError} onRetryPlaces={loadPlaces} onOpenAddresses={onOpenAddresses} onStage={setStage} /></>}
       <details className="ride-panel ride-notifications"><summary>Preview ride updates ({data.notices?.length || 0})</summary>{data.notices?.map((n, i) => <p key={i}><b>{n.ref}</b> · {n.message}</p>)}{!data.notices?.length && <p>No ride updates yet.</p>}</details>
     </fieldset>}
     <RideSafety />
   </div>;
 }
-function Quote({ config, call, nav, seed, rides, places, placesLoading, placesError, onRetryPlaces, onOpenAddresses }) {
+const VEHICLE_GLYPH = { Bike: '🏍️', Auto: '🛺', Cab: '🚕', 'Women Special': '🚺' };
+// Honest route panel in the map position: the pilot has no map, geocoding or live route provider.
+function RouteVisual({ pickup, destination, note }) {
+  return <div className="mv-map" role="img" aria-label={`Route from ${pickup || 'pickup'} to ${destination || 'drop'}. ${note}`}>
+    <div className="mv-map-route"><span className="mv-pin green" /><b>{pickup || 'Pickup'}</b><i /><span className="mv-pin red" /><b>{destination || 'Drop'}</b></div>
+    <small>{note}</small>
+  </div>;
+}
+function Quote({ config, call, nav, seed, rides, places, placesLoading, placesError, onRetryPlaces, onOpenAddresses, onStage }) {
   const modes = config.modes || [];
   const firstEnabled = modes.find(mode => mode.enabled)?.name || '';
   const [form, setForm] = useState(() => ({ mode: 'instant', zone: config.zone, pickup: seed?.pickup || '', destination: seed?.destination || '', scheduled_at: '', vehicle_class: seed?.quote?.vehicle_class || firstEnabled, accessibility: seed?.quote?.accessibility || 'none', payment: seed?.quote?.payment || 'cash' }));
   const [q, setQ] = useState(null), [localError, setLocalError] = useState(''), [now, setNow] = useState(Date.now());
+  const [savedOpen, setSavedOpen] = useState(false), [fareOpen, setFareOpen] = useState(false);
   const key = useRef(crypto.randomUUID()), pickupInput = useRef(null);
   const selected = modes.find(mode => mode.name === form.vehicle_class);
   const enabled = modes.some(mode => mode.enabled);
+  const women = modes.find(mode => mode.name === 'Women Special');
   const recent = recentDestinations(rides);
   useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer); }, []);
+  useEffect(() => { onStage?.(q ? 'confirm' : 'main'); }, [q, onStage]);
+  useEffect(() => () => onStage?.('main'), [onStage]);
   const change = (name, value) => { setForm(f => ({ ...f, [name]: value })); setQ(null); setLocalError(''); };
   const estimate = async (candidate = form) => {
-    if (!selected?.enabled) { setLocalError('This vehicle class is unavailable. Choose an enabled class explicitly.'); return; }
+    const mode = modes.find(m => m.name === candidate.vehicle_class);
+    if (!mode?.enabled) { setLocalError('This vehicle class is unavailable. Choose an enabled class explicitly.'); return; }
     if (candidate.pickup.trim().length < 4 || candidate.destination.trim().length < 4 || candidate.pickup.trim().toLowerCase() === candidate.destination.trim().toLowerCase()) {
       setLocalError('Enter distinct pickup and destination meeting points.'); return;
     }
@@ -121,29 +140,56 @@ function Quote({ config, call, nav, seed, rides, places, placesLoading, placesEr
     if (candidate.pickup.trim().length >= 4 && candidate.destination.trim().length >= 4 && candidate.mode === 'instant') estimate(candidate);
     else if (field === 'destination' && !candidate.pickup.trim()) pickupInput.current?.focus();
   };
+  const swap = () => { setForm(f => ({ ...f, pickup: f.destination, destination: f.pickup })); setQ(null); setLocalError(''); };
+  // Changing payment re-checks the fare with the server (the quote is bound to the payment method).
+  const changePayment = () => { const next = { ...form, payment: form.payment === 'cash' ? 'hpay_test' : 'cash' }; setForm(next); estimate(next); };
   const quoteExpired = q && Date.parse(q.expires_at) <= now;
-  return <div className="ride-grid"><RidePanel id="RIDE-001" title="Request a Ride">
-    <div className="ride-booking-mode" role="group" aria-label="Ride time"><button type="button" className={form.mode === 'instant' ? 'ride-primary' : ''} aria-pressed={form.mode === 'instant'} onClick={() => change('mode', 'instant')}>Ride now</button><button type="button" className={form.mode === 'scheduled' ? 'ride-primary' : ''} aria-pressed={form.mode === 'scheduled'} onClick={() => change('mode', 'scheduled')}>Schedule a Ride</button></div>
-    <p>{form.mode === 'instant' ? 'Request an eligible driver in the local test pilot. There is no production dispatch.' : 'Choose a time 30 minutes to 7 days ahead. A driver must still accept.'}</p>
-    <form onSubmit={event => { event.preventDefault(); estimate(); }}>
-      <RideField label="Pickup meeting point"><input ref={pickupInput} required maxLength={300} value={form.pickup} onChange={event => change('pickup', event.target.value)} placeholder="Building, entrance or landmark" /></RideField>
-      <div className="ride-location-note"><button type="button" disabled>Use current location · unavailable</button><span>Live pickup location and geocoding are not connected in Preview/Test. Enter the exact meeting point yourself.</span></div>
-      <RideField label="Destination meeting point"><input required maxLength={300} value={form.destination} onChange={event => change('destination', event.target.value)} placeholder="Where would you like to go?" /></RideField>
+  const payLabel = p => (p === 'cash' ? 'Cash · test collection' : 'HPay Test · no real charge');
+
+  if (q) return <section className="mv-screen" data-screen={form.mode === 'scheduled' ? 'RIDE-013' : 'RIDE-CONFIRM'} aria-label="Confirm your ride">
+    <div className="mv-appbar"><button type="button" className="mv-back" aria-label="Back to ride choices" onClick={() => setQ(null)}>‹</button><h1>Confirm your ride</h1></div>
+    <RouteVisual pickup={form.pickup} destination={form.destination} note="Live map and route distance aren’t connected in Preview/Test." />
+    <div className="mv-sheet">
+      <div className="mv-fare-card"><span className="mv-glyph" aria-hidden="true">{VEHICLE_GLYPH[q.vehicle_class] || '🚖'}</span><div><b>{q.vehicle_class}</b><small>{q.mode === 'instant' ? 'Ride now' : rideWhen(q.scheduled_at)}</small></div><strong>{rupees(q.fare.total)}</strong><button type="button" className="mv-caret" aria-expanded={fareOpen} aria-label="Fare details" onClick={() => setFareOpen(o => !o)}><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" style={{ transform: fareOpen ? 'rotate(180deg)' : 'none' }}><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg></button></div>
+      {fareOpen && <div className="mv-fare-detail"><dl><dt>Base fare</dt><dd>{rupees(q.fare.base)}</dd><dt>Scheduled pickup</dt><dd>{rupees(q.fare.scheduled)}</dd><dt>Service</dt><dd>{rupees(q.fare.service)}</dd></dl><p>Server estimate · Preview/Test. {q.fare.basis}</p></div>}
+      <div className="mv-row"><span className="mv-row-ico" aria-hidden="true">{form.payment === 'cash' ? '💵' : '🅷'}</span><span className="mv-row-text">{payLabel(q.payment)}</span><button type="button" className="mv-link" onClick={changePayment}>Change ›</button></div>
+      <p className="mv-fine">{q.cancellation} Quote expires {rideWhen(q.expires_at)}; driver eligibility and availability are checked again by the server.</p>
+      {quoteExpired ? <><p className="ride-alert" role="alert">This quote expired. Check a new fare before requesting a Ride.</p><button type="button" className="mv-cta" onClick={() => estimate()}>Refresh fare</button></>
+        : <button type="button" className="mv-cta" disabled={!selected?.enabled} onClick={async () => { const result = await call('POST', BASE + '/bookings', { quote_code: q.code, request_key: key.current }); if (result?.ride) nav('rides/' + result.ride.code); }}>Request ride</button>}
+      <p className="mv-fine">By requesting, you accept the fare and cancellation terms shown. Pickup details and the vehicle plate stay private until both people confirm; check the plate and share your pickup PIN in person.</p>
+    </div>
+  </section>;
+
+  const quick = places.slice(0, 2);
+  return <form className="mv-main" data-screen="RIDE-001" onSubmit={event => { event.preventDefault(); estimate(); }}>
+    <div className="mv-route-card">
+      <label className="mv-stop" data-field="pickup"><i className="mv-dot green" aria-hidden="true" /><span><small>Pickup</small><input ref={pickupInput} required maxLength={300} value={form.pickup} onChange={event => change('pickup', event.target.value)} placeholder="Building, entrance or landmark" aria-label="Pickup meeting point" /></span></label>
+      <button type="button" className="mv-swap" aria-label="Swap pickup and drop" onClick={swap}>⇅</button>
+      <label className="mv-stop" data-field="destination"><i className="mv-dot red" aria-hidden="true" /><span><small>Drop</small><input required maxLength={300} value={form.destination} onChange={event => change('destination', event.target.value)} placeholder="Where would you like to go?" aria-label="Destination meeting point" /></span></label>
+    </div>
+    <p className="mv-hint">Live location isn’t connected in Preview/Test — type the exact meeting point.</p>
+    <div className="mv-chips" role="group" aria-label="Saved locations">
+      {quick.map(place => <button type="button" key={place.key} onClick={() => choosePlace(savedAddressText(place))}><span aria-hidden="true">{/home/i.test(place.name) ? '🏠' : /office|work/i.test(place.name) ? '💼' : '📍'}</span>{place.name}</button>)}
+      <button type="button" aria-expanded={savedOpen} onClick={() => setSavedOpen(o => !o)}><span aria-hidden="true">🔖</span>Saved</button>
+    </div>
+    {savedOpen && <div className="mv-saved">
       <div className="ride-place-section"><h3>Recent destinations</h3>{recent.length ? <div className="ride-place-list">{recent.map(place => <button type="button" key={place.rideCode} onClick={() => choosePlace(place.address)}><b>{place.address}</b><small>Use as destination</small></button>)}</div> : <p>No completed Ride destinations yet.</p>}</div>
       <div className="ride-place-section"><h3>Saved places</h3><p>From your HOWDI address book. Check the meeting point before requesting a Ride.</p>{placesLoading ? <p role="status">Loading saved addresses…</p> : placesError ? <p className="ride-alert" role="alert">{placesError} <button type="button" onClick={onRetryPlaces}>Retry</button></p> : places.length ? <div className="ride-place-list">{places.map(place => <div className="ride-saved-place" key={place.key}><b>{place.name}</b><small>{savedAddressText(place)}</small><div><button type="button" onClick={() => choosePlace(savedAddressText(place), 'pickup')}>Use as pickup</button><button type="button" onClick={() => choosePlace(savedAddressText(place))}>Use as destination</button></div></div>)}</div> : <p>No saved addresses yet.</p>}{onOpenAddresses && <button type="button" onClick={onOpenAddresses}>Manage saved addresses</button>}</div>
-      <h3>Choose a vehicle</h3><div className="ride-mode-grid" role="group" aria-label="Ride class">{modes.map(mode => <button key={mode.name} type="button" aria-pressed={form.vehicle_class === mode.name} className={form.vehicle_class === mode.name ? 'ride-mode-selected' : ''} onClick={() => change('vehicle_class', mode.name)}><b>{mode.name}</b><small>{mode.enabled ? 'Preview available' : 'Unavailable'}</small></button>)}</div>
-      <p className={selected?.enabled ? 'ride-notice' : 'ride-alert'} role="status">{selected?.reason || 'No configured vehicle class is available.'}</p>
-      {form.vehicle_class === 'Women Special' && !selected?.enabled && <p>Women Special is closed. HOWDI will not move this request to a general driver. Choose another class only if you want to.</p>}
-      {!enabled && <p className="ride-alert" role="alert">Ride service is unavailable in this pilot area. No request can be placed.</p>}
-      {form.mode === 'scheduled' && <RideField label="Pickup date and time (your device time)"><input required type="datetime-local" value={form.scheduled_at} onChange={event => change('scheduled_at', event.target.value)} /></RideField>}
-      <RideField label="Accessibility need"><select value={form.accessibility} onChange={event => change('accessibility', event.target.value)}><option value="none">No additional requirement</option><option value="step_free">Verified step-free vehicle required</option></select></RideField>
-      <RideField label="Payment"><select value={form.payment} onChange={event => change('payment', event.target.value)}><option value="cash">Cash · test collection</option><option value="hpay_test">HPay Test · no real charge</option></select></RideField>
-      {localError && <p className="ride-alert" role="alert">{localError}</p>}
-      <button type="submit" className="ride-primary" disabled={!selected?.enabled}>Review fare and availability</button>
-    </form>
-  </RidePanel><RidePanel id={form.mode === 'scheduled' ? 'RIDE-013' : 'RIDE-002'} title="Review your Ride">
-    {q ? <><div className="ride-route"><span>Pickup · {form.pickup}</span><i /><span>Destination · {form.destination}</span></div><p>{q.vehicle_class} · {q.mode === 'instant' ? 'Ride now' : rideWhen(q.scheduled_at)} · {q.payment === 'cash' ? 'Cash test collection' : 'HPay Test'}</p><div className="ride-fare"><span>Server estimate · Preview/Test</span><strong>{rupees(q.fare.total)}</strong></div><dl><dt>Base fare</dt><dd>{rupees(q.fare.base)}</dd><dt>Scheduled pickup</dt><dd>{rupees(q.fare.scheduled)}</dd><dt>Service</dt><dd>{rupees(q.fare.service)}</dd></dl><p>{q.fare.basis}</p><p>{q.cancellation}</p><p>Quote expires {rideWhen(q.expires_at)}. Driver eligibility and service availability are checked again by the server.</p>{quoteExpired ? <><p className="ride-alert" role="alert">This quote expired. Check a new fare before requesting a Ride.</p><button type="button" onClick={() => estimate()}>Refresh fare</button></> : <button type="button" className="ride-primary" disabled={!selected?.enabled} onClick={async () => { const result = await call('POST', BASE + '/bookings', { quote_code: q.code, request_key: key.current }); if (result?.ride) nav('rides/' + result.ride.code); }}>Request Ride · accept shown fare and cancellation terms</button>}</> : <><div className="ride-route"><span>01 · Your pickup</span><i /><span>02 · Your destination</span></div><p>Choose an enabled class, check the server estimate, then request your Ride.</p><p>Pickup details and vehicle plate remain private until both people confirm disclosure. Check the plate and share the pickup PIN in person.</p></>}
-  </RidePanel></div>;
+    </div>}
+    {placesError && !savedOpen ? <p className="ride-alert" role="alert">{placesError} <button type="button" onClick={onRetryPlaces}>Retry</button></p> : null}
+    <div className="mv-when" role="group" aria-label="Ride time"><button type="button" className={form.mode === 'instant' ? 'on' : ''} aria-pressed={form.mode === 'instant'} onClick={() => change('mode', 'instant')}>Ride now</button><button type="button" className={form.mode === 'scheduled' ? 'on' : ''} aria-pressed={form.mode === 'scheduled'} onClick={() => change('mode', 'scheduled')}>Schedule</button></div>
+    {form.mode === 'scheduled' && <RideField label="Pickup date and time (your device time) · 30 minutes to 7 days ahead"><input required type="datetime-local" value={form.scheduled_at} onChange={event => change('scheduled_at', event.target.value)} /></RideField>}
+    <div className="mv-h2"><h2>Choose your ride</h2><small>Fare on the next step</small></div>
+    <div className="mv-vehicles" role="radiogroup" aria-label="Ride class">{modes.filter(mode => mode.name !== 'Women Special').map(mode => <button key={mode.name} type="button" role="radio" aria-checked={form.vehicle_class === mode.name} className={`${form.vehicle_class === mode.name ? 'on' : ''}${mode.enabled ? '' : ' closed'}`} onClick={() => change('vehicle_class', mode.name)}>
+      <span className="mv-vglyph" aria-hidden="true">{VEHICLE_GLYPH[mode.name] || '🚖'}</span><b>{mode.name}</b><small>{mode.enabled ? 'Available' : 'Closed'}</small><i className="mv-radio" aria-hidden="true" /></button>)}</div>
+    {women && <div className="mv-women"><span className="mv-women-ico" aria-hidden="true">👩</span><div><b>Women Special</b><small>{women.enabled ? 'Eligible women drivers only' : women.reason}</small></div><button type="button" role="switch" aria-checked={form.vehicle_class === 'Women Special'} aria-label="Women Special" className="mv-switch" onClick={() => change('vehicle_class', form.vehicle_class === 'Women Special' ? firstEnabled : 'Women Special')}><i /></button></div>}
+    <p className={selected?.enabled ? 'mv-status ok' : 'mv-status'} role="status">{selected?.reason || 'No configured vehicle class is available.'}</p>
+    {form.vehicle_class === 'Women Special' && !selected?.enabled && <p className="mv-fine">Women Special is closed. HOWDI will not move this request to a general driver. Choose another class only if you want to.</p>}
+    {!enabled && <p className="ride-alert" role="alert">Ride service is unavailable in this pilot area. No request can be placed.</p>}
+    <div className="mv-row"><span className="mv-row-ico" aria-hidden="true">♿</span><label className="mv-row-text">Accessibility<select value={form.accessibility} onChange={event => change('accessibility', event.target.value)}><option value="none">No additional requirement</option><option value="step_free">Verified step-free vehicle required</option></select></label></div>
+    {localError && <p className="ride-alert" role="alert">{localError}</p>}
+    <button type="submit" className="mv-cta" disabled={!selected?.enabled}>See fare</button>
+  </form>;
 }
 
 function RideList({ rides, nav, onRepeat }) {
@@ -206,6 +252,38 @@ function Trip({ ride: r, call, onRepeat, onRefresh }) {
     {!driver && ['completed', 'cancelled', 'expired'].includes(r.state) && r.pickup && r.destination && <button type="button" onClick={() => onRepeat(r)}>Repeat route · check a new fare</button>}
   </RidePanel><div>{r.state === 'completed' && <RidePanel id="RIDE-004" title={driver ? 'Payment and settlement status' : 'Payment and receipt'}><div className="ride-fare"><span>Preview total</span><strong>{rupees(r.quote.fare.total)}</strong></div><p>{r.payment_state} · settlement {r.payout_state}</p>{r.payment_state !== 'paid' && r.payment_state !== 'refunded' && (driver && r.quote.payment === 'cash' ? <button className="ride-primary" onClick={() => action('cash')}>Mark test cash received</button> : !driver && r.quote.payment === 'hpay_test' ? <><button className="ride-primary" onClick={() => action('pay')}>Pay / retry HPay Test</button><button data-screen="RIDE-011" onClick={() => action('pay', { test_outcome: 'fail' })}>Test payment failure</button></> : <p>Waiting for payment confirmation.</p>)}{r.ledger?.length ? r.ledger.map(l => <p key={l.reference}><b>{l.kind}: {rupees(l.amount)}</b><br />{l.payment} · {l.reference}</p>) : <p>No payment receipt is recorded yet.</p>}<p>{driver ? 'Settlement is a server status only. This preview does not claim a payout or earnings.' : 'Cash stays cash. HPay Test is a local simulation, with no wallet debit or real charge.'}</p><div data-screen="RIDE-016"><RideField label="Rate the other participant"><select value={stars} onChange={e => setStars(Number(e.target.value))}>{[5, 4, 3, 2, 1].map(n => <option key={n} value={n}>{n} stars</option>)}</select></RideField><button onClick={() => action('rating', { stars })}>Save rating</button></div></RidePanel>}
     <RidePanel id="RIDE-012" title="Support for this ride"><RideField label="Case type"><select value={kind} onChange={e => setKind(e.target.value)}>{['support', 'lost_item', 'incident', 'refund', 'fee_review', 'appeal', 'cash_dispute'].map(k => <option key={k} value={k}>{k.replaceAll('_', ' ')}</option>)}</select></RideField><RideField label="What happened? Do not include PINs or phone numbers."><textarea value={reason} onChange={e => setReason(e.target.value)} maxLength={300} /></RideField><button disabled={!reason.trim()} onClick={() => action('support', { kind, reason })}>Send to local staff queue</button></RidePanel></div></div>;
+}
+
+// Customer trip in the approved "driver on the way" composition. Same server data and actions as Trip; the pilot has no
+// live map, arrival time, driver name/rating, calling or ride sharing, so those are not shown.
+function CustomerTrip({ ride: r, call, onRepeat, onRefresh, nav }) {
+  const [agree, setAgree] = useState(false), [cancel, setCancel] = useState(false), [reason, setReason] = useState(''), [kind, setKind] = useState('support'), [stars, setStars] = useState(5);
+  const action = (name, body = {}) => call('POST', `${BASE}/${r.code}/${name}`, body);
+  const title = r.state === 'requested' ? (r.matching === 'no_eligible_driver' ? 'No eligible driver yet' : 'Finding your driver') : r.state === 'accepted' ? 'Your driver is on the way'
+    : r.state === 'in_trip' ? 'On your trip' : r.state === 'completed' ? 'Ride completed' : r.state === 'expired' ? 'Ride request expired' : 'Ride cancelled';
+  const note = r.state === 'accepted' ? 'Live tracking and arrival time aren’t connected in Preview/Test.' : r.state === 'in_trip' ? 'Live tracking and route guidance aren’t connected in Preview/Test.' : 'Live map isn’t connected in Preview/Test.';
+  return <section className="mv-screen" data-screen="RIDE-002" aria-label={title}>
+    <div className="mv-appbar"><button type="button" className="mv-back" aria-label="Back to Move" onClick={() => nav('rides')}>‹</button><h1>{title}</h1></div>
+    {r.pickup ? <RouteVisual pickup={r.pickup} destination={r.destination} note={note} /> : null}
+    <div className="mv-sheet">
+      <div className="mv-driver"><span className="mv-glyph" aria-hidden="true">{VEHICLE_GLYPH[r.quote.vehicle_class] || '🚖'}</span><div><b>{r.driver ? `@${r.driver}` : r.state === 'requested' ? 'Looking for a driver' : 'No driver assigned'}</b><small>{[r.quote.vehicle_class, r.plate].filter(Boolean).join(' · ')}</small></div><strong>{rupees(r.quote.fare.total)}</strong></div>
+      {r.pin && <div className="mv-info" data-screen="RIDE-003"><span aria-hidden="true">🛡️</span><div><b>Your pickup PIN <span className="mv-pin-code">{r.pin}</span></b><small>Check the plate first, then tell the driver this PIN in person. Never send it in chat or notifications. Expires {rideWhen(r.pin_expires_at)}.</small></div></div>}
+      {r.state === 'requested' && <div className="mv-info"><span aria-hidden="true">⏳</span><div><b>{r.matching === 'no_eligible_driver' ? 'No eligible driver right now' : 'Waiting for a driver to accept'}</b><small>{r.matching === 'no_eligible_driver' ? 'No eligible driver is available for this class, area and accessibility need. No automatic fallback. You can wait, refresh or cancel.' : 'No driver has accepted yet. You can wait, refresh or cancel.'}</small>{r.offer_expires_at && <OfferClock until={r.offer_expires_at} />}</div></div>}
+      {r.state === 'accepted' && r.customer_consent && !r.plate && <p className="mv-fine">Waiting for the driver to confirm. Plate and pickup instructions stay hidden until both of you confirm.</p>}
+      {r.state === 'accepted' && !r.customer_consent && <div className="mv-consent" data-screen="RIDE-009"><h3>Confirm exactly what you share</h3><ul>{r.consent_fields.map(f => <li key={f}>{f.replaceAll('_', ' ')}</li>)}</ul><p>Shared only with the other participant for this ride. Phones remain private. No GPS or trusted-contact sharing is enabled. Consent events retain field names only. Contact support for data deletion review.</p><label className="ride-check"><input type="checkbox" checked={agree} onChange={e => setAgree(e.target.checked)} />I affirm these fields for this ride.</label><button type="button" disabled={!agree} className="mv-cta" onClick={() => action('consent', { fields: r.consent_fields })}>Confirm field disclosure</button></div>}
+      {r.state === 'in_trip' && <p className="ride-notice">Pickup PIN verified by the server. Trip is active.</p>}
+      {r.reason && <p className="mv-fine">{r.reason}</p>}
+      {['requested', 'accepted'].includes(r.state) && <div className="mv-actions" data-screen="RIDE-010">
+        <button type="button" className="mv-cancel" aria-expanded={cancel} onClick={() => setCancel(!cancel)}><span aria-hidden="true">✕</span>Cancel ride</button>
+        {r.state === 'requested' && <button type="button" className="mv-secondary" onClick={onRefresh}><span aria-hidden="true">↻</span>Refresh status</button>}
+      </div>}
+      {cancel && <div className="ride-alert"><h3>Confirm cancellation</h3><p>Fee: ₹0. Both sides will be notified. This cannot be undone.</p><RideField label="Cancellation reason"><textarea value={reason} onChange={e => setReason(e.target.value)} /></RideField><button type="button" disabled={!reason.trim()} onClick={() => action('cancel', { reason, confirm: true })}>Confirm free cancellation</button><button type="button" onClick={() => setCancel(false)}>Keep ride</button></div>}
+      {['completed', 'cancelled', 'expired'].includes(r.state) && r.pickup && r.destination && <button type="button" className="mv-secondary mv-wide" onClick={() => onRepeat(r)}>Repeat route · check a new fare</button>}
+      {r.state === 'completed' && <div className="mv-receipt" data-screen="RIDE-004"><h3>Payment and receipt</h3><p>{r.payment_state} · settlement {r.payout_state}</p>{r.payment_state !== 'paid' && r.payment_state !== 'refunded' && (r.quote.payment === 'hpay_test' ? <><button type="button" className="mv-cta" onClick={() => action('pay')}>Pay / retry HPay Test</button><button type="button" data-screen="RIDE-011" onClick={() => action('pay', { test_outcome: 'fail' })}>Test payment failure</button></> : <p>Waiting for payment confirmation.</p>)}{r.ledger?.length ? r.ledger.map(l => <p key={l.reference}><b>{l.kind}: {rupees(l.amount)}</b><br />{l.payment} · {l.reference}</p>) : <p>No payment receipt is recorded yet.</p>}<p className="mv-fine">Cash stays cash. HPay Test is a local simulation, with no wallet debit or real charge.</p><div data-screen="RIDE-016"><RideField label="Rate your driver"><select value={stars} onChange={e => setStars(Number(e.target.value))}>{[5, 4, 3, 2, 1].map(n => <option key={n} value={n}>{n} stars</option>)}</select></RideField><button type="button" onClick={() => action('rating', { stars })}>Save rating</button></div></div>}
+      <details className="mv-more"><summary>Ride details</summary><b className="ride-code">{r.code}</b><RideProgress ride={r} /><p>{r.quote.mode === 'instant' ? 'Ride now · local preview' : rideWhen(r.quote.scheduled_at)} · {r.quote.vehicle_class}</p><p>{rupees(r.quote.fare.total)} · {r.quote.payment === 'cash' ? 'Cash test collection' : 'HPay Test'}</p>{r.pickup && <div className="ride-route"><span>Pickup · {r.pickup}</span><i /><span>Destination · {r.destination}</span></div>}</details>
+      <details className="mv-more" data-screen="RIDE-012"><summary>Help with this ride</summary><RideField label="Case type"><select value={kind} onChange={e => setKind(e.target.value)}>{['support', 'lost_item', 'incident', 'refund', 'fee_review', 'appeal', 'cash_dispute'].map(k => <option key={k} value={k}>{k.replaceAll('_', ' ')}</option>)}</select></RideField><RideField label="What happened? Do not include PINs or phone numbers."><textarea value={reason} onChange={e => setReason(e.target.value)} maxLength={300} /></RideField><button type="button" disabled={!reason.trim()} onClick={() => action('support', { kind, reason })}>Send to local staff queue</button></details>
+    </div>
+  </section>;
 }
 
 function OfferClock({ until }) { const [now,setNow]=useState(Date.now()); useEffect(()=>{const t=setInterval(()=>setNow(Date.now()),1000);return()=>clearInterval(t);},[]);const seconds=Math.max(0,Math.ceil((Date.parse(until)-now)/1000));return <p role="timer">{seconds ? `Offer expires in ${seconds}s` : "Offer expired — refreshing confirmed status…"}</p>; }

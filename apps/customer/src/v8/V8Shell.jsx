@@ -1,7 +1,7 @@
 // HOWDI V8 shell — NAV-001 (desktop text rail), NAV-002 (desktop header, fixed order),
 // NAV-003 (one floating mobile bar), NAV-004 (quick actions live in the profile hub, never a second bar).
 // Pure presentation: every action is a callback owned by App, so no navigation logic is duplicated here.
-import { forwardRef, useRef } from "react";
+import { forwardRef, useEffect, useRef, useState } from "react";
 
 export const V8_PILLARS = [
   { area: "home", label: "Home" },
@@ -185,14 +185,18 @@ export const V8Header = forwardRef(function V8Header({
 });
 
 export function V8BottomBar({ active, onNavigate, pillars = V8_PILLARS, onCustomize }) {
-  const hold = useRef(null), held = useRef(false);
+  const hold = useRef(null), held = useRef(false), tapTimer = useRef(null);
+  // Founder-approved dock: a brief filled-circle "tap" state on the pressed pillar (visual only; navigation unchanged).
+  const [tapped, setTapped] = useState(null);
+  useEffect(() => () => window.clearTimeout(tapTimer.current), []);
   const startHold = () => { held.current = false; if (onCustomize) hold.current = window.setTimeout(() => { held.current = true; onCustomize(); }, 2000); };
   const endHold = () => { if (hold.current) window.clearTimeout(hold.current); hold.current = null; };
+  const tap = (area) => { window.clearTimeout(tapTimer.current); setTapped(area); tapTimer.current = window.setTimeout(() => setTapped(null), 450); };
   return (
     <nav className="v8-bottombar" aria-label="Main" onPointerDown={startHold} onPointerUp={endHold} onPointerCancel={endHold} onPointerLeave={endHold}>
       {pillars.map((p) => (
-        <button key={p.area} type="button" aria-current={active === p.area ? "page" : undefined} onClick={() => { if (held.current) { held.current = false; return; } onNavigate(p.area); }}>
-          <V8Icon name={p.area} size={22} /><span>{p.label}</span>
+        <button key={p.area} type="button" className={tapped === p.area ? "is-tapped" : undefined} aria-current={active === p.area ? "page" : undefined} onPointerDown={() => tap(p.area)} onClick={() => { if (held.current) { held.current = false; return; } onNavigate(p.area); }}>
+          <i className="v8-dock-ico" aria-hidden="true"><V8Icon name={p.area} size={22} /></i><span>{p.label}</span>
         </button>
       ))}
     </nav>
