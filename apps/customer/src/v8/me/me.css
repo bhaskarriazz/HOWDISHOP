@@ -46,3 +46,6 @@
 .v8me-addrcard { display: flex; gap: 10px; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; padding: 10px 0; border-top: 1px solid var(--v8-line); } .v8me-addrcard > span:first-child { display: grid; gap: 2px; flex: 1; min-width: 200px; } .v8me-addrcard small { color: var(--v8-muted); } .v8me-addrcard em { margin-left: 8px; font-style: normal; }
 .v8me-danger { border: 1px solid #fecaca; } .v8me-danger h3 { color: #b91c1c; } .v8me-danger ul { margin: 4px 0 0; padding-left: 18px; }
 .v8s-rvote .v8-btn.on { background: var(--v8-success-soft); border-color: var(--v8-success); }
+
+/* HPay · Cashfree (sandbox) add money */
+.v8me-cf { display: grid; gap: 6px; margin-top: 10px; } .v8me-cf .v8-btn { justify-self: start; } .v8me-cf-state { margin: 0; font-size: 14px; } .v8me-cf-state.paid { color: var(--v8-success); } .v8me-cf-state.failed, .v8me-cf-state.mismatch, .v8me-cf-state.expired { color: var(--v8-danger, #b91c1c); }

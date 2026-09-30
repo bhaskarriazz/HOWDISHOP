@@ -5,6 +5,7 @@ import { V8Icon, V8State } from "../V8Shell";
 import { useV8Ui } from "../V8System";
 import { useApi, Skel, Tabs } from "../connect/common";
 import { inr, newKey } from "../connect/HPayUtilities";
+import { REF_RE, STATE_TEXT, loadCashfree, pollPayment } from "./cashfreeCheckout";
 import "./me.css";
 
 const when = (iso) => (iso ? new Date(iso).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }) : "");
@@ -14,6 +15,36 @@ export function Wallet({ apiBase, getAuthHeaders, onRoute, onBack }) {
   const [d, setD] = useState(null); const [tab, setTab] = useState("all"); const [amt, setAmt] = useState(""); const [busy, setBusy] = useState(false); const key = useRef(newKey()); const [err, setErr] = useState("");
   const load = useCallback(async () => { const r = await api("GET", "/api/v8/hpay/history"); setD(r.ok ? r.json : { error: r.json.message }); }, [api]);
   useEffect(() => { load(); }, [load]);
+  // Cashfree (sandbox): the server creates the order and verifies the payment; the browser only opens the checkout and asks HOWDI.
+  const [cf, setCf] = useState(null); const [cfState, setCfState] = useState(""); const cfKey = useRef({ amount: null, key: null });
+  useEffect(() => { api("GET", "/api/v8/hpay/cashfree/config").then((r) => setCf(r.ok ? r.json : { enabled: false })); }, [api]);
+  const cfFinish = useCallback((res) => {
+    if (!res || res.error) { setCfState(""); setErr(res?.error || "We couldn’t confirm the payment yet."); return; }
+    const st = res.payment?.status;
+    if (st === "paid") { cfKey.current = { amount: null, key: null }; setAmt(""); ui?.toast({ title: `${inr(res.payment.amount)} added with Cashfree (sandbox)` }); load(); }
+    setCfState(["paid", "failed", "user_dropped", "expired", "mismatch"].includes(st) ? st : "pending");
+  }, [load, ui]);
+  useEffect(() => { // back from a Cashfree redirect: ?cf_order=HCF-… → ask HOWDI, never trust the redirect itself
+    const ref = new URLSearchParams(window.location.search).get("cf_order");
+    if (!REF_RE.test(ref || "")) return;
+    const u = new URL(window.location.href); u.searchParams.delete("cf_order"); window.history.replaceState(window.history.state, "", u.pathname + u.search);
+    setCfState("verifying"); pollPayment(api, ref).then(cfFinish);
+  }, [api, cfFinish]);
+  const payCf = async () => {
+    const amount = Number(amt); setErr("");
+    if (cfKey.current.amount !== amount || !cfKey.current.key) cfKey.current = { amount, key: newKey() };
+    setCfState("creating");
+    const r = await api("POST", "/api/v8/hpay/cashfree/orders", { amount, idempotency_key: cfKey.current.key });
+    if (!r.ok) { setCfState(""); setErr(r.json?.message || "Cashfree checkout couldn’t start."); return; }
+    const ref = r.json.payment.reference;
+    if (r.json.payment.settled || !r.json.checkout_session) { cfFinish(await pollPayment(api, ref)); return; }
+    try {
+      const cashfree = await loadCashfree(); setCfState("checkout");
+      await cashfree.checkout({ paymentSessionId: r.json.checkout_session, redirectTarget: "_modal" });
+    } catch (e) { setErr(e.message); }
+    setCfState("verifying"); cfFinish(await pollPayment(api, ref));
+  };
+  const cfBusy = ["creating", "checkout", "verifying"].includes(cfState);
   if (!d) return <div className="v8-page v8me"><Skel h={320} r={16} /></div>;
   if (d.error) return <div className="v8-page v8me"><V8State kind="error" title="Your wallet didn’t load" message={d.error} actionLabel="Retry" onAction={load} /></div>;
   const add = async () => {
@@ -41,6 +72,11 @@ export function Wallet({ apiBase, getAuthHeaders, onRoute, onBack }) {
           <div className="v8l-chips">{[200, 500, 1000, 2000].map((a) => <button key={a} type="button" className={Number(amt) === a ? "on" : ""} onClick={() => setAmt(String(a))}>{inr(a)}</button>)}</div>
           <div className="v8me-addrow"><label className="v8c-field"><span>Amount (₹)</span><input inputMode="numeric" value={amt} onChange={(e) => setAmt(e.target.value.replace(/\D/g, "").slice(0, 4))} placeholder="500" /></label>
             <button type="button" className="v8-btn v8-btn-primary" disabled={busy || !(Number(amt) >= 100)} onClick={add}>{busy ? "Adding…" : `Add ${amt ? inr(amt) : "money"}`}</button></div>
+          {cf?.enabled ? <div className="v8me-cf">
+            <button type="button" className="v8-btn" disabled={busy || cfBusy || !(Number(amt) >= 100 && Number(amt) <= 5000)} onClick={payCf}><V8Icon name="lock" size={16} />{cfBusy ? "Please wait…" : `Pay ${amt ? inr(amt) : ""} with Cashfree (sandbox)`}</button>
+            <small className="v8c-muted">Cashfree sandbox: use Cashfree’s test cards/UPI. HOWDI adds money only after it confirms the payment with Cashfree.</small>
+            {cfState ? <p className={`v8me-cf-state ${cfState}`} role="status" aria-live="polite">{STATE_TEXT[cfState]}</p> : null}
+          </div> : null}
           {err ? <p className="v8c-err" role="alert">{err}</p> : null}
         </>) : <p className="v8c-muted">Adding money needs a payment provider, which isn’t connected yet.</p>}
       </section>
