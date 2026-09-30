@@ -1,7 +1,21 @@
 // P8 learner journey helpers (TG-LRN-04/06, LRN-WORK-001 file rules) — pure tests.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { checkWorkFile, costing, explainPath, pathQueries } from "./learnJourneyModel.js";
+import fs from "node:fs";
+import { checkWorkFile, costing, explainPath, isConfirmedDraft, pathQueries } from "./learnJourneyModel.js";
+
+test("P8 correction 1: Ready to Sell succeeds only on an explicit status === 'draft' from the Vendor API", () => {
+  assert.equal(isConfirmedDraft({ product: { public_key: "PRD-AAAAAAAAAAAA", status: "draft", price: 520 } }), true);
+  for (const bad of [
+    null, undefined, {}, { product: null }, { product: {} }, { product: { status: "published" } }, { product: { status: "DRAFT" } },
+    { product: { status: "" } }, { product: { status: undefined } }, { product: { status: ["draft"] } }, { product: "draft" }, { status: "draft" },
+  ]) assert.equal(isConfirmedDraft(bad), false, JSON.stringify(bad));
+  // the component gates its success state on the helper (fail closed), and never calls publish
+  const src = fs.readFileSync(new URL("./LearnJourney.jsx", import.meta.url), "utf8");
+  const sell = src.slice(src.indexOf("export function ReadyToSell"), src.indexOf("export function PathFinder"));
+  assert.match(sell, /if \(!isConfirmedDraft\(r\.json\)\) \{ setState\(\{ busy: false, err: [^}]*product: null \}\); return; \}\s*setState\(\{ busy: false, err: "", code: "", product: r\.json\.product \}\)/);
+  assert.doesNotMatch(sell, /\/publish/);
+});
 
 test("path queries go strictest first and relax level → time → language → goal", () => {
   const q = pathQueries({ goal: "project", lang: "Telugu", time: "under1h" });

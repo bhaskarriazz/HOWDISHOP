@@ -50,11 +50,19 @@ function createLearnJourneyV8(deps) {
     return { items: items.map((name) => ({ name, owned: owned.has(name) })), ready: items.every((n) => owned.has(n)) };
   }
 
+  // A course has a project only on affirmative evidence: an explicit project_required = TRUE, or an active lesson that
+  // actually carries a practice task. NULL / missing is never proof of a project (and there is no separate Project entity).
+  async function hasProject(c) {
+    if (c.project_required === true) return true;
+    return Boolean((await pool.query(`SELECT 1 FROM learning_course_lessons l JOIN learning_course_modules m ON m.id=l.module_id
+      WHERE m.course_id=$1 AND l.is_active AND m.is_active AND COALESCE(TRIM(l.practice_task),'')<>'' LIMIT 1`, [c.id])).rows[0]);
+  }
+
   // Project Journey: every milestone is derived from verified server records (entitlement, lesson progress, evidence, certificate).
   async function journeyFor(uid, c) {
     const ls = await lessonsOf(c.id); const st = await stateOf(uid, c.id, ls.length); const cert = await certOf(uid, c.id);
     const mats = await materialsState(uid, c); const work = await workState(uid, c);
-    const project = c.project_required !== false; const certOn = c.certificate_enabled !== false;
+    const project = await hasProject(c); const certOn = c.certificate_enabled !== false;
     const half = Math.ceil(ls.length / 2);
     const m = [
       { key: 'joined', label: 'Joined the course', done: st.enrolled },
@@ -123,7 +131,7 @@ function createLearnJourneyV8(deps) {
       }
       if (m[2] === 'work') {
         if (!(await entitled(uid, c.id))) { fail(res, 403, 'NOT_ENROLLED', 'Join the course to share your work.'); return true; }
-        if (c.project_required === false) { fail(res, 409, 'NO_PROJECT', 'This course doesn’t include a project.'); return true; }
+        if (!(await hasProject(c))) { fail(res, 409, 'NO_PROJECT', 'This course doesn’t include a project.'); return true; }
         if (req.method === 'GET') {
           const s = await workState(uid, c); const items = []; for (const r of s.rows) items.push(await workDto(r));
           ok(res, { items, can_submit: s.canSubmit, accepted: s.accepted, attempts_left: s.attemptsLeft, max_attempts: MAX_ATTEMPTS }); return true;

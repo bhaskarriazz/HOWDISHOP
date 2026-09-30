@@ -4,7 +4,8 @@
 // Every filter maps to a real learning_courses / lesson column; unknown values are dropped server-side, so a
 // shared URL can never widen what the catalogue exposes (published + active only, applied by the caller).
 //   q        course title, tagline, description, skill, outcomes, lesson titles / practice tasks, teacher @handle / name
-//   goal     certificate → certificate_enabled · project → project_required · sell → skill "Business & Selling"
+//   goal     certificate → certificate_enabled · project → affirmative only: project_required IS TRUE or a lesson with a
+//            practice task (NULL is never project-positive) · sell → skill "Business & Selling" (derived; taxonomy decision pending)
 //   lang     language values that exist in the published catalogue (validated against that list)
 //   level    beginner | intermediate | advanced
 //   price    free | under500 | 500to2000 | over2000   (effective price = sale_price when set, else price)
@@ -83,7 +84,7 @@ function buildDiscoverySql(f, { published }) {
       OR EXISTS(SELECT 1 FROM users du LEFT JOIN howdi_connect_profiles dp ON dp.user_id=du.id WHERE du.id=c.v8_teacher_user_id
         AND (LOWER(COALESCE(dp.public_username,'')) LIKE ${like} ESCAPE '\\' OR (COALESCE(dp.discoverable,TRUE) AND COALESCE(dp.private_profile,FALSE)=FALSE AND LOWER(COALESCE(du.full_name,'')) LIKE ${like} ESCAPE '\\'))))`);
   }
-  const goal = f.goal.map((g) => (g === 'certificate' ? `c.certificate_enabled IS NOT FALSE` : g === 'project' ? `c.project_required IS NOT FALSE` : `c.category=${p(SELL_SKILL)}`));
+  const goal = f.goal.map((g) => (g === 'certificate' ? `c.certificate_enabled IS NOT FALSE` : g === 'project' ? `(c.project_required IS TRUE OR EXISTS(SELECT 1 FROM learning_course_modules pm JOIN learning_course_lessons pl ON pl.module_id=pm.id WHERE pm.course_id=c.id AND pm.is_active AND pl.is_active AND COALESCE(TRIM(pl.practice_task),'')<>''))` : `c.category=${p(SELL_SKILL)}`));
   if (goal.length) where.push(or(goal));
   if (f.lang.length) where.push(`LOWER(c.language) = ANY(${p(f.lang.map((x) => x.toLowerCase()))}::text[])`);
   if (f.level.length) where.push(`LOWER(c.level) = ANY(${p(f.level)}::text[])`);

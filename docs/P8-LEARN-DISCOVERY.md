@@ -14,8 +14,8 @@ P7-HOWDI-FOR / K5-HF-01 remains BUILD/REVIEW (visual direction accepted, Founder
 | LRN-PATH-001 Find My Learning Path | Done | `PathFinder` in `v8/learn/LearnJourney.jsx`, `learnJourneyModel.js` |
 | LRN-PROG-001 Today's Next Step + Project Journey | Done | `backend/learn-journey-v8.cjs`, `NextStep`, `JourneyTrack` |
 | LRN-MAT-001 Materials Checklist → Shop | Done | `/courses/{CRS}/materials`, `MaterialsChecklist`, App `howdi:v8-open` |
-| LRN-WORK-001 Show My Work + teacher feedback | Done (moderation/report flow not added) | `/courses/{CRS}/work`, `/work/{EVD}/media`, `/teach/work/{EVD}/review` |
-| LRN-SELL-001 Ready to Sell | Done (draft only) | `ReadyToSell` → existing `POST /api/v8/vendor/products` |
+| LRN-WORK-001 Show My Work + teacher feedback | Partial — implemented; contract/audit/lifecycle review and moderation/report still open | `/courses/{CRS}/work`, `/work/{EVD}/media`, `/teach/work/{EVD}/review` |
+| LRN-SELL-001 Ready to Sell | Done (draft only; success shown only when the Vendor API returns `status: "draft"`) | `ReadyToSell` → existing `POST /api/v8/vendor/products` |
 | LRN-NAV-001 simplified learner navigation | Not started — needs Founder visual approval first | Learn navigation unchanged |
 | TG-LRN-01/02/03 | Evidence below | tests + browser proof |
 | TG-LRN-04/05/06 | Evidence below | tests + browser proof |
@@ -27,7 +27,10 @@ catalogue), `level`, `price` (free · under500 · 500to2000 · over2000), `skill
 (under1h · 1to3h · over3h), `materials` (none · list), `sort` (relevance · newest · learners · shortest · price_low · price_high),
 `offset`, `limit` (1–48, default 12). The P7 `from=for-*` marker is preserved in the URL and never sent to the API.
 Every value maps to a real column; unknown values are dropped server-side and the applied set is echoed back.
-Goal is derived transparently: certificate → `certificate_enabled`, project → `project_required`, sell → skill "Business & Selling".
+Goal values are derived, not an authoritative taxonomy (DECISION REQUIRED): certificate → `certificate_enabled`; project → affirmative
+evidence only (`project_required IS TRUE` or an active lesson with a `practice_task`; NULL/missing is never project-positive);
+sell → skill "Business & Selling" (a category, not proof of a learner goal). There is no standalone Project entity or project search corpus.
+An empty materials list reads "No materials listed" — it never claims materials are unnecessary.
 "Most learners" sorts by the real enrolment count; no Bestseller/Popular labels exist. The legacy first-8 grid is no longer
 reachable and its positional badges and hard-coded 4.8 rating were removed.
 
@@ -66,3 +69,14 @@ sheet (portalled above the dock) + single-column image cards; 16px inputs, 44px 
 Founder visual walkthrough for P7 and P8; LRN-NAV-001 after visual approval; a report/moderation flow for shared work;
 teacher-side editing of materials/estimate on existing courses; per-lesson "project step" metadata if teachers need finer
 milestones; paid-course checkout was not re-verified in the browser (unchanged API, covered by 11-learn).
+
+## Approved corrections (after 1d91b95)
+
+1. Ready to Sell fails closed unless the Vendor API response explicitly confirms `product.status === "draft"`.
+2. Project Journey, Show My Work gating, card `project` and `goal=project` use affirmative evidence only (explicit TRUE or a practice task).
+   Note: `learning_courses.project_required` is `NOT NULL DEFAULT TRUE` and the V8 teacher form does not set it, so V8-created courses
+   currently read as explicitly TRUE; whether the form should ask teachers is a product decision.
+3. Empty materials → "No materials listed" (card and filter label).
+
+Unresolved by design: Goal taxonomy (decision required), Project entity/search (model/product decision), learner-support taxonomy
+(unclaimed — Live class / Certificate stay factual labels), Show My Work contract/audit/lifecycle review.

@@ -13,7 +13,7 @@ export const FILTERS = Object.freeze({
   skill: { label: "Skill", options: SKILLS.map((s) => [s, s]) },
   format: { label: "Format", options: [["video", "Video lessons"], ["reading", "Reading lessons"], ["live", "Live class included"]] },
   time: { label: "Time", options: [["under1h", "Under 1 hour"], ["1to3h", "1 – 3 hours"], ["over3h", "Over 3 hours"]] },
-  materials: { label: "Materials", options: [["none", "No materials needed"], ["list", "Materials list provided"]] },
+  materials: { label: "Materials", options: [["none", "No materials listed"], ["list", "Materials list provided"]] },
 });
 export const PRIMARY_FILTERS = Object.freeze(["goal", "lang", "level", "price"]);
 export const MORE_FILTERS = Object.freeze(["skill", "format", "time", "materials"]);
@@ -116,7 +116,7 @@ export function cardFacts(c) {
   const hours = c.minutes >= 60 ? `${Math.floor(c.minutes / 60)} h${c.minutes % 60 ? ` ${c.minutes % 60} min` : ""}` : c.minutes ? `${c.minutes} min` : null;
   const formats = (c.formats || []).map((f) => ({ video: "Video", reading: "Reading", live: "Live class" }[f])).filter(Boolean);
   const support = [c.live_class ? "Live class with teacher" : null, c.certificate_available ? "Certificate" : null].filter(Boolean);
-  const materials = c.materials_count ? (c.materials_cost ? `Materials ≈ ₹${Number(c.materials_cost).toLocaleString("en-IN")} extra` : `${c.materials_count} material${c.materials_count === 1 ? "" : "s"} listed`) : "No materials needed";
+  const materials = c.materials_count ? (c.materials_cost ? `Materials ≈ ₹${Number(c.materials_cost).toLocaleString("en-IN")} extra` : `${c.materials_count} material${c.materials_count === 1 ? "" : "s"} listed`) : "No materials listed";
   return { duration: hours, formats, support, materials, level: c.level ? c.level[0].toUpperCase() + c.level.slice(1) : null };
 }
 

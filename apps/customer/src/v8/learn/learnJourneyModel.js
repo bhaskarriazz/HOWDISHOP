@@ -53,7 +53,11 @@ export function costing({ materials = 0, extras = 0, hours = 0, rate = 0, margin
   return { materials: Math.round(m), extras: Math.round(e), labour, cost, margin: g, price };
 }
 
-export const WORK_LIMITS = Object.freeze({ image: 5 * 1024 * 1024, video: 20 * 1024 * 1024 });
+// Ready to Sell completes only when the authoritative Vendor API explicitly confirms the saved listing is a draft.
+// Anything else (missing product, missing/other status) fails closed: never shown as a successful draft.
+export const isConfirmedDraft = (json) => Boolean(json && typeof json === "object" && json.product && typeof json.product === "object" && json.product.status === "draft");
+
+export const WORK_LIMITS =Object.freeze({ image: 5 * 1024 * 1024, video: 20 * 1024 * 1024 });
 const OK_TYPES = { "image/jpeg": "image", "image/png": "image", "image/webp": "image", "video/mp4": "video", "video/webm": "video", "video/quicktime": "video" };
 export function checkWorkFile(file) {
   if (!file) return { ok: false, message: "Choose a photo or a short clip." };

@@ -84,6 +84,7 @@ function createLearnV8(deps) {
     const learners = Number((await pool.query(`SELECT COUNT(*) n FROM learning_course_entitlements WHERE course_id=$1 AND entitlement_status='ACTIVE'`, [c.id])).rows[0].n);
     // P8: card facts come only from real course/lesson columns; absent metadata is null, never guessed.
     const kinds = (await pool.query(`SELECT BOOL_OR(UPPER(l.lesson_type)='VIDEO' AND COALESCE(l.content_url,'')<>'') video, BOOL_OR(UPPER(l.lesson_type)='TEXT') reading,
+      BOOL_OR(COALESCE(TRIM(l.practice_task),'')<>'') practice,
       (ARRAY_AGG(l.id ORDER BY m.sort_order, l.sort_order, l.created_at) FILTER (WHERE l.is_preview))[1] preview
       FROM learning_course_lessons l JOIN learning_course_modules m ON m.id=l.module_id WHERE m.course_id=$1 AND l.is_active AND m.is_active`, [c.id])).rows[0] || {};
     const mats = Array.isArray(c.materials) ? c.materials.filter((x) => typeof x === 'string' && x.trim()).slice(0, 12) : [];
@@ -93,7 +94,7 @@ function createLearnV8(deps) {
     return { public_key: await code('LCRS', c.id), title: c.title, tagline: c.tagline || null, category: c.category, level: c.level, language: c.language, minutes: Number(c.duration_minutes) || 0,
       price: money(c.sale_price ?? c.price ?? 0), free: !(Number(c.sale_price ?? c.price) > 0), image: safeUrl(c.thumbnail_url), lessons: n, learners,
       teacher: await teacherDto(c.v8_teacher_user_id), by_howdi: !c.v8_teacher_user_id, enrolled: st.enrolled, progress: st.progress,
-      outcome: outcomes[0] || null, certificate_available: c.certificate_enabled !== false, project: c.project_required !== false, live_class: c.live_class_included === true,
+      outcome: outcomes[0] || null, certificate_available: c.certificate_enabled !== false, project: c.project_required === true || kinds.practice === true, live_class: c.live_class_included === true,
       formats: [kinds.video ? 'video' : null, kinds.reading ? 'reading' : null, c.live_class_included === true ? 'live' : null].filter(Boolean),
       materials_count: mats.length, materials_cost: Number.isFinite(matCost) && matCost > 0 ? money(matCost) : null,
       preview_lesson: kinds.preview ? await code('LLSN', kinds.preview) : null, saved };

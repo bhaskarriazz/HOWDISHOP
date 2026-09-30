@@ -7,7 +7,7 @@ import { Sheet, Skel } from "../connect/common";
 import { inr } from "../connect/HPayUtilities";
 import CourseCard from "./CourseCard";
 import { discoveryApiQuery } from "./learnDiscovery";
-import { PATH_GOALS, PATH_TIMES, STEP_ICON, checkWorkFile, costing, explainPath, pathQueries } from "./learnJourneyModel";
+import { PATH_GOALS, PATH_TIMES, STEP_ICON, checkWorkFile, costing, explainPath, isConfirmedDraft, pathQueries } from "./learnJourneyModel";
 import "./learn-journey.css";
 
 // ------------------------------------------------------------ authorised media (evidence is never a public URL)
@@ -159,6 +159,8 @@ export function ReadyToSell({ api, course, nav }) {
     const description = [f.description.trim(), f.credit ? `Made after finishing the HOWDI Learn course “${course.title}”.` : ""].filter(Boolean).join(" ").slice(0, 600);
     const r = await api("POST", "/api/v8/vendor/products", { name: f.name.trim(), price: c.price, mrp: c.price, stock: 1, description });
     if (!r.ok) { setState({ busy: false, err: r.json.message, code: r.json.code || "", product: null }); return; }
+    // Fail closed: success is shown only when Shop explicitly confirms the listing is a draft.
+    if (!isConfirmedDraft(r.json)) { setState({ busy: false, err: "HOWDI Shop didn’t confirm this listing is a private draft, so it isn’t shown as saved. Check your store before sharing it.", code: "DRAFT_NOT_CONFIRMED", product: null }); return; }
     setState({ busy: false, err: "", code: "", product: r.json.product }); ui?.toast({ title: "Draft saved in your store — not visible to buyers yet" });
   };
   return (

@@ -2,7 +2,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  FILTER_KEYS, activeCount, cardFacts, clearAll, discoveryApiQuery, discoveryChips, discoverySearch, effectiveSort, emptyDiscovery,
+  FILTERS, FILTER_KEYS, activeCount, cardFacts, optionLabel, clearAll, discoveryApiQuery, discoveryChips, discoverySearch, effectiveSort, emptyDiscovery,
   mediaSrc, parseDiscoveryParams, reconcileApplied, recoverySuggestions, removeChip, toggleValue,
 } from "./learnDiscovery.js";
 
@@ -68,9 +68,16 @@ test("card facts come only from returned metadata; no popularity claims", () => 
   assert.deepEqual(f.support, ["Live class with teacher", "Certificate"]);
   assert.equal(f.materials, "Materials ≈ ₹550 extra"); assert.equal(f.level, "Intermediate");
   assert.equal(cardFacts({ minutes: 0, materials_count: 3 }).materials, "3 materials listed");
-  assert.equal(cardFacts({ minutes: 45 }).materials, "No materials needed");
   assert.equal(cardFacts({ minutes: 0 }).duration, null);
   assert.doesNotMatch(JSON.stringify(f), /bestseller|popular|trending/i);
+});
+
+test("P8 correction 3: an empty/unprovided materials list is 'No materials listed', never 'not needed'", () => {
+  for (const c of [{ minutes: 45 }, { minutes: 45, materials_count: 0 }, { minutes: 45, materials_count: null }, { minutes: 45, materials_count: undefined, materials_cost: 300 }])
+    assert.equal(cardFacts(c).materials, "No materials listed", JSON.stringify(c));
+  assert.equal(optionLabel("materials", "none"), "No materials listed");
+  const everyLabel = JSON.stringify(FILTERS) + JSON.stringify([{ minutes: 45 }, { materials_count: 0 }].map(cardFacts));
+  assert.doesNotMatch(everyLabel, /materials (are )?(not )?needed|no materials needed|nothing to buy/i);
 });
 
 test("media URLs resolve against the API origin and reject anything else", () => {

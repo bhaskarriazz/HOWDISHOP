@@ -94,6 +94,24 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCA
   r = await api('GET', `/api/v8/learn/teach/courses/${A}/work`, { token: T.token });
   check('teacher list: @handles only', r.json.items.length === 2 && r.json.items.every((x) => x.learner?.public_username === 'lina_p8') && !FORBIDDEN.test(r.text));
 
+  // ---- P8 correction 2: a project needs affirmative evidence (explicit TRUE or a real practice task), never a default/missing flag
+  const plain = async (title, practice) => (await api('POST', '/api/v8/learn/teach/courses', { token: T.token, body: { title, category: 'Cooking', level: 'beginner', price: 0, publish: true,
+    lessons: [{ title: 'Only lesson', body: 'Read this', minutes: 10, ...(practice ? { practice } : {}) }] } })).json.course?.public_key;
+  const E = await plain('P8 NoProject Notes'); const F = await plain('P8 Practice Only', 'Cook one dosa');
+  await pool.query(`UPDATE learning_courses SET project_required=FALSE WHERE title IN ('P8 NoProject Notes','P8 Practice Only')`);
+  const cardOf = async (t) => (await list(`q=${encodeURIComponent(t)}`)).json.items.find((x) => x.title === t);
+  check('no flag + no practice task → card is not project-positive', (await cardOf('P8 NoProject Notes'))?.project === false);
+  check('practice task is affirmative project evidence', (await cardOf('P8 Practice Only'))?.project === true);
+  r = await list('goal=project&limit=48'); const gp = r.json.items.map((x) => x.title);
+  check('goal=project excludes the course without evidence, keeps the practice course', !gp.includes('P8 NoProject Notes') && gp.includes('P8 Practice Only'));
+  await api('POST', `/api/v8/learn/courses/${E}/enroll`, { token: X.token, body: { idem_key: 'p8-e' } });
+  r = await api('GET', `/api/v8/learn/courses/${E}/journey`, { token: X.token });
+  check('journey without project evidence has no project milestones', r.status === 200 && !r.json.milestones.some((m) => ['shared', 'feedback'].includes(m.key)), r.json.milestones?.map((m) => m.key));
+  check('Show My Work refused without project evidence', (await api('GET', `/api/v8/learn/courses/${E}/work`, { token: X.token })).json.code === 'NO_PROJECT');
+  await api('POST', `/api/v8/learn/courses/${F}/enroll`, { token: X.token, body: { idem_key: 'p8-f' } });
+  check('Show My Work available when a practice task exists', (await api('GET', `/api/v8/learn/courses/${F}/work`, { token: X.token })).status === 200);
+  check('journey with practice evidence includes project milestones', (await api('GET', `/api/v8/learn/courses/${F}/journey`, { token: X.token })).json.milestones.some((m) => m.key === 'shared'));
+
   // ---- Ready to Sell: Shop decides; drafts only
   check('non-vendor cannot create a Shop listing', (await api('POST', '/api/v8/vendor/products', { token: L.token, body: { name: 'Daisy coaster', price: 520, mrp: 520, stock: 1 } })).json.code === 'NOT_A_VENDOR');
   r = await api('POST', '/api/v8/vendor/products', { token: V.token, body: { name: 'Daisy coaster', price: 520, mrp: 520, stock: 1, description: 'Made after finishing a HOWDI Learn course.' } });
