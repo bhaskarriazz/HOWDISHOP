@@ -70,7 +70,8 @@ test('module contract: amounts/ids from the server, secret server-side, settleme
 
 test('client: polls HOWDI until a final state; never treats checkout completion as success', async () => {
   const src = fs.readFileSync(path.join(__dirname, '..', '..', 'apps', 'customer', 'src', 'v8', 'me', 'V8Wallet.jsx'), 'utf8');
-  assert.match(src, /await cashfree\.checkout\(\{ paymentSessionId: r\.json\.checkout_session, redirectTarget: "_modal" \}\);[\s\S]*setCfState\("verifying"\); cfFinish\(await pollPayment\(api, ref\)\);/);
+  assert.match(src, /rememberPending\(ref\);[\s\S]*const out = await openCheckout\(cashfree, r\.json\.checkout_session\);[\s\S]*if \(out\.mode === "redirect"\) \{ setCfState\("redirecting"\); return; \}[\s\S]*setCfState\("verifying"\); cfFinish\(await pollPayment\(api, ref\)\);/);
+  assert.match(src, /const pending = takePending\(\); const ref = REF_RE\.test\(fromUrl \|\| ""\) \? fromUrl : pending;[\s\S]*pollPayment\(api, ref\)\.then\(cfFinish\)/, 'return from redirect is verified by HOWDI');
   const { pollPayment, FINAL_STATES } = await import('../../apps/customer/src/v8/me/cashfreeCheckout.js');
   assert.deepEqual([...FINAL_STATES], ['paid', 'failed', 'user_dropped', 'expired', 'mismatch']);
   const seq = ['active', 'pending', 'paid']; let i = 0;
@@ -79,4 +80,17 @@ test('client: polls HOWDI until a final state; never treats checkout completion 
   assert.equal(out.payment.status, 'paid'); assert.equal(i, 3);
   const nf = await pollPayment(async () => ({ ok: false, status: 404, json: { message: 'Payment not found.' } }), 'HCF-0123456789ABCDEF', { sleep: async () => {} });
   assert.equal(nf.error, 'Payment not found.');
+});
+
+test('client: Web Popup Checkout first; Redirect Checkout only when the popup cannot launch or the method must navigate', async () => {
+  const { openCheckout } = await import('../../apps/customer/src/v8/me/cashfreeCheckout.js');
+  const fake = (behaviour) => { const calls = []; return { calls, checkout: async (o) => { calls.push(o.redirectTarget); return behaviour(o); } }; };
+  let cf = fake(() => ({ paymentDetails: { paymentMessage: 'Payment finished. Check status.' } }));
+  assert.deepEqual(await openCheckout(cf, 'session_x'), { mode: 'popup', closedWithError: false }); assert.deepEqual(cf.calls, ['_modal']);
+  cf = fake(() => ({ error: { message: 'User closed the popup' } }));
+  assert.deepEqual(await openCheckout(cf, 'session_x'), { mode: 'popup', closedWithError: true }); assert.deepEqual(cf.calls, ['_modal'], 'closing the popup never triggers a redirect');
+  cf = fake(() => ({ redirect: true }));
+  assert.deepEqual(await openCheckout(cf, 'session_x'), { mode: 'redirect' }); assert.deepEqual(cf.calls, ['_modal'], 'method that navigates: Cashfree handles it, HOWDI verifies on return');
+  cf = fake((o) => { if (o.redirectTarget === '_modal') throw new Error('popup blocked'); return {}; });
+  assert.deepEqual(await openCheckout(cf, 'session_x'), { mode: 'redirect' }); assert.deepEqual(cf.calls, ['_modal', '_self'], 'popup cannot launch → redirect fallback');
 });

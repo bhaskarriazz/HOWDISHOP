@@ -22,9 +22,30 @@ export function loadCashfree() {
 export const FINAL_STATES = Object.freeze(["paid", "failed", "user_dropped", "expired", "mismatch"]);
 export const REF_RE = /^HCF-[0-9A-F]{16}$/;
 
+// Pending HOWDI reference, kept for this tab only, so a return from a redirect (or a reload) is always verified by HOWDI.
+const PENDING_KEY = "howdi.cf.pending";
+export const rememberPending = (ref) => { try { if (REF_RE.test(ref)) window.sessionStorage.setItem(PENDING_KEY, ref); } catch { /* storage blocked */ } };
+export const takePending = () => { try { const r = window.sessionStorage.getItem(PENDING_KEY); window.sessionStorage.removeItem(PENDING_KEY); return REF_RE.test(r || "") ? r : null; } catch { return null; } };
+export const clearPending = () => { try { window.sessionStorage.removeItem(PENDING_KEY); } catch { /* storage blocked */ } };
+
+// Web → Popup Checkout first (redirectTarget "_modal"). Redirect Checkout ("_self") only as a fallback: when the popup cannot
+// launch, or when Cashfree reports that the chosen payment method must navigate. Whatever happens, the caller then asks HOWDI.
+export async function openCheckout(cashfree, paymentSessionId) {
+  let result;
+  try {
+    result = await cashfree.checkout({ paymentSessionId, redirectTarget: "_modal" });
+  } catch {
+    await cashfree.checkout({ paymentSessionId, redirectTarget: "_self" }); // popup could not launch → full-page checkout
+    return { mode: "redirect" };
+  }
+  if (result && result.redirect) return { mode: "redirect" }; // this method continues on Cashfree's page; we verify on return
+  return { mode: "popup", closedWithError: Boolean(result && result.error) };
+}
+
 export const STATE_TEXT = Object.freeze({
   creating: "Starting a secure Cashfree checkout…",
-  checkout: "Complete the payment in the Cashfree window.",
+  checkout: "Complete the payment in the Cashfree popup.",
+  redirecting: "Taking you to Cashfree to finish the payment…",
   verifying: "Checking the payment with Cashfree…",
   paid: "Money added.",
   failed: "The payment failed. Nothing was added — you can try again.",
