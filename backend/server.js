@@ -52234,6 +52234,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               const key=W.idempotencyKey(req,body);
               if(amount===null) return sendJSON(res,400,{status:"error",code:"AMOUNT_INVALID",message:"Amount must be greater than zero"});
               if(key===null) return sendJSON(res,400,{status:"error",code:"IDEMPOTENCY_KEY_INVALID",message:"Invalid request key."});
+              if(key===undefined) return sendJSON(res,400,{status:"error",code:"IDEMPOTENCY_KEY_REQUIRED",message:"A request key (8–80 letters, digits, . _ : -) is required."});
               try{
                 const r=await W.mutateWallet(pool,{userId,op:"DEBIT",amount,title:"Wallet payment",description,referenceType:"WALLET_DEBIT",key});
                 return sendJSON(res,200,{status:"success",message:"Wallet debited successfully",replayed:r.replayed,wallet:k5eOmitUserId(r.wallet),transaction:k5eOmitUserId(r.transaction)});
@@ -52299,47 +52300,11 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             }
 
             if(req.method==="POST" && pathname==="/api/rewards/earn"){
-              // STAGE 2B SECURITY FIX (found during the sweep, not in the original audit list, and not
-              // called by the current frontend or any internal caller): this had NO auth check at all —
-              // any anonymous caller could mint free reward points into ANY account (which redeem into
-              // wallet credit). Session-derived now, like every other own-account route.
+              // HPay final patch: retired. Any signed-in caller could award themselves unlimited legacy reward points (no HOWDI
+              // screen or server flow calls this). Points are awarded only by server-side events; nothing is written here.
               const userId=await k5eRequireSelf(req,res);
               if(userId===null) return;
-              const body=await getBody(req);
-              const points=Math.floor(Number(body.points));
-              const description=clean(body.description||"").trim();
-              const referenceType=clean(body.reference_type ?? body.referenceType ?? "").trim()||null;
-              const referenceId=clean(body.reference_id ?? body.referenceId ?? "").trim()||null;
-
-              if(!Number.isInteger(points)||points<=0) return sendJSON(res,400,{status:"error",message:"Points must be a positive whole number"});
-              if(!description) return sendJSON(res,400,{status:"error",message:"Reward description is required"});
-
-              const client=await pool.connect();
-              try{
-                await client.query("BEGIN");
-                await client.query(`
-                  INSERT INTO user_rewards_wallet(user_id,available_points,lifetime_points)
-                  VALUES($1,0,0) ON CONFLICT(user_id) DO NOTHING
-                `,[userId]);
-
-                const transaction=await client.query(`
-                  INSERT INTO reward_transactions(user_id,transaction_type,points,description,reference_type,reference_id)
-                  VALUES($1,'EARN',$2,$3,$4,$5) RETURNING *
-                `,[userId,points,description,referenceType,referenceId]);
-
-                const wallet=await client.query(`
-                  UPDATE user_rewards_wallet
-                  SET available_points=available_points+$2,lifetime_points=lifetime_points+$2,updated_at=NOW()
-                  WHERE user_id=$1 RETURNING *
-                `,[userId,points]);
-
-                await client.query("COMMIT");
-                // STAGE 2B SECURITY FIX: strip user_id FK from response body (response-leak fix)
-                return sendJSON(res,201,{status:"success",message:"Reward points added",wallet:k5eOmitUserId(wallet.rows[0]),transaction:k5eOmitUserId(transaction.rows[0])});
-              }catch(error){
-                await client.query("ROLLBACK");
-                throw error;
-              }finally{client.release();}
+              return sendJSON(res,410,{status:"error",code:"REWARDS_ENDPOINT_RETIRED",message:"This rewards endpoint is retired."});
             }
 
             if(req.method==="POST" && pathname==="/api/rewards/redeem"){
@@ -53144,6 +53109,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               const body=await getBody(req); const amount=W.parseAmount(body.amount,{max:5000}); const key=W.idempotencyKey(req,body);
               if(amount===null) return sendJSON(res,400,{status:"error",code:"AMOUNT_INVALID",message:"Add from ₹0.01 to ₹5,000 at a time."});
               if(key===null) return sendJSON(res,400,{status:"error",code:"IDEMPOTENCY_KEY_INVALID",message:"Invalid request key."});
+              if(key===undefined) return sendJSON(res,400,{status:"error",code:"IDEMPOTENCY_KEY_REQUIRED",message:"A request key (8–80 letters, digits, . _ : -) is required."});
               try{
                 const r=await W.mutateWallet(pool,{userId,op:"CREDIT",kind:"ADD_MONEY",amount,title:"Money added to wallet",description:"Money added to wallet (Preview/Test)",referenceType:"ADD_MONEY",key});
                 return sendJSON(res,200,{status:"success",message:"Money added to wallet",replayed:r.replayed,wallet:k5eOmitUserId(r.wallet)});

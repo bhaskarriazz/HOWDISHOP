@@ -49,7 +49,8 @@ const key = () => 'k-' + crypto.randomBytes(8).toString('hex');
     const audit = Number((await pool.query(`SELECT COUNT(*) n FROM wallet_transactions WHERE user_id=$1 AND reference_type='ADD_MONEY'`, [A.id])).rows[0].n);
     check('add-money: one audit row per applied credit', audit === 2, audit);
     check('add-money: malformed key refused', (await api('POST', '/api/wallet/add-money', { token: A.token, body: { amount: 10, idempotency_key: 'bad key!' } })).status === 400);
-    check('add-money: legacy call without a key still works', (await api('POST', '/api/wallet/add-money', { token: A.token, body: { amount: 10 } })).status === 200);
+    { const before = await avail(A); const nk = await api('POST', '/api/wallet/add-money', { token: A.token, body: { amount: 10 } });
+      check('add-money: missing request key refused (400 IDEMPOTENCY_KEY_REQUIRED), nothing added', nk.status === 400 && nk.json.code === 'IDEMPOTENCY_KEY_REQUIRED' && await avail(A) === before, nk.json); }
     check('add-money: a key used for add-money cannot be replayed as a debit', (await api('POST', '/api/wallet/debit', { token: A.token, body: { amount: 40, idempotency_key: k2 } })).status === 409);
   } else {
     check('add-money (no sandbox): refused without a payment provider', (await api('POST', '/api/wallet/add-money', { token: A.token, body: { amount: 100, idempotency_key: key() } })).status === 503);
@@ -57,6 +58,8 @@ const key = () => 'k-' + crypto.randomBytes(8).toString('hex');
 
   // ================= 3. debit: idempotency, conflict, rapid double-submit, concurrency =================
   await setAvail(A, 500);
+  r = await api('POST', '/api/wallet/debit', { token: A.token, body: { amount: 60 } });
+  check('debit: missing request key refused (400 IDEMPOTENCY_KEY_REQUIRED), nothing debited', r.status === 400 && r.json.code === 'IDEMPOTENCY_KEY_REQUIRED' && await avail(A) === 500, r.json);
   const d = key();
   const d1 = await api('POST', '/api/wallet/debit', { token: A.token, body: { amount: 60, idempotency_key: d } });
   const d2 = await api('POST', '/api/wallet/debit', { token: A.token, body: { amount: 60, idempotency_key: d } });
@@ -83,6 +86,21 @@ const key = () => 'k-' + crypto.randomBytes(8).toString('hex');
   r = await api('POST', '/api/wallet/debit', { token: A.token, body: { amount: 25, description: 'retry after failure', idempotency_key: fk } });
   check('rollback: the same key succeeds on retry after the failure', r.status === 200 && await avail(A) === 75);
   await pool.query(`DROP TRIGGER howdi_test_fail_audit ON wallet_transactions`);
+
+  // ================= 4b. retired self-awarded legacy rewards =================
+  const pts = async (u) => (await pool.query(`SELECT available_points, lifetime_points FROM user_rewards_wallet WHERE user_id=$1`, [u.id])).rows[0];
+  await pool.query(`INSERT INTO user_rewards_wallet(user_id,available_points,lifetime_points) VALUES($1,50,50) ON CONFLICT(user_id) DO UPDATE SET available_points=50, lifetime_points=50`, [B.id]);
+  const rtx0 = Number((await pool.query(`SELECT COUNT(*) n FROM reward_transactions WHERE user_id=$1`, [B.id])).rows[0].n);
+  r = await api('POST', '/api/rewards/earn', { token: B.token, body: { points: 100000, description: 'free points' } });
+  check('rewards/earn: signed-in caller gets 410 REWARDS_ENDPOINT_RETIRED', r.status === 410 && r.json.code === 'REWARDS_ENDPOINT_RETIRED', { s: r.status, j: r.json });
+  const p1 = await pts(B);
+  check('rewards/earn: points unchanged, no reward transaction written', p1.available_points === 50 && p1.lifetime_points === 50 && Number((await pool.query(`SELECT COUNT(*) n FROM reward_transactions WHERE user_id=$1`, [B.id])).rows[0].n) === rtx0, p1);
+  check('rewards/earn: unauthenticated caller refused', (await api('POST', '/api/rewards/earn', { body: { points: 5, description: 'x' } })).status === 401);
+  r = await api('POST', '/api/rewards/redeem', { token: B.token, body: { points: 10 } });
+  // /api/rewards/redeem is intentionally unchanged. On the repository's fresh-boot schema its INSERT does not match
+  // reward_transactions (pre-existing, same at 602ec8a), so it may fail — it must then roll back fully.
+  const p2 = (await pts(B)).available_points;
+  check('rewards/redeem (unchanged): points move only on a successful redeem, never partially', r.status === 200 ? p2 === 40 : (r.status === 500 && p2 === 50), { s: r.status, p2 });
 
   // ================= 5. cashback transfer =================
   await setAvail(B, 0);

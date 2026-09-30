@@ -115,3 +115,16 @@ test('legacy wallet UI sends one request key per attempt (retry/double-click reu
   const b = k.keyFor('add-money', 11); k.done();
   assert.notEqual(k.keyFor('add-money', 11), b, 'after success the next attempt is new');
 });
+
+test('final patch: debit + add-money require a request key; legacy rewards/earn is retired and writes nothing', () => {
+  for (const r of ['if(req.method==="POST" && pathname==="/api/wallet/debit"){', 'if(req.method==="POST" && pathname==="/api/wallet/add-money"){']) {
+    const block = route(r);
+    assert.match(block, /if\(key===null\) return sendJSON\(res,400,\{status:"error",code:"IDEMPOTENCY_KEY_INVALID"/, r);
+    assert.match(block, /if\(key===undefined\) return sendJSON\(res,400,\{status:"error",code:"IDEMPOTENCY_KEY_REQUIRED"/, r);
+    assert.ok(block.indexOf('IDEMPOTENCY_KEY_REQUIRED') < block.indexOf('mutateWallet('), 'refused before any write');
+  }
+  const earn = route('if(req.method==="POST" && pathname==="/api/rewards/earn"){');
+  assert.match(earn, /const userId=await k5eRequireSelf\(req,res\);\s*if\(userId===null\) return;\s*return sendJSON\(res,410,\{status:"error",code:"REWARDS_ENDPOINT_RETIRED"/);
+  assert.doesNotMatch(earn, /INSERT|UPDATE|getBody/);
+  assert.match(route('if(req.method==="POST" && pathname==="/api/rewards/redeem"){'), /SELECT available_points,lifetime_points FROM user_rewards_wallet WHERE user_id=\$1 FOR UPDATE/, 'redeem unchanged');
+});

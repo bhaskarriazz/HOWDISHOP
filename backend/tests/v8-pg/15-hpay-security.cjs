@@ -53,11 +53,11 @@ const idem = () => 'k-' + crypto.randomBytes(8).toString('hex');
 
   // ================= legacy /api/wallet/debit — isolation, amounts, replay, concurrency =================
   await setLegacy(A, 100);
-  r = await api('POST', '/api/wallet/debit', { token: A.token, body: { user_id: B.id, userId: B.id, amount: 30 } });
+  r = await api('POST', '/api/wallet/debit', { token: A.token, body: { user_id: B.id, userId: B.id, amount: 30, idempotency_key: idem() } });
   check('debit: forged user_id cannot drain another account', r.status === 200 && await bal(B) === 500 && await bal(A) === 70, { s: r.status, a: await bal(A), b: await bal(B) });
   check('debit: response carries no internal ids', !LEAK.test(r.text), r.text.slice(0, 200));
   for (const [label, amount] of [['zero', 0], ['negative', -40], ['text', 'x'], ['extreme', 1e12], ['over balance', 71]]) {
-    r = await api('POST', '/api/wallet/debit', { token: A.token, body: { amount } });
+    r = await api('POST', '/api/wallet/debit', { token: A.token, body: { amount, idempotency_key: idem() } });
     check(`debit: ${label} amount refused, balance unchanged`, r.status === 400 && await bal(A) === 70, { s: r.status, a: await bal(A) });
   }
   {
@@ -69,7 +69,7 @@ const idem = () => 'k-' + crypto.randomBytes(8).toString('hex');
   await setLegacy(A, 100);
   const debited = async () => Number((await pool.query(`SELECT COALESCE(SUM(amount),0) s FROM wallet_transactions WHERE user_id=$1 AND transaction_type='DEBIT'`, [A.id])).rows[0].s);
   const trail0 = await debited();
-  const conc = await Promise.all(Array.from({ length: 6 }, () => api('POST', '/api/wallet/debit', { token: A.token, body: { amount: 30 } })));
+  const conc = await Promise.all(Array.from({ length: 6 }, () => api('POST', '/api/wallet/debit', { token: A.token, body: { amount: 30, idempotency_key: idem() } })));
   const okN = conc.filter((x) => x.status === 200).length;
   const trail = (await debited()) - trail0;
   check('debit: concurrent debits never overspend; trail matches balance', okN === 3 && await bal(A) === 10 && trail === 90, { okN, a: await bal(A), trail });
