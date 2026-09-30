@@ -19,6 +19,8 @@ import { Wallet as V8Wallet, Photo as V8Photo } from "./v8/me/V8Wallet";
 import * as V8MyHowdi from "./v8/me/V8MyHowdi";
 import V8Shop from "./v8/shop/V8Shop";
 import { V8Appearance, V8Permissions, V8IdentityBadges } from "./v8/V8Settings";
+import V8PublicInfo, { V8PublicFooter } from "./v8/public/V8PublicInfo";
+import { publicInfoPageForPath, publicInfoPathForPage } from "./v8/public/publicInfoRoutes";
 import { V8Confirm, V8OfflineBanner, V8SessionExpired, loadV8Prefs, applyV8Prefs, useV8Ui } from "./v8/V8System";
 import HowdiFor from "./howdi-for/HowdiFor";
 import { HowdiForMenuRow, HowdiForFeedCard, HowdiForEmptyStateLink, insertFeedCard } from "./howdi-for/HowdiForEntryPoints";
@@ -2684,6 +2686,7 @@ function App() {
   const [v8LearnPath,setV8LearnPath]=useState("courses");
   const [v8NotifOpen,setV8NotifOpen]=useState(false);
   const [v8ProfileHandle,setV8ProfileHandle]=useState("");
+  const [v8PublicInfoPage,setV8PublicInfoPage]=useState(()=>publicInfoPageForPath(typeof window!=="undefined"?window.location.pathname:"")||"about");
   const [v8Prefs,setV8Prefs]=useState(()=>loadV8Prefs());
   const [v8SessionExpired,setV8SessionExpired]=useState(false);
   // AUTH-007: /reset-password#token=… opens the reset screen (token stays in the fragment: never sent to the server log)
@@ -9895,6 +9898,13 @@ return () => window.clearInterval(timer);
     setHowdiForRoute(null);
     const next=String(area||"connect").toLowerCase();
     const view=String(subview||"home").toLowerCase();
+    if(next==="info"){
+      const page=publicInfoPageForPath(publicInfoPathForPage(view)||view)||view;
+      if(!publicInfoPathForPage(page))return;
+      closeHeaderPanels();setMenuOpen(false);setNavDropdown(null);setMyHowdiDrawer(null);setAccountMenuOpen(false);
+      setConnectModalOpen(false);setWorksExperienceOpen(false);setLearningBrowseOpen(false);
+      setV8PublicInfoPage(page);setNavigationOSArea("info");return;
+    }
     // V8 Gate: Home is the one mixed ecosystem Home; Connect opens Connect Home; Shop is the one canonical Shop.
     // The retired Crochet landing and "Shop Home" pages are no longer reachable: crochet is a Shop collection.
     if(next==="home"&&view==="crochet")return openNavigationOSArea("shop","crochet");
@@ -12699,6 +12709,7 @@ const removeNotification = async (notificationId) => {
   const v8PathForState=()=>{
     if(navigationOSArea==="home")return "/";
     if(navigationOSArea==="profile")return v8ProfileHandle?`/@${v8ProfileHandle}`:"/";
+    if(navigationOSArea==="info")return publicInfoPathForPage(v8PublicInfoPage)||"/about";
     if(navigationOSArea==="me")return v8MeView==="hub"?"/me":`/me/${v8MeView}`;
     if(navigationOSArea==="connect"){
       if(connectView==="v8")return v8ConnectPath?`/connect/${v8ConnectPath}`:"/connect";
@@ -12732,6 +12743,7 @@ const removeNotification = async (notificationId) => {
     const p=String(pathname||"/").replace(/\/+$/,"")||"/";
     let m;
     if(p==="/"){openNavigationOSArea("home");return true;}
+    const infoPage=publicInfoPageForPath(p);if(infoPage){openNavigationOSArea("info",infoPage);return true;}
     if(p==="/hpay"){openNavigationOSArea("hpay","home");return true;}
     if((m=p.match(/^\/connect(?:\/([A-Za-z0-9/_.-]{1,160}))?$/))){openNavigationOSArea("connect","p:"+(m[1]||"")+(window.location.search||""));return true;}
     if(p==="/shop"){const context=resolveForDestination(window.location.href,window.location.origin);if(context)setShopCatalogueQuery(context.q);openNavigationOSArea("shop","catalogue");return true;}
@@ -12788,7 +12800,7 @@ const removeNotification = async (notificationId) => {
     // content may still be loading: retry the restore a few times until the page is tall enough
     [60,300,800,1500].forEach((ms)=>window.setTimeout(()=>{const el=document.querySelector(".v8-page")||document.querySelector(".howdi-os-workspace");if(el&&v8LastPath.current===path&&Math.abs(el.scrollTop-restore)>2)el.scrollTop=restore;},ms));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[howdiForRoute,v8RouterOn,navigationOSArea,v8MovePath,connectView,connectContentMode,v8ConnectPath,v8ShopPath,v8LearnPath,shopOSView,shopCollection,worksExperienceTab,learningPortalView,v8MeView,v8ProfileHandle]);
+  },[howdiForRoute,v8RouterOn,navigationOSArea,v8MovePath,connectView,connectContentMode,v8ConnectPath,v8ShopPath,v8LearnPath,shopOSView,shopCollection,worksExperienceTab,learningPortalView,v8MeView,v8ProfileHandle,v8PublicInfoPage]);
   useEffect(()=>{
     // V8 Connect sheets (e.g. Share → Messages) ask the shell to open another area.
     const onOpen=(e)=>{const d=e&&e.detail;if(!d||typeof d.area!=="string")return;
@@ -18068,6 +18080,16 @@ const removeNotification = async (notificationId) => {
       ====================================== */}
 
       <main id="v8-main" tabIndex={-1} inert={howdiForRoute&&!showLogin&&!howdiOnboardingPending ? true : undefined}>
+        {navigationOSArea === "info" && (
+          <V8PublicInfo page={v8PublicInfoPage} signedIn={Boolean(currentUser)}
+            onNavigate={(page) => {
+              if(page==="me-privacy"){openNavigationOSArea("me","privacy");return;}
+              if(page==="me-delete"){openNavigationOSArea("me","delete");return;}
+              if(publicInfoPathForPage(page)){openNavigationOSArea("info",page);return;}
+              v8Navigate("home");
+            }}
+            onOpenArea={(area,view) => openNavigationOSArea(area,view)} />
+        )}
         {/* V8 S2: public profile (ID-001..003) and profile-hub settings pages (MY-011, TRU-003, ID settings) */}
         {navigationOSArea === "profile" && (
           <V8Profile apiBase={SHOP_API_BASE} handle={v8ProfileHandle} getAuthHeaders={customerSessionHeaders} signedIn={Boolean(currentUser)}
@@ -18100,7 +18122,7 @@ const removeNotification = async (notificationId) => {
             onOpenArea={(area, view) => openNavigationOSArea(area, view)} />
         )}
         {/* V8 HOME-001: the one Common Home (board 04/15). */}
-        {navigationOSArea === "home" && (
+        {navigationOSArea === "home" && (<>
           <V8Home
             apiBase={SHOP_API_BASE}
             getAuthHeaders={customerSessionHeaders}
@@ -18112,7 +18134,8 @@ const removeNotification = async (notificationId) => {
             prefs={v8HomePrefs}
             onCustomize={() => setV8CustomizeOpen(true)}
           />
-        )}
+          <div className="v8pi-home-footer"><V8PublicFooter onNavigate={(page) => openNavigationOSArea("info",page)} /></div>
+        </>)}
 
         {/* V8: the legacy crochet landing, dashboard, search and quick-navigation blocks are retired (never mounted). */}
         {V8_RETIRED_LEGACY_HOME && (<>
