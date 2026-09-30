@@ -5,7 +5,7 @@ import { V8Icon, V8State } from "../V8Shell";
 import { useV8Ui } from "../V8System";
 import { useApi, Skel, Tabs } from "../connect/common";
 import { inr, newKey } from "../connect/HPayUtilities";
-import { REF_RE, STATE_TEXT, loadCashfree, pollPayment } from "./cashfreeCheckout";
+import { REF_RE, STATE_TEXT, clearPending, loadCashfree, openCheckout, pollPayment, rememberPending, takePending } from "./cashfreeCheckout";
 import "./me.css";
 
 const when = (iso) => (iso ? new Date(iso).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }) : "");
@@ -21,14 +21,16 @@ export function Wallet({ apiBase, getAuthHeaders, onRoute, onBack }) {
   const cfFinish = useCallback((res) => {
     if (!res || res.error) { setCfState(""); setErr(res?.error || "We couldn’t confirm the payment yet."); return; }
     const st = res.payment?.status;
+    if (["paid", "failed", "user_dropped", "expired", "mismatch"].includes(st)) clearPending();
     if (st === "paid") { cfKey.current = { amount: null, key: null }; setAmt(""); ui?.toast({ title: `${inr(res.payment.amount)} added with Cashfree (sandbox)` }); load(); }
     setCfState(["paid", "failed", "user_dropped", "expired", "mismatch"].includes(st) ? st : "pending");
   }, [load, ui]);
-  useEffect(() => { // back from a Cashfree redirect: ?cf_order=HCF-… → ask HOWDI, never trust the redirect itself
-    const ref = new URLSearchParams(window.location.search).get("cf_order");
-    if (!REF_RE.test(ref || "")) return;
-    const u = new URL(window.location.href); u.searchParams.delete("cf_order"); window.history.replaceState(window.history.state, "", u.pathname + u.search);
-    setCfState("verifying"); pollPayment(api, ref).then(cfFinish);
+  useEffect(() => { // back from a redirect fallback (?cf_order=HCF-… or the remembered reference) → ask HOWDI, never trust the redirect
+    const fromUrl = new URLSearchParams(window.location.search).get("cf_order");
+    if (fromUrl) { const u = new URL(window.location.href); u.searchParams.delete("cf_order"); window.history.replaceState(window.history.state, "", u.pathname + u.search); }
+    const pending = takePending(); const ref = REF_RE.test(fromUrl || "") ? fromUrl : pending;
+    if (!ref) return;
+    rememberPending(ref); setCfState("verifying"); pollPayment(api, ref).then(cfFinish);
   }, [api, cfFinish]);
   const payCf = async () => {
     const amount = Number(amt); setErr("");
@@ -38,13 +40,15 @@ export function Wallet({ apiBase, getAuthHeaders, onRoute, onBack }) {
     if (!r.ok) { setCfState(""); setErr(r.json?.message || "Cashfree checkout couldn’t start."); return; }
     const ref = r.json.payment.reference;
     if (r.json.payment.settled || !r.json.checkout_session) { cfFinish(await pollPayment(api, ref)); return; }
+    rememberPending(ref);
     try {
       const cashfree = await loadCashfree(); setCfState("checkout");
-      await cashfree.checkout({ paymentSessionId: r.json.checkout_session, redirectTarget: "_modal" });
+      const out = await openCheckout(cashfree, r.json.checkout_session);
+      if (out.mode === "redirect") { setCfState("redirecting"); return; } // HOWDI verifies when the user comes back
     } catch (e) { setErr(e.message); }
     setCfState("verifying"); cfFinish(await pollPayment(api, ref));
   };
-  const cfBusy = ["creating", "checkout", "verifying"].includes(cfState);
+  const cfBusy = ["creating", "checkout", "redirecting", "verifying"].includes(cfState);
   if (!d) return <div className="v8-page v8me"><Skel h={320} r={16} /></div>;
   if (d.error) return <div className="v8-page v8me"><V8State kind="error" title="Your wallet didn’t load" message={d.error} actionLabel="Retry" onAction={load} /></div>;
   const add = async () => {

@@ -15,6 +15,12 @@
 | `GET /api/v8/hpay/cashfree/orders/{HCF-…}` | owner only | verifies with Cashfree server-side, settles once, returns state + balance |
 | `POST /api/v8/hpay/cashfree/webhook` | Cashfree | `x-webhook-signature` = Base64(HMAC-SHA256(client secret, `x-webhook-timestamp` + raw body)); re-verifies with Cashfree before any credit; idempotent (event hash); 500 only when settlement failed so Cashfree retries |
 
+Checkout UI: **Web → Popup Checkout** (`cashfree.checkout({ paymentSessionId, redirectTarget: "_modal" })`). When the popup
+closes, HOWDI asks its own server. **Redirect Checkout** (`"_self"`) is only a fallback, used when the popup cannot launch or when
+Cashfree reports that the chosen method must navigate (`result.redirect`). Before opening checkout, the HOWDI reference is kept in
+`sessionStorage` for that tab. On return (`?cf_order=` from the order's return URL, or the remembered reference) the wallet
+verifies with the server. The redirect fallback returns to HOWDI only if `HOWDI_CASHFREE_RETURN_URL` (https) is configured.
+
 States: `active` (awaiting payment) · `pending` · `paid` · `failed` / `user_dropped` (the same order can be paid again) · `expired` ·
 `mismatch` (a SUCCESS that does not match the order amount/currency — never credited). A `paid` payment is never settled again or downgraded.
 
