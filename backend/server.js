@@ -52308,50 +52308,24 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             }
 
             if(req.method==="POST" && pathname==="/api/rewards/redeem"){
-              // STAGE 2B SECURITY FIX: session-derived actor, body.user_id is no longer trusted
-              const userId=await k5eRequireSelf(req,res);
+              // Rewards redeem compatibility fix: the old insert used ('REDEEM', description), which the authoritative fresh-boot
+              // reward_transactions schema rejects (title NOT NULL; type IN EARNED/REDEEMED/ADJUSTMENT), so every redeem failed and
+              // the raw PostgreSQL error was returned. Now: session actor + active account, strict whole points, optional request key
+              // (a replay deducts once), REDEEMED row + deduction in one locked transaction, allow-listed response, generic errors.
+              // Points only — no wallet/HPay credit.
+              const userId=await k5eRequireFinancialSelf(req,res);
               if(userId===null) return;
+              const R=require("./rewards-redeem-v8.cjs");
               const body=await getBody(req);
-              const points=Math.floor(Number(body.points));
-              const description=clean(body.description||"").trim() || "HOWDI reward redemption";
-
-              if(!Number.isInteger(points)||points<=0) return sendJSON(res,400,{status:"error",message:"Points must be a positive whole number"});
-
-              const client=await pool.connect();
+              const points=R.parsePoints(body.points);
+              const title=clean(body.description||"").trim().slice(0,200) || "HOWDI reward redemption";
+              const key=require("./wallet-security-v8.cjs").idempotencyKey(req,body);
+              if(points===null) return sendJSON(res,400,{status:"error",code:"POINTS_INVALID",message:"Points must be a whole number from 1 to 1,000,000"});
+              if(key===null) return sendJSON(res,400,{status:"error",code:"IDEMPOTENCY_KEY_INVALID",message:"Invalid request key."});
               try{
-                await client.query("BEGIN");
-                await client.query(`
-                  INSERT INTO user_rewards_wallet(user_id,available_points,lifetime_points)
-                  VALUES($1,0,0) ON CONFLICT(user_id) DO NOTHING
-                `,[userId]);
-
-                const locked=await client.query(`
-                  SELECT available_points,lifetime_points FROM user_rewards_wallet WHERE user_id=$1 FOR UPDATE
-                `,[userId]);
-
-                if(locked.rows[0].available_points < points){
-                  await client.query("ROLLBACK");
-                  return sendJSON(res,400,{status:"error",message:"Not enough available reward points"});
-                }
-
-                const transaction=await client.query(`
-                  INSERT INTO reward_transactions(user_id,transaction_type,points,description)
-                  VALUES($1,'REDEEM',$2,$3) RETURNING *
-                `,[userId,-points,description]);
-
-                const wallet=await client.query(`
-                  UPDATE user_rewards_wallet
-                  SET available_points=available_points-$2,updated_at=NOW()
-                  WHERE user_id=$1 RETURNING *
-                `,[userId,points]);
-
-                await client.query("COMMIT");
-                // STAGE 2B SECURITY FIX: strip user_id FK from response body (response-leak fix)
-                return sendJSON(res,200,{status:"success",message:"Reward points redeemed",wallet:k5eOmitUserId(wallet.rows[0]),transaction:k5eOmitUserId(transaction.rows[0])});
-              }catch(error){
-                try{await client.query("ROLLBACK");}catch(_){}
-                throw error;
-              }finally{client.release();}
+                const r=await R.redeemPoints(pool,{userId,points,title,key});
+                return sendJSON(res,200,{status:"success",message:"Reward points redeemed",replayed:r.replayed,wallet:r.wallet,transaction:r.transaction});
+              }catch(e){if(e instanceof R.RewardsError)return sendJSON(res,e.status,{status:"error",code:e.code,message:e.message});console.error("HOWDI rewards redeem error:",e&&e.message);return sendJSON(res,500,{status:"error",message:"Unable to redeem reward points right now"});}
             }
 
             // =====================================================

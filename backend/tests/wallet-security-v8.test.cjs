@@ -126,5 +126,5 @@ test('final patch: debit + add-money require a request key; legacy rewards/earn 
   const earn = route('if(req.method==="POST" && pathname==="/api/rewards/earn"){');
   assert.match(earn, /const userId=await k5eRequireSelf\(req,res\);\s*if\(userId===null\) return;\s*return sendJSON\(res,410,\{status:"error",code:"REWARDS_ENDPOINT_RETIRED"/);
   assert.doesNotMatch(earn, /INSERT|UPDATE|getBody/);
-  assert.match(route('if(req.method==="POST" && pathname==="/api/rewards/redeem"){'), /SELECT available_points,lifetime_points FROM user_rewards_wallet WHERE user_id=\$1 FOR UPDATE/, 'redeem unchanged');
+  assert.match(route('if(req.method==="POST" && pathname==="/api/rewards/redeem"){'), /R\.redeemPoints\(pool,\{userId,points,title,key\}\)/, 'redeem: points only, locked (rewards-redeem-v8.cjs)');
 });
