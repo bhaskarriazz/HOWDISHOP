@@ -1,0 +1,26 @@
+/* HOWDI Shop S2 — product actions. Selectors are .sc-* so they inherit the catalogue tokens and nothing leaks out. */
+.sc-heart{width:44px;height:44px;flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--sc-line);border-radius:50%;background:#fff;color:var(--sc-ink);font-size:22px;line-height:1;cursor:pointer}
+.sc-heart:hover:not(:disabled){border-color:var(--sc-forest)}
+.sc-heart:disabled{opacity:.6;cursor:default}
+.sc-heart-on{color:#b3261e;border-color:#b3261e;background:#fff5f4}
+.sc-heart-large{width:48px;height:48px}
+.sc-card-foot{justify-content:space-between;gap:8px}
+.sc-btn-gold{background:var(--sc-gold);border-color:var(--sc-gold);color:#2b1d00}
+.sc-btn-gold:hover:not(:disabled){filter:brightness(.96);border-color:var(--sc-gold)}
+
+.sc-actions{display:flex;flex-direction:column;gap:12px;margin:16px 0;padding:14px 0;border-top:1px solid var(--sc-line);border-bottom:1px solid var(--sc-line)}
+.sc-qty{display:inline-flex;align-items:center;gap:4px;align-self:flex-start;border:1px solid var(--sc-line);border-radius:10px;background:#fff}
+.sc-qty output{min-width:36px;text-align:center;font-weight:700}
+.sc-qty-btn{width:44px;height:44px;border:0;background:none;color:var(--sc-ink);font:inherit;font-size:20px;cursor:pointer}
+.sc-qty-btn:disabled{opacity:.4;cursor:default}
+.sc-action-row{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.sc-action-row .sc-btn{flex:1 1 140px}
+.sc-action-notice{margin:0;padding:10px 12px;border-radius:10px;display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:14px}
+.sc-action-ok{background:#ecf0f9;color:#22304f}
+.sc-action-info{background:var(--sc-soft);color:var(--sc-ink)}
+.sc-action-error{background:#fdeeee;color:#a32d2d}
+
+.sc-wishlist-head{display:flex;flex-direction:column;gap:4px;margin-bottom:12px}
+.sc-header-actions{display:flex;gap:8px;flex-wrap:wrap}
+.sc-state{padding:24px 16px;border:1px dashed var(--sc-line);border-radius:14px;text-align:center}
+@media (max-width:640px){.sc-action-row .sc-btn{flex:1 1 100%}.sc-heart-large{align-self:flex-start}}

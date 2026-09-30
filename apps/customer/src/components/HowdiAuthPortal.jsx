@@ -1,19 +1,47 @@
 import React, { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 
+// Stage 2 — dedicated full-bleed sign-in / create-account page (rendered via
+// createPortal to document.body so it is never a modal layered over Home —
+// Home is not visible or interactive behind it), plus the one-time "What
+// brings you to HOWDI today?" onboarding step shown right after a fresh
+// signup. Visual language matches the approved reference mockups (premium
+// split-screen auth, warm illustration, centered onboarding card) while
+// every navigation/session call below targets the app's real Connect/Shop/
+// Works/Learn & Earn pillars — this file has no opinion on pillar naming.
 export default function HowdiAuthPortal({
   open, onClose, authMode, setAuthMode,
   loginName, setLoginName,
   loginPhone, setLoginPhone,
   loginPassword, setLoginPassword,
   loginLoading, loginMessage, onLogin, onRegister,
+  onOtpSuccess,
+  onboardingPending, onCloseOnboarding,
 }) {
   const [showPassword, setShowPassword] = useState(false);
   const [notice, setNotice] = useState("");
+  const [onbSelected, setOnbSelected] = useState("shopping");
+
+  // Real phone+OTP sign-in flow (Stage 2). Separate from the password form's
+  // own loading/message state so switching methods never mixes the two.
+  const [otpMode, setOtpMode] = useState(false);
+  const [otpStage, setOtpStage] = useState("phone"); // "phone" | "code"
+  const [otpPhone, setOtpPhone] = useState("");
+  const [otpCode, setOtpCode] = useState("");
+  const [otpBusy, setOtpBusy] = useState(false);
+  const [otpNotice, setOtpNotice] = useState("");
+  const [otpDevCode, setOtpDevCode] = useState("");
 
   useEffect(() => {
     if (open) {
       setNotice("");
       setShowPassword(false);
+      setOtpMode(false);
+      setOtpStage("phone");
+      setOtpPhone("");
+      setOtpCode("");
+      setOtpNotice("");
+      setOtpDevCode("");
     }
   }, [open, authMode]);
 
@@ -23,123 +51,329 @@ export default function HowdiAuthPortal({
 
   const method = (name) => {
     if (name === "mobile") {
-      setNotice("Enter your mobile number and password to continue securely.");
-      setTimeout(() => document.querySelector(".howdi-auth-phone")?.focus(), 0);
-    } else if (name === "google") {
-      setNotice("Google sign-in is the next authentication connection to activate.");
+      setOtpMode(true);
+      setOtpStage("phone");
+      setOtpPhone(loginPhone || "");
+      setOtpNotice("");
     } else {
-      setNotice("Passkey sign-in will be available on supported devices.");
+      setNotice("Google sign-in is the next authentication connection to activate.");
     }
   };
 
-  return (
+  const requestOtp = async (e) => {
+    e?.preventDefault();
+    const phone = otpPhone.replace(/\D/g, "").slice(-10);
+    if (phone.length !== 10) {
+      setOtpNotice("Please enter a valid 10-digit mobile number.");
+      return;
+    }
+    try {
+      setOtpBusy(true);
+      setOtpNotice("");
+      const response = await fetch("http://localhost:5000/api/auth/otp/request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        setOtpNotice(data.message || "Could not send a code. Please try again.");
+        return;
+      }
+      setOtpPhone(phone);
+      setOtpStage("code");
+      setOtpDevCode(data.dev_otp || "");
+      setOtpNotice(data.message || "A 6-digit code was sent to your mobile number.");
+    } catch {
+      setOtpNotice("Cannot connect to HOWDI server.");
+    } finally {
+      setOtpBusy(false);
+    }
+  };
+
+  const verifyOtp = async (e) => {
+    e?.preventDefault();
+    const code = otpCode.replace(/\D/g, "");
+    if (code.length !== 6) {
+      setOtpNotice("Enter the 6-digit code we sent you.");
+      return;
+    }
+    try {
+      setOtpBusy(true);
+      setOtpNotice("");
+      const response = await fetch("http://localhost:5000/api/auth/otp/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone: otpPhone, code }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        setOtpNotice(data.message || "That code is incorrect.");
+        return;
+      }
+      setOtpNotice("Signed in! 🎉");
+      onOtpSuccess && onOtpSuccess(data);
+    } catch {
+      setOtpNotice("Cannot connect to HOWDI server.");
+    } finally {
+      setOtpBusy(false);
+    }
+  };
+
+  const handleCloseClick = () => {
+    if (loginLoading) return;
+    if (onboardingPending) { onCloseOnboarding && onCloseOnboarding(); return; }
+    onClose && onClose();
+  };
+
+  // "What brings you to HOWDI today?" onboarding step (Step 1 of 3). Rendered
+  // as a dimmed-backdrop centered card ONLY — the real signed-in app shell
+  // (header + nav) stays mounted and visible behind it, matching the
+  // reference, since by this point the account is real and signed in.
+  const ONBOARDING_CHOICES = [
+    { key: "shopping", icon: "🛍️", label: "Shopping", desc: "Discover and support handmade, local and unique products" },
+    { key: "local_help", icon: "👥", label: "Finding local help", desc: "Connect with people for trusted, local services" },
+    { key: "learning", icon: "🎓", label: "Learning a skill", desc: "Find and join workshops and learn from real people" },
+    { key: "connecting", icon: "♥", label: "Connecting", desc: "Meet like-minded people in your community" },
+  ];
+
+  if (onboardingPending) {
+    return createPortal(
+      <>
+        <style>{`
+          .howdi-onb-root{position:fixed;inset:0;z-index:2147483600;display:grid;place-items:center;padding:20px;background:rgba(15,30,80,.5);backdrop-filter:blur(4px);font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+          .howdi-onb-root *{box-sizing:border-box}
+          .howdi-onb-card{width:min(560px,100%);max-height:92vh;overflow-y:auto;border-radius:22px;background:#fff;box-shadow:0 30px 80px rgba(39,64,134,.32);padding:30px 32px 26px}
+          .howdi-onb-progress{display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:14px}
+          .howdi-onb-dot{width:9px;height:9px;border-radius:50%;background:#d8dce7}.howdi-onb-dot.active{background:#1749d6;width:22px;border-radius:5px}
+          .howdi-onb-step{display:block;text-align:center;color:#7f828a;font-size:11px;font-weight:800;letter-spacing:.06em;margin-bottom:4px}
+          .howdi-onb-root h2{margin:2px 0 6px;text-align:center;font-size:24px;line-height:30px;font-weight:800;color:#0d1a3a}
+          .howdi-onb-root>div>p.howdi-onb-sub{margin:0 0 22px;text-align:center;color:#6b707a;font-size:14px;line-height:1.5}
+          .howdi-onb-chips{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+          .howdi-onb-chip{position:relative;text-align:left;padding:16px 14px;border-radius:16px;border:1.5px solid #dee1e9;background:#fff;cursor:pointer;display:grid;gap:8px;transition:border-color .15s ease,background .15s ease}
+          .howdi-onb-chip.selected{border-color:#274086;background:#f2f4f8}
+          .howdi-onb-chip-icon{width:38px;height:38px;display:grid;place-items:center;border-radius:12px;background:#f0f2f7;font-size:18px}
+          .howdi-onb-chip b{font-size:14px;color:#0d1a3a;font-weight:800}
+          .howdi-onb-chip span{font-size:11.5px;line-height:1.4;color:#747880}
+          .howdi-onb-check{position:absolute;top:12px;right:12px;width:20px;height:20px;border-radius:50%;background:#1f7a3f;color:#fff;display:grid;place-items:center;font-size:11px}
+          .howdi-onb-continue{width:100%;min-height:52px;margin-top:20px;border:0;border-radius:14px;background:#1749d6;color:#fff;font-size:14px;font-weight:800;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px}
+          .howdi-onb-tag{display:block;margin-top:14px;text-align:center;color:#5c606b;font-size:12px;font-style:italic}
+          @media(max-width:520px){.howdi-onb-chips{grid-template-columns:1fr}.howdi-onb-card{padding:24px 18px 20px}}
+        `}</style>
+        <div className="howdi-onb-root" role="dialog" aria-modal="true" aria-label="What brings you to HOWDI today">
+          <div className="howdi-onb-card">
+            <small className="howdi-onb-step">Step 1 of 3</small>
+            <div className="howdi-onb-progress">
+              <span className="howdi-onb-dot active" /><span className="howdi-onb-dot" /><span className="howdi-onb-dot" />
+            </div>
+            <h2>What brings you to HOWDI today?</h2>
+            <p className="howdi-onb-sub">Choose what interests you most. You can always explore more later.</p>
+            <div className="howdi-onb-chips">
+              {ONBOARDING_CHOICES.map((choice) => (
+                <button
+                  key={choice.key}
+                  type="button"
+                  className={`howdi-onb-chip${onbSelected === choice.key ? " selected" : ""}`}
+                  onClick={() => setOnbSelected(choice.key)}
+                  aria-pressed={onbSelected === choice.key}
+                >
+                  {onbSelected === choice.key && <span className="howdi-onb-check" aria-hidden="true">✓</span>}
+                  <span className="howdi-onb-chip-icon" aria-hidden="true">{choice.icon}</span>
+                  <b>{choice.label}</b>
+                  <span>{choice.desc}</span>
+                </button>
+              ))}
+            </div>
+            <button type="button" className="howdi-onb-continue" onClick={() => onCloseOnboarding && onCloseOnboarding(onbSelected)}>
+              Continue <span aria-hidden="true">→</span>
+            </button>
+            <small className="howdi-onb-tag">Same people. A kinder tomorrow. 🌿</small>
+          </div>
+        </div>
+      </>,
+      document.body
+    );
+  }
+
+  return createPortal(
     <>
       <style>{`
         .howdi-auth-root,.howdi-auth-root *{box-sizing:border-box}
         .howdi-auth-root{
-          --green:#183d31;--green2:#285746;--ink:#24343b;--gold:#dfb25d;
-          position:fixed;inset:0;z-index:2147483600;overflow:auto;color:var(--ink);
+          position:fixed;inset:0;z-index:2147483600;overflow:auto;color:#24343b;
           font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
-          background:radial-gradient(circle at 6% 10%,rgba(229,190,94,.26),transparent 21%),
-          radial-gradient(circle at 94% 8%,rgba(255,237,186,.62),transparent 22%),
-          linear-gradient(115deg,#eef1e8,#f8f2e4 50%,#e5eee7);
+          background:#ecf1fb;display:flex;flex-direction:column;
         }
-        .howdi-auth-root:before,.howdi-auth-root:after{content:"";position:fixed;border-radius:50%;pointer-events:none}
-        .howdi-auth-root:before{width:720px;height:720px;left:-300px;bottom:-430px;background:radial-gradient(circle,rgba(70,122,83,.65),rgba(70,122,83,.08) 58%,transparent 72%)}
-        .howdi-auth-root:after{width:620px;height:620px;right:-220px;bottom:-290px;background:radial-gradient(circle,rgba(104,151,92,.48),rgba(104,151,92,.08) 58%,transparent 72%)}
-        .howdi-auth-wrap{position:relative;width:min(1440px,calc(100% - 56px));min-height:100vh;margin:auto;padding:28px 0;display:grid;grid-template-columns:minmax(270px,1fr) minmax(470px,620px) minmax(280px,.95fr);gap:34px;align-items:center}
-        .howdi-auth-left{min-height:620px;padding:34px 30px;border-radius:34px;position:relative;overflow:hidden;color:#fff;background:radial-gradient(circle at 80% 8%,rgba(107,156,112,.2),transparent 27%),linear-gradient(145deg,#173e31,#244d3d 60%,#335e4a);box-shadow:0 28px 90px rgba(23,61,49,.2)}
-        .howdi-auth-left:before{content:"";position:absolute;width:370px;height:370px;border-radius:50%;border:1px solid rgba(255,255,255,.08);right:-130px;top:-140px}
-        .howdi-auth-left:after{content:"";position:absolute;width:260px;height:260px;border-radius:50%;background:rgba(226,185,89,.12);left:-130px;bottom:-140px}
-        .howdi-auth-left-inner{height:100%;position:relative;z-index:1;display:flex;flex-direction:column;justify-content:space-between}
-        .howdi-brand{display:flex;align-items:center;gap:12px}.howdi-logo{width:54px;height:54px;display:grid;place-items:center;border-radius:17px;background:linear-gradient(145deg,#214f40,#16382d);border:1px solid rgba(255,255,255,.14);color:#f0bd59;font-family:Georgia,serif;font-size:30px;font-weight:800}
-        .howdi-brand strong{font-size:14px;letter-spacing:.13em}.howdi-brand small{display:block;margin-top:4px;color:rgba(255,255,255,.58);font-size:10px}
-        .howdi-eyebrow{margin-top:52px;color:#efc56e;font-size:10px;letter-spacing:.24em;font-weight:800}
-        .howdi-auth-left h1{margin:17px 0 18px;max-width:540px;font-family:Georgia,"Times New Roman",serif;font-size:clamp(46px,4.7vw,78px);line-height:.98;letter-spacing:-.055em;font-weight:500}
-        .howdi-auth-left p{margin:0;max-width:470px;color:rgba(255,255,255,.75);font-size:16px;line-height:1.72;font-weight:500}
-        .howdi-features{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:36px}.howdi-feature{min-height:54px;display:flex;align-items:center;justify-content:center;gap:8px;border-radius:15px;border:1px solid rgba(255,255,255,.13);background:rgba(255,255,255,.06);color:rgba(255,255,255,.88);font-size:13px;font-weight:700}
-        .howdi-trust{margin-top:32px;display:flex;gap:18px;flex-wrap:wrap;color:rgba(255,255,255,.6);font-size:11px;font-weight:700}
-        .howdi-auth-panel{width:100%;border-radius:34px;padding:30px;position:relative;overflow:hidden;background:radial-gradient(circle at 100% 0%,rgba(235,190,85,.25),transparent 26%),linear-gradient(145deg,rgba(255,255,255,.97),rgba(247,244,236,.97));border:1px solid rgba(255,255,255,.82);box-shadow:0 30px 80px rgba(45,62,54,.2)}
-        .howdi-close{position:absolute;top:18px;right:18px;width:38px;height:38px;border:1px solid rgba(30,57,48,.13);border-radius:13px;background:rgba(255,255,255,.76);color:#52615d;cursor:pointer;font-size:22px}
-        .howdi-auth-top{text-align:center;padding-top:18px}.howdi-auth-logo{width:64px;height:64px;margin:0 auto 14px;display:grid;place-items:center;border-radius:19px;color:#f3c15d;background:linear-gradient(145deg,#295946,#1a3f32);box-shadow:0 12px 24px rgba(27,65,51,.17);font-family:Georgia,serif;font-size:35px;font-weight:800}
-        .howdi-auth-top h2{margin:0;font-size:clamp(25px,2.3vw,34px);letter-spacing:-.035em}.howdi-auth-top p{margin:7px 0 22px;color:#68747a;font-size:14px}
-        .howdi-tabs{display:grid;grid-template-columns:1fr 1fr;padding:4px;border-radius:16px;background:rgba(28,63,50,.07);margin-bottom:18px}.howdi-tabs button{min-height:44px;border:0;border-radius:12px;background:transparent;color:#718078;font-weight:800;cursor:pointer;font-size:14px}.howdi-tabs button.active{color:#fff;background:linear-gradient(135deg,#214f3e,#295b47);box-shadow:0 7px 16px rgba(24,61,48,.18)}
-        .howdi-form{display:grid;gap:11px}.howdi-field{display:flex;align-items:center;gap:11px;min-height:54px;padding:0 15px;border-radius:16px;background:rgba(255,255,255,.76);border:1px solid rgba(42,70,60,.16)}.howdi-field span{width:22px;text-align:center;opacity:.72;font-size:17px}.howdi-field input{width:100%;min-width:0;border:0;outline:0;background:transparent;color:#26343a;font-size:14px}.howdi-eye{border:0;background:transparent;cursor:pointer;color:#66736e;font-size:17px}
-        .howdi-row{display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:12px;color:#66736e}.howdi-row label{display:inline-flex;align-items:center;gap:7px}.howdi-row input{accent-color:#295b47}.howdi-link{border:0;padding:0;background:transparent;color:#295b47;font-size:12px;font-weight:800;cursor:pointer}
-        .howdi-submit{min-height:55px;margin-top:5px;border:0;border-radius:17px;color:#fff;background:linear-gradient(135deg,#214f3e,#2f674f);box-shadow:0 15px 25px rgba(31,76,58,.2);font-size:15px;font-weight:800;cursor:pointer}.howdi-submit:disabled{opacity:.62;cursor:not-allowed}
-        .howdi-notice{margin:2px 0 0;padding:10px 12px;border-radius:12px;text-align:center;background:rgba(40,89,69,.08);color:#285540;font-size:12px;line-height:1.4;font-weight:700}
-        .howdi-divider{display:flex;align-items:center;gap:12px;margin:17px 0 13px;color:#8a948f;font-size:10px;text-transform:uppercase;letter-spacing:.12em;white-space:nowrap}.howdi-divider:before,.howdi-divider:after{content:"";height:1px;flex:1;background:rgba(42,70,60,.13)}
-        .howdi-methods{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.howdi-method{min-height:64px;border-radius:15px;border:1px solid rgba(42,70,60,.15);background:rgba(255,255,255,.68);cursor:pointer;color:#33423f;display:grid;place-items:center;align-content:center;gap:4px;font-size:10px;font-weight:800}.howdi-method strong{font-size:20px;line-height:1}
-        .howdi-security{margin:18px 0 0;text-align:center;color:#84908b;font-size:10px;letter-spacing:.04em}
-        .howdi-auth-right{display:grid;gap:16px}.howdi-side{min-height:102px;display:grid;grid-template-columns:90px 1fr auto;align-items:center;gap:15px;padding:13px 18px 13px 13px;border-radius:24px;background:rgba(255,255,255,.66);border:1px solid rgba(255,255,255,.85);box-shadow:0 18px 40px rgba(43,63,53,.1)}.howdi-side-icon{height:76px;display:grid;place-items:center;border-radius:19px;font-size:43px;background:linear-gradient(145deg,#f8f1df,#e8efe5)}.howdi-side strong{display:block;margin-bottom:6px;font-size:16px;color:#2c3940}.howdi-side span{color:#6e797d;font-size:12px;line-height:1.45}.howdi-arrow{font-size:22px;color:#334a42}.howdi-right-note{text-align:center;color:#4e6359;font-size:12px;font-style:italic}
-        @media(max-width:1120px) and (min-width:761px){.howdi-auth-wrap{width:min(980px,calc(100% - 40px));grid-template-columns:minmax(260px,.85fr) minmax(430px,1.15fr);gap:24px}.howdi-auth-right{display:none}.howdi-auth-left h1{font-size:54px}}
-        @media(max-width:760px){.howdi-auth-root{background:radial-gradient(circle at 50% 0%,rgba(255,242,196,.95),transparent 27%),linear-gradient(180deg,#f8f1df,#edf3e8 58%,#e2ecdc)}.howdi-auth-wrap{width:100%;min-height:100svh;padding:0;display:block}.howdi-auth-left,.howdi-auth-right{display:none}.howdi-auth-panel{min-height:100svh;border-radius:0;border:0;box-shadow:none;padding:22px 18px 26px;background:radial-gradient(circle at 100% 12%,rgba(231,195,99,.26),transparent 25%),linear-gradient(180deg,rgba(255,255,255,.89),rgba(247,241,226,.9))}.howdi-close{top:14px;right:14px}.howdi-auth-top{padding-top:14px}.howdi-auth-top:before{content:"Choose Your Door";display:block;position:absolute;top:18px;left:18px;color:#26433a;font-size:12px;font-weight:900}.howdi-auth-logo{width:58px;height:58px;border-radius:17px;margin-bottom:8px;font-size:31px}.howdi-auth-top h2{font-family:Georgia,serif;font-size:27px}.howdi-auth-top p{margin-bottom:14px;font-size:12px}.howdi-tabs{margin-bottom:14px}.howdi-form{gap:9px}.howdi-field{min-height:50px}.howdi-methods{gap:8px}.howdi-method{min-height:82px;border-radius:18px}.howdi-method strong{font-size:24px}.howdi-security{margin-top:14px}}
+        .howdi-auth-topbar{flex:0 0 auto;min-height:52px;padding:0 26px;display:flex;align-items:center;justify-content:space-between;background:#1749d6;color:#fff}
+        .howdi-auth-topbar b{font-family:Georgia,serif;font-size:17px;letter-spacing:.08em}
+        .howdi-auth-topbar span{font-size:12.5px;color:rgba(255,255,255,.82)}
+        .howdi-auth-body{flex:1;display:grid;grid-template-columns:1.05fr 1fr;min-height:0}
+        .howdi-auth-photo{position:relative;overflow:hidden;color:#fff;background:
+          radial-gradient(circle at 30% 20%,rgba(77,121,241,.35),transparent 45%),
+          linear-gradient(165deg,#2a1b12,#4a2f1c 45%,#6b4423 100%);
+          display:flex;flex-direction:column;justify-content:flex-end;padding:44px}
+        .howdi-auth-photo:before{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(20,12,7,.05),rgba(15,9,5,.72));z-index:0}
+        .howdi-auth-photo-inner{position:relative;z-index:1}
+        .howdi-auth-photo h1{margin:0 0 10px;font-family:Georgia,"Times New Roman",serif;font-size:clamp(38px,4.6vw,58px);line-height:1.05;letter-spacing:-.02em;font-weight:500}
+        .howdi-auth-photo p{margin:0 0 26px;max-width:420px;color:rgba(255,255,255,.85);font-size:15px;line-height:1.55}
+        .howdi-auth-photo-tag{color:rgba(255,255,255,.68);font-size:11px;letter-spacing:.22em;font-weight:700}
+        .howdi-auth-panel{display:flex;align-items:center;justify-content:center;padding:36px;background:#ecf1fb;overflow-y:auto}
+        .howdi-auth-card{width:100%;max-width:400px}
+        .howdi-auth-card h2{margin:0 0 6px;font-size:26px;line-height:31px;font-weight:800;color:#0d1a3a}
+        .howdi-auth-card>p.howdi-auth-sub{margin:0 0 24px;color:#6b707a;font-size:14.5px;line-height:1.5}
+        .howdi-form{display:grid;gap:11px}
+        .howdi-field{display:flex;align-items:center;gap:11px;min-height:52px;padding:0 15px;border-radius:13px;background:#fff;border:1px solid #dbdee6;transition:border-color .15s ease}
+        .howdi-field:focus-within{border-color:#274086}
+        .howdi-field span{width:20px;text-align:center;opacity:.75;font-size:15px}
+        .howdi-field input{width:100%;min-width:0;border:0;outline:0;background:transparent;color:#0d1a3a;font-size:14px;font-weight:600}
+        .howdi-eye{border:0;background:transparent;cursor:pointer;color:#666a73;font-size:16px}
+        .howdi-phone-field{gap:9px}
+        .howdi-phone-field .howdi-cc{width:auto;flex:0 0 auto;padding-right:9px;border-right:1px solid #dbdee6;color:#0d1a3a;font-size:14px;font-weight:700;display:flex;align-items:center;gap:5px}
+        .howdi-row{display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:12.5px;color:#666a73}
+        .howdi-row label{display:inline-flex;align-items:center;gap:7px}.howdi-row input{accent-color:#1749d6}
+        .howdi-link{border:0;padding:0;background:transparent;color:#0d1a3a;font-size:12.5px;font-weight:700;cursor:pointer}
+        .howdi-submit{min-height:52px;margin-top:5px;border:0;border-radius:13px;color:#fff;background:#1749d6;font-size:14.5px;font-weight:700;cursor:pointer}
+        .howdi-submit:disabled{opacity:.6;cursor:not-allowed}
+        .howdi-notice{margin:2px 0 0;padding:10px 12px;border-radius:12px;text-align:center;background:rgba(23,73,214,.08);color:#0d1a3a;font-size:12px;line-height:1.4;font-weight:700}
+        .howdi-notice.dev-otp{background:rgba(19,75,229,.14);color:#7a5b0c;font-weight:800}
+        .howdi-divider{display:flex;align-items:center;gap:12px;margin:18px 0 13px;color:#7f828a;font-size:11px;text-transform:none;white-space:nowrap}
+        .howdi-divider:before,.howdi-divider:after{content:"";height:1px;flex:1;background:#dfe3eb}
+        .howdi-methods{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+        .howdi-method{min-height:46px;border-radius:11px;border:1.5px solid #dbdee6;background:#fff;cursor:pointer;color:#22304f;display:flex;align-items:center;justify-content:center;gap:8px;font-size:12.5px;font-weight:700}
+        .howdi-method:hover{border-color:#274086}
+        .howdi-method strong{font-size:14px;line-height:1;font-weight:800}
+        .howdi-back-link{margin:2px 0 10px;text-align:left}
+        .howdi-back-link button{border:0;padding:0;background:transparent;color:#5c606b;font-size:12.5px;font-weight:700;cursor:pointer}
+        .howdi-toggle-line{margin:18px 0 0;text-align:center;color:#6b707a;font-size:13px}
+        .howdi-toggle-line button{border:0;background:transparent;color:#0d1a3a;font-weight:800;cursor:pointer;font-size:13px;text-decoration:underline;text-underline-offset:2px}
+        .howdi-legal{margin:18px 0 0;text-align:center;color:#9099ad;font-size:11px;line-height:1.5}
+        .howdi-legal button{border:0;padding:0;background:transparent;color:#6b707a;font-size:11px;text-decoration:underline;cursor:pointer}
+        .howdi-close{position:fixed;top:14px;right:18px;width:34px;height:34px;border:1px solid rgba(255,255,255,.3);border-radius:11px;background:rgba(0,0,0,.15);color:#fff;cursor:pointer;font-size:19px;z-index:2}
+        @media(max-width:900px){.howdi-auth-body{grid-template-columns:1fr}.howdi-auth-photo{display:none}.howdi-auth-panel{padding:22px 18px}}
+
+        /* "Made by hand." scene - a potter's wheel + shaping hands, drawn from CSS shapes in the
+           same flat-illustration language already used for the Works/Home hero silhouettes
+           (rounded blocks + a monogram circle), since no photo asset is available here. */
+        .howdi-auth-scene{position:absolute;right:6%;bottom:18%;z-index:0;width:230px;height:230px;pointer-events:none}
+        .howdi-auth-wheel{position:absolute;left:50%;bottom:14px;width:210px;height:64px;transform:translateX(-50%);border-radius:50%;background:radial-gradient(ellipse at 50% 35%,rgba(226,176,112,.5),rgba(17,69,212,.55) 70%,rgba(70,42,20,.6));box-shadow:0 0 0 1px rgba(255,224,176,.12),0 18px 30px rgba(10,6,3,.4)}
+        .howdi-auth-wheel:before{content:"";position:absolute;inset:10px 26px;border-radius:50%;border:1px dashed rgba(255,229,186,.35)}
+        .howdi-auth-pot{position:absolute;left:50%;bottom:52px;width:78px;height:104px;transform:translateX(-50%);border-radius:38px 38px 16px 16px/46px 46px 14px 14px;background:linear-gradient(160deg,#1b53ed,#1145d4 70%);box-shadow:inset 0 -10px 18px rgba(0,0,0,.22),0 10px 16px rgba(10,6,3,.3)}
+        .howdi-auth-pot:before{content:"";position:absolute;left:50%;top:-9px;width:52px;height:18px;transform:translateX(-50%);border-radius:50%;background:#3e6def;box-shadow:inset 0 3px 6px rgba(0,0,0,.25)}
+        .howdi-auth-hand{position:absolute;bottom:66px;width:46px;height:70px;border-radius:26px 26px 30px 30px;background:linear-gradient(160deg,#e3ad78,#134deb)}
+        .howdi-auth-hand.left{left:calc(50% - 58px);transform:rotate(18deg)}
+        .howdi-auth-hand.right{left:calc(50% + 14px);transform:rotate(-16deg)}
+        .howdi-auth-dust{position:absolute;left:50%;bottom:118px;width:5px;height:5px;border-radius:50%;background:rgba(255,224,176,.55)}
+        .howdi-auth-dust:nth-child(5){transform:translate(-38px,-6px);opacity:.4}
+        .howdi-auth-dust:nth-child(6){transform:translate(30px,-14px);opacity:.55}
+        .howdi-auth-dust:nth-child(7){transform:translate(6px,-26px);opacity:.35}
       `}</style>
 
       <div className="howdi-auth-root" role="dialog" aria-modal="true" aria-label="HOWDI sign in">
-        <div className="howdi-auth-wrap">
+        <div className="howdi-auth-topbar">
+          <b>HOWDI</b>
+          <span>A kinder, closer community</span>
+        </div>
+        <button type="button" className="howdi-close" onClick={handleCloseClick} disabled={loginLoading} aria-label="Close">×</button>
 
-          <section className="howdi-auth-left">
-            <div className="howdi-auth-left-inner">
-              <div>
-                <div className="howdi-brand">
-                  <div className="howdi-logo">H</div>
-                  <div><strong>HOWDI</strong><small>Kaam bhi, Samaan bhi.</small></div>
-                </div>
-                <div className="howdi-eyebrow">MADE BY HAND. MADE WITH HEART.</div>
-                <h1>Your<br/>Neighbourhood,<br/>Connected.</h1>
-                <p>Start your HOWDI journey with handmade crochet today, and grow with creators, learning, earning and community tomorrow.</p>
-                <div className="howdi-features">
-                  <div className="howdi-feature">🧶 Crochet First</div><div className="howdi-feature">✨ Real Creators</div>
-                  <div className="howdi-feature">🎓 Learn &amp; Earn</div><div className="howdi-feature">🤝 Community</div>
-                </div>
-              </div>
-              <div className="howdi-trust"><span>✓ Secure</span><span>✓ Local</span><span>✓ One HOWDI</span></div>
+        <div className="howdi-auth-body">
+          <section className="howdi-auth-photo">
+            <div className="howdi-auth-scene" aria-hidden="true">
+              <div className="howdi-auth-dust" /><div className="howdi-auth-dust" /><div className="howdi-auth-dust" />
+              <div className="howdi-auth-wheel" />
+              <div className="howdi-auth-hand left" />
+              <div className="howdi-auth-hand right" />
+              <div className="howdi-auth-pot" />
+            </div>
+            <div className="howdi-auth-photo-inner">
+              <h1>Made by hand.<br/>Made with heart.</h1>
+              <p>Real people. Real skills. A kinder, closer community.</p>
+              <div className="howdi-auth-photo-tag">PEOPLE&nbsp;&nbsp;·&nbsp;&nbsp;SKILLS&nbsp;&nbsp;·&nbsp;&nbsp;OPPORTUNITIES</div>
             </div>
           </section>
 
           <section className="howdi-auth-panel">
-            <button type="button" className="howdi-close" onClick={onClose} disabled={loginLoading}>×</button>
-            <div className="howdi-auth-top">
-              <div className="howdi-auth-logo">H</div>
-              <h2>Welcome to HOWDI 👋</h2>
-              <p>{signup ? "Create your account and join your neighbourhood journey." : "Sign in and continue your neighbourhood journey."}</p>
+            <div className="howdi-auth-card">
+              {otpMode ? (
+                <>
+                  <h2>Sign in with a code</h2>
+                  <p className="howdi-auth-sub">{otpStage === "phone" ? "We'll text a 6-digit code to your mobile number." : `Enter the code sent to +91 ${otpPhone}.`}</p>
+
+                  <div className="howdi-back-link">
+                    <button type="button" onClick={() => { setOtpMode(false); setOtpStage("phone"); setOtpNotice(""); }}>← Back to password sign in</button>
+                  </div>
+
+                  {otpStage === "phone" ? (
+                    <form className="howdi-form" onSubmit={requestOtp}>
+                      <label className="howdi-field howdi-phone-field">
+                        <span className="howdi-cc">🇮🇳 +91</span>
+                        <input className="howdi-auth-phone" value={otpPhone} onChange={e=>setOtpPhone(e.target.value)} placeholder="Enter your phone number" inputMode="numeric" autoComplete="tel" maxLength={10}/>
+                      </label>
+                      <button className="howdi-submit" type="submit" disabled={otpBusy}>{otpBusy ? "Sending…" : "Send code"}</button>
+                      {otpNotice && <div className="howdi-notice">{otpNotice}</div>}
+                    </form>
+                  ) : (
+                    <form className="howdi-form" onSubmit={verifyOtp}>
+                      <label className="howdi-field">
+                        <span>🔢</span>
+                        <input value={otpCode} onChange={e=>setOtpCode(e.target.value.replace(/\D/g,"").slice(0,6))} placeholder="6-digit code" inputMode="numeric" autoComplete="one-time-code" maxLength={6}/>
+                      </label>
+                      <button className="howdi-submit" type="submit" disabled={otpBusy}>{otpBusy ? "Verifying…" : "Verify & sign in"}</button>
+                      {otpNotice && <div className="howdi-notice">{otpNotice}</div>}
+                      {otpDevCode && <div className="howdi-notice dev-otp">Dev mode (no SMS gateway configured here): your code is {otpDevCode}</div>}
+                      <div className="howdi-row"><span/><button type="button" className="howdi-link" onClick={requestOtp} disabled={otpBusy}>Resend code</button></div>
+                    </form>
+                  )}
+                </>
+              ) : (
+                <>
+                  <h2>Welcome to HOWDI</h2>
+                  <p className="howdi-auth-sub">{signup ? "Create your account to get started." : "Sign in to your account or create a new one"}</p>
+
+                  <form className="howdi-form" onSubmit={signup ? onRegister : onLogin}>
+                    {signup && <label className="howdi-field"><span>👤</span><input value={loginName} onChange={e=>setLoginName(e.target.value)} placeholder="Full name" autoComplete="name"/></label>}
+                    <label className="howdi-field howdi-phone-field">
+                      <span className="howdi-cc">🇮🇳 +91</span>
+                      <input className="howdi-auth-phone" value={loginPhone} onChange={e=>setLoginPhone(e.target.value)} placeholder="Enter your phone number" inputMode="numeric" autoComplete="tel" maxLength={10}/>
+                    </label>
+                    <label className="howdi-field">
+                      <span>🔒</span>
+                      <input value={loginPassword} onChange={e=>setLoginPassword(e.target.value)} placeholder="Enter your password" type={showPassword ? "text":"password"} autoComplete={signup ? "new-password":"current-password"}/>
+                      <button type="button" className="howdi-eye" onClick={()=>setShowPassword(v=>!v)} aria-label={showPassword ? "Hide password" : "Show password"}>{showPassword?"◉":"◌"}</button>
+                    </label>
+                    {!signup && <div className="howdi-row">
+                      <label><input type="checkbox" defaultChecked/> Keep me signed in</label>
+                      <button type="button" className="howdi-link" onClick={()=>setNotice("Password recovery will be connected to the secure HOWDI account flow next.")}>Forgot password?</button>
+                    </div>}
+                    <button className="howdi-submit" type="submit" disabled={loginLoading}>{loginLoading ? "Please wait…" : signup ? "Create account" : "Sign in"}</button>
+                    {message && <div className="howdi-notice">{message}</div>}
+                  </form>
+
+                  {!signup && <>
+                    <div className="howdi-divider">or continue with</div>
+                    <div className="howdi-methods">
+                      <button type="button" className="howdi-method" onClick={()=>method("google")}><strong>G</strong><span>Continue with Google</span></button>
+                      <button type="button" className="howdi-method" onClick={()=>method("mobile")}><strong>📲</strong><span>Continue with Mobile OTP</span></button>
+                    </div>
+                  </>}
+
+                  <p className="howdi-toggle-line">
+                    {signup ? "Already have an account? " : "Don't have an account? "}
+                    <button type="button" onClick={() => {setAuthMode(signup ? "login" : "signup");setNotice("");}}>{signup ? "Sign in" : "Create account"}</button>
+                  </p>
+
+                  <p className="howdi-legal">
+                    By continuing, you agree to our{" "}
+                    <button type="button" onClick={()=>setNotice("Terms of Service will open in a dedicated page.")}>Terms of Service</button>
+                    {" "}and{" "}
+                    <button type="button" onClick={()=>setNotice("Privacy Policy will open in a dedicated page.")}>Privacy Policy.</button>
+                  </p>
+                </>
+              )}
             </div>
-
-            <div className="howdi-tabs">
-              <button type="button" className={!signup ? "active" : ""} onClick={() => {setAuthMode("login");setNotice("");}}>Sign In</button>
-              <button type="button" className={signup ? "active" : ""} onClick={() => {setAuthMode("signup");setNotice("");}}>Create Account</button>
-            </div>
-
-            <form className="howdi-form" onSubmit={signup ? onRegister : onLogin}>
-              {signup && <label className="howdi-field"><span>👤</span><input value={loginName} onChange={e=>setLoginName(e.target.value)} placeholder="Full name" autoComplete="name"/></label>}
-              <label className="howdi-field"><span>📱</span><input className="howdi-auth-phone" value={loginPhone} onChange={e=>setLoginPhone(e.target.value)} placeholder="Mobile number" inputMode="numeric" autoComplete="tel"/></label>
-              <label className="howdi-field"><span>🔒</span><input value={loginPassword} onChange={e=>setLoginPassword(e.target.value)} placeholder="Password" type={showPassword ? "text":"password"} autoComplete={signup ? "new-password":"current-password"}/><button type="button" className="howdi-eye" onClick={()=>setShowPassword(v=>!v)}>{showPassword?"◉":"◌"}</button></label>
-              {!signup && <div className="howdi-row"><label><input type="checkbox" defaultChecked/> Remember me</label><button type="button" className="howdi-link" onClick={()=>setNotice("Password recovery will be connected to the secure HOWDI account flow next.")}>Forgot password?</button></div>}
-              <button className="howdi-submit" type="submit" disabled={loginLoading}>{loginLoading ? "Please wait..." : signup ? "Create my HOWDI account →" : "Sign in to HOWDI →"}</button>
-              {message && <div className="howdi-notice">{message}</div>}
-            </form>
-
-            {!signup && <>
-              <div className="howdi-divider">or continue with</div>
-              <div className="howdi-methods">
-                <button type="button" className="howdi-method" onClick={()=>method("google")}><strong>G</strong><span>Google</span></button>
-                <button type="button" className="howdi-method" onClick={()=>method("mobile")}><strong>📲</strong><span>Mobile OTP</span></button>
-                <button type="button" className="howdi-method" onClick={()=>method("passkey")}><strong>🔑</strong><span>Passkey</span></button>
-              </div>
-              <p className="howdi-security">🔒 Secure access for your HOWDI account</p>
-            </>}
           </section>
-
-          <aside className="howdi-auth-right">
-            {[["🧶","Shop Handmade Crochet","Unique. Local. Handmade."],["👷","Find Trusted Workers","Skilled. Verified. Nearby."],["👩‍💻","Learn & Earn","Build skills for a brighter tomorrow."],["🏪","Sell as a Vendor","Grow your local business."],["💬","Connect & Share","Your local community."]].map(([icon,title,text]) =>
-              <div className="howdi-side" key={title}><div className="howdi-side-icon">{icon}</div><div><strong>{title}</strong><span>{text}</span></div><div className="howdi-arrow">→</div></div>
-            )}
-            <div className="howdi-right-note">“Support local. Grow together.” ♡</div>
-          </aside>
-
         </div>
       </div>
-    </>
+    </>,
+    document.body
   );
 }

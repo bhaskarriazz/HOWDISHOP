@@ -1,0 +1,88 @@
+// V8 Shop purchase journey — real PostgreSQL, both sides: product → bag → address → quote → checkout (HPay held, or COD
+// without the sandbox; idempotent; stock reserved) → vendor sees order without the address → accept (address released) →
+// pack → ship → deliver (payment released minus commission) → return → approve → received → refund; plus buyer cancel
+// (refund + restock), vendor decline, sold-out race, outsiders, no internal ids.
+const K = require('../k5a-pg/lib.cjs');
+const { pool, check, finish, api } = K;
+const SANDBOX = process.env.V8_EXPECT_SANDBOX === '1';
+const LABEL = `v8 10 shop (${SANDBOX ? 'sandbox' : 'no-sandbox'})`;
+const FORBIDDEN = /"(id|user_id|[a-z_]*_user_id|userId|howdi_id|master_id|email|uuid|order_id|product_id|vendor_profile_id|phone)"\s*:/;
+const key = () => 'k' + Math.random().toString(36).slice(2, 12) + Date.now().toString(36);
+(async () => {
+  const started = await K.start(); check('server starts', started, K.serverLog().slice(-600)); if (!started) return finish(LABEL);
+  const B = await K.member('Bina Buyer', { username: 'bina_b' }); const S = await K.member('Sanjay Seller', { username: 'sanjay_s' }); const X = await K.member('Xtra', { username: 'xtra_x' });
+  const V = await K.vendor(S, { business: 'Sanjay Looms' }); await pool.query(`UPDATE vendor_profiles SET kyc_status='verified', status='active', store_status='online' WHERE id=$1`, [V.id]);
+  const P1 = await K.product(V, 'Kalamkari cushion cover', { stock: 3 }); const P2 = await K.product(V, 'Block print table runner', { stock: 1 });
+  await pool.query(`UPDATE vendor_products SET price=300, mrp=350, image_urls='["/api/v8/media/0123456789abcdef0123456789abcdef.jpg"]'::jsonb WHERE id=ANY($1::bigint[])`, [[P1.id, P2.id]]);
+  const code = async (name) => ((await api('GET', `/api/search?q=${encodeURIComponent(name)}&types=product`, { token: B.token })).json.results || [])[0]?.route?.split('/').pop();
+  const C1 = await code('Kalamkari'); const C2 = await code('runner');
+  const notes = async (m) => ((await api('GET', '/api/v8/notifications', { token: m.token })).json.items || []);
+  const bal = async (m) => (await api('GET', '/api/v8/hpay/history', { token: m.token })).json.balance;
+  const pd = await api('GET', `/api/v8/shop/products/${C1}`); check('product page (guest ok)', pd.json.product?.price === 300 && pd.json.product.store.name === 'Sanjay Looms', pd.text.slice(0, 200));
+  check('seller cannot buy own product', (await api('POST', '/api/v8/shop/cart', { token: S.token, body: { product: C1 } })).json.code === 'OWN_PRODUCT');
+  check('more than stock refused', (await api('POST', '/api/v8/shop/cart', { token: B.token, body: { product: C1, qty: 5 } })).json.code === 'OUT_OF_STOCK');
+  const c1 = await api('POST', '/api/v8/shop/cart', { token: B.token, body: { product: C1, qty: 2 } });
+  check('bag: ₹600, free delivery over ₹499', c1.json.cart?.subtotal === 600 && c1.json.cart.shipping === 0, c1.text.slice(0, 200));
+  check('address validation', (await api('POST', '/api/v8/shop/addresses', { token: B.token, body: { name: 'Bina', phone: '123', line1: 'x' } })).status === 400);
+  const ad = await api('POST', '/api/v8/shop/addresses', { token: B.token, body: { name: 'Bina Rao', phone: '9876512340', line1: '12-3 Gandhi Nagar', city: 'Khammam', state: 'Telangana', pin_code: '507002' } });
+  const ADR = ad.json.saved?.key; check('address saved, phone masked', /^•+ 2340$/.test(ad.json.saved?.contact || '') && !ad.text.includes('9876512340'), ad.text.slice(0, 200));
+  const method = SANDBOX ? 'hpay' : 'cod';
+  if (SANDBOX) { await api('POST', '/api/v8/hpay/pin', { token: B.token, body: { pin: '4826' } }); await bal(B); await pool.query(`UPDATE howdi_v8_wallets SET balance=5000 WHERE user_id=$1`, [B.id]); await bal(S); }
+  if (!SANDBOX) check('HPay without sandbox → 503', (await api('POST', '/api/v8/shop/checkout', { token: B.token, body: { address: ADR, method: 'hpay', pin: '4826', idempotency_key: key() } })).json.code === 'PAYMENT_PROVIDER_REQUIRED');
+  const q = await api('POST', '/api/v8/shop/checkout/quote', { token: B.token, body: { address: ADR, method } }); check('quote', q.json.review?.total === 600, q.text.slice(0, 200));
+  const k1 = key(); const co = await api('POST', '/api/v8/shop/checkout', { token: B.token, body: { address: ADR, method, pin: '4826', idempotency_key: k1 } });
+  const O1 = co.json.orders?.[0]?.public_key; check('order placed', co.status === 201 && /^ORD-[0-9A-F]{12}$/.test(O1 || '') && co.json.orders[0].state === 'placed', co.text.slice(0, 300));
+  check('buyer payload: no internal ids', !FORBIDDEN.test(co.text), (co.text.match(FORBIDDEN) || [])[0]);
+  check('same key replays (no double charge)', (await api('POST', '/api/v8/shop/checkout', { token: B.token, body: { address: ADR, method, pin: '4826', idempotency_key: k1 } })).json.replayed === true);
+  if (SANDBOX) check('HPay charged once (₹600 held)', (await bal(B)) === 4400);
+  check('stock reserved (3 → 1)', Number((await pool.query(`SELECT stock FROM vendor_products WHERE id=$1`, [P1.id])).rows[0].stock) === 1);
+  check('bag emptied', (await api('GET', '/api/v8/shop/cart', { token: B.token })).json.cart.items.length === 0);
+  check('seller notified', (await notes(S)).some((n) => /New order/.test(n.title)));
+  const vo = await api('GET', '/api/v8/vendor/orders?tab=new', { token: S.token }); const vv = (vo.json.items || []).find((x) => x.public_key === O1);
+  check('vendor sees the new order but not the address yet', vv && vv.delivery.hidden === true && !vo.text.includes('Gandhi Nagar') && !vo.text.includes('9876512340') && vv.net === 552, vo.text.slice(0, 300));
+  check('outsider cannot act on it', (await api('POST', `/api/v8/vendor/orders/${O1}/accept`, { token: X.token })).json.code === 'NOT_A_VENDOR' && (await api('GET', `/api/v8/shop/orders/${O1}`, { token: X.token })).status === 404);
+  check('cannot ship before accepting', (await api('POST', `/api/v8/vendor/orders/${O1}/ship`, { token: S.token, body: { courier: 'DTDC', tracking: 'D12345' } })).json.code === 'INVALID_STATE');
+  const ac = await api('POST', `/api/v8/vendor/orders/${O1}/accept`, { token: S.token });
+  check('accepted → vendor now sees delivery address + phone', ac.json.order?.state === 'accepted' && ac.json.order.delivery.line.includes('Gandhi Nagar') && ac.json.order.delivery.contact === '9876512340', ac.text.slice(0, 300));
+  check('buyer told', (await notes(B)).some((n) => /accepted your order/.test(n.title)));
+  await api('POST', `/api/v8/vendor/orders/${O1}/pack`, { token: S.token });
+  check('ship needs courier + tracking', (await api('POST', `/api/v8/vendor/orders/${O1}/ship`, { token: S.token, body: {} })).status === 400);
+  await api('POST', `/api/v8/vendor/orders/${O1}/ship`, { token: S.token, body: { courier: 'India Post', tracking: 'EE123456789IN' } });
+  const bo = await api('GET', `/api/v8/shop/orders/${O1}`, { token: B.token }); check('buyer sees shipped + tracking; cannot cancel now', bo.json.order.state === 'shipped' && bo.json.order.tracking === 'EE123456789IN' && !bo.json.order.actions.includes('cancel'));
+  check('buyer cancel after shipping refused', (await api('POST', `/api/v8/shop/orders/${O1}/cancel`, { token: B.token, body: { reason: 'Other' } })).json.code === 'INVALID_STATE');
+  const s0 = SANDBOX ? await bal(S) : 0;
+  const dl = await api('POST', `/api/v8/vendor/orders/${O1}/deliver`, { token: S.token });
+  check('delivered; payment released / collected', dl.json.order?.state === 'delivered' && dl.json.order.payment.state === (SANDBOX ? 'released' : 'collected'), dl.text.slice(0, 200));
+  if (SANDBOX) check('seller credited ₹552 (600 − 8%)', (await bal(S)) === s0 + 552);
+  check('buyer can return', (await api('GET', `/api/v8/shop/orders/${O1}`, { token: B.token })).json.order.actions.includes('return'));
+  const rq = await api('POST', `/api/v8/shop/orders/${O1}/return`, { token: B.token, body: { reason: 'damaged', details: 'Seam torn' } });
+  check('return requested', rq.json.order?.return?.status === 'requested', rq.text.slice(0, 200));
+  check('only one return', (await api('POST', `/api/v8/shop/orders/${O1}/return`, { token: B.token, body: { reason: 'damaged' } })).json.code === 'ALREADY_REQUESTED');
+  const RTN = rq.json.order.return.public_key;
+  check('vendor sees it under Returns', ((await api('GET', '/api/v8/vendor/orders?tab=returns', { token: S.token })).json.items || []).some((x) => x.public_key === O1));
+  await api('POST', `/api/v8/vendor/returns/${RTN}/approve`, { token: S.token });
+  check('buyer told pickup scheduled', (await notes(B)).some((n) => /Return approved/.test(n.title)));
+  const b0 = SANDBOX ? await bal(B) : 0;
+  const rc = await api('POST', `/api/v8/vendor/returns/${RTN}/received`, { token: S.token });
+  check('received → returned + refunded', rc.json.order?.state === 'returned' && rc.json.order.return.status === 'refunded', rc.text.slice(0, 200));
+  if (SANDBOX) check('buyer refunded ₹600; seller debited ₹552', (await bal(B)) === b0 + 600 && (await bal(S)) === s0);
+  check('stock restored after return', Number((await pool.query(`SELECT stock FROM vendor_products WHERE id=$1`, [P1.id])).rows[0].stock) === 3);
+  // cancel before shipping + vendor decline + sold-out
+  await api('POST', '/api/v8/shop/cart', { token: B.token, body: { product: C2, qty: 1 } });
+  const o2 = (await api('POST', '/api/v8/shop/checkout', { token: B.token, body: { address: ADR, method, pin: '4826', idempotency_key: key() } })).json.orders[0];
+  check('under ₹499 → ₹49 delivery', o2.shipping === 49 && o2.total === 349);
+  const cn = await api('POST', `/api/v8/shop/orders/${o2.public_key}/cancel`, { token: B.token, body: { reason: 'Ordered by mistake' } });
+  check('buyer cancels → cancelled, stock back', cn.json.order?.state === 'cancelled' && Number((await pool.query(`SELECT stock FROM vendor_products WHERE id=$1`, [P2.id])).rows[0].stock) === 1, cn.text.slice(0, 200));
+  await api('POST', '/api/v8/shop/cart', { token: B.token, body: { product: C1, qty: 1 } });
+  const o3 = (await api('POST', '/api/v8/shop/checkout', { token: B.token, body: { address: ADR, method, pin: '4826', idempotency_key: key() } })).json.orders[0];
+  check('decline needs a reason', (await api('POST', `/api/v8/vendor/orders/${o3.public_key}/reject`, { token: S.token, body: {} })).json.code === 'REASON_REQUIRED');
+  const rj = await api('POST', `/api/v8/vendor/orders/${o3.public_key}/reject`, { token: S.token, body: { reason: 'Colour no longer available' } });
+  check('vendor declines → buyer told, refunded', rj.json.order?.state === 'rejected' && (await notes(B)).some((n) => /couldn’t take your order/.test(n.title)));
+  await api('POST', '/api/v8/shop/cart', { token: X.token, body: { product: C2, qty: 1 } });
+  await pool.query(`UPDATE vendor_products SET stock=0 WHERE id=$1`, [P2.id]);
+  await api('POST', '/api/v8/shop/addresses', { token: X.token, body: { name: 'Xtra', phone: '9876512341', line1: '1 Main Road', city: 'Khammam', state: 'Telangana', pin_code: '507001' } });
+  const XA = (await api('GET', '/api/v8/shop/addresses', { token: X.token })).json.items[0].key;
+  check('sold out before checkout → refused, nothing charged', (await api('POST', '/api/v8/shop/checkout', { token: X.token, body: { address: XA, method: 'cod', idempotency_key: key() } })).json.code === 'CART_CHANGED');
+  check('buyer order history tabs', ((await api('GET', '/api/v8/shop/orders?tab=past', { token: B.token })).json.items || []).length === 3);
+  await finish(LABEL);
+})().catch(async (e) => { check('suite ran to the end', false, e && e.stack); await finish(LABEL); });
