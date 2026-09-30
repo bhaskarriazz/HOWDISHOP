@@ -5,8 +5,12 @@
 
 export const SKILLS = Object.freeze(["Crochet & Handmade", "Tailoring & Textiles", "Cooking", "Digital skills", "Business & Selling", "Languages", "Wellness"]);
 
+// Mirrors backend/learn-taxonomy-v8.cjs (the authority). Goals and support are teacher-authored or system facts, never category names.
+export const GOALS = Object.freeze([["certificate", "Get a certificate"], ["project", "Make a finished project"], ["sell", "Start selling"]]);
+export const SUPPORT = Object.freeze([["live_class", "Live class with teacher"], ["certificate", "Certificate"], ["teacher_review", "Teacher reviews your project"]]);
+
 export const FILTERS = Object.freeze({
-  goal: { label: "Goal", options: [["certificate", "Get a certificate"], ["project", "Make a finished project"], ["sell", "Start selling"]] },
+  goal: { label: "Goal", options: GOALS },
   lang: { label: "Language", options: null }, // real languages come from the catalogue facets
   level: { label: "Level", options: [["beginner", "Beginner"], ["intermediate", "Intermediate"], ["advanced", "Advanced"]] },
   price: { label: "Price", options: [["free", "Free"], ["under500", "Under ₹500"], ["500to2000", "₹500 – ₹2,000"], ["over2000", "Over ₹2,000"]] },
@@ -115,9 +119,12 @@ export function recoverySuggestions(state) {
 export function cardFacts(c) {
   const hours = c.minutes >= 60 ? `${Math.floor(c.minutes / 60)} h${c.minutes % 60 ? ` ${c.minutes % 60} min` : ""}` : c.minutes ? `${c.minutes} min` : null;
   const formats = (c.formats || []).map((f) => ({ video: "Video", reading: "Reading", live: "Live class" }[f])).filter(Boolean);
-  const support = [c.live_class ? "Live class with teacher" : null, c.certificate_available ? "Certificate" : null].filter(Boolean);
+  const supportKeys = Array.isArray(c.support) ? c.support : [c.live_class ? "live_class" : null, c.certificate_available ? "certificate" : null];
+  const support = SUPPORT.filter(([v]) => supportKeys.includes(v)).map(([, l]) => l);
   const materials = c.materials_count ? (c.materials_cost ? `Materials ≈ ₹${Number(c.materials_cost).toLocaleString("en-IN")} extra` : `${c.materials_count} material${c.materials_count === 1 ? "" : "s"} listed`) : "No materials listed";
-  return { duration: hours, formats, support, materials, level: c.level ? c.level[0].toUpperCase() + c.level.slice(1) : null };
+  // "You'll make" only for a course with a project; otherwise the outcome is what the learner will learn.
+  const outcomeLead = c.project ? "You’ll make:" : "You’ll learn:";
+  return { duration: hours, formats, support, materials, outcomeLead, level: c.level ? c.level[0].toUpperCase() + c.level.slice(1) : null };
 }
 
 export const mediaSrc = (apiBase, url) => {

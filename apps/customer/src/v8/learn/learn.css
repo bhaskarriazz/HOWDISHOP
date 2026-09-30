@@ -32,3 +32,19 @@
 .v8l .v8l-chips { flex: 0 0 auto; min-height: 44px; align-items: center; }
 .v8l .v8l-chips button { display: inline-flex; align-items: center; min-height: 36px; height: auto; line-height: 1.2; white-space: nowrap; color: var(--v8-ink); font-weight: 600; }
 .v8l .v8l-chips button.on { color: #fff; }
+/* LRN-NAV-001 — simplified learner navigation (V8 tab pattern: primary underline on the current tab, secondary Teach entry) */
+.v8l-nav { display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--v8-line); min-width: 0; }
+.v8l-tabs { display: flex; gap: 4px; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; } .v8l-tabs::-webkit-scrollbar { display: none; }
+.v8l-tabs button { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; min-height: 44px; border: 0; background: none; padding: 10px 12px 9px; font: 500 15px var(--v8-font); color: var(--v8-muted); border-bottom: 3px solid transparent; cursor: pointer; white-space: nowrap; }
+.v8l-tabs button[aria-current="page"] { color: var(--v8-primary); border-bottom-color: var(--v8-primary); font-weight: 600; }
+.v8l-tabs button:focus-visible, .v8l-teach:focus-visible { outline: 2px solid var(--v8-primary); outline-offset: -2px; border-radius: 8px; }
+.v8l-teach { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 6px 12px; border: 1px solid var(--v8-line-2); border-radius: 999px; background: var(--v8-surface); font: 600 14px var(--v8-font); color: var(--v8-ink-2); cursor: pointer; }
+.v8l-teach.on { border-color: var(--v8-primary); color: var(--v8-primary); }
+.v8l-tab-short { display: none; }
+@media (max-width: 560px) { .v8l-tab-full { display: none; } .v8l-tab-short { display: inline; } .v8l-tabs button { padding: 10px 8px 9px; font-size: 14px; } .v8l-tabs button svg { display: none; } .v8l-teach { padding: 6px 10px; } }
+/* P8 decision closure — explicit project answer in teacher authoring */
+.v8l-choice { border: 1px solid var(--v8-line); border-radius: 12px; padding: 10px 12px; display: grid; gap: 8px; min-width: 0; } .v8l-choice legend { font-weight: 700; padding: 0 4px; } .v8l-choice p { margin: 0; font-size: 14px; }
+.v8l-choice-opts { display: flex; flex-wrap: wrap; gap: 8px; } .v8l-choice-opts label, .v8l-check { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 12px; border: 1px solid var(--v8-line-2); border-radius: 12px; cursor: pointer; }
+.v8l-choice-opts label:has(input:checked) { border-color: var(--v8-primary); background: color-mix(in srgb, var(--v8-primary) 8%, transparent); }
+.v8l-check { border: 0; padding: 0; } .v8l-check.off { color: var(--v8-muted); cursor: not-allowed; }
+.v8l-setup { margin: 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 14px; color: var(--v8-ink-2); } .v8l-setup.todo { color: var(--v8-warning, #b45309); }

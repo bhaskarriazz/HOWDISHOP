@@ -17,7 +17,7 @@ export default function CourseCard({ c, apiBase, nav, onSave, compact }) {
       <div className="lx-card-body">
         <span className="lx-tags">{[c.category, f.level, c.language].filter(Boolean).map((t) => <i key={t}>{t}</i>)}</span>
         <h3><button type="button" className="lx-title" onClick={() => nav(`courses/${c.public_key}`)}>{c.title}</button></h3>
-        {c.outcome ? <p className="lx-outcome"><V8Icon name="star" size={14} /><span><b>You’ll make:</b> {c.outcome}</span></p> : c.tagline ? <p className="lx-outcome plain">{c.tagline}</p> : null}
+        {c.outcome ? <p className="lx-outcome"><V8Icon name="star" size={14} /><span><b>{f.outcomeLead}</b> {c.outcome}</span></p> : c.tagline ? <p className="lx-outcome plain">{c.tagline}</p> : null}
         <p className="lx-teacher">{c.by_howdi ? "HOWDI Learn" : c.teacher ? <>@{c.teacher.public_username}{c.teacher.verified ? <V8Icon name="check" size={12} /> : null}</> : null}</p>
         <ul className="lx-facts">
           {f.duration ? <li><V8Icon name="clock" size={14} />{f.duration} · {c.lessons} lesson{c.lessons === 1 ? "" : "s"}</li> : null}

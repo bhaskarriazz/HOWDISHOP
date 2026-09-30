@@ -14,9 +14,9 @@ P7-HOWDI-FOR / K5-HF-01 remains BUILD/REVIEW (visual direction accepted, Founder
 | LRN-PATH-001 Find My Learning Path | Done | `PathFinder` in `v8/learn/LearnJourney.jsx`, `learnJourneyModel.js` |
 | LRN-PROG-001 Today's Next Step + Project Journey | Done | `backend/learn-journey-v8.cjs`, `NextStep`, `JourneyTrack` |
 | LRN-MAT-001 Materials Checklist → Shop | Done | `/courses/{CRS}/materials`, `MaterialsChecklist`, App `howdi:v8-open` |
-| LRN-WORK-001 Show My Work + teacher feedback | Partial — implemented; contract/audit/lifecycle review and moderation/report still open | `/courses/{CRS}/work`, `/work/{EVD}/media`, `/teach/work/{EVD}/review` |
+| LRN-WORK-001 Show My Work + teacher feedback | Done — contract/audit/lifecycle review closed (see Decision closure); report/moderation flow not built | `/courses/{CRS}/work`, `/work/{EVD}/media`, `/teach/work/{EVD}/review` |
 | LRN-SELL-001 Ready to Sell | Done (draft only; success shown only when the Vendor API returns `status: "draft"`) | `ReadyToSell` → existing `POST /api/v8/vendor/products` |
-| LRN-NAV-001 simplified learner navigation | Not started — needs Founder visual approval first | Learn navigation unchanged |
+| LRN-NAV-001 simplified learner navigation | Done — Founder approval to proceed granted | `LearnNav` in `v8/learn/V8Learn.jsx`, `learn.css` |
 | TG-LRN-01/02/03 | Evidence below | tests + browser proof |
 | TG-LRN-04/05/06 | Evidence below | tests + browser proof |
 
@@ -80,3 +80,34 @@ milestones; paid-course checkout was not re-verified in the browser (unchanged A
 
 Unresolved by design: Goal taxonomy (decision required), Project entity/search (model/product decision), learner-support taxonomy
 (unclaimed — Live class / Certificate stay factual labels), Show My Work contract/audit/lifecycle review.
+
+## Decision closure (branch `codex/p8-learn-decisions`, from frozen `c305b0b`)
+
+Founder approved closing the six frozen P8 decisions. Authority: `backend/learn-taxonomy-v8.cjs` (mirrored labels in `v8/learn/learnDiscovery.js`).
+
+1. **Project requirement authoring — CLOSED.** The Teacher form asks "Does this course end with a project learners make and share
+   with you?" with no preselected answer; the API refuses a course without a real yes/no (`INVALID_COURSE`) and always writes
+   `project_required` + `v8_project_declared_at` explicitly. The DB default (`NOT NULL DEFAULT TRUE`) is not migrated.
+   Existing courses (`v8_project_declared_at IS NULL`) keep the accepted affirmative-evidence rule unchanged; teachers see
+   "Project not confirmed" and answer via `POST /api/v8/learn/teach/courses/{CRS}/project` (owner only). A project with shared
+   work cannot be switched off (`WORK_EXISTS`).
+2. **Goal taxonomy — CLOSED.** Closed list: certificate (`certificate_enabled`), project (rule above), sell (teacher-declared
+   `v8_sell_goal` AND a project; authoring refuses selling without a project). No goal derives from a category name
+   (`goal=sell` no longer maps to "Business & Selling").
+3. **Project entity/search — CLOSED (smallest model).** No standalone Project entity: a course-level declared project plus the
+   legacy evidence rule for older courses. A declared "No" wins over lesson practice tasks. Search already covers outcomes and
+   practice-task text. Cards say "You’ll make:" only for courses with a project, otherwise "You’ll learn:".
+4. **Learner-support taxonomy — CLOSED.** `support`: live_class (`live_class_included`), certificate (`certificate_enabled`),
+   teacher_review (project + a V8 teacher, i.e. the Show My Work review flow). Cards render only these server values.
+5. **Show My Work contract — CLOSED.** Privacy/authorization unchanged (entitled learner submits; media readable only by the
+   owner learner and the course teacher, `private, no-store`; @handles/EVD codes only). Added: an audit trail
+   (`howdi_v8_learn_work_events`: actor user, learner/teacher, submitted/accepted/revision) written in the same transaction as
+   each transition; a race-safe share (a concurrent duplicate attempt → 409 `AWAITING_REVIEW`, stored file removed); reviews
+   refused for inactive courses and for learners no longer enrolled (`NOT_ENROLLED`), while the learner keeps read access.
+   Not built (not required by the current contract): learner withdrawal/deletion of a share, report/moderation, retention policy.
+6. **LRN-NAV-001 — CLOSED.** Learner tabs Discover · My learning · Live & Passport ("Live" on phones) with `aria-current`
+   (V8 tab pattern: primary underline), Teach as a separate secondary entry. Routes unchanged; no other Learn surface rebuilt.
+
+Verification: backend unit `learn-discovery-v8` + `learn-taxonomy-v8` 19/19; client `learnDiscovery` + `learnJourneyModel` 18/18;
+`14-learn-p8` PG 79/79 (sandbox and no-sandbox); `11-learn` PG 39/39 and 37/37 (fixture now answers the project question);
+P7 `test-howdi-for` 26/26; customer build PASS; browser 28/28 at 390/1440 (`Documents/HOWDI_P8_EVIDENCE/decision-closure`).

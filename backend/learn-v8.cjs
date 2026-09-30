@@ -13,6 +13,7 @@
 // =====================================================================================
 const crypto = require('node:crypto');
 const discovery = require('./learn-discovery-v8.cjs');
+const taxonomy = require('./learn-taxonomy-v8.cjs');
 const { createLearnJourneyV8 } = require('./learn-journey-v8.cjs');
 const CATEGORIES = ['Crochet & Handmade', 'Tailoring & Textiles', 'Cooking', 'Digital skills', 'Business & Selling', 'Languages', 'Wellness'];
 const LEVELS = ['beginner', 'intermediate', 'advanced'];
@@ -44,6 +45,9 @@ function createLearnV8(deps) {
     // P8 Learn Discovery: estimated materials cost (never part of the course price) + per-learner saved courses
     await pool.query(`ALTER TABLE learning_courses ADD COLUMN IF NOT EXISTS v8_materials_cost NUMERIC(12,2)`);
     await pool.query(`CREATE TABLE IF NOT EXISTS howdi_v8_learn_saves(user_id BIGINT NOT NULL, course_id UUID NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY(user_id, course_id))`);
+    // P8 decision closure: the teacher's explicit project answer (NULL = created before the question existed) + selling goal
+    await pool.query(`ALTER TABLE learning_courses ADD COLUMN IF NOT EXISTS v8_project_declared_at TIMESTAMPTZ`);
+    await pool.query(`ALTER TABLE learning_courses ADD COLUMN IF NOT EXISTS v8_sell_goal BOOLEAN`);
     await journey.ensureSchema();
     await pool.query(`CREATE TABLE IF NOT EXISTS howdi_v8_learn_payments(user_id BIGINT NOT NULL, course_id UUID NOT NULL, amount NUMERIC(12,2) NOT NULL, txn VARCHAR(32), idem_key VARCHAR(64), created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY(user_id, course_id))`);
   }
@@ -91,15 +95,19 @@ function createLearnV8(deps) {
     const matCost = Number(c.v8_materials_cost);
     const outcomes = Array.isArray(c.outcomes) ? c.outcomes.filter((x) => typeof x === 'string' && x.trim()) : [];
     const saved = uid ? Boolean((await pool.query(`SELECT 1 FROM howdi_v8_learn_saves WHERE user_id=$1 AND course_id=$2`, [uid, c.id])).rows[0]) : false;
+    const project = taxonomy.projectOf(c, kinds.practice === true).has;
     return { public_key: await code('LCRS', c.id), title: c.title, tagline: c.tagline || null, category: c.category, level: c.level, language: c.language, minutes: Number(c.duration_minutes) || 0,
       price: money(c.sale_price ?? c.price ?? 0), free: !(Number(c.sale_price ?? c.price) > 0), image: safeUrl(c.thumbnail_url), lessons: n, learners,
       teacher: await teacherDto(c.v8_teacher_user_id), by_howdi: !c.v8_teacher_user_id, enrolled: st.enrolled, progress: st.progress,
-      outcome: outcomes[0] || null, certificate_available: c.certificate_enabled !== false, project: c.project_required === true || kinds.practice === true, live_class: c.live_class_included === true,
+      outcome: outcomes[0] || null, certificate_available: c.certificate_enabled !== false, project, live_class: c.live_class_included === true,
+      goals: taxonomy.goalsOf(c, project), support: taxonomy.supportOf(c, project),
       formats: [kinds.video ? 'video' : null, kinds.reading ? 'reading' : null, c.live_class_included === true ? 'live' : null].filter(Boolean),
       materials_count: mats.length, materials_cost: Number.isFinite(matCost) && matCost > 0 ? money(matCost) : null,
       preview_lesson: kinds.preview ? await code('LLSN', kinds.preview) : null, saved };
   }
   const published = `is_active AND publish_status='PUBLISHED'`;
+  // Teacher-only view of the authoring answers (null = not answered yet: a course created before the project question existed).
+  const setupOf = (c) => ({ project_declared: Boolean(c.v8_project_declared_at), project_required: c.v8_project_declared_at ? c.project_required === true : null, sell_goal: c.v8_project_declared_at ? c.v8_sell_goal === true : null });
 
   // P8 learner journey: next step, project journey, materials checklist, Show My Work (./learn-journey-v8.cjs)
   const journey = createLearnJourneyV8({ pool, getBody, notify, H, M, key, code, lessonsOf, stateOf, certOf, courseCard });
@@ -240,7 +248,7 @@ function createLearnV8(deps) {
       if (!(await isTeacher(uid))) { fail(res, 403, 'TEACHER_ROLE_REQUIRED', 'Apply as a Teacher first. HOWDI approves each teacher.'); return true; }
       if (p === '/api/v8/learn/teach' && req.method === 'GET') {
         const rows = (await pool.query(`SELECT * FROM learning_courses WHERE v8_teacher_user_id=$1 AND is_active ORDER BY created_at DESC`, [uid])).rows;
-        const items = await Promise.all(rows.map(async (c) => ({ ...(await courseCard(c, null)), status: c.publish_status === 'PUBLISHED' ? 'published' : 'draft',
+        const items = await Promise.all(rows.map(async (c) => ({ ...(await courseCard(c, null)), status: c.publish_status === 'PUBLISHED' ? 'published' : 'draft', ...setupOf(c),
           completed: Number((await pool.query(`SELECT COUNT(*) n FROM user_learning_certificates WHERE course_id=$1`, [c.id])).rows[0].n),
           earned: money((await pool.query(`SELECT COALESCE(SUM(amount),0) s FROM howdi_v8_learn_payments WHERE course_id=$1`, [c.id])).rows[0].s) })));
         ok(res, { items, categories: CATEGORIES, levels: LEVELS }); return true;
@@ -251,23 +259,33 @@ function createLearnV8(deps) {
         const price = Math.round(Number(b.price) || 0);
         const materials = (Array.isArray(b.materials) ? b.materials : []).map((x) => line(x, 120)).filter(Boolean).slice(0, 12);
         const matCost = b.materials_cost === '' || b.materials_cost == null ? null : Math.round(Number(b.materials_cost));
-        const bad = [!title && 'title', matCost !== null && !(matCost >= 0 && matCost <= 50000) && 'materials cost (₹0–₹50,000)', !CATEGORIES.includes(b.category) && 'category', !LEVELS.includes(b.level) && 'level', !(price >= 0 && price <= 20000) && 'price (₹0–₹20,000)', !lessons.length && 'at least one lesson with text'].filter(Boolean);
+        const choice = taxonomy.authoringChoice(b);
+        const bad = [!title && 'title', ...choice.errors, matCost !== null && !(matCost >= 0 && matCost <= 50000) && 'materials cost (₹0–₹50,000)', !CATEGORIES.includes(b.category) && 'category', !LEVELS.includes(b.level) && 'level', !(price >= 0 && price <= 20000) && 'price (₹0–₹20,000)', !lessons.length && 'at least one lesson with text'].filter(Boolean);
         if (bad.length) { fail(res, 400, 'INVALID_COURSE', `Add ${bad.join(', ')}.`); return true; }
         const client = await pool.connect(); let cid;
         try {
           await client.query('BEGIN');
-          cid = (await client.query(`INSERT INTO learning_courses(title,description,category,level,duration_minutes,tagline,language,publish_status,price,purchase_mode,v8_teacher_user_id,outcomes,materials,v8_materials_cost) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13::jsonb,$14) RETURNING id`,
+          cid = (await client.query(`INSERT INTO learning_courses(title,description,category,level,duration_minutes,tagline,language,publish_status,price,purchase_mode,v8_teacher_user_id,outcomes,materials,v8_materials_cost,project_required,v8_sell_goal,v8_project_declared_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13::jsonb,$14,$15,$16,NOW()) RETURNING id`,
             [title, text(b.description, 2000) || null, b.category, b.level, lessons.reduce((s, x) => s + x.minutes, 0), line(b.tagline, 200) || null, line(b.language, 40) || 'English', b.publish ? 'PUBLISHED' : 'DRAFT', price, price > 0 ? 'PAID' : 'FREE', uid,
-              JSON.stringify((Array.isArray(b.outcomes) ? b.outcomes : []).map((x) => line(x, 140)).filter(Boolean).slice(0, 6)), JSON.stringify(materials), matCost || null])).rows[0].id;
+              JSON.stringify((Array.isArray(b.outcomes) ? b.outcomes : []).map((x) => line(x, 140)).filter(Boolean).slice(0, 6)), JSON.stringify(materials), matCost || null, choice.project, choice.sell])).rows[0].id;
           const mid = (await client.query(`INSERT INTO learning_course_modules(course_id,title,sort_order) VALUES($1,'Lessons',0) RETURNING id`, [cid])).rows[0].id;
           for (let k = 0; k < lessons.length; k++) { const x = lessons[k]; await client.query(`INSERT INTO learning_course_lessons(module_id,title,lesson_type,content_text,duration_minutes,grandma_tip,practice_task,sort_order,is_preview) VALUES($1,$2,'TEXT',$3,$4,$5,$6,$7,$8)`, [mid, x.title, x.body, x.minutes, x.tip, x.practice, k, k === 0]); }
           await client.query('COMMIT');
         } catch (e) { await client.query('ROLLBACK').catch(() => {}); throw e; } finally { client.release(); }
         ok(res, { course: await courseCard((await pool.query(`SELECT * FROM learning_courses WHERE id=$1`, [cid])).rows[0], null), status: b.publish ? 'published' : 'draft' }, 201); return true;
       }
-      if ((m = p.match(/^\/api\/v8\/learn\/teach\/courses\/(CRS-[0-9A-F]{12})(?:\/(publish|unpublish))?$/))) {
+      if ((m = p.match(/^\/api\/v8\/learn\/teach\/courses\/(CRS-[0-9A-F]{12})(?:\/(publish|unpublish|project))?$/))) {
         const cid = await key(m[1], 'LCRS'); const c = cid ? (await pool.query(`SELECT * FROM learning_courses WHERE id=$1 AND v8_teacher_user_id=$2 AND is_active`, [cid, uid])).rows[0] : null;
         if (!c) { fail(res, 404, 'NOT_FOUND', 'Not your course.'); return true; }
+        if (m[2] === 'project' && req.method === 'POST') {
+          // Existing courses: the teacher answers the project question explicitly. Nothing changes until they do.
+          const b = await getBody(req).catch(() => ({})); const choice = taxonomy.authoringChoice(b);
+          if (choice.errors.length) { fail(res, 400, 'INVALID_PROJECT_CHOICE', `Add ${choice.errors.join(', ')}.`); return true; }
+          const shared = Number((await pool.query(`SELECT COUNT(*) n FROM howdi_v8_learn_work WHERE course_id=$1`, [c.id])).rows[0].n);
+          if (!choice.project && shared) { fail(res, 409, 'WORK_EXISTS', 'Learners have already shared work for this project, so it can’t be switched off.'); return true; }
+          const r = (await pool.query(`UPDATE learning_courses SET project_required=$2, v8_sell_goal=$3, v8_project_declared_at=NOW(), updated_at=NOW() WHERE id=$1 RETURNING *`, [c.id, choice.project, choice.sell])).rows[0];
+          ok(res, { course: { ...(await courseCard(r, null)), status: r.publish_status === 'PUBLISHED' ? 'published' : 'draft', ...setupOf(r) } }); return true;
+        }
         if (m[2] && req.method === 'POST') { await pool.query(`UPDATE learning_courses SET publish_status=$2, updated_at=NOW() WHERE id=$1`, [c.id, m[2] === 'publish' ? 'PUBLISHED' : 'DRAFT']); ok(res, { status: m[2] === 'publish' ? 'published' : 'draft' }); return true; }
         if (!m[2] && req.method === 'GET') {
           const n = (await lessonsOf(c.id)).length;

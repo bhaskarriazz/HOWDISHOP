@@ -89,3 +89,12 @@ test("media URLs resolve against the API origin and reject anything else", () =>
 test("every filter key is represented in the canonical URL order", () => {
   assert.deepEqual(FILTER_KEYS, ["goal", "lang", "level", "price", "skill", "format", "time", "materials"]);
 });
+
+test("P8 decision closure: support labels come from the server taxonomy; 'You'll make' only for a project", () => {
+  assert.deepEqual(cardFacts({ minutes: 30, support: ["certificate", "teacher_review"] }).support, ["Certificate", "Teacher reviews your project"]);
+  assert.deepEqual(cardFacts({ minutes: 30, support: [] }).support, [], "server said no support → nothing claimed");
+  assert.deepEqual(cardFacts({ minutes: 30, support: ["made_up"] }).support, [], "unknown values are never shown");
+  assert.equal(cardFacts({ minutes: 30, project: true }).outcomeLead, "You’ll make:");
+  assert.equal(cardFacts({ minutes: 30, project: false }).outcomeLead, "You’ll learn:");
+  assert.deepEqual(FILTERS.goal.options.map(([v]) => v), ["certificate", "project", "sell"]);
+});

@@ -39,7 +39,7 @@ const FORBIDDEN = /"(id|user_id|[a-z_]*_user_id|userId|howdi_id|master_id|email|
   // --- teacher creates a course
   check('invalid course refused', (await api('POST', '/api/v8/learn/teach/courses', { token: T.token, body: { title: 'x' } })).json.code === 'INVALID_COURSE');
   const price = SANDBOX ? 199 : 0;
-  const cc = await api('POST', '/api/v8/learn/teach/courses', { token: T.token, body: { title: 'Granny squares in a weekend', tagline: 'Your first crochet blanket square', category: 'Crochet & Handmade', level: 'beginner', price, publish: false, outcomes: ['Hold the hook', 'Make a magic ring'],
+  const cc = await api('POST', '/api/v8/learn/teach/courses', { token: T.token, body: { title: 'Granny squares in a weekend', tagline: 'Your first crochet blanket square', category: 'Crochet & Handmade', level: 'beginner', price, publish: false, project_required: true, outcomes: ['Hold the hook', 'Make a magic ring'],
     lessons: [{ title: 'Hook and yarn', body: 'Pick a 4 mm hook and cotton yarn.', minutes: 6, tip: 'Hold it like a pencil.' }, { title: 'Magic ring', body: 'Wrap twice, pull through.', minutes: 10, practice: 'Make 3 rings.' }, { title: 'First square', body: 'Three chains, two trebles…', minutes: 20 }] } });
   const CRS = cc.json.course?.public_key;
   check('course created as draft, CRS code, no ids', /^CRS-/.test(CRS || '') && cc.json.status === 'draft' && cc.json.course.lessons === 3 && !FORBIDDEN.test(cc.text), cc.text.slice(0, 300));

@@ -3,7 +3,7 @@
 // create + publish a course, see each learner's progress. Role applications: Teacher / Institute / Startup → HOWDI Admin.
 // Routes: /learn/courses · /learn/courses/{CRS} · /learn/lessons/{LSN} · /learn/mine · /learn/certificates/{no}
 //         /learn/teach · /learn/teach/{CRS} · /me/apply/(teacher|institute|startup)
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 import { V8Icon, V8State } from "../V8Shell";
 import { useV8Ui } from "../V8System";
 import { useApi, Sheet, Skel, Tabs, SignInCard, safeImg } from "../connect/common";
@@ -26,9 +26,10 @@ export default function V8Learn({ apiBase, getAuthHeaders, user, path, onNavigat
   const need = (el) => (user ? el : <SignInCard title="Sign in to continue" message="Your courses, progress and certificates are saved to your HOWDI account." onSignIn={onRequireLogin} />);
   const apply = p.match(/^apply\/(teacher|institute|startup)$/);
   const discover = !apply && !/^(courses\/|lessons\/|certificates\/|mine|teach)/.test(p);
+  const section = p === "mine" ? "mine" : /^teach/.test(p) ? "teach" : discover || /^courses\//.test(p) ? "discover" : null;
   return (
     <div className={`v8-page v8s v8l${discover ? " v8l-wide" : ""}`} id="v8-main">
-      {!apply ? <nav className="v8s-top" aria-label="Learn & Earn"><button type="button" className="v8-link" onClick={() => onNavigate("courses")}>Courses</button><span /><button type="button" className="v8-btn" onClick={() => onNavigate("mine")}><V8Icon name="learn" size={16} />My learning</button><button type="button" className="v8-btn" onClick={() => onNavigate("teach")}><V8Icon name="star" size={16} />Teach</button><button type="button" className="v8-link" onClick={() => onNavigate("/learn/live")}>Live classes & Passport</button></nav> : null}
+      {!apply ? <LearnNav section={section} onNavigate={onNavigate} /> : null}
       {(m = p.match(/^courses\/(CRS-[0-9A-F]{12})$/)) ? <Course key={m[1]} api={api} apiBase={apiBase} getAuthHeaders={getAuthHeaders} code={m[1]} user={user} nav={onNavigate} onRequireLogin={onRequireLogin} />
         : (m = p.match(/^lessons\/(LSN-[0-9A-F]{12})$/)) ? <Lesson key={m[1]} api={api} code={m[1]} user={user} nav={onNavigate} onRequireLogin={onRequireLogin} />
           : (m = p.match(/^certificates\/([A-Z0-9-]{6,80})$/)) ? <Verify api={api} code={m[1]} nav={onNavigate} />
@@ -163,22 +164,38 @@ function Mine({ api, apiBase, nav }) {
 
 // ------------------------------------------------------------------ teacher side
 const blankLesson = () => ({ title: "", body: "", minutes: 10, tip: "", practice: "" });
+// LRN-NAV-001 simplified learner navigation (V8 tab pattern): three learner destinations with a clear current tab; teaching
+// is a separate, secondary entry. Routes are unchanged (/learn/courses · /learn/mine · /learn/live · /learn/teach).
+const LEARN_TABS = [["discover", "Discover", "courses", "search"], ["mine", "My learning", "mine", "learn"], ["live", "Live & Passport", "/learn/live", "live", "Live"]];
+function LearnNav({ section, onNavigate }) {
+  return (
+    <nav className="v8l-nav" aria-label="Learn">
+      <div className="v8l-tabs">{LEARN_TABS.map(([id, label, to, icon, short]) => <button key={id} type="button" aria-label={short ? label : undefined} aria-current={section === id ? "page" : undefined} onClick={() => onNavigate(to)}><V8Icon name={icon} size={16} /><span className={short ? "v8l-tab-full" : undefined}>{label}</span>{short ? <span className="v8l-tab-short" aria-hidden="true">{short}</span> : null}</button>)}</div>
+      <button type="button" className={`v8l-teach ${section === "teach" ? "on" : ""}`} aria-current={section === "teach" ? "page" : undefined} onClick={() => onNavigate("teach")}><V8Icon name="star" size={16} />Teach</button>
+    </nav>
+  );
+}
+
 function Teach({ api, nav }) {
   const ui = useV8Ui(); const [d, setD] = useState(null); const [open, setOpen] = useState(false); const [err, setErr] = useState(""); const [busy, setBusy] = useState(false);
-  const [f, setF] = useState({ title: "", tagline: "", description: "", category: "", level: "beginner", price: 0, outcomes: "", language: "English", materials: "", materials_cost: "", lessons: [blankLesson()] });
+  const [f, setF] = useState({ title: "", tagline: "", description: "", category: "", level: "beginner", price: 0, outcomes: "", language: "English", materials: "", materials_cost: "", project_required: null, sell_goal: false, lessons: [blankLesson()] });
+  const [setup, setSetup] = useState(null);
   const load = useCallback(async () => { const r = await api("GET", "/api/v8/learn/teach"); setD(r.ok ? r.json : { error: r.json.message, code: r.json.code }); }, [api]);
   useEffect(() => { load(); }, [load]);
   if (!d) return <Skel h={260} r={16} />;
   if (d.code === "TEACHER_ROLE_REQUIRED") return <V8State icon="learn" title="Teach on HOWDI" message="Apply as a Teacher. HOWDI checks your skill and experience, then you can create courses and get paid in HPay." actionLabel="Apply as a teacher" onAction={() => nav("/me/apply/teacher")} />;
   if (d.error) return <p className="v8c-err">{d.error}</p>;
   const set = (k, v) => setF((x) => ({ ...x, [k]: v })); const setL = (i, k, v) => setF((x) => ({ ...x, lessons: x.lessons.map((l, j) => (j === i ? { ...l, [k]: v } : l)) }));
-  const create = async (publish) => { setBusy(true); setErr(""); const r = await api("POST", "/api/v8/learn/teach/courses", { ...f, price: Number(f.price) || 0, outcomes: f.outcomes.split(/\n+/).filter(Boolean), materials: f.materials.split(/\n+/).map((x) => x.trim()).filter(Boolean), materials_cost: f.materials_cost === "" ? null : Number(f.materials_cost), publish }); setBusy(false); if (!r.ok) { setErr(r.json.message); return; } ui?.toast({ title: publish ? "Course published — learners can join now" : "Draft saved" }); setOpen(false); setF({ title: "", tagline: "", description: "", category: "", level: "beginner", price: 0, outcomes: "", language: "English", materials: "", materials_cost: "", lessons: [blankLesson()] }); load(); };
+  const create = async (publish) => { if (typeof f.project_required !== "boolean") { setErr("Choose whether this course ends with a project learners share."); return; } setBusy(true); setErr(""); const r = await api("POST", "/api/v8/learn/teach/courses", { ...f, price: Number(f.price) || 0, outcomes: f.outcomes.split(/\n+/).filter(Boolean), materials: f.materials.split(/\n+/).map((x) => x.trim()).filter(Boolean), materials_cost: f.materials_cost === "" ? null : Number(f.materials_cost), publish }); setBusy(false); if (!r.ok) { setErr(r.json.message); return; } ui?.toast({ title: publish ? "Course published — learners can join now" : "Draft saved" }); setOpen(false); setF({ title: "", tagline: "", description: "", category: "", level: "beginner", price: 0, outcomes: "", language: "English", materials: "", materials_cost: "", project_required: null, sell_goal: false, lessons: [blankLesson()] }); load(); };
+  const saveSetup = async () => { setBusy(true); setErr(""); const r = await api("POST", `/api/v8/learn/teach/courses/${setup.c.public_key}/project`, { project_required: setup.project_required, sell_goal: setup.sell_goal }); setBusy(false); if (!r.ok) { setErr(r.json.message); return; } ui?.toast({ title: "Project answer saved" }); setSetup(null); load(); };
   const toggle = async (c) => { const r = await api("POST", `/api/v8/learn/teach/courses/${c.public_key}/${c.status === "published" ? "unpublish" : "publish"}`); if (r.ok) { ui?.toast({ title: r.json.status === "published" ? "Published" : "Unpublished — hidden from the catalogue" }); load(); } };
   return (<>
     <header className="v8l-teachhead"><div><h1 className="v8l-h">My courses</h1><p className="v8c-muted">Learners pay you in HPay (Preview/Test). You see each learner by @username only.</p></div><button type="button" className="v8-btn v8-btn-primary" onClick={() => setOpen(true)}><V8Icon name="learn" size={16} />New course</button></header>
     {!d.items.length ? <V8State icon="learn" title="No courses yet" message="Create your first course: a few short lessons with a tip and a practice task each." actionLabel="New course" onAction={() => setOpen(true)} />
       : <div className="v8-card v8w-block">{d.items.map((c) => <article key={c.public_key} className="v8me-order"><header><b>{c.title}</b><span className={`v8m-state ${c.status === "published" ? "ok" : "muted"}`}><i />{c.status === "published" ? "Published" : "Draft"}</span></header>
         <p className="v8c-muted">{c.category} · {c.lessons} lessons · {c.free ? "Free" : inr(c.price)} · {c.learners} learners · {c.completed} completed · earned {inr(c.earned)}</p>
+        <p className={`v8l-setup ${c.project_declared ? "" : "todo"}`}>{c.project_declared ? (c.project_required ? <>Project: learners share their work with you{c.sell_goal ? " · teaches selling" : ""}</> : "No project") : <><b>Project not confirmed.</b> Answer the project question so learners see the right steps.</>}
+          <button type="button" className="v8-link" onClick={() => { setErr(""); setSetup({ c, project_required: c.project_declared ? c.project_required : null, sell_goal: Boolean(c.sell_goal) }); }}>{c.project_declared ? "Change" : "Answer now"}</button></p>
         <div className="v8w-row"><button type="button" className="v8-btn v8-btn-primary" onClick={() => nav(`teach/${c.public_key}`)}>Learners</button><button type="button" className="v8-btn" onClick={() => toggle(c)}>{c.status === "published" ? "Unpublish" : "Publish"}</button>{c.status === "published" ? <button type="button" className="v8-btn" onClick={() => nav(`courses/${c.public_key}`)}>View as learner</button> : null}</div></article>)}</div>}
     {open ? <Sheet open title="New course" onClose={() => setOpen(false)}>
       <div className="v8l-form">
@@ -190,6 +207,7 @@ function Teach({ api, nav }) {
         <label className="v8c-field"><span>Language you teach in</span><input value={f.language} maxLength={40} onChange={(e) => set("language", e.target.value)} placeholder="e.g. Telugu" /></label>
         <label className="v8c-field"><span>Materials learners need (one per line, optional)</span><textarea rows={2} value={f.materials} onChange={(e) => set("materials", e.target.value)} placeholder={"e.g. Cotton yarn 4-ply\n4 mm crochet hook"} /></label>
         <label className="v8c-field"><span>Estimated materials cost, ₹ (optional — shown separately from the course price)</span><input inputMode="numeric" value={f.materials_cost} onChange={(e) => set("materials_cost", e.target.value.replace(/\D/g, "").slice(0, 5))} /></label>
+        <ProjectChoice value={f.project_required} sell={f.sell_goal} onChange={(v) => setF((x) => ({ ...x, ...v }))} />
         <label className="v8c-field"><span>What learners will be able to do (one per line)</span><textarea rows={2} value={f.outcomes} onChange={(e) => set("outcomes", e.target.value)} /></label>
         {f.lessons.map((l, i) => <fieldset key={i} className="v8l-lessonf"><legend>Lesson {i + 1}{i === 0 ? " · free preview" : ""}</legend>
           <label className="v8c-field"><span>Lesson title</span><input value={l.title} onChange={(e) => setL(i, "title", e.target.value)} /></label>
@@ -201,7 +219,30 @@ function Teach({ api, nav }) {
         {err ? <p className="v8c-err" role="alert">{err}</p> : null}
         <div className="v8vc-actions"><button type="button" className="v8-btn" disabled={busy} onClick={() => create(false)}>Save draft</button><button type="button" className="v8-btn v8-btn-primary" disabled={busy} onClick={() => create(true)}>Publish</button></div>
       </div></Sheet> : null}
+    {setup ? <Sheet open title="Project" onClose={() => setSetup(null)}>
+      <div className="v8l-form">
+        <p className="v8c-muted">{setup.c.title}</p>
+        <ProjectChoice value={setup.project_required} sell={setup.sell_goal} onChange={(v) => setSetup((x) => ({ ...x, ...v }))} />
+        {err ? <p className="v8c-err" role="alert">{err}</p> : null}
+        <div className="v8vc-actions"><button type="button" className="v8-btn" onClick={() => setSetup(null)}>Cancel</button><button type="button" className="v8-btn v8-btn-primary" disabled={busy || typeof setup.project_required !== "boolean"} onClick={saveSetup}>Save</button></div>
+      </div></Sheet> : null}
   </>);
+}
+
+// P8 decision closure: the teacher answers the project question explicitly (no preselected answer, no silent default).
+function ProjectChoice({ value, sell, onChange }) {
+  const name = useId();
+  return (
+    <fieldset className="v8l-choice">
+      <legend>Does this course end with a project learners make and share with you?</legend>
+      <p className="v8c-muted">If yes, learners can share a photo or short clip of their project, and you accept it or ask for a revision.</p>
+      <div className="v8l-choice-opts">
+        <label><input type="radio" name={name} checked={value === true} onChange={() => onChange({ project_required: true, sell_goal: sell })} />Yes, learners make a project</label>
+        <label><input type="radio" name={name} checked={value === false} onChange={() => onChange({ project_required: false, sell_goal: false })} />No project</label>
+      </div>
+      <label className={`v8l-check ${value === true ? "" : "off"}`}><input type="checkbox" disabled={value !== true} checked={value === true && Boolean(sell)} onChange={(e) => onChange({ project_required: true, sell_goal: e.target.checked })} />This course also teaches learners to price and sell what they make</label>
+    </fieldset>
+  );
 }
 
 function TeachCourse({ api, apiBase, getAuthHeaders, code, nav }) {

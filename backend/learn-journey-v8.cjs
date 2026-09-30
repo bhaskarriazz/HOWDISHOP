@@ -11,7 +11,11 @@
 // Server is the authority for progress, milestones and evidence status. Evidence media is stored outside the public media
 // folder and only streamed through an authorised call. Only public codes (CRS/LSN/EVD) and @handles leave the server.
 // =====================================================================================
+const taxonomy = require('./learn-taxonomy-v8.cjs');
 const MAX_ATTEMPTS = 3;
+// Show My Work lifecycle (one row per share): submitted → accepted | revision. A revision allows a new share (next attempt) until
+// MAX_ATTEMPTS; nothing follows acceptance. Every transition is written to howdi_v8_learn_work_events in the same transaction
+// (who acted, as learner or teacher, and what), so decisions stay auditable after the row changes.
 const WORK_STATUSES = ['submitted', 'revision', 'accepted'];
 
 function createLearnJourneyV8(deps) {
@@ -25,6 +29,9 @@ function createLearnJourneyV8(deps) {
       media_file VARCHAR(64) NOT NULL, media_type VARCHAR(8) NOT NULL, note VARCHAR(600), status VARCHAR(12) NOT NULL DEFAULT 'submitted', feedback VARCHAR(1000),
       reviewed_by BIGINT, reviewed_at TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), UNIQUE(user_id, course_id, attempt))`);
     await pool.query(`CREATE INDEX IF NOT EXISTS howdi_v8_learn_work_course ON howdi_v8_learn_work(course_id, status, created_at DESC)`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS howdi_v8_learn_work_events(id BIGSERIAL PRIMARY KEY, work_id BIGINT NOT NULL, actor_user_id BIGINT NOT NULL, actor VARCHAR(8) NOT NULL,
+      action VARCHAR(12) NOT NULL, at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS howdi_v8_learn_work_events_work ON howdi_v8_learn_work_events(work_id, id)`);
   }
 
   const entitled = async (uid, courseId) => Boolean((await pool.query(`SELECT 1 FROM learning_course_entitlements WHERE user_id=$1 AND course_id=$2 AND entitlement_status='ACTIVE'`, [uid, courseId])).rows[0]);
@@ -50,13 +57,15 @@ function createLearnJourneyV8(deps) {
     return { items: items.map((name) => ({ name, owned: owned.has(name) })), ready: items.every((n) => owned.has(n)) };
   }
 
-  // A course has a project only on affirmative evidence: an explicit project_required = TRUE, or an active lesson that
-  // actually carries a practice task. NULL / missing is never proof of a project (and there is no separate Project entity).
+  // Project rule from learn-taxonomy-v8.cjs: the teacher's explicit answer decides; courses created before the question keep the
+  // affirmative-evidence rule (project_required = TRUE or an active practice task). NULL / missing is never proof of a project.
   async function hasProject(c) {
-    if (c.project_required === true) return true;
-    return Boolean((await pool.query(`SELECT 1 FROM learning_course_lessons l JOIN learning_course_modules m ON m.id=l.module_id
-      WHERE m.course_id=$1 AND l.is_active AND m.is_active AND COALESCE(TRIM(l.practice_task),'')<>'' LIMIT 1`, [c.id])).rows[0]);
+    const needPractice = !c.v8_project_declared_at && c.project_required !== true;
+    const practice = needPractice ? Boolean((await pool.query(`SELECT 1 FROM learning_course_lessons l JOIN learning_course_modules m ON m.id=l.module_id
+      WHERE m.course_id=$1 AND l.is_active AND m.is_active AND COALESCE(TRIM(l.practice_task),'')<>'' LIMIT 1`, [c.id])).rows[0]) : false;
+    return taxonomy.projectOf(c, practice).has;
   }
+  const event = (db, workId, actorId, actor, action) => db.query(`INSERT INTO howdi_v8_learn_work_events(work_id, actor_user_id, actor, action) VALUES($1,$2,$3,$4)`, [workId, actorId, actor, action]);
 
   // Project Journey: every milestone is derived from verified server records (entitlement, lesson progress, evidence, certificate).
   async function journeyFor(uid, c) {
@@ -142,8 +151,20 @@ function createLearnJourneyV8(deps) {
           if (!s.canSubmit) { fail(res, 409, s.accepted ? 'ALREADY_ACCEPTED' : s.latest?.status === 'submitted' ? 'AWAITING_REVIEW' : 'NO_ATTEMPTS_LEFT', s.accepted ? 'Your work is already accepted.' : s.latest?.status === 'submitted' ? 'Your teacher is still reviewing your last share.' : 'No attempts left for this course.'); return true; }
           const b = await getBody(req).catch(() => ({}));
           let saved; try { saved = H.savePrivate(b.mediaData, { maxImage: 5 * 1024 * 1024, maxVideo: 20 * 1024 * 1024 }); } catch (e) { fail(res, 400, e.code || 'MEDIA_INVALID', e.message || 'Add a photo or a short clip.'); return true; }
-          const row = (await pool.query(`INSERT INTO howdi_v8_learn_work(user_id, course_id, attempt, media_file, media_type, note) VALUES($1,$2,$3,$4,$5,$6) RETURNING *`,
-            [uid, c.id, s.rows.length + 1, saved.file, saved.type === 'video' ? 'video' : 'image', line(b.note, 600) || null])).rows[0];
+          // Row + audit event commit together. A concurrent share for the same attempt loses on UNIQUE(user, course, attempt):
+          // it is refused like any second pending share and its stored file is removed, so no orphan evidence is kept.
+          const client = await pool.connect(); let row;
+          try {
+            await client.query('BEGIN');
+            row = (await client.query(`INSERT INTO howdi_v8_learn_work(user_id, course_id, attempt, media_file, media_type, note) VALUES($1,$2,$3,$4,$5,$6) RETURNING *`,
+              [uid, c.id, s.rows.length + 1, saved.file, saved.type === 'video' ? 'video' : 'image', line(b.note, 600) || null])).rows[0];
+            await event(client, row.id, uid, 'learner', 'submitted');
+            await client.query('COMMIT');
+          } catch (e) {
+            await client.query('ROLLBACK').catch(() => {}); if (H.deletePrivate) H.deletePrivate(saved.file);
+            if (e && e.code === '23505') { fail(res, 409, 'AWAITING_REVIEW', 'Your teacher is still reviewing your last share.'); return true; }
+            throw e;
+          } finally { client.release(); }
           if (c.v8_teacher_user_id) await notify(Number(c.v8_teacher_user_id), 'LEARN_WORK_SHARED', `@${(await handleOf(uid)) || 'learner'} shared work for “${line(c.title, 50)}”`, 'Review it and leave feedback.', `/learn/teach/${m[1]}`, uid);
           ok(res, { item: await workDto(row) }, 201); return true;
         }
@@ -171,14 +192,22 @@ function createLearnJourneyV8(deps) {
     if ((m = p.match(/^\/api\/v8\/learn\/teach\/work\/(EVD-[0-9A-F]{12})\/review$/)) && req.method === 'POST') {
       if (!uid) { fail(res, 401, 'SIGN_IN_REQUIRED', 'Sign in first.'); return true; }
       const wid = await key(m[1], 'LEVD');
-      const w = wid ? (await pool.query(`SELECT w.*, c.title, c.v8_teacher_user_id FROM howdi_v8_learn_work w JOIN learning_courses c ON c.id=w.course_id WHERE w.id=$1`, [wid])).rows[0] : null;
+      const w = wid ? (await pool.query(`SELECT w.*, c.title, c.v8_teacher_user_id FROM howdi_v8_learn_work w JOIN learning_courses c ON c.id=w.course_id WHERE w.id=$1 AND c.is_active`, [wid])).rows[0] : null;
       if (!w || Number(w.v8_teacher_user_id) !== uid) { fail(res, 404, 'NOT_FOUND', 'Not found.'); return true; }
       if (w.status !== 'submitted') { fail(res, 409, 'ALREADY_REVIEWED', 'This share was already reviewed.'); return true; }
+      // A learner who left the course (refund/removal) is no longer reviewed; their own share stays readable to them.
+      if (!(await entitled(Number(w.user_id), w.course_id))) { fail(res, 409, 'NOT_ENROLLED', 'This learner is no longer in the course.'); return true; }
       const b = await getBody(req).catch(() => ({})); const decision = b.decision === 'accept' ? 'accepted' : b.decision === 'revise' ? 'revision' : null;
       const feedback = text(b.feedback, 1000);
       if (!decision) { fail(res, 400, 'INVALID_DECISION', 'Choose accept or ask for a revision.'); return true; }
       if (decision === 'revision' && !feedback) { fail(res, 400, 'FEEDBACK_REQUIRED', 'Tell the learner what to improve.'); return true; }
-      const r = (await pool.query(`UPDATE howdi_v8_learn_work SET status=$2, feedback=$3, reviewed_by=$4, reviewed_at=NOW() WHERE id=$1 AND status='submitted' RETURNING *`, [w.id, decision, feedback || null, uid])).rows[0];
+      const client = await pool.connect(); let r;
+      try {
+        await client.query('BEGIN');
+        r = (await client.query(`UPDATE howdi_v8_learn_work SET status=$2, feedback=$3, reviewed_by=$4, reviewed_at=NOW() WHERE id=$1 AND status='submitted' RETURNING *`, [w.id, decision, feedback || null, uid])).rows[0];
+        if (r) await event(client, r.id, uid, 'teacher', decision);
+        await client.query('COMMIT');
+      } catch (e) { await client.query('ROLLBACK').catch(() => {}); throw e; } finally { client.release(); }
       if (!r) { fail(res, 409, 'ALREADY_REVIEWED', 'This share was already reviewed.'); return true; }
       const crs = await code('LCRS', w.course_id);
       await notify(Number(w.user_id), decision === 'accepted' ? 'LEARN_WORK_ACCEPTED' : 'LEARN_WORK_REVISION', decision === 'accepted' ? `Your work for “${line(w.title, 50)}” was accepted` : `Feedback on your work for “${line(w.title, 50)}”`,

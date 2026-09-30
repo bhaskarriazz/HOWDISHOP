@@ -15,12 +15,12 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCA
   for (const t of [T, P]) await pool.query(`INSERT INTO user_roles(user_id,role_id,role_status) VALUES($1,$2,'ACTIVE')`, [t.id, roleId]);
   const v = await K.vendor(V, { business: 'Vani Crafts' }); await pool.query(`UPDATE vendor_profiles SET kyc_status='verified', store_status='online' WHERE id=$1`, [v.id]);
 
-  const mk = async (who, body) => (await api('POST', '/api/v8/learn/teach/courses', { token: who.token, body: { level: 'beginner', price: 0, lessons: [{ title: 'Welcome', body: 'Hello', minutes: 20 }, { title: 'Practice', body: 'Do it', minutes: 20, practice: 'Make a coaster' }], publish: true, ...body } })).json.course?.public_key;
+  const mk = async (who, body) => (await api('POST', '/api/v8/learn/teach/courses', { token: who.token, body: { level: 'beginner', price: 0, project_required: true, lessons: [{ title: 'Welcome', body: 'Hello', minutes: 20 }, { title: 'Practice', body: 'Do it', minutes: 20, practice: 'Make a coaster' }], publish: true, ...body } })).json.course?.public_key;
   const A = await mk(T, { title: 'P8 Daisy Coaster', category: 'Crochet & Handmade', language: 'Telugu', outcomes: ['Make a daisy coaster'], materials: ['Cotton yarn', '4 mm hook'], materials_cost: 250 });
-  const B = await mk(T, { title: 'P8 Pricing Basics', category: 'Business & Selling', language: 'English', price: 600 });
+  const B = await mk(T, { title: 'P8 Pricing Basics', category: 'Business & Selling', language: 'English', price: 600, sell_goal: true });
   const Cc = await mk(T, { title: 'P8 Quick Hem', category: 'Tailoring & Textiles', language: 'Hindi', level: 'advanced' });
   const D = await mk(P, { title: 'P8 Secret Teacher Course', category: 'Cooking', language: 'English' });
-  await api('POST', '/api/v8/learn/teach/courses', { token: T.token, body: { title: 'P8 Hidden Draft', category: 'Cooking', level: 'beginner', price: 0, lessons: [{ title: 'x', body: 'y', minutes: 5 }], publish: false } });
+  await api('POST', '/api/v8/learn/teach/courses', { token: T.token, body: { title: 'P8 Hidden Draft', category: 'Cooking', level: 'beginner', price: 0, project_required: false, lessons: [{ title: 'x', body: 'y', minutes: 5 }], publish: false } });
   for (let i = 0; i < 14; i++) await mk(T, { title: `P8 Filler ${String(i).padStart(2, '0')}`, category: 'Wellness', language: 'English' });
   check('courses created', [A, B, Cc, D].every((x) => /^CRS-/.test(x || '')));
 
@@ -33,7 +33,7 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCA
   check('card has no internal ids', !FORBIDDEN.test((await list('limit=48')).text));
   r = await list('lang=Telugu&level=beginner'); check('language + level filter', r.json.total === 1 && r.json.items[0].title === 'P8 Daisy Coaster');
   r = await list('price=500to2000'); check('price band filter', r.json.items.map((x) => x.title).join() === 'P8 Pricing Basics');
-  r = await list('goal=sell'); check('goal=sell maps to the selling skill', r.json.items.map((x) => x.title).join() === 'P8 Pricing Basics');
+  r = await list('goal=sell'); check('goal=sell is the teacher-declared selling goal', r.json.items.map((x) => x.title).join() === 'P8 Pricing Basics');
   r = await list('materials=list'); check('materials filter', r.json.items.map((x) => x.title).join() === 'P8 Daisy Coaster');
   r = await list('level=advanced&lang=Klingon'); check('unknown language dropped, valid filter kept', r.json.total === 1 && !r.json.applied.lang);
   r = await list('q=tara_p8'); check('search by teacher @handle (her 17 published courses)', r.json.total === 17, r.json.total);
@@ -95,10 +95,10 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCA
   check('teacher list: @handles only', r.json.items.length === 2 && r.json.items.every((x) => x.learner?.public_username === 'lina_p8') && !FORBIDDEN.test(r.text));
 
   // ---- P8 correction 2: a project needs affirmative evidence (explicit TRUE or a real practice task), never a default/missing flag
-  const plain = async (title, practice) => (await api('POST', '/api/v8/learn/teach/courses', { token: T.token, body: { title, category: 'Cooking', level: 'beginner', price: 0, publish: true,
+  const plain = async (title, practice) => (await api('POST', '/api/v8/learn/teach/courses', { token: T.token, body: { title, category: 'Cooking', level: 'beginner', price: 0, publish: true, project_required: true,
     lessons: [{ title: 'Only lesson', body: 'Read this', minutes: 10, ...(practice ? { practice } : {}) }] } })).json.course?.public_key;
   const E = await plain('P8 NoProject Notes'); const F = await plain('P8 Practice Only', 'Cook one dosa');
-  await pool.query(`UPDATE learning_courses SET project_required=FALSE WHERE title IN ('P8 NoProject Notes','P8 Practice Only')`);
+  await pool.query(`UPDATE learning_courses SET project_required=FALSE, v8_project_declared_at=NULL WHERE title IN ('P8 NoProject Notes','P8 Practice Only')`);
   const cardOf = async (t) => (await list(`q=${encodeURIComponent(t)}`)).json.items.find((x) => x.title === t);
   check('no flag + no practice task → card is not project-positive', (await cardOf('P8 NoProject Notes'))?.project === false);
   check('practice task is affirmative project evidence', (await cardOf('P8 Practice Only'))?.project === true);
@@ -111,6 +111,49 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCA
   await api('POST', `/api/v8/learn/courses/${F}/enroll`, { token: X.token, body: { idem_key: 'p8-f' } });
   check('Show My Work available when a practice task exists', (await api('GET', `/api/v8/learn/courses/${F}/work`, { token: X.token })).status === 200);
   check('journey with practice evidence includes project milestones', (await api('GET', `/api/v8/learn/courses/${F}/journey`, { token: X.token })).json.milestones.some((m) => m.key === 'shared'));
+
+  // ---- P8 decision closure: explicit project authoring, goal/support taxonomy, legacy courses, Show My Work audit + lifecycle
+  const base = { category: 'Cooking', level: 'beginner', price: 0, publish: true, lessons: [{ title: 'One', body: 'Read', minutes: 10, practice: 'Cook a dosa' }] };
+  const create = (body, who = T) => api('POST', '/api/v8/learn/teach/courses', { token: who.token, body: { ...base, ...body } });
+  r = await create({ title: 'P8 No Answer' }); check('authoring: the project question must be answered', r.status === 400 && r.json.code === 'INVALID_COURSE' && /project choice/.test(r.json.message), r.json);
+  r = await create({ title: 'P8 Bad Answer', project_required: 'yes' }); check('authoring: only a real yes/no counts', r.status === 400);
+  r = await create({ title: 'P8 Sell No Project', project_required: false, sell_goal: true }); check('authoring: selling needs a project', r.status === 400 && /selling course needs/.test(r.json.message));
+  const NO = (await create({ title: 'P8 Declared No', project_required: false })).json.course;
+  check('declared No wins over a practice task (card, goal, support)', NO && NO.project === false && !NO.goals.includes('project') && !NO.support.includes('teacher_review'), NO);
+  const YES = (await create({ title: 'P8 Declared Yes', project_required: true, lessons: [{ title: 'One', body: 'Read', minutes: 10 }] })).json.course;
+  check('declared Yes without practice tasks is a project with teacher review', YES && YES.project === true && YES.goals.includes('project') && YES.support.includes('teacher_review'), YES);
+  const dbRow = async (t) => (await pool.query(`SELECT project_required, v8_sell_goal, v8_project_declared_at FROM learning_courses WHERE title=$1`, [t])).rows[0];
+  const rNo = await dbRow('P8 Declared No'); check('authoring writes the answer explicitly (never the DB default)', rNo.project_required === false && rNo.v8_sell_goal === false && rNo.v8_project_declared_at !== null);
+  r = await list('goal=project&limit=48'); check('goal=project: declared No excluded, declared Yes included', !r.json.items.some((x) => x.title === 'P8 Declared No') && r.json.items.some((x) => x.title === 'P8 Declared Yes'));
+  const sellCat = (await create({ title: 'P8 Selling Category Only', category: 'Business & Selling', project_required: true })).json.course;
+  r = await list('goal=sell&limit=48'); check('goal=sell never derives from the category name', sellCat && !r.json.items.some((x) => x.title === 'P8 Selling Category Only') && r.json.items.some((x) => x.title === 'P8 Pricing Basics'));
+  check('card goals/support come from the taxonomy', card && Array.isArray(card.support) && card.support.includes('certificate') && card.support.includes('teacher_review') && !card.support.includes('live_class'));
+  // legacy course (created before the question): unchanged behaviour until the teacher answers
+  const LEG = (await create({ title: 'P8 Legacy Course', project_required: true })).json.course.public_key;
+  await pool.query(`UPDATE learning_courses SET v8_project_declared_at=NULL, v8_sell_goal=NULL WHERE title='P8 Legacy Course'`);
+  let tl = (await api('GET', '/api/v8/learn/teach', { token: T.token })).json.items.find((x) => x.public_key === LEG);
+  check('legacy course: teacher sees "not confirmed", learners keep the accepted evidence rule', tl && tl.project_declared === false && tl.project_required === null && tl.project === true, tl);
+  const setProject = (who, crs, body) => api('POST', `/api/v8/learn/teach/courses/${crs}/project`, { token: who.token, body });
+  check('confirm: another teacher cannot', (await setProject(P, LEG, { project_required: false })).status === 404);
+  check('confirm: learner (no teacher role) cannot', (await setProject(L, LEG, { project_required: false })).status === 403);
+  check('confirm: needs a real yes/no', (await setProject(T, LEG, {})).json.code === 'INVALID_PROJECT_CHOICE');
+  r = await setProject(T, LEG, { project_required: false });
+  check('confirm: teacher answers No on a legacy course', r.status === 200 && r.json.course.project_declared === true && r.json.course.project === false, r.json);
+  check('confirm: cannot switch off a project with shared work', (await setProject(T, A, { project_required: false })).json.code === 'WORK_EXISTS');
+  r = await setProject(T, A, { project_required: true, sell_goal: true }); check('confirm: Yes + selling on a course with work', r.status === 200 && r.json.course.sell_goal === true && r.json.course.goals.includes('sell'));
+  // Show My Work audit trail + lifecycle
+  const ev = (await pool.query(`SELECT e.actor, e.action FROM howdi_v8_learn_work_events e JOIN howdi_v8_learn_work w ON w.id=e.work_id WHERE w.user_id=$1 ORDER BY e.id`, [L.id])).rows.map((x) => `${x.actor}:${x.action}`);
+  check('audit: every transition recorded with its actor', ev.join() === 'learner:submitted,teacher:revision,learner:submitted,teacher:accepted', ev);
+  const Q = await K.member('Quinn Racer', { username: 'quinn_p8' });
+  await api('POST', `/api/v8/learn/courses/${Cc}/enroll`, { token: Q.token, body: { idem_key: 'p8-q' } });
+  const both = await Promise.all([1, 2].map(() => api('POST', `/api/v8/learn/courses/${Cc}/work`, { token: Q.token, body: { mediaData: PNG } })));
+  const qRows = Number((await pool.query(`SELECT COUNT(*) n FROM howdi_v8_learn_work WHERE user_id=$1`, [Q.id])).rows[0].n);
+  check('lifecycle: two simultaneous shares → exactly one pending share, the other refused', qRows === 1 && both.map((x) => x.status).sort().join() === '201,409', both.map((x) => [x.status, x.json.code]));
+  const qw = both.find((x) => x.status === 201).json.item.public_key;
+  await pool.query(`UPDATE learning_course_entitlements SET entitlement_status='REVOKED' WHERE user_id=$1`, [Q.id]);
+  check('lifecycle: a learner who left the course is not reviewed', (await api('POST', `/api/v8/learn/teach/work/${qw}/review`, { token: T.token, body: { decision: 'accept' } })).json.code === 'NOT_ENROLLED');
+  check('privacy: the learner can still read their own share', (await media(Q, qw)).status === 200);
+  check('privacy: still hidden from outsiders', (await media(X, qw)).status === 404);
 
   // ---- Ready to Sell: Shop decides; drafts only
   check('non-vendor cannot create a Shop listing', (await api('POST', '/api/v8/vendor/products', { token: L.token, body: { name: 'Daisy coaster', price: 520, mrp: 520, stock: 1 } })).json.code === 'NOT_A_VENDOR');
