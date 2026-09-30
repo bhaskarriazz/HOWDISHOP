@@ -35,13 +35,13 @@ test('retired V16.4A/B HPay packs: deny by default, capabilities public, admin p
 test('legacy wallet routes: session-only actor, validated amounts, atomic helper, no raw user ids', () => {
   const credit = route('if(req.method==="POST" && pathname==="/api/wallet/credit"){');
   assert.match(credit, /if\(!accessV8\.sandboxEnabled\(\)\)return sendJSON\(res,503/);
-  assert.match(credit, /const userId=await k5eRequireSelf\(req,res\);/);
+  assert.match(credit, /const userId=await k5eRequireFinancialSelf\(req,res\);/);
   assert.match(credit, /parseAmount\(body\.amount,\{max:5000\}\)/);
   assert.match(credit, /if\(transactionType!=="CREDIT"\)/);
   assert.match(credit, /if\(!key\) return sendJSON\(res,400/);
   assert.doesNotMatch(credit, /body\.user_?[iI]d/);
   const debit = route('if(req.method==="POST" && pathname==="/api/wallet/debit"){');
-  assert.match(debit, /const userId=await k5eRequireSelf\(req,res\);/);
+  assert.match(debit, /const userId=await k5eRequireFinancialSelf\(req,res\);/);
   assert.match(debit, /mutateWallet\(pool,\{userId,op:"DEBIT"/);
   assert.match(debit, /wallet:k5eOmitUserId\(r\.wallet\),transaction:k5eOmitUserId\(r\.transaction\)/);
   assert.doesNotMatch(debit, /body\.user_?[iI]d/);
@@ -57,4 +57,61 @@ test('mutateWallet: locks the wallet row before the idempotency check and the ba
   assert.ok(lock > 0 && lock < idem && idem < check);
   assert.match(body, /INSERT INTO wallet_transactions\(wallet_id, user_id, transaction_type, amount, title/);
   assert.match(body, /await client\.query\('COMMIT'\)/);
+});
+
+// ---------------------------------------------------------------- production-integration hardening
+test('financial access needs the sign-in account state (is_active + ACTIVE); anything else fails closed', () => {
+  assert.equal(W.financialActive({ is_active: true, account_status: 'ACTIVE' }), true);
+  assert.equal(W.financialActive({ is_active: true, account_status: ' active ' }), true);
+  for (const u of [null, {}, { is_active: false, account_status: 'ACTIVE' }, { is_active: true, account_status: 'SUSPENDED' }, { is_active: true, account_status: 'BLOCKED' },
+    { is_active: null, account_status: 'ACTIVE' }, { is_active: true, account_status: '' }, { is_active: 'true', account_status: 'ACTIVE' }])
+    assert.equal(W.financialActive(u), false, JSON.stringify(u));
+  const gate = server.slice(server.indexOf('async function k5eRequireFinancialSelf'), server.indexOf('async function k5eRequireSelf'));
+  assert.match(gate, /if \(!session\) \{ sendJSON\(res, 401/);
+  assert.match(gate, /financialActive\(session\)\) \{ sendJSON\(res, 403/);
+  for (const r of ['"/api/wallet/me"', '"/api/wallet/transactions"', '"/api/wallet/credit"', '"/api/wallet/debit"', 'pathname === "/api/wallet/user/me"', '"/api/wallet/add-money"', '"/api/wallet/transfer-cashback"']) {
+    const i = server.indexOf(r); const block = server.slice(i, i + 1400);
+    assert.match(block, /const userId=await k5eRequireFinancialSelf\(req,res\);/, r);
+  }
+  assert.equal((server.match(/financialActive\(sessionUser\)\) return sendJSON\(res,403/g) || []).length, 4, 'hpay me / accounts / accounts/user / requests');
+});
+
+test('legacy balance reconciliation: available_balance is the only balance written and shown', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'wallet-security-v8.cjs'), 'utf8');
+  assert.doesNotMatch(src, /SET balance=|balance=balance\+/, 'the legacy balance column is never written');
+  assert.doesNotMatch(route('if(req.method==="POST" && pathname==="/api/wallet/add-money"){'), /UPDATE user_wallets SET balance/);
+  assert.match(route('if(req.method==="POST" && pathname==="/api/wallet/add-money"){'), /mutateWallet\(pool,\{userId,op:"CREDIT",kind:"ADD_MONEY"/);
+  assert.match(server, /balance:Number\(wallet\.available_balance\?\?0\),transactions:k5eOmitUserId\(tx\)\.map\(\(\{wallet_id,\.\.\.t\}\)=>t\)/);
+  const cash = src.slice(src.indexOf('async function transferCashback'));
+  assert.doesNotMatch(cash, /SUM\([^)]*\)[^`]*FOR UPDATE/, 'no aggregate FOR UPDATE');
+  assert.match(cash, /FROM user_wallets WHERE user_id=\$1 FOR UPDATE[\s\S]*status='AVAILABLE' FOR UPDATE/);
+});
+
+test('idempotency records the operation kind, so one key cannot be replayed as another operation', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'wallet-security-v8.cjs'), 'utf8');
+  assert.match(src, /const record = kind \|\| op;/);
+  assert.match(src, /if \(prior\.op !== record \|\| Number\(prior\.amount\) !== amount\)/);
+});
+
+test('V8 daily limit: one per-payer transaction lock, shared by chat/QR and Utilities, taken before the day total is read', () => {
+  for (const f of ['connect-v8-messages.cjs', 'hpay-v8-utilities.cjs']) {
+    const src = fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
+    const lock = src.indexOf("pg_advisory_xact_lock(hashtext($1))`, [`hpay-daily:");
+    const today = src.indexOf("SELECT COALESCE(SUM(amount),0) s FROM howdi_v8_ledger WHERE user_id=$1 AND direction='DEBIT'");
+    assert.ok(lock > 0 && lock < today, f);
+  }
+});
+
+test('legacy wallet UI sends one request key per attempt (retry/double-click reuse it; new amount or success resets)', async () => {
+  const app = fs.readFileSync(path.join(__dirname, '..', '..', 'apps', 'customer', 'src', 'App.jsx'), 'utf8');
+  assert.match(app, /idempotency_key:walletRequestKeys\.current\.keyFor\("add-money",amount\)/);
+  assert.match(app, /idempotency_key: walletRequestKeys\.current\.keyFor\("debit", amount\)/);
+  const { createWalletRequestKeys } = await import('../../apps/customer/src/walletRequestKey.js');
+  const k = createWalletRequestKeys();
+  const a = k.keyFor('debit', 10);
+  assert.equal(k.keyFor('debit', 10), a, 'retry / double-click reuses the key');
+  assert.match(a, /^[A-Za-z0-9._:-]{8,80}$/);
+  assert.notEqual(k.keyFor('debit', 11), a, 'a different amount is a new request');
+  const b = k.keyFor('add-money', 11); k.done();
+  assert.notEqual(k.keyFor('add-money', 11), b, 'after success the next attempt is new');
 });

@@ -162,6 +162,8 @@ function createHpayV8Utilities(deps) {
   async function debit(client, uid, amount, ref, note) {
     const w = await wallet(uid, client);
     if (!w) return { error: [503, 'PAYMENT_PROVIDER_REQUIRED', 'HPay isn’t connected in this environment, so no money can move.'] };
+    // Same per-payer daily-limit lock as chat/QR payments (connect-v8-messages transfer), held until the transaction ends.
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`hpay-daily:${uid}`]);
     const today = Number((await client.query(`SELECT COALESCE(SUM(amount),0) s FROM howdi_v8_ledger WHERE user_id=$1 AND direction='DEBIT' AND kind IN ('CHAT_PAYMENT','QR_PAYMENT','UTILITY') AND created_at>NOW()-interval '1 day'`, [uid])).rows[0].s);
     if (today + amount > 25000) return { error: [422, 'DAILY_LIMIT', 'You can pay up to ₹25,000 a day with HPay in this preview.'] };
     const up = await client.query(`UPDATE howdi_v8_wallets SET balance=balance-$2, updated_at=NOW() WHERE user_id=$1 AND balance>=$2 RETURNING balance`, [uid, amount]);

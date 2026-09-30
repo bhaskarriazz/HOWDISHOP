@@ -9567,6 +9567,14 @@
     // Never trust a client-supplied user id (path/query/body) for the acting user — always
     // derive it from the authenticated session. Sends the 401 itself so call sites can just
     // `if (userId === null) return;` on a null result.
+    // Wallet / HPay money + balance routes: the session must also belong to an account that may sign in (is_active + ACTIVE).
+    // Suspending an account does not end its existing sessions, so financial routes check the account state on every call.
+    async function k5eRequireFinancialSelf(req, res) {
+      const session = await getSessionUserFromRequest(req);
+      if (!session) { sendJSON(res, 401, { status: "error", message: "Please sign in to continue." }); return null; }
+      if (!require("./wallet-security-v8.cjs").financialActive(session)) { sendJSON(res, 403, { status: "error", code: "ACCOUNT_RESTRICTED", message: "This account can’t use the wallet or HPay right now." }); return null; }
+      return Number(session.id);
+    }
     async function k5eRequireSelf(req, res) {
       const session = await getSessionUserFromRequest(req);
       if (!session) {
@@ -51041,7 +51049,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             if(req.method==="GET" && pathname==="/api/wallet/me"){
               // STAGE 2B SECURITY FIX: session-derived, was /api/wallet/:id (IDOR)
               try {
-              const userId=await k5eRequireSelf(req,res);
+              const userId=await k5eRequireFinancialSelf(req,res);
               if(userId===null) return;
               let wallet=(await pool.query(`SELECT * FROM user_wallets WHERE user_id=$1`,[userId])).rows[0];
               if(!wallet) wallet=(await pool.query(`INSERT INTO user_wallets(user_id) VALUES($1) ON CONFLICT (user_id) DO UPDATE SET user_id=EXCLUDED.user_id RETURNING *`,[userId])).rows[0];
@@ -51057,7 +51065,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               catch(error){ rows=(await pool.query(`SELECT * FROM wallet_transactions WHERE wallet_id=$1 ORDER BY created_at DESC LIMIT 100`,[wallet.id])).rows; }
               const transactions=rows.map(t=>({...t,description:t.description||t.title||"",source_type:t.source_type||t.reference_type||"WALLET",
                 direction:t.direction||(["DEBIT","REWARD_REDEMPTION"].includes(String(t.transaction_type).toUpperCase())?"DEBIT":"CREDIT"),status:t.status||"COMPLETED"}));
-              return sendJSON(res,200,{status:"success",wallet:k5eOmitUserId(normalizedWallet),transactions:k5eOmitUserId(transactions)});
+              return sendJSON(res,200,{status:"success",wallet:k5eOmitUserId(normalizedWallet),transactions:k5eOmitUserId(transactions).map(({wallet_id,...t})=>t)});
                           } catch (error) {
                 console.error("HOWDI WALLET GET DB ERROR:", {
                   message:error.message, code:error.code, detail:error.detail, hint:error.hint
@@ -51073,7 +51081,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               // HPay security lane: this let any signed-in caller write CREDIT rows and raise their own wallet / HOWDI credit /
               // cashback balance by any amount with no payment provider (and outside a transaction). No HOWDI screen calls it.
               // Balances change only through the dedicated, validated routes (debit, sandbox credit/add-money, cashback transfer).
-              const userId=await k5eRequireSelf(req,res);
+              const userId=await k5eRequireFinancialSelf(req,res);
               if(userId===null) return;
               return sendJSON(res,410,{status:"error",code:"WALLET_ENDPOINT_RETIRED",message:"This wallet endpoint is retired."});
             }
@@ -52190,7 +52198,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               // Preview/Test sandbox (HOWDI_PREVIEW_SANDBOX=1 on a *_preview database); otherwise refused.
               if(!accessV8.sandboxEnabled())return sendJSON(res,503,{status:"error",code:"PAYMENT_PROVIDER_REQUIRED",message:"Adding money needs a connected payment provider."});
               // STAGE 2B SECURITY FIX: session-derived actor (body user ids are ignored).
-              const userId=await k5eRequireSelf(req,res);
+              const userId=await k5eRequireFinancialSelf(req,res);
               if(userId===null) return;
               // HPay security lane: test money is a plain CREDIT (callers cannot label it a refund/cashback/adjustment), capped like
               // V8 add-money, needs an idempotency key (a replay credits once) and is written atomically with its audit row.
@@ -52207,7 +52215,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               try{
                 const r=await W.mutateWallet(pool,{userId,op:"CREDIT",amount,title:"Test credit (Preview/Test)",description,referenceType:"SANDBOX_CREDIT",key});
                 return sendJSON(res,r.replayed?200:201,{status:"success",message:"Wallet credited successfully",replayed:r.replayed,wallet:k5eOmitUserId(r.wallet),transaction:k5eOmitUserId(r.transaction)});
-              }catch(e){if(e instanceof W.WalletError)return sendJSON(res,e.status,{status:"error",code:e.code,message:e.message});throw e;}
+              }catch(e){if(e instanceof W.WalletError)return sendJSON(res,e.status,{status:"error",code:e.code,message:e.message});console.error("HOWDI wallet credit error:",e&&e.message);return sendJSON(res,500,{status:"error",message:"Unable to update the wallet right now"});}
             }
 
             if(req.method==="POST" && pathname==="/api/wallet/debit"){
@@ -52215,7 +52223,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               // previously trusted body.user_id for BOTH the balance check and the debit —
               // any signed-in caller could drain another user's real wallet balance by
               // supplying their id. The actor is now always the session user.
-              const userId=await k5eRequireSelf(req,res);
+              const userId=await k5eRequireFinancialSelf(req,res);
               if(userId===null) return;
               // HPay security lane: strict amount, optional idempotency key (a replay debits once), one atomic locked debit with a
               // schema-correct audit row (the old insert had no wallet_id/title and a negative amount, so every debit failed).
@@ -52229,7 +52237,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               try{
                 const r=await W.mutateWallet(pool,{userId,op:"DEBIT",amount,title:"Wallet payment",description,referenceType:"WALLET_DEBIT",key});
                 return sendJSON(res,200,{status:"success",message:"Wallet debited successfully",replayed:r.replayed,wallet:k5eOmitUserId(r.wallet),transaction:k5eOmitUserId(r.transaction)});
-              }catch(e){if(e instanceof W.WalletError)return sendJSON(res,e.status,{status:"error",code:e.code,message:e.message});throw e;}
+              }catch(e){if(e instanceof W.WalletError)return sendJSON(res,e.status,{status:"error",code:e.code,message:e.message});console.error("HOWDI wallet debit error:",e&&e.message);return sendJSON(res,500,{status:"error",message:"Unable to update the wallet right now"});}
             }
 
             // =====================================================
@@ -53103,7 +53111,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             // =====================================================
             if (req.method === "GET" && pathname === "/api/wallet/user/me") {
               // STAGE 2B SECURITY FIX: session-derived, was /api/wallet/user/:id (IDOR)
-              const userId=await k5eRequireSelf(req,res);
+              const userId=await k5eRequireFinancialSelf(req,res);
               if(userId===null) return;
               const client=await pool.connect();
               try{
@@ -53118,7 +53126,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 const cashbackHistory=(await client.query(`SELECT * FROM user_cashback WHERE user_id=$1 ORDER BY created_at DESC LIMIT 50`,[userId])).rows;
                 await client.query("COMMIT");
                 // STAGE 2B SECURITY FIX: strip user_id FK from response body (response-leak fix, distinct from the IDOR fix above)
-                return sendJSON(res,200,{status:"success",wallet:k5eOmitUserId({...wallet,transactions:k5eOmitUserId(tx)}),cashback:{total:Number(cashback.total),pending:Number(cashback.pending),available:Number(cashback.available),history:k5eOmitUserId(cashbackHistory)},rewards:{points:rewards?.points||0,history:k5eOmitUserId(rewardHistory)}});
+                return sendJSON(res,200,{status:"success",wallet:k5eOmitUserId({...wallet,balance:Number(wallet.available_balance??0),transactions:k5eOmitUserId(tx).map(({wallet_id,...t})=>t)}),cashback:{total:Number(cashback.total),pending:Number(cashback.pending),available:Number(cashback.available),history:k5eOmitUserId(cashbackHistory)},rewards:{points:rewards?.points||0,history:k5eOmitUserId(rewardHistory)}});
               }catch(e){try{await client.query("ROLLBACK")}catch{};console.error("Wallet load error:",e);return sendJSON(res,500,{status:"error",message:"Unable to load wallet"})}finally{client.release()}
             }
 
@@ -53127,21 +53135,32 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               // Preview/Test sandbox (HOWDI_PREVIEW_SANDBOX=1 on a *_preview database); otherwise refused.
               if(!accessV8.sandboxEnabled())return sendJSON(res,503,{status:"error",code:"PAYMENT_PROVIDER_REQUIRED",message:"Adding money needs a connected payment provider."});
               // STAGE 2B SECURITY FIX: session-derived actor, body.user_id is no longer trusted
-              const userId=await k5eRequireSelf(req,res);
+              const userId=await k5eRequireFinancialSelf(req,res);
               if(userId===null) return;
-              // HPay security lane: test top-ups are bounded like V8 add-money (was any positive number).
-              const body=await getBody(req); const amount=require("./wallet-security-v8.cjs").parseAmount(body.amount,{max:5000});
+              // HPay production hardening: bounded amount, optional request key (a double-click/retry adds once; the same key with a
+              // different amount is refused), credited to the authoritative available_balance with its audit row in one transaction.
+              // (It previously raised the legacy `balance` column, which no wallet screen or debit uses.)
+              const W=require("./wallet-security-v8.cjs");
+              const body=await getBody(req); const amount=W.parseAmount(body.amount,{max:5000}); const key=W.idempotencyKey(req,body);
               if(amount===null) return sendJSON(res,400,{status:"error",code:"AMOUNT_INVALID",message:"Add from ₹0.01 to ₹5,000 at a time."});
-              const client=await pool.connect();
-              try{await client.query("BEGIN");await client.query(`INSERT INTO user_wallets(user_id) VALUES($1) ON CONFLICT(user_id) DO NOTHING`,[userId]);const wallet=(await client.query(`UPDATE user_wallets SET balance=balance+$1,updated_at=NOW() WHERE user_id=$2 RETURNING *`,[amount,userId])).rows[0];await client.query(`INSERT INTO wallet_transactions(wallet_id,transaction_type,amount,title,reference_type) VALUES($1,'CREDIT',$2,$3,'ADD_MONEY')`,[wallet.id,amount,"Money added to wallet"]);await client.query("COMMIT");return sendJSON(res,200,{status:"success",message:"Money added to wallet",wallet:k5eOmitUserId(wallet)})}catch(e){try{await client.query("ROLLBACK")}catch{};return sendJSON(res,500,{status:"error",message:"Unable to add money"})}finally{client.release()}
+              if(key===null) return sendJSON(res,400,{status:"error",code:"IDEMPOTENCY_KEY_INVALID",message:"Invalid request key."});
+              try{
+                const r=await W.mutateWallet(pool,{userId,op:"CREDIT",kind:"ADD_MONEY",amount,title:"Money added to wallet",description:"Money added to wallet (Preview/Test)",referenceType:"ADD_MONEY",key});
+                return sendJSON(res,200,{status:"success",message:"Money added to wallet",replayed:r.replayed,wallet:k5eOmitUserId(r.wallet)});
+              }catch(e){if(e instanceof W.WalletError)return sendJSON(res,e.status,{status:"error",code:e.code,message:e.message});console.error("HOWDI wallet add-money error:",e&&e.message);return sendJSON(res,500,{status:"error",message:"Unable to add money"});}
             }
 
             if(req.method==="POST" && pathname==="/api/wallet/transfer-cashback"){
               // STAGE 2B SECURITY FIX: session-derived actor, body.user_id is no longer trusted
-              const userId=await k5eRequireSelf(req,res);
+              const userId=await k5eRequireFinancialSelf(req,res);
               if(userId===null) return;
-              const client=await pool.connect();
-              try{await client.query("BEGIN");await client.query(`INSERT INTO user_wallets(user_id) VALUES($1) ON CONFLICT(user_id) DO NOTHING`,[userId]);const sum=(await client.query(`SELECT COALESCE(SUM(amount),0) AS amount FROM user_cashback WHERE user_id=$1 AND status='AVAILABLE' FOR UPDATE`,[userId])).rows[0];const amount=Number(sum.amount);if(!amount){await client.query("ROLLBACK");return sendJSON(res,400,{status:"error",message:"No available cashback to transfer"})};const wallet=(await client.query(`UPDATE user_wallets SET balance=balance+$1,updated_at=NOW() WHERE user_id=$2 RETURNING *`,[amount,userId])).rows[0];await client.query(`UPDATE user_cashback SET status='TRANSFERRED',updated_at=NOW() WHERE user_id=$1 AND status='AVAILABLE'`,[userId]);await client.query(`INSERT INTO wallet_transactions(wallet_id,transaction_type,amount,title,reference_type) VALUES($1,'CASHBACK',$2,'Cashback transferred to wallet','CASHBACK')`,[wallet.id,amount]);await client.query("COMMIT");return sendJSON(res,200,{status:"success",message:"Cashback transferred to wallet",amount,wallet:k5eOmitUserId(wallet)})}catch(e){try{await client.query("ROLLBACK")}catch{};return sendJSON(res,500,{status:"error",message:"Unable to transfer cashback"})}finally{client.release()}
+              // HPay production hardening: the old query locked an aggregate (SUM … FOR UPDATE), which PostgreSQL rejects, so this never
+              // worked. Now: wallet row locked, AVAILABLE rows locked and summed, credited to available_balance with an audit row, once.
+              const W=require("./wallet-security-v8.cjs");
+              try{
+                const r=await W.transferCashback(pool,{userId});
+                return sendJSON(res,200,{status:"success",message:"Cashback transferred to wallet",amount:r.amount,wallet:k5eOmitUserId(r.wallet)});
+              }catch(e){if(e instanceof W.WalletError)return sendJSON(res,e.status,{status:"error",code:e.code,message:e.message});console.error("HOWDI cashback transfer error:",e&&e.message);return sendJSON(res,500,{status:"error",message:"Unable to transfer cashback"});}
             }
 
             // HPay security lane: removed an unreachable duplicate of POST /api/rewards/redeem (the session-derived handler above
@@ -55356,6 +55375,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             if (req.method === "GET" && (pathname === "/api/hpay/me" || pathname === "/api/hpay/me/")) {
               const sessionUser=await getSessionUserFromRequest(req);
               if(!sessionUser) return sendJSON(res,401,{status:"error",message:"Sign in to use HPay"});
+              if(!require("./wallet-security-v8.cjs").financialActive(sessionUser)) return sendJSON(res,403,{status:"error",code:"ACCOUNT_RESTRICTED",message:"This account can’t use HPay right now."});
               const account=await ensureSessionHpayAccount(sessionUser);
               let wallet=(await pool.query(`SELECT * FROM user_wallets WHERE user_id=$1 LIMIT 1`,[sessionUser.id])).rows[0];
               if(!wallet) wallet=(await pool.query(`INSERT INTO user_wallets(user_id) VALUES($1) ON CONFLICT (user_id) DO UPDATE SET user_id=EXCLUDED.user_id RETURNING *`,[sessionUser.id])).rows[0];
@@ -55402,6 +55422,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             if (req.method === "POST" && pathname === "/api/hpay/accounts") {
               const sessionUser=await getSessionUserFromRequest(req);
               if(!sessionUser) return sendJSON(res,401,{status:"error",message:"Sign in to use HPay"});
+              if(!require("./wallet-security-v8.cjs").financialActive(sessionUser)) return sendJSON(res,403,{status:"error",code:"ACCOUNT_RESTRICTED",message:"This account can’t use HPay right now."});
               const account=await ensureSessionHpayAccount(sessionUser);
               return sendJSON(res,201,{status:"success",account:hpayPublicAccount(account)});
             }
@@ -55409,6 +55430,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             if (req.method === "GET" && /^\/api\/hpay\/accounts\/user\/\d+\/?$/.test(pathname)) {
               const sessionUser=await getSessionUserFromRequest(req);
               if(!sessionUser) return sendJSON(res,401,{status:"error",message:"Sign in to use HPay"});
+              if(!require("./wallet-security-v8.cjs").financialActive(sessionUser)) return sendJSON(res,403,{status:"error",code:"ACCOUNT_RESTRICTED",message:"This account can’t use HPay right now."});
               const requestedUserId=Number(pathname.match(/^\/api\/hpay\/accounts\/user\/(\d+)\/?$/)?.[1]);
               if(requestedUserId!==Number(sessionUser.id)) return sendJSON(res,403,{status:"error",message:"You can only access your own HPay account"});
               const account=await ensureSessionHpayAccount(sessionUser);
@@ -55419,6 +55441,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
             if (req.method === "POST" && pathname === "/api/hpay/requests") {
               const sessionUser=await getSessionUserFromRequest(req);
               if(!sessionUser) return sendJSON(res,401,{status:"error",message:"Sign in to use HPay"});
+              if(!require("./wallet-security-v8.cjs").financialActive(sessionUser)) return sendJSON(res,403,{status:"error",code:"ACCOUNT_RESTRICTED",message:"This account can’t use HPay right now."});
               const requester=await ensureSessionHpayAccount(sessionUser);
               if(requester.requests_enabled!==true) return sendJSON(res,403,{status:"error",message:"Payment requests are disabled for this HPay account"});
               const body=await getBody(req);

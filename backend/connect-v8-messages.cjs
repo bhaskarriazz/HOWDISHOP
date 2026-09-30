@@ -265,6 +265,9 @@ function createConnectV8Messages(deps) {
   async function transfer(client, payer, payee, amount, note, refCode, kind = 'CHAT_PAYMENT') {
     const w = await wallet(payer, client);
     if (!w) return { error: [503, 'PAYMENT_PROVIDER_REQUIRED', 'HPay isn’t connected in this environment, so no money can move.'] };
+    // Daily limit is authoritative only if concurrent payments by the same payer are serialised: this transaction-scoped lock
+    // (shared with Utilities debits, same key) is held until COMMIT/ROLLBACK, so the day's total cannot be read stale.
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`hpay-daily:${payer}`]);
     const today = Number((await client.query(`SELECT COALESCE(SUM(amount),0) s FROM howdi_v8_ledger WHERE user_id=$1 AND direction='DEBIT' AND kind IN ('CHAT_PAYMENT','QR_PAYMENT','UTILITY') AND created_at>NOW()-interval '1 day'`, [payer])).rows[0].s);
     if (today + amount > DAY_MAX) return { error: [422, 'DAILY_LIMIT', `You can pay up to ₹${DAY_MAX.toLocaleString('en-IN')} a day with HPay in this preview.`] };
     const up = await client.query(`UPDATE howdi_v8_wallets SET balance=balance-$2, updated_at=NOW() WHERE user_id=$1 AND balance>=$2 RETURNING balance`, [payer, amount]);

@@ -1,4 +1,5 @@
 import { Component, Fragment, useEffect, useRef, useState } from "react";
+import { createWalletRequestKeys } from "./walletRequestKey";
 import { createPortal } from "react-dom";
 import "./App.css";
 import ShopCatalogue from "./components/ShopCatalogue";
@@ -3838,6 +3839,7 @@ function App() {
   const [communicationsLoading, setCommunicationsLoading] = useState(false);
   const [walletBalance, setWalletBalance] = useState(0);
   const [walletAmount, setWalletAmount] = useState("");
+  const walletRequestKeys = useRef(createWalletRequestKeys());
   const [walletMessage, setWalletMessage] = useState("");
   const [cashbackStats, setCashbackStats] = useState({total:0, pending:0, available:0});
   const [rewardPoints, setRewardPoints] = useState(0);
@@ -7725,10 +7727,10 @@ const deleteNotification = async (id) => {
     if (!currentUser) { setWalletMessage("Please login again."); return; }
     setWalletLoading(true);
     try {
-      const response=await fetch(`${SHOP_API_BASE}/api/wallet/add-money`,{method:"POST",headers:{"Content-Type":"application/json",...customerSessionHeaders()},body:JSON.stringify({amount})});
+      const response=await fetch(`${SHOP_API_BASE}/api/wallet/add-money`,{method:"POST",headers:{"Content-Type":"application/json",...customerSessionHeaders()},body:JSON.stringify({amount,idempotency_key:walletRequestKeys.current.keyFor("add-money",amount)})});
       const data=await response.json().catch(()=>({}));
       if(!response.ok||data.status!=="success") throw new Error(data.message||"Unable to add money.");
-      setWalletAmount(""); setWalletMessage(data.message||"Money added to wallet."); await loadWalletData();
+      walletRequestKeys.current.done(); setWalletAmount(""); setWalletMessage(data.message||"Money added to wallet."); await loadWalletData();
     } catch(e){ setWalletMessage(e.message||"Unable to add money."); } finally { setWalletLoading(false); }
   };
 
@@ -11953,11 +11955,13 @@ const removeNotification = async (notificationId) => {
         headers: { "Content-Type": "application/json", ...customerSessionHeaders() },
         body: JSON.stringify({
           amount,
-          description: "Customer wallet redemption request"
+          description: "Customer wallet redemption request",
+          idempotency_key: walletRequestKeys.current.keyFor("debit", amount)
         }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data.status !== "success") throw new Error(data.message || "Unable to use wallet balance.");
+      walletRequestKeys.current.done();
       setWalletDebitAmount("");
       setWalletNotice(data.message || "Wallet balance used successfully.");
       await loadWalletCenter();
