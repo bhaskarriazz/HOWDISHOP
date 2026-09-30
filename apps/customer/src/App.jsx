@@ -7745,16 +7745,6 @@ const deleteNotification = async (id) => {
     } catch(e){ setWalletMessage(e.message||"Unable to transfer cashback."); } finally { setWalletLoading(false); }
   };
 
-  const redeemRewards = async () => {
-    if (!currentUser) return;
-    setWalletLoading(true);
-    try {
-      const response=await fetch(`${SHOP_API_BASE}/api/rewards/redeem`,{method:"POST",headers:{"Content-Type":"application/json",...customerSessionHeaders()},body:JSON.stringify({points:500,wallet_credit:50})});
-      const data=await response.json().catch(()=>({}));
-      if(!response.ok||data.status!=="success") throw new Error(data.message||"Unable to redeem rewards.");
-      setWalletMessage(data.message||"Rewards redeemed."); await loadWalletData();
-    } catch(e){ setWalletMessage(e.message||"Unable to redeem rewards."); } finally { setWalletLoading(false); }
-  };
 
   const [addresses, setAddresses] = useState([]);
 
@@ -16642,8 +16632,8 @@ const removeNotification = async (notificationId) => {
                           <div style={{ border: "1px solid #e2e8f0", borderRadius: "18px", padding: "20px", background: "#fff" }}>
                             <div style={{ fontWeight: 800, fontSize: "18px" }}>🎁 Reward Points</div>
                             <div style={{ fontSize: "28px", fontWeight: 900, marginTop: "12px" }}>{rewardPoints.toLocaleString("en-IN")} pts</div>
-                            <div style={{ color: "#64748b", fontSize: "12px", margin: "4px 0 14px" }}>Redeem 500 pts = ₹50</div>
-                            <button type="button" onClick={redeemRewards} disabled={rewardPoints < 500} style={{ border: 0, borderRadius: "10px", padding: "10px 14px", background: rewardPoints >= 500 ? "#1f5af6" : "#cbd5e1", color: "#fff", fontWeight: 900, cursor: rewardPoints >= 500 ? "pointer" : "not-allowed" }}>🎁 Redeem now</button>
+                            <div style={{ color: "#64748b", fontSize: "12px", margin: "4px 0 14px" }}>Redeem points in the Rewards Center. Points are not converted to wallet money.</div>
+                            <button type="button" onClick={() => setProfileTab("rewards")} style={{ border: 0, borderRadius: "10px", padding: "10px 14px", background: "#1f5af6", color: "#fff", fontWeight: 900, cursor: "pointer" }}>🎁 Open Rewards Center</button>
                           </div>
                         </div>
 
@@ -16671,7 +16661,7 @@ const removeNotification = async (notificationId) => {
 
                     {walletSection === "rewards" && (
                       <div style={{ display: "grid", gap: "14px" }}>
-                        <div style={{ border: "1px solid #e2e8f0", borderRadius: "18px", padding: "22px", background: "#fff" }}><div style={{ fontSize: "12px", fontWeight: 800, color: "#64748b", letterSpacing: "1px" }}>REWARDS</div><h4 style={{ fontSize: "24px", margin: "6px 0" }}>{rewardPoints.toLocaleString("en-IN")} points available</h4><p style={{ color: "#64748b" }}>Every 500 points can be redeemed for ₹50 wallet credit.</p><button type="button" onClick={redeemRewards} disabled={rewardPoints < 500} style={{ border: 0, borderRadius: "10px", padding: "11px 15px", background: rewardPoints >= 500 ? "#1f5af6" : "#cbd5e1", color: "#fff", fontWeight: 900, cursor: rewardPoints >= 500 ? "pointer" : "not-allowed" }}>🎁 Redeem 500 points → ₹50</button></div>
+                        <div style={{ border: "1px solid #e2e8f0", borderRadius: "18px", padding: "22px", background: "#fff" }}><div style={{ fontSize: "12px", fontWeight: 800, color: "#64748b", letterSpacing: "1px" }}>REWARDS</div><h4 style={{ fontSize: "24px", margin: "6px 0" }}>{rewardPoints.toLocaleString("en-IN")} points available</h4><p style={{ color: "#64748b" }}>Reward points are redeemed in the Rewards Center. They are not converted to wallet money.</p><button type="button" onClick={() => setProfileTab("rewards")} style={{ border: 0, borderRadius: "10px", padding: "11px 15px", background: "#1f5af6", color: "#fff", fontWeight: 900, cursor: "pointer" }}>🎁 Open Rewards Center</button></div>
                         <div style={{ border: "1px solid #e2e8f0", borderRadius: "18px", overflow: "hidden", background: "#fff" }}><div style={{ padding: "16px 18px", fontWeight: 900 }}>Reward history</div>{walletRewards.map((item)=><div key={item.id} style={{ display: "flex", justifyContent: "space-between", padding: "15px 18px", borderTop: "1px solid #f1f5f9", gap: "12px" }}><div><div style={{ fontWeight: 800 }}>{item.title}</div><div style={{ color: "#64748b", fontSize: "12px" }}>{item.date}</div></div><strong style={{ color: item.points < 0 ? "#1f5af6" : "#166534" }}>{item.points > 0 ? "+" : ""}{item.points} pts</strong></div>)}</div>
                       </div>
                     )}

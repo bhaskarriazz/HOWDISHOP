@@ -33,3 +33,12 @@ test('route: active-account session, strict input, allow-listed DTOs, generic er
   assert.equal((server.match(/pathname==="\/api\/rewards\/redeem"/g) || []).length, 1);
   assert.match(route('if(req.method==="POST" && pathname==="/api/rewards/earn"){'), /sendJSON\(res,410,\{status:"error",code:"REWARDS_ENDPOINT_RETIRED"/, 'earn stays retired');
 });
+
+test('legacy wallet UI: no points → ₹ conversion claim and no wallet_credit request; buttons open the Rewards Center', () => {
+  const app = fs.readFileSync(path.join(__dirname, '..', '..', 'apps', 'customer', 'src', 'App.jsx'), 'utf8').replace(/\r\n/g, '\n');
+  assert.doesNotMatch(app, /wallet_credit|redeemRewards\b/, 'no client call asks for wallet credit from points');
+  assert.doesNotMatch(app, /500 pts = ₹50|500 points → ₹50|redeemed for ₹50 wallet credit/);
+  assert.equal((app.match(/onClick=\{\(\) => setProfileTab\("rewards"\)\}/g) || []).length, 2);
+  assert.match(app, /Points are not converted to wallet money/);
+  assert.match(app, /\{profileTab === "rewards" && \(/, 'the Rewards Center (points-only redeem) exists');
+});
