@@ -21412,6 +21412,11 @@ async function ensureVibeReleaseReadinessV140LSchema(){
       pool, getBody, helpers: connectV8._internal, messages: connectV8Messages._internal, notify: connectV8Community._internal.notify,
       wallet: connectV8Rooms._internal.wallet, sandboxEnabled: () => accessV8.sandboxEnabled(), secret: process.env.HOWDI_CONNECT_REF_SECRET || "",
     });
+    // HPay add money through Cashfree (./hpay-cashfree-v8.cjs) — SANDBOX ONLY: server-created orders, server-side verification,
+    // signed idempotent webhook, settlement into the V8 HPay wallet + ledger. Fails closed unless the Cashfree sandbox is configured.
+    const hpayCashfreeV8 = require("./hpay-cashfree-v8.cjs").createHpayCashfreeV8({
+      pool, helpers: connectV8._internal, wallet: connectV8Rooms._internal.wallet, sandboxEnabled: () => accessV8.sandboxEnabled(), refSecret: process.env.HOWDI_CONNECT_REF_SECRET || "",
+    });
     // V8 Works booking journey, both sides (./works-v8.cjs): consent-gated private details, worker-entered Job PIN, HPay hold/release.
     const worksV8 = require("./works-v8.cjs").createWorksV8({
       pool, getBody, helpers: connectV8._internal, messages: connectV8Messages._internal, notify: connectV8Community._internal.notify,
@@ -21518,6 +21523,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
           if (await v8SafeHandle(connectV8Rooms, req, res, url)) return;
           if (await v8SafeHandle(connectV8Community, req, res, url)) return;
           if (await v8SafeHandle(connectV8Creator, req, res, url)) return;
+          if (await v8SafeHandle(hpayCashfreeV8, req, res, url)) return;
           if (await v8SafeHandle(hpayV8Utilities, req, res, url)) return;
           if (await v8SafeHandle(shopV8, req, res, url)) return;
           if (await v8SafeHandle(vendorV8, req, res, url)) return;
@@ -57152,6 +57158,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
         await connectV8Creator.ensureSchema();
         await connectV8Messages.ensureSchema();
         await hpayV8Utilities.ensureSchema();
+        await hpayCashfreeV8.ensureSchema();
         await worksV8.ensureSchema();
         await worksV8Onboarding.ensureSchema();
         await ridesV8.ensureSchema();
