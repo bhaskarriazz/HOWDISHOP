@@ -193,6 +193,14 @@ body:has(.howdi-app.v8) { background: var(--v8-bg); color: var(--v8-ink); font-f
      tap = filled primary circle with a soft halo, briefly, on the pressed pillar. */
   .v8-dock-ico { display: grid; place-items: center; width: 34px; height: 30px; border-radius: 15px; font-style: normal; transition: background .18s, color .18s, box-shadow .25s; }
   .v8-bottombar button[aria-current="page"] { color: var(--v8-primary); font-weight: 700; }
+  .v8-bottombar button.is-spark { color: var(--v8-primary); font-weight: 700; }
+  .v8-bottombar button.is-spark .v8-dock-ico {
+    width: 46px; height: 46px; margin: -8px 0 -5px; border-radius: 50%;
+    background: linear-gradient(145deg, #2f73ff, #1550e8); color: #fff;
+    box-shadow: 0 7px 18px rgba(31, 90, 246, .34), 0 0 0 6px rgba(31, 90, 246, .10);
+  }
+  .v8-bottombar.v8-dock-style-soft button:not(.is-spark) .v8-dock-ico { background: var(--v8-primary-soft); color: var(--v8-primary); }
+  .v8-bottombar.v8-dock-style-soft button:not([aria-current="page"]):not(.is-spark) .v8-dock-ico { background: var(--v8-bg-2); color: var(--v8-muted); }
   .v8-bottombar button.is-tapped .v8-dock-ico, .v8-bottombar button:active .v8-dock-ico {
     width: 40px; height: 40px; border-radius: 50%; margin: -5px 0; background: var(--v8-primary); color: #fff;
     box-shadow: 0 0 0 7px rgba(31, 90, 246, .16), 0 6px 16px rgba(31, 90, 246, .35); animation: v8-dock-tap .45s ease-out;
@@ -230,7 +238,7 @@ body:has(.howdi-app.v8) { background: var(--v8-bg); color: var(--v8-ink); font-f
   overflow-y: auto; overscroll-behavior: contain; background: var(--v8-bg);
 }
 .v8-page-inner { max-width: 1240px; margin: 0 auto; padding: 28px 28px 56px; }
-.v8-customize-section{margin:18px 0;padding:16px;border:1px solid var(--v8-line);border-radius:14px;background:var(--v8-bg)}.v8-customize-section h3{margin:0 0 5px;color:var(--v8-ink)}.v8-customize-section p,.v8-customize-section small{color:var(--v8-muted);font-size:13px}.v8-customize-row{display:flex;align-items:center;gap:8px;padding:10px 0;border-top:1px solid var(--v8-line);font-size:13px}.v8-customize-row:first-of-type{border-top:0}.v8-customize-row b{color:var(--v8-ink);min-width:140px}.v8-customize-row span{color:var(--v8-muted);margin-right:auto}.v8-customize-row button{border:1px solid var(--v8-line);border-radius:8px;padding:6px 8px;background:#fff;color:var(--v8-ink);font:inherit;cursor:pointer}.v8-customize-row button:disabled{opacity:.5;cursor:not-allowed}
+.v8-customize-section{margin:18px 0;padding:16px;border:1px solid var(--v8-line);border-radius:14px;background:var(--v8-bg)}.v8-customize-section h3{margin:0 0 5px;color:var(--v8-ink)}.v8-customize-section p,.v8-customize-section small{color:var(--v8-muted);font-size:13px}.v8-customize-row{display:flex;align-items:center;gap:8px;padding:10px 0;border-top:1px solid var(--v8-line);font-size:13px}.v8-customize-row:first-of-type{border-top:0}.v8-customize-row b{color:var(--v8-ink);min-width:140px}.v8-customize-row span{color:var(--v8-muted);margin-right:auto}.v8-customize-row button,.v8-customize-row select,.v8-customize-row input{border:1px solid var(--v8-line);border-radius:8px;padding:6px 8px;background:#fff;color:var(--v8-ink);font:inherit}.v8-customize-row button{cursor:pointer}.v8-customize-row button:disabled,.v8-customize-row input:disabled{opacity:.5;cursor:not-allowed}.v8-customize-row select{min-width:110px}.v8-dock-label-input{width:112px}.v8-dock-lock{font-size:12px;color:var(--v8-primary);background:var(--v8-primary-soft);padding:6px 9px;border-radius:8px}
 @media (max-width: 760px) { .v8-page { bottom: 0; } .v8-page-inner { padding: 16px 16px calc(var(--v8-bottom) + 28px); } }
 @media (max-width: 640px){.v8-customize-row{align-items:flex-start;flex-wrap:wrap}.v8-customize-row b{min-width:0;flex:1 1 56%}.v8-customize-row span{margin-right:0;flex:1 1 38%}.v8-customize-row button{font-size:12px}}
 
