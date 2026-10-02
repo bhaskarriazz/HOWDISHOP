@@ -51,6 +51,14 @@ try {
   ]));
   await page.waitForFunction(() => document.querySelectorAll(".v8-bottombar button").length === 3);
   assert.deepEqual(await page.locator(".v8-bottombar button").allTextContents(), ["Home", "Learn", "Move"]);
+  const lastRect = await button(page, "Move").boundingBox();
+  assert.ok(Math.abs(lastRect.x + lastRect.width - (rect.x + rect.width)) < 3, "visible pillars fill the capsule");
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { bottom: 34 } });
+  const safeRect = await page.locator(".v8-bottombar").boundingBox();
+  const contentRect = await page.locator("#content-end").boundingBox();
+  assert.ok(844 - safeRect.y - safeRect.height >= 46, "dock clears bottom safe area");
+  assert.ok(contentRect.y + contentRect.height <= safeRect.y, "content clears the raised dock");
   await page.close();
   console.log("PASS: mobile six-pillar callbacks, active state, personalization inputs, bounds and single dock");
 
@@ -85,7 +93,7 @@ try {
   await page.close();
   console.log("PASS: keyboard activation survives a hold with no dock release click");
 
-  for (const cancellation of ["unmount", "leave", "cancel", "blur"]) {
+  for (const cancellation of ["unmount", "leave", "cancel", "blur", "drag", "multi-touch", "window blur"]) {
     page = await fixture();
     await press(page);
     if (cancellation === "unmount") {
@@ -93,13 +101,18 @@ try {
       await page.waitForFunction(() => !document.querySelector(".v8-bottombar"));
     } else if (cancellation === "leave") await page.mouse.move(380, 100);
     else if (cancellation === "cancel") await button(page).dispatchEvent("pointercancel");
-    else await page.locator("#outside").focus();
+    else if (cancellation === "blur") await page.locator("#outside").focus();
+    else if (cancellation === "window blur") await page.evaluate(() => window.dispatchEvent(new Event("blur")));
+    else if (cancellation === "drag") {
+      const box = await button(page).boundingBox();
+      await page.mouse.move(box.x + box.width / 2 + 15, box.y + box.height / 2);
+    } else await button(page).dispatchEvent("pointerdown", { pointerId: 2, isPrimary: false, button: 0 });
     await page.clock.runFor(2100);
     await count(page, "customizations", 0);
     await page.mouse.up();
     await page.close();
   }
-  console.log("PASS: unmount, leave, pointer cancellation and blur cancel pending customization");
+  console.log("PASS: unmount, leave, pointer cancellation, focus/window blur, drag and multi-touch cancel pending customization");
 
   page = await fixture();
   const box = await button(page).boundingBox();
@@ -123,6 +136,23 @@ try {
   await page.mouse.up();
   await page.close();
   console.log("PASS: keyboard and sustained pointer press respect reduced motion");
+
+  page = await fixture();
+  await page.evaluate(() => window.dockFixture.save({
+    ...window.dockFixture.prefs,
+    dock: ["home", "learn", "shop", "move", "works", "connect"],
+    hiddenDock: ["shop", "move", "works"], favoriteDock: ["learn"],
+  }));
+  await page.reload();
+  await page.waitForFunction(() => window.dockFixture?.prefs.favoriteDock.includes("learn"));
+  assert.deepEqual(await page.locator(".v8-bottombar button").allTextContents(), ["Home", "Learn", "Connect"]);
+  await page.evaluate(() => window.dockFixture.setAccount("beta"));
+  await page.waitForFunction(() => document.querySelectorAll(".v8-bottombar button").length === 6);
+  await page.evaluate(() => window.dockFixture.setAccount("alpha"));
+  await page.waitForFunction(() => document.querySelectorAll(".v8-bottombar button").length === 3);
+  assert.deepEqual(await page.evaluate(() => window.dockFixture.prefs.favoriteDock), ["learn"]);
+  await page.close();
+  console.log("PASS: account-scoped local persistence restores ordering, hidden pillars and favorites");
 
   for (const width of [768, 1440]) {
     page = await fixture(width);
