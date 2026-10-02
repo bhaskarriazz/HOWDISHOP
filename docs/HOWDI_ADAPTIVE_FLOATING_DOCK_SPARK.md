@@ -99,4 +99,36 @@ Block merge for any high-confidence regression.
 - No backend/database changes required for this UI task.
 
 ## Implementation Notes
-_To be completed by Claude._
+The review branches both started at `7251489`, which added this contract only.
+The focused follow-up adds Spark within `V8BottomBar`, preserving App-owned
+navigation, the existing preference hook, and the desktop rail/header.
+
+- Spark uses a native auto popover for Escape/outside dismissal and exposes
+  Customize Home plus hidden pillars. It does not own route state.
+- The 2000 ms hold remains; timers are canceled on unmount, pointer cancellation,
+  route change, window blur, and responsive breakpoint changes.
+- The existing account-keyed localStorage persistence remains unchanged. It is
+  browser-local persistence, not server synchronization across devices.
+- The mobile capsule reserves a 44px Spark target; all six default pillar targets
+  remain at least 44px wide at 390px. Content clearance includes the bottom inset.
+- Reduced motion covers both the OS setting and HOWDI's in-app setting.
+- No backend/schema changes or unrelated module redesign.
+
+Validation: `npm run test:dock --workspace apps/customer` (9 Chromium browser
+checks), `npm run build --workspace apps/customer`, and `git diff --check` pass.
+Install the test browser with `npx playwright install chromium` after `npm ci`.
+Tests cover 390px mobile, 768px tablet, 1440px desktop, six navigation callbacks,
+Spark dismissal, touch, customization, account isolation/reload, canceled holds,
+and reduced motion. A 34px safe-area inset is simulated in the real stylesheet.
+
+Integration gate remains **BLOCKED for final release approval** pending real
+mobile Safari/browser chrome verification and a live authenticated app smoke
+check. The full guest app is tested with external requests blocked; expected
+API failure notices occur, but there are no uncaught page errors. Spark requires
+a browser supporting the native Popover API. The build retains existing large
+chunk and mixed static/dynamic import warnings.
+
+Smallest integration path: review the focused follow-up into
+`claude/adaptive-floating-dock-v8`, then reassess draft PR #4 against
+`codex/move-v8-final`. Do not merge the full historical V8 branch into `main`
+as part of this UI fix.
