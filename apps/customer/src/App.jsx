@@ -18532,8 +18532,10 @@ const removeNotification = async (notificationId) => {
           });
 
           const visible = personalized
-            .filter(({ product }) => !cart.some((item) => item.name === product.name))
-            .slice(0, 6);
+            .filter(Boolean)
+            .filter((product) => !cart.some((item) => item.name === product.name))
+            .slice(0, 6)
+            .map((product) => ({ product, reasons: [] }));
 
           if (!visible.length) return null;
 
