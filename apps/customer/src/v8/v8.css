@@ -200,7 +200,10 @@ body:has(.howdi-app.v8) { background: var(--v8-bg); color: var(--v8-ink); font-f
   .v8-bottombar button.is-tapped, .v8-bottombar button:active { color: var(--v8-primary); }
   @keyframes v8-dock-tap { from { box-shadow: 0 0 0 0 rgba(31, 90, 246, .35), 0 6px 16px rgba(31, 90, 246, .35); } to { box-shadow: 0 0 0 12px rgba(31, 90, 246, 0), 0 6px 16px rgba(31, 90, 246, .35); } }
 }
-@media (max-width: 760px) and (prefers-reduced-motion: reduce) { .v8-dock-ico { transition: none; } .v8-bottombar button.is-tapped .v8-dock-ico { animation: none; } }
+@media (max-width: 760px) and (prefers-reduced-motion: reduce) {
+  .v8-dock-ico { transition: none; }
+  .v8-bottombar button.is-tapped .v8-dock-ico, .v8-bottombar button:active .v8-dock-ico { animation: none; }
+}
 
 /* Home → Move entry (Founder-approved MOVE reference) */
 .v8-move-entry {
