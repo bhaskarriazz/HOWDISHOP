@@ -12671,11 +12671,19 @@ const removeNotification = async (notificationId) => {
   // V8: exactly one selected destination — Home, Connect, Shop, Works or Learn & Earn.
   const pillarActive = (area) => navigationOSArea === area;
   // HPay is a global utility (header), not a pillar: no rail item is selected while it is open.
-  const v8ActivePillar =
-    navigationOSArea === "connect" && connectView === "hpay" ? "hpay" :
-    navigationOSArea === "connect" && connectContentMode === "vibe" ? "vibe" :
-    navigationOSArea === "connect" && connectView === "messages" ? "messages" :
-    (["connect", "shop", "move", "works", "learn"].includes(navigationOSArea) ? navigationOSArea : "");
+  // Desktop/tablet rail keeps canonical pillar selection (unchanged from the pre-dock baseline).
+  const v8RailActive = navigationOSArea === "connect" && connectView === "hpay" ? "" : (["home", "connect", "shop", "move", "works", "learn"].includes(navigationOSArea) ? navigationOSArea : "");
+  // Mobile dock: highlight the quick-access shortcut that owns the current canonical destination.
+  const v8ConnectSection = connectView === "v8" ? String(v8ConnectPath || "").split("/")[0] : "";
+  const v8DockDestination =
+    navigationOSArea !== "connect" ? navigationOSArea :
+    connectView === "hpay" ? "hpay" :
+    connectView === "messages" ? "messages" :
+    v8ConnectSection === "ask" ? "spark" :
+    (v8ConnectSection === "vibe" || connectContentMode === "vibe") ? "vibe" : "connect";
+  // A Connect sub-destination that is not pinned in the dock falls back to Connect; HPay stays a utility.
+  const v8ActivePillar = v8HomePrefs.dock.includes(v8DockDestination) ? v8DockDestination
+    : (["vibe", "messages"].includes(v8DockDestination) && v8HomePrefs.dock.includes("connect") ? "connect" : "");
   const v8VisiblePillars = v8HomePrefs.dock
     .filter((id) => !v8HomePrefs.hiddenDock.includes(id))
     .map((id, index) => {
@@ -12683,6 +12691,7 @@ const removeNotification = async (notificationId) => {
       return item ? { ...item, slotKey: `${index}-${id}`, personalLabel: v8HomePrefs.dockLabels?.[id] || "" } : null;
     })
     .filter(Boolean);
+  const V8_RAIL_PILLARS = [{ area: "home", label: "Home" }, ...V8_PILLARS.filter((p) => p.area !== "spark").map(({ area, label }) => ({ area, label }))];
   const V8_DEFAULT_VIEW = { home: "home", connect: "home", shop: "catalogue", move: "home", works: "find", learn: "discover" };
   const v8Navigate = (area) => {
     if (area === "home") { v8HomeChosenRef.current = true; setV8AskMode(false); openNavigationOSArea("home"); return; }
@@ -13132,7 +13141,7 @@ const removeNotification = async (notificationId) => {
         onRoute={(r) => { const s = String(r || ""); if (s.startsWith("/connect")) openNavigationOSArea("connect", "p:" + s.replace(/^\/connect\/?/, "")); else if (s.startsWith("/@")) openNavigationOSArea("profile", s.slice(2)); else v8ApplyPath(s.split("?")[0]); }} />
       {currentUser ? <V8CallCenter apiBase={SHOP_API_BASE} getAuthHeaders={customerSessionHeaders} user={currentUser} /> : null}
       <a className="v8-skip" href="#v8-main" onClick={(e) => { e.preventDefault(); const m = document.querySelector(".v8-page") || document.getElementById("v8-main"); if (m) { m.setAttribute("tabindex", "-1"); m.focus(); } }}>Skip to content</a>
-      <V8Rail active={v8ActivePillar} onNavigate={v8Navigate} pillars={v8VisiblePillars} />
+      <V8Rail active={v8RailActive} onNavigate={v8Navigate} pillars={V8_RAIL_PILLARS} />
       <V8Header
         ref={headerRef}
         user={currentUser}
