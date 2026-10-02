@@ -13147,7 +13147,7 @@ const removeNotification = async (notificationId) => {
         onSignIn={openLogin}
         onHome={() => v8Navigate("home")}
       />
-      <V8BottomBar active={v8ActivePillar} onNavigate={v8Navigate} pillars={v8VisiblePillars} onCustomize={() => setV8CustomizeOpen(true)} />
+      <V8BottomBar active={v8ActivePillar} onNavigate={v8Navigate} pillars={v8VisiblePillars} onCustomize={() => setV8CustomizeOpen(true)} onSearch={() => searchInputRef.current?.focus()} />
       <V8CustomizeHome open={v8CustomizeOpen} prefs={v8HomePrefs} onSave={setV8HomePrefs} onClose={() => setV8CustomizeOpen(false)} />
       <V8BuildLabel />
       <V8OfflineBanner onRetry={() => window.dispatchEvent(new Event("online"))} />

@@ -46,7 +46,7 @@
 }
 @media (max-width: 1100px) { :root { --v8-rail: 196px; } }
 @media (max-width: 760px) {
-  :root { --v8-rail: 0px; --v8-header-h: 172px; --v8-bottom: 84px; }
+  :root { --v8-rail: 0px; --v8-header-h: 172px; --v8-bottom: calc(84px + env(safe-area-inset-bottom, 0px)); }
 }
 
 /* ---------- base ---------- */
@@ -174,33 +174,67 @@ body:has(.howdi-app.v8) { background: var(--v8-bg); color: var(--v8-ink); font-f
   .v8-header .v8-mobile-actions { grid-area: actions; justify-self: end; display: flex; gap: 2px; }
 }
 
-/* ---------- mobile floating bottom bar (NAV-003) ---------- */
+/* ---------- HOWDI Floating Dock — Core Pillar Navigation ---------- */
+.v8-floating-dock {
+  position: fixed; right: max(16px, env(safe-area-inset-right, 0px));
+  bottom: calc(12px + env(safe-area-inset-bottom, 0px)); z-index: 9300;
+  display: flex; align-items: center; gap: 8px;
+}
+.v8-floating-dock, .v8-floating-dock * { box-sizing: border-box; }
 .v8-bottombar { display: none; }
+.v8-spark {
+  flex: 0 0 44px; width: 44px; height: 44px; display: grid; place-items: center;
+  border: 0; border-radius: 50%; background: var(--v8-ink); color: var(--v8-surface); cursor: pointer;
+  box-shadow: 0 6px 20px rgba(13, 26, 58, .18); transition: background .15s, transform .15s;
+}
+.v8-spark:hover, .v8-spark[aria-expanded="true"], .v8-spark.has-active-pillar { background: var(--v8-primary); color: #fff; }
+.v8-spark:active { transform: scale(.95); }
+.v8-spark-panel {
+  position: absolute; right: 0; bottom: calc(100% + 12px); width: min(280px, calc(100vw - 32px));
+  max-height: calc(100dvh - 120px - env(safe-area-inset-bottom, 0px) - env(safe-area-inset-top, 0px)); overflow-y: auto; overscroll-behavior: contain;
+  padding: 12px; border: 1px solid var(--v8-line); border-radius: 18px; background: var(--v8-surface);
+  color: var(--v8-ink); box-shadow: 0 12px 36px rgba(13, 26, 58, .16); animation: v8-spark-in .15s ease-out;
+}
+.v8-spark-panel h2 { margin: 2px 10px 8px; font: 700 15px/1.4 var(--v8-font); }
+.v8-spark-panel h3 { margin: 12px 10px 4px; font: 500 12px/1.4 var(--v8-font); color: var(--v8-muted); }
+.v8-spark-panel button {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 10px;
+  border: 0; border-radius: 10px; background: transparent; color: var(--v8-ink-2); text-align: left;
+  cursor: pointer; font: 500 14px/1.4 var(--v8-font);
+}
+.v8-spark-panel button:hover, .v8-spark-panel button:active, .v8-spark-panel button[aria-current="page"] {
+  background: var(--v8-primary-soft); color: var(--v8-primary);
+}
+@keyframes v8-spark-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 @media (max-width: 760px) {
+  .v8-floating-dock { left: max(12px, env(safe-area-inset-left, 0px)); right: max(12px, env(safe-area-inset-right, 0px)); max-width: 520px; margin-inline: auto; }
   .v8-bottombar {
-    position: fixed; left: 12px; right: 12px; bottom: 12px; z-index: 9300; height: 64px;
-    display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); align-items: center;
-    background: var(--v8-surface); border: 1px solid var(--v8-line); border-radius: 26px;
-    box-shadow: 0 10px 30px rgba(13, 26, 58, .12);
-    margin-bottom: env(safe-area-inset-bottom);
+    flex: 1; min-width: 0; height: 60px; display: flex; align-items: center; padding: 4px;
+    background: var(--v8-surface); border: 1px solid var(--v8-line); border-radius: 30px;
+    box-shadow: 0 8px 26px rgba(13, 26, 58, .12);
   }
   .v8-bottombar button {
-    border: 0; background: none; cursor: pointer; height: 56px; display: grid; justify-items: center; align-content: center; gap: 3px;
-    color: var(--v8-muted); font: 500 11px/1.1 var(--v8-font); white-space: nowrap; -webkit-tap-highlight-color: transparent;
+    flex: 1; min-width: 0; padding: 0; border: 0; border-radius: 22px; background: transparent;
+    cursor: pointer; height: 50px; display: grid; justify-items: center; align-content: center; gap: 2px;
+    color: var(--v8-muted); font: 500 10px/1.2 var(--v8-font); white-space: nowrap;
+    -webkit-tap-highlight-color: transparent; touch-action: manipulation; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
   }
-  .v8-bottombar button svg { width: 22px; height: 22px; }
-  /* Founder-approved MOVE reference dock: active = primary icon + label (no avatar, no underline);
-     tap = filled primary circle with a soft halo, briefly, on the pressed pillar. */
-  .v8-dock-ico { display: grid; place-items: center; width: 34px; height: 30px; border-radius: 15px; font-style: normal; transition: background .18s, color .18s, box-shadow .25s; }
+  .v8-dock-ico { display: grid; place-items: center; width: 32px; height: 28px; border-radius: 14px; font-style: normal; transition: background .15s, color .15s; }
   .v8-bottombar button[aria-current="page"] { color: var(--v8-primary); font-weight: 700; }
-  .v8-bottombar button.is-tapped .v8-dock-ico, .v8-bottombar button:active .v8-dock-ico {
-    width: 40px; height: 40px; border-radius: 50%; margin: -5px 0; background: var(--v8-primary); color: #fff;
-    box-shadow: 0 0 0 7px rgba(31, 90, 246, .16), 0 6px 16px rgba(31, 90, 246, .35); animation: v8-dock-tap .45s ease-out;
-  }
-  .v8-bottombar button.is-tapped, .v8-bottombar button:active { color: var(--v8-primary); }
-  @keyframes v8-dock-tap { from { box-shadow: 0 0 0 0 rgba(31, 90, 246, .35), 0 6px 16px rgba(31, 90, 246, .35); } to { box-shadow: 0 0 0 12px rgba(31, 90, 246, 0), 0 6px 16px rgba(31, 90, 246, .35); } }
+  .v8-bottombar button[aria-current="page"] .v8-dock-ico { background: var(--v8-primary-soft); }
+  .v8-bottombar button:active .v8-dock-ico { background: var(--v8-primary); color: #fff; }
 }
-@media (max-width: 760px) and (prefers-reduced-motion: reduce) { .v8-dock-ico { transition: none; } .v8-bottombar button.is-tapped .v8-dock-ico { animation: none; } }
+/* Keep six 44px targets on narrow phones; Spark sits just above the capsule. */
+@media (max-width: 359px) {
+  :root { --v8-bottom: calc(132px + env(safe-area-inset-bottom, 0px)); }
+  .v8-floating-dock { padding-top: 52px; }
+  .v8-spark { position: absolute; right: 0; top: 0; }
+  .v8-spark-panel { max-height: calc(100dvh - 176px - env(safe-area-inset-bottom, 0px) - env(safe-area-inset-top, 0px)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .v8-dock-ico, .v8-spark { transition: none; }
+  .v8-spark-panel { animation: none; }
+}
 
 /* Home → Move entry (Founder-approved MOVE reference) */
 .v8-move-entry {

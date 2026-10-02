@@ -99,4 +99,9 @@ Block merge for any high-confidence regression.
 - No backend/database changes required for this UI task.
 
 ## Implementation Notes
-_To be completed by Claude._
+- Audit: six-pillar callbacks, the desktop rail/header, and per-account personalization already existed. Spark was missing; long-press timers lacked unmount cleanup.
+- `V8Shell.jsx`: one Spark disclosure exposes Search HOWDI, Customize Home, and hidden pillars through App-owned callbacks. It supports touch, pointer, keyboard, Escape, outside dismissal, focus return, and active hidden-pillar indication. The 2000 ms customization hold remains, cancels on drag/cancel/unmount, and suppresses its trailing navigation click.
+- `v8.css`: slimmer mobile capsule with at least 44px targets at tested widths, safe-area spacing, a narrow-phone Spark placement, scrollable secondary actions, and reduced-motion support. Tablet/desktop retain the existing rail/header and gain only the Spark action control.
+- `App.jsx` wires Spark search to the existing input; `V8Personalization.jsx` updates the hidden-destination hint. Preference keys, account scoping, ordering, favorites, visibility, and Home-module settings are unchanged. No backend/schema changes or migrations.
+- Browser regression: `DOCK_PLAYWRIGHT=/path/to/playwright node --test apps/customer/tests/floating-dock.browser.cjs`. Covers 390×844, 768×1024, 1440×900, and narrow 320px layouts; all six callbacks, keyboard/touch access, active state, preference reload/account isolation, hidden pillars, hold cancellation, and reduced motion. `DOCK_SHOTS` optionally saves screenshots.
+- Production build: `npm run build --workspace apps/customer`. Full built-app smoke checks at 390px, 768px, and 1440px exercised all six routes, Spark search, and customization without page runtime errors or horizontal overflow. Backend requests were intercepted as unavailable, so live backend/auth flows and physical iOS browser chrome were not verified. Build reports existing large-chunk/mixed-import warnings.
