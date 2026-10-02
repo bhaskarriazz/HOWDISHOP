@@ -185,17 +185,52 @@ export const V8Header = forwardRef(function V8Header({
 });
 
 export function V8BottomBar({ active, onNavigate, pillars = V8_PILLARS, onCustomize }) {
-  const hold = useRef(null), held = useRef(false), tapTimer = useRef(null);
+  const hold = useRef(null), held = useRef(false), tapTimer = useRef(null), pointer = useRef(null);
   // Founder-approved dock: a brief filled-circle "tap" state on the pressed pillar (visual only; navigation unchanged).
   const [tapped, setTapped] = useState(null);
-  useEffect(() => () => window.clearTimeout(tapTimer.current), []);
-  const startHold = () => { held.current = false; if (onCustomize) hold.current = window.setTimeout(() => { held.current = true; onCustomize(); }, 2000); };
-  const endHold = () => { if (hold.current) window.clearTimeout(hold.current); hold.current = null; };
+  const endHold = () => {
+    window.clearTimeout(hold.current);
+    hold.current = null;
+    pointer.current = null;
+  };
+  useEffect(() => {
+    const cancelHiddenHold = () => { if (document.hidden) endHold(); };
+    window.addEventListener("blur", endHold);
+    document.addEventListener("visibilitychange", cancelHiddenHold);
+    return () => {
+      endHold();
+      window.clearTimeout(tapTimer.current);
+      window.removeEventListener("blur", endHold);
+      document.removeEventListener("visibilitychange", cancelHiddenHold);
+    };
+  }, []);
+  const startHold = (event) => {
+    endHold();
+    if (event.button !== 0 || !event.isPrimary || !onCustomize) return;
+    held.current = false;
+    pointer.current = { id: event.pointerId, x: event.clientX, y: event.clientY };
+    hold.current = window.setTimeout(() => {
+      hold.current = null;
+      held.current = true;
+      onCustomize();
+    }, 2000);
+  };
+  const moveHold = (event) => {
+    const start = pointer.current;
+    if (start && (event.pointerId !== start.id || Math.hypot(event.clientX - start.x, event.clientY - start.y) > 10)) endHold();
+  };
   const tap = (area) => { window.clearTimeout(tapTimer.current); setTapped(area); tapTimer.current = window.setTimeout(() => setTapped(null), 450); };
   return (
-    <nav className="v8-bottombar" aria-label="Main" onPointerDown={startHold} onPointerUp={endHold} onPointerCancel={endHold} onPointerLeave={endHold}>
+    <nav className="v8-bottombar" aria-label="Main" onPointerDown={startHold} onPointerMove={moveHold} onPointerUp={endHold} onPointerCancel={endHold} onPointerLeave={endHold}
+      onContextMenu={(event) => { if (hold.current !== null || held.current) event.preventDefault(); }}
+      onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) endHold(); }}>
       {pillars.map((p) => (
-        <button key={p.area} type="button" className={tapped === p.area ? "is-tapped" : undefined} aria-current={active === p.area ? "page" : undefined} onPointerDown={() => tap(p.area)} onClick={() => { if (held.current) { held.current = false; return; } onNavigate(p.area); }}>
+        <button key={p.area} type="button" className={tapped === p.area ? "is-tapped" : undefined} aria-current={active === p.area ? "page" : undefined} onPointerDown={() => tap(p.area)} onClick={(event) => {
+          // Only consume the pointer click after a hold; keyboard/assistive clicks have detail 0.
+          const suppress = held.current && event.detail !== 0;
+          held.current = false;
+          if (!suppress) onNavigate(p.area);
+        }}>
           <i className="v8-dock-ico" aria-hidden="true"><V8Icon name={p.area} size={22} /></i><span>{p.label}</span>
         </button>
       ))}

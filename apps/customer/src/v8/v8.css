@@ -46,7 +46,7 @@
 }
 @media (max-width: 1100px) { :root { --v8-rail: 196px; } }
 @media (max-width: 760px) {
-  :root { --v8-rail: 0px; --v8-header-h: 172px; --v8-bottom: 84px; }
+  :root { --v8-rail: 0px; --v8-header-h: 172px; --v8-bottom: calc(84px + env(safe-area-inset-bottom, 0px)); }
 }
 
 /* ---------- base ---------- */
@@ -179,7 +179,7 @@ body:has(.howdi-app.v8) { background: var(--v8-bg); color: var(--v8-ink); font-f
 @media (max-width: 760px) {
   .v8-bottombar {
     position: fixed; left: 12px; right: 12px; bottom: 12px; z-index: 9300; height: 64px;
-    display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); align-items: center;
+    display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); align-items: center;
     background: var(--v8-surface); border: 1px solid var(--v8-line); border-radius: 26px;
     box-shadow: 0 10px 30px rgba(13, 26, 58, .12);
     margin-bottom: env(safe-area-inset-bottom);
@@ -200,7 +200,11 @@ body:has(.howdi-app.v8) { background: var(--v8-bg); color: var(--v8-ink); font-f
   .v8-bottombar button.is-tapped, .v8-bottombar button:active { color: var(--v8-primary); }
   @keyframes v8-dock-tap { from { box-shadow: 0 0 0 0 rgba(31, 90, 246, .35), 0 6px 16px rgba(31, 90, 246, .35); } to { box-shadow: 0 0 0 12px rgba(31, 90, 246, 0), 0 6px 16px rgba(31, 90, 246, .35); } }
 }
-@media (max-width: 760px) and (prefers-reduced-motion: reduce) { .v8-dock-ico { transition: none; } .v8-bottombar button.is-tapped .v8-dock-ico { animation: none; } }
+@media (max-width: 760px) and (prefers-reduced-motion: reduce) {
+  .v8-dock-ico { transition: none; }
+  .v8-bottombar button.is-tapped .v8-dock-ico,
+  .v8-bottombar button:active .v8-dock-ico { animation: none; }
+}
 
 /* Home → Move entry (Founder-approved MOVE reference) */
 .v8-move-entry {
