@@ -1,7 +1,7 @@
 // HOWDI V8 shell — NAV-001 (desktop text rail), NAV-002 (desktop header, fixed order),
 // NAV-003 (one floating mobile bar), NAV-004 (quick actions live in the profile hub, never a second bar).
 // Pure presentation: every action is a callback owned by App, so no navigation logic is duplicated here.
-import { forwardRef, useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useId, useRef, useState } from "react";
 
 export const V8_PILLARS = [
   { area: "home", label: "Home" },
@@ -184,22 +184,86 @@ export const V8Header = forwardRef(function V8Header({
   );
 });
 
-export function V8BottomBar({ active, onNavigate, pillars = V8_PILLARS, onCustomize }) {
-  const hold = useRef(null), held = useRef(false), tapTimer = useRef(null);
-  // Founder-approved dock: a brief filled-circle "tap" state on the pressed pillar (visual only; navigation unchanged).
-  const [tapped, setTapped] = useState(null);
-  useEffect(() => () => window.clearTimeout(tapTimer.current), []);
-  const startHold = () => { held.current = false; if (onCustomize) hold.current = window.setTimeout(() => { held.current = true; onCustomize(); }, 2000); };
-  const endHold = () => { if (hold.current) window.clearTimeout(hold.current); hold.current = null; };
-  const tap = (area) => { window.clearTimeout(tapTimer.current); setTapped(area); tapTimer.current = window.setTimeout(() => setTapped(null), 450); };
+// HOWDI Floating Dock — Core Pillar Navigation. App still owns every route and preference.
+export function V8BottomBar({ active, onNavigate, pillars = V8_PILLARS, onCustomize, onSearch }) {
+  const hold = useRef(null), held = useRef(false), origin = useRef(null);
+  const root = useRef(null), spark = useRef(null), panel = useRef(null);
+  const panelId = useId();
+  const [open, setOpen] = useState(false);
+  const hiddenPillars = V8_PILLARS.filter((p) => !pillars.some((visible) => visible.area === p.area));
+  const hiddenActive = hiddenPillars.find((p) => p.area === active);
+  const endHold = () => { window.clearTimeout(hold.current); hold.current = null; origin.current = null; };
+  const close = () => { setOpen(false); spark.current?.focus(); };
+  const runAction = (action) => { close(); action?.(); };
+
+  useEffect(() => () => window.clearTimeout(hold.current), []);
+  useEffect(() => { setOpen(false); }, [active]);
+  useEffect(() => {
+    if (!open) return undefined;
+    panel.current?.querySelector("button")?.focus();
+    const outside = (event) => { if (!root.current?.contains(event.target)) setOpen(false); };
+    const escape = (event) => {
+      if (event.key === "Escape") { event.preventDefault(); setOpen(false); spark.current?.focus(); }
+    };
+    document.addEventListener("pointerdown", outside);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("pointerdown", outside);
+      document.removeEventListener("keydown", escape);
+    };
+  }, [open]);
+
+  const startHold = (event) => {
+    endHold();
+    held.current = false;
+    if (!event.isPrimary || event.button !== 0 || !onCustomize) return;
+    origin.current = { x: event.clientX, y: event.clientY };
+    hold.current = window.setTimeout(() => {
+      held.current = true;
+      endHold();
+      setOpen(false);
+      onCustomize();
+    }, 2000);
+  };
+  const moveHold = (event) => {
+    if (origin.current && Math.hypot(event.clientX - origin.current.x, event.clientY - origin.current.y) > 10) endHold();
+  };
+
   return (
-    <nav className="v8-bottombar" aria-label="Main" onPointerDown={startHold} onPointerUp={endHold} onPointerCancel={endHold} onPointerLeave={endHold}>
-      {pillars.map((p) => (
-        <button key={p.area} type="button" className={tapped === p.area ? "is-tapped" : undefined} aria-current={active === p.area ? "page" : undefined} onPointerDown={() => tap(p.area)} onClick={() => { if (held.current) { held.current = false; return; } onNavigate(p.area); }}>
-          <i className="v8-dock-ico" aria-hidden="true"><V8Icon name={p.area} size={22} /></i><span>{p.label}</span>
-        </button>
-      ))}
-    </nav>
+    <div className="v8-floating-dock" ref={root} onBlur={(event) => {
+      if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
+    }}>
+      <nav className="v8-bottombar" aria-label="Core pillars"
+        onPointerDown={startHold} onPointerMove={moveHold} onPointerUp={endHold}
+        onPointerCancel={endHold} onPointerLeave={endHold}
+        onContextMenu={(event) => { if (onCustomize) event.preventDefault(); }}>
+        {pillars.map((p) => (
+          <button key={p.area} type="button" aria-current={active === p.area ? "page" : undefined}
+            onClick={(event) => {
+              if (held.current && event.detail !== 0) { held.current = false; return; }
+              held.current = false;
+              setOpen(false);
+              onNavigate(p.area);
+            }}>
+            <i className="v8-dock-ico" aria-hidden="true"><V8Icon name={p.area} size={22} /></i><span>{p.label}</span>
+          </button>
+        ))}
+      </nav>
+      <button ref={spark} type="button" className="v8-spark" aria-label={`Spark${hiddenActive ? `, current pillar: ${hiddenActive.label}` : ""}`}
+        aria-expanded={open} aria-controls={open ? panelId : undefined} aria-haspopup="dialog"
+        data-active-pillar={hiddenActive ? active : undefined} onClick={() => setOpen((value) => !value)}>
+        <V8Icon name={open ? "x" : "sparkles"} size={22} />
+      </button>
+      {open ? <section ref={panel} id={panelId} className="v8-spark-panel" role="dialog" aria-label="Spark quick actions">
+        <div className="v8-spark-heading"><b>Spark</b><button type="button" aria-label="Close Spark" onClick={close}><V8Icon name="x" size={18} /></button></div>
+        {onSearch ? <button type="button" onClick={() => runAction(onSearch)}><V8Icon name="search" />Search HOWDI</button> : null}
+        {onCustomize ? <button type="button" onClick={() => runAction(onCustomize)}><V8Icon name="sliders" />Customize Home</button> : null}
+        {hiddenPillars.length ? <><p>More pillars</p>{hiddenPillars.map((p) => <button key={p.area} type="button"
+          aria-current={active === p.area ? "page" : undefined} onClick={() => runAction(() => onNavigate(p.area))}>
+          <V8Icon name={p.area} />{p.label}
+        </button>)}</> : null}
+      </section> : null}
+    </div>
   );
 }
 
