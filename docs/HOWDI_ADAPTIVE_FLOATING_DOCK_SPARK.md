@@ -99,4 +99,15 @@ Block merge for any high-confidence regression.
 - No backend/database changes required for this UI task.
 
 ## Implementation Notes
-_To be completed by Claude._
+Implemented as an additive disclosure in `V8BottomBar`. Spark opens Customize Home and any hidden pillars through the existing App callbacks. It owns only disclosure state; App remains the source of the active route and the existing account-keyed preferences hook remains the persistence owner.
+
+- Preserves the six pillars, separate header profile, desktop rail/header and existing Home customization dialog.
+- Retains the 2000 ms hold, keyboard activation after a hold, cancellation and unmount cleanup from the polish branch; also cancels on movement and route/breakpoint changes.
+- Adds Escape, outside-pointer and focus-leave dismissal; restores focus when closing with Escape or the close action.
+- Uses a 60px light capsule with equal-width visible destinations plus Spark; hidden destinations remain reachable in Spark. Keeps the active hidden pillar identifiable on the Spark control.
+- Adds top/bottom safe-area spacing and viewport coverage, bounds the popup to the viewport, and disables dock motion under reduced-motion preferences.
+- No backend, schema, account model, module screen or navigation architecture changes. Preferences retain their existing browser-local, per-public-username scope; this does not add cross-device synchronization.
+
+Validation: `npm run test:dock --workspace apps/customer` runs the retained polish regression script (seven PASS groups) plus six Playwright tests. Coverage includes account A/B/guest isolation and reload, hide/show/order/favorite/Home-module persistence, touch/keyboard/pointer controls, canceled holds, all six real App callbacks without a backend, 390px mobile, 768px tablet, 1440px desktop, emulated 44px top/34px bottom safe areas, and reduced motion. `npm run build --workspace apps/customer` passes with existing chunk-size/dynamic-import warnings.
+
+Integration: this change builds on `coderabbit/adaptive-floating-dock-v8-polish` at `2ee609a`, which targets the Claude contract branch through PR #6; PR #4 then targets `codex/move-v8-final`. Authenticated backend-backed flows and physical-device browser chrome have not been verified in this environment. Keep the final integration gate blocked until those checks pass.

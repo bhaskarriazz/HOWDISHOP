@@ -5,3 +5,6 @@ backend/.dev-otp-log.jsonl
 backend/data/
 # Vite build output
 apps/customer/dist/
+# Browser regression artifacts
+apps/customer/test-results/
+apps/customer/playwright-report/

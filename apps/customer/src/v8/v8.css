@@ -46,7 +46,7 @@
 }
 @media (max-width: 1100px) { :root { --v8-rail: 196px; } }
 @media (max-width: 760px) {
-  :root { --v8-rail: 0px; --v8-header-h: 172px; --v8-bottom: 84px; }
+  :root { --v8-rail: 0px; --v8-header-h: calc(172px + env(safe-area-inset-top, 0px)); --v8-bottom: calc(84px + env(safe-area-inset-bottom, 0px)); }
 }
 
 /* ---------- base ---------- */
@@ -159,7 +159,7 @@ body:has(.howdi-app.v8) { background: var(--v8-bg); color: var(--v8-ink); font-f
 
 @media (max-width: 760px) {
   .v8-header {
-    left: 0; padding: 12px 16px 10px; height: var(--v8-header-h);
+    left: 0; padding: calc(12px + env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) 10px max(16px, env(safe-area-inset-left, 0px)); height: var(--v8-header-h);
     display: grid; grid-template-columns: 1fr auto auto; grid-template-areas: "brand avatar hpay" "search search search" "loc actions actions";
     align-items: center; row-gap: 10px; column-gap: 10px;
   }
@@ -178,14 +178,15 @@ body:has(.howdi-app.v8) { background: var(--v8-bg); color: var(--v8-ink); font-f
 .v8-bottombar { display: none; }
 @media (max-width: 760px) {
   .v8-bottombar {
-    position: fixed; left: 12px; right: 12px; bottom: 12px; z-index: 9300; height: 64px;
-    display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); align-items: center;
-    background: var(--v8-surface); border: 1px solid var(--v8-line); border-radius: 26px;
+    position: fixed; left: 12px; right: 12px; bottom: 12px; z-index: 9300; height: 60px;
+    display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); align-items: center;
+    background: var(--v8-surface); border: 1px solid var(--v8-line); border-radius: 30px;
     box-shadow: 0 10px 30px rgba(13, 26, 58, .12);
-    margin-bottom: env(safe-area-inset-bottom);
+    margin-bottom: env(safe-area-inset-bottom, 0px);
+    left: max(12px, env(safe-area-inset-left, 0px)); right: max(12px, env(safe-area-inset-right, 0px));
   }
-  .v8-bottombar button {
-    border: 0; background: none; cursor: pointer; height: 56px; display: grid; justify-items: center; align-content: center; gap: 3px;
+  .v8-bottombar > button {
+    border: 0; background: none; cursor: pointer; min-width: 0; padding: 0; height: 52px; display: grid; justify-items: center; align-content: center; gap: 3px;
     color: var(--v8-muted); font: 500 11px/1.1 var(--v8-font); white-space: nowrap; -webkit-tap-highlight-color: transparent;
   }
   .v8-bottombar button svg { width: 22px; height: 22px; }
@@ -193,16 +194,28 @@ body:has(.howdi-app.v8) { background: var(--v8-bg); color: var(--v8-ink); font-f
      tap = filled primary circle with a soft halo, briefly, on the pressed pillar. */
   .v8-dock-ico { display: grid; place-items: center; width: 34px; height: 30px; border-radius: 15px; font-style: normal; transition: background .18s, color .18s, box-shadow .25s; }
   .v8-bottombar button[aria-current="page"] { color: var(--v8-primary); font-weight: 700; }
-  .v8-bottombar button.is-tapped .v8-dock-ico, .v8-bottombar button:active .v8-dock-ico {
+  .v8-bottombar button.is-tapped .v8-dock-ico, .v8-bottombar > button:active .v8-dock-ico {
     width: 40px; height: 40px; border-radius: 50%; margin: -5px 0; background: var(--v8-primary); color: #fff;
     box-shadow: 0 0 0 7px rgba(31, 90, 246, .16), 0 6px 16px rgba(31, 90, 246, .35); animation: v8-dock-tap .45s ease-out;
   }
   .v8-bottombar button.is-tapped, .v8-bottombar button:active { color: var(--v8-primary); }
   @keyframes v8-dock-tap { from { box-shadow: 0 0 0 0 rgba(31, 90, 246, .35), 0 6px 16px rgba(31, 90, 246, .35); } to { box-shadow: 0 0 0 12px rgba(31, 90, 246, 0), 0 6px 16px rgba(31, 90, 246, .35); } }
 }
+.v8-bottombar button:focus-visible { outline: 2px solid var(--v8-primary); outline-offset: -2px; border-radius: 16px; }
+.v8-spark[aria-expanded="true"], .v8-spark.has-active-pillar { color: var(--v8-primary); font-weight: 700; }
+.v8-spark-panel {
+  position: absolute; bottom: calc(100% + 12px); right: 0; width: min(280px, 100%);
+  max-height: calc(100dvh - 120px - env(safe-area-inset-bottom, 0px) - env(safe-area-inset-top, 0px)); overflow-y: auto;
+  padding: 8px; box-sizing: border-box; border: 1px solid var(--v8-line); border-radius: 20px;
+  background: var(--v8-surface); box-shadow: 0 10px 30px rgba(13, 26, 58, .16);
+}
+.v8-spark-panel button {
+  display: flex; align-items: center; gap: 12px; width: 100%; min-height: 44px; padding: 10px 12px;
+  border: 0; border-radius: 12px; background: transparent; color: var(--v8-ink); font: 500 14px/1.4 var(--v8-font); text-align: left; cursor: pointer;
+}
+.v8-spark-panel button:hover { background: var(--v8-bg); }
 @media (max-width: 760px) and (prefers-reduced-motion: reduce) {
-  .v8-dock-ico { transition: none; }
-  .v8-bottombar button.is-tapped .v8-dock-ico, .v8-bottombar button:active .v8-dock-ico { animation: none; }
+  .v8-bottombar .v8-dock-ico { transition: none; animation: none !important; }
 }
 
 /* Home → Move entry (Founder-approved MOVE reference) */

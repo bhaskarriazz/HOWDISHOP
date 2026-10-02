@@ -35,7 +35,7 @@ try {
 
   let page = await fixture();
   const labels = ["Home", "Connect", "Shop", "Move", "Work", "Learn"];
-  assert.deepEqual(await page.locator(".v8-bottombar button").allTextContents(), labels);
+  assert.deepEqual(await page.locator(".v8-bottombar > button:not(.v8-spark)").allTextContents(), labels);
   for (const label of labels) {
     await button(page, label).click();
     assert.equal(await button(page, label).getAttribute("aria-current"), "page");
@@ -49,8 +49,8 @@ try {
   await page.evaluate(() => window.dockFixture.setPillars([
     { area: "home", label: "Home" }, { area: "learn", label: "Learn" }, { area: "move", label: "Move" },
   ]));
-  await page.waitForFunction(() => document.querySelectorAll(".v8-bottombar button").length === 3);
-  assert.deepEqual(await page.locator(".v8-bottombar button").allTextContents(), ["Home", "Learn", "Move"]);
+  await page.waitForFunction(() => document.querySelectorAll(".v8-bottombar > button:not(.v8-spark)").length === 3);
+  assert.deepEqual(await page.locator(".v8-bottombar > button:not(.v8-spark)").allTextContents(), ["Home", "Learn", "Move"]);
   await page.close();
   console.log("PASS: mobile six-pillar callbacks, active state, personalization inputs, bounds and single dock");
 
