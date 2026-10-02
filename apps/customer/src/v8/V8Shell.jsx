@@ -4,12 +4,19 @@
 import { forwardRef, useEffect, useRef, useState } from "react";
 
 export const V8_PILLARS = [
-  { area: "home", label: "Home" },
-  { area: "connect", label: "Connect" },
-  { area: "shop", label: "Shop" },
-  { area: "move", label: "Move" },
-  { area: "works", label: "Work" },
-  { area: "learn", label: "Learn" },
+  { area: "connect", label: "Connect", icon: "connect" },
+  { area: "shop", label: "Shop", icon: "shop" },
+  { area: "spark", label: "Spark", icon: "spark", locked: true },
+  { area: "move", label: "Move", icon: "move" },
+  { area: "works", label: "Work", icon: "works" },
+  { area: "learn", label: "Learn", icon: "learn" },
+];
+
+export const V8_DOCK_ITEMS = [
+  ...V8_PILLARS,
+  { area: "vibe", label: "Vibe", icon: "play" },
+  { area: "hpay", label: "HPay", icon: "wallet" },
+  { area: "messages", label: "Messages", icon: "comment" },
 ];
 
 const PATHS = {
@@ -184,7 +191,7 @@ export const V8Header = forwardRef(function V8Header({
   );
 });
 
-export function V8BottomBar({ active, onNavigate, pillars = V8_PILLARS, onCustomize }) {
+export function V8BottomBar({ active, onNavigate, pillars = V8_PILLARS, onCustomize, iconStyle = "line" }) {
   const hold = useRef(null), held = useRef(false), tapTimer = useRef(null);
   // Founder-approved dock: a brief filled-circle "tap" state on the pressed pillar (visual only; navigation unchanged).
   const [tapped, setTapped] = useState(null);
@@ -193,10 +200,10 @@ export function V8BottomBar({ active, onNavigate, pillars = V8_PILLARS, onCustom
   const endHold = () => { if (hold.current) window.clearTimeout(hold.current); hold.current = null; };
   const tap = (area) => { window.clearTimeout(tapTimer.current); setTapped(area); tapTimer.current = window.setTimeout(() => setTapped(null), 450); };
   return (
-    <nav className="v8-bottombar" aria-label="Main" onPointerDown={startHold} onPointerUp={endHold} onPointerCancel={endHold} onPointerLeave={endHold}>
+    <nav className={`v8-bottombar v8-dock-style-${iconStyle}`} aria-label="Quick access" onPointerDown={startHold} onPointerUp={endHold} onPointerCancel={endHold} onPointerLeave={endHold}>
       {pillars.map((p) => (
-        <button key={p.area} type="button" className={tapped === p.area ? "is-tapped" : undefined} aria-current={active === p.area ? "page" : undefined} onPointerDown={() => tap(p.area)} onClick={() => { if (held.current) { held.current = false; return; } onNavigate(p.area); }}>
-          <i className="v8-dock-ico" aria-hidden="true"><V8Icon name={p.area} size={22} /></i><span>{p.label}</span>
+        <button key={p.slotKey || p.area} type="button" className={`${tapped === p.area ? "is-tapped" : ""} ${p.area === "spark" ? "is-spark" : ""}`.trim()} aria-current={active === p.area ? "page" : undefined} onPointerDown={() => tap(p.area)} onClick={() => { if (held.current) { held.current = false; return; } onNavigate(p.area); }}>
+          <i className="v8-dock-ico" aria-hidden="true"><V8Icon name={p.icon || p.area} size={p.area === "spark" ? 24 : 22} fill={p.area === "spark"} /></i><span>{p.personalLabel || p.label}</span>
         </button>
       ))}
     </nav>
