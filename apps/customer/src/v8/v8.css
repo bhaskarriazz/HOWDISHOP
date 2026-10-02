@@ -46,7 +46,7 @@
 }
 @media (max-width: 1100px) { :root { --v8-rail: 196px; } }
 @media (max-width: 760px) {
-  :root { --v8-rail: 0px; --v8-header-h: 172px; --v8-bottom: 84px; }
+  :root { --v8-rail: 0px; --v8-header-h: 172px; --v8-bottom: calc(84px + env(safe-area-inset-bottom, 0px)); }
 }
 
 /* ---------- base ---------- */
@@ -175,16 +175,18 @@ body:has(.howdi-app.v8) { background: var(--v8-bg); color: var(--v8-ink); font-f
 }
 
 /* ---------- mobile floating bottom bar (NAV-003) ---------- */
-.v8-bottombar { display: none; }
+.v8-floating-dock { display: none; }
 @media (max-width: 760px) {
-  .v8-bottombar {
+  .v8-floating-dock {
     position: fixed; left: 12px; right: 12px; bottom: 12px; z-index: 9300; height: 64px;
-    display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); align-items: center;
+    display: flex; align-items: center; gap: 2px; padding: 0 4px;
     background: var(--v8-surface); border: 1px solid var(--v8-line); border-radius: 26px;
     box-shadow: 0 10px 30px rgba(13, 26, 58, .12);
     margin-bottom: env(safe-area-inset-bottom);
   }
+  .v8-bottombar { display: flex; flex: 1; min-width: 0; }
   .v8-bottombar button {
+    flex: 1; min-width: 0; padding: 0;
     border: 0; background: none; cursor: pointer; height: 56px; display: grid; justify-items: center; align-content: center; gap: 3px;
     color: var(--v8-muted); font: 500 11px/1.1 var(--v8-font); white-space: nowrap; -webkit-tap-highlight-color: transparent;
   }
@@ -200,7 +202,18 @@ body:has(.howdi-app.v8) { background: var(--v8-bg); color: var(--v8-ink); font-f
   .v8-bottombar button.is-tapped, .v8-bottombar button:active { color: var(--v8-primary); }
   @keyframes v8-dock-tap { from { box-shadow: 0 0 0 0 rgba(31, 90, 246, .35), 0 6px 16px rgba(31, 90, 246, .35); } to { box-shadow: 0 0 0 12px rgba(31, 90, 246, 0), 0 6px 16px rgba(31, 90, 246, .35); } }
 }
-@media (max-width: 760px) and (prefers-reduced-motion: reduce) { .v8-dock-ico { transition: none; } .v8-bottombar button.is-tapped .v8-dock-ico { animation: none; } }
+/* Spark is a transient native popover: Escape and outside taps dismiss it. */
+.v8-dock-spark { flex: 0 0 44px; height: 44px; display: grid; place-items: center; border: 0; border-radius: 50%; background: var(--v8-primary-soft); color: var(--v8-primary); cursor: pointer; }
+.v8-dock-spark[aria-expanded="true"] { background: var(--v8-primary); color: var(--v8-primary-ink); }
+.v8-spark-panel { position: fixed; inset: auto 12px calc(88px + env(safe-area-inset-bottom, 0px)) auto; margin: 0; box-sizing: border-box; width: min(300px, calc(100vw - 24px)); max-height: calc(100dvh - 112px - env(safe-area-inset-bottom, 0px)); overflow-y: auto; padding: 12px; border: 1px solid var(--v8-line); border-radius: 20px; background: var(--v8-surface); color: var(--v8-ink); box-shadow: 0 10px 30px rgba(13, 26, 58, .12); font: 500 14px/1.4 var(--v8-font); }
+.v8-spark-heading { display: flex; align-items: center; justify-content: space-between; }
+.v8-spark-panel button { display: flex; align-items: center; gap: 10px; min-height: 44px; width: 100%; padding: 8px; border: 0; border-radius: 10px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.v8-spark-heading button { width: 44px; justify-content: center; }
+.v8-spark-panel button:hover, .v8-spark-panel button[aria-current="page"] { background: var(--v8-primary-soft); color: var(--v8-primary); }
+.v8-spark-panel p { margin: 12px 8px 4px; color: var(--v8-muted); font-size: 12px; }
+@media (prefers-reduced-motion: reduce) { .v8-dock-ico { transition: none; } .v8-bottombar button:is(.is-tapped, :active) .v8-dock-ico { animation: none; } }
+[data-motion="reduced"] .v8-dock-ico { transition: none; }
+[data-motion="reduced"] .v8-bottombar button:is(.is-tapped, :active) .v8-dock-ico { animation: none; }
 
 /* Home → Move entry (Founder-approved MOVE reference) */
 .v8-move-entry {
