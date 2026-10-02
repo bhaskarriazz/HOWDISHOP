@@ -3,7 +3,8 @@ import { createPortal } from "react-dom";
 import "./App.css";
 import ShopCatalogue from "./components/ShopCatalogue";
 import "./v8/v8.css";
-import { V8Rail, V8Header, V8BottomBar, V8BuildLabel, V8_PILLARS } from "./v8/V8Shell";
+import { V8Rail, V8Header, V8BottomBar, V8BuildLabel, V8_DOCK_ITEMS } from "./v8/V8Shell";
+import { V8Spark } from "./v8/V8Spark";
 import { useV8CommonHomePrefs, V8CustomizeHome } from "./v8/V8Personalization";
 import V8Home from "./v8/V8Home";
 import V8Profile from "./v8/V8Profile";
@@ -2816,6 +2817,7 @@ function App() {
   });
   const [v8HomePrefs, setV8HomePrefs] = useV8CommonHomePrefs(currentUser?.public_username || "guest");
   const [v8CustomizeOpen, setV8CustomizeOpen] = useState(false);
+  const [v8SparkOpen, setV8SparkOpen] = useState(false);
 
   // One single customer identity source for header, welcome and My HOWDI.
   useEffect(() => {
@@ -12671,14 +12673,26 @@ const removeNotification = async (notificationId) => {
   // V8: exactly one selected destination — Home, Connect, Shop, Works or Learn & Earn.
   const pillarActive = (area) => navigationOSArea === area;
   // HPay is a global utility (header), not a pillar: no rail item is selected while it is open.
-  const v8ActivePillar = navigationOSArea === "connect" && connectView === "hpay" ? "" : (["home", "connect", "shop", "move", "works", "learn"].includes(navigationOSArea) ? navigationOSArea : "");
+  const v8ActivePillar =
+    navigationOSArea === "connect" && connectView === "hpay" ? "hpay" :
+    navigationOSArea === "connect" && ((connectView === "v8" && v8ConnectPath.split("/")[0] === "vibe") || (connectView === "feed" && connectContentMode === "vibe")) ? "vibe" :
+    navigationOSArea === "connect" && connectView === "messages" ? "messages" :
+    (["connect", "shop", "move", "works", "learn"].includes(navigationOSArea) ? navigationOSArea : "");
   const v8VisiblePillars = v8HomePrefs.dock
     .filter((id) => !v8HomePrefs.hiddenDock.includes(id))
-    .map((id) => V8_PILLARS.find((pillar) => pillar.area === id))
+    .map((id, index) => {
+      const item = V8_DOCK_ITEMS.find((pillar) => pillar.area === id);
+      return item ? { ...item, slotKey: `${index}-${id}`, personalLabel: v8HomePrefs.dockLabels?.[id] || "" } : null;
+    })
     .filter(Boolean);
   const V8_DEFAULT_VIEW = { home: "home", connect: "home", shop: "catalogue", move: "home", works: "find", learn: "discover" };
   const v8Navigate = (area) => {
-    if (area === "home") v8HomeChosenRef.current = true;
+    if (area === "home") { v8HomeChosenRef.current = true; setV8AskMode(false); openNavigationOSArea("home"); return; }
+    if (area === "spark") { setV8SparkOpen(true); return; }
+    if (area === "ask") { setV8AskMode(false); openNavigationOSArea("connect", "p:ask"); return; }
+    if (area === "vibe") { setV8AskMode(false); openNavigationOSArea("connect", "vibe"); return; }
+    if (area === "hpay") { setV8AskMode(false); openNavigationOSArea("hpay", "home"); return; }
+    if (area === "messages") { setV8AskMode(false); openNavigationOSArea("connect", "messages"); return; }
     if (area === "shop") { setShopCatalogueQuery(""); setShopCatalogueNotice(""); }
     setV8AskMode(false);
     // Board 16: the Shop opens on the Handmade Crochet collection; "All" is one tap away.
@@ -13147,7 +13161,8 @@ const removeNotification = async (notificationId) => {
         onSignIn={openLogin}
         onHome={() => v8Navigate("home")}
       />
-      <V8BottomBar active={v8ActivePillar} onNavigate={v8Navigate} pillars={v8VisiblePillars} onCustomize={() => setV8CustomizeOpen(true)} />
+      <V8BottomBar active={v8ActivePillar} onNavigate={v8Navigate} pillars={v8VisiblePillars} iconStyle={v8HomePrefs.dockIconStyle} onCustomize={() => setV8CustomizeOpen(true)} />
+      <V8Spark open={v8SparkOpen} onClose={() => setV8SparkOpen(false)} onNavigate={v8Navigate} onCustomize={() => setV8CustomizeOpen(true)} />
       <V8CustomizeHome open={v8CustomizeOpen} prefs={v8HomePrefs} onSave={setV8HomePrefs} onClose={() => setV8CustomizeOpen(false)} />
       <V8BuildLabel />
       <V8OfflineBanner onRetry={() => window.dispatchEvent(new Event("online"))} />

@@ -23,8 +23,8 @@ try {
     await page.clock.pauseAt(new Date("2026-01-01T00:00:01Z"));
     return page;
   }
-  const button = (page, label = "Home") => page.locator(".v8-bottombar").getByRole("button", { name: label, exact: true });
-  async function press(page, label = "Home") {
+  const button = (page, label = "Connect") => page.locator(".v8-bottombar").getByRole("button", { name: label, exact: true });
+  async function press(page, label = "Connect") {
     const box = await button(page, label).boundingBox();
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
     await page.mouse.down();
@@ -34,13 +34,13 @@ try {
   }
 
   let page = await fixture();
-  const labels = ["Home", "Connect", "Shop", "Move", "Work", "Learn"];
+  const labels = ["Connect", "Shop", "Spark", "Move", "Work", "Learn"];
   assert.deepEqual(await page.locator(".v8-bottombar button").allTextContents(), labels);
-  for (const label of labels) {
+  for (const label of labels.filter(label => label !== "Spark")) {
     await button(page, label).click();
     assert.equal(await button(page, label).getAttribute("aria-current"), "page");
   }
-  await count(page, "navigations", 6);
+  await count(page, "navigations", 5);
   const rect = await page.locator(".v8-bottombar").boundingBox();
   assert.ok(rect.x >= 0 && rect.x + rect.width <= 390 && rect.y + rect.height <= 832);
   assert.equal(await page.locator(".v8-bottombar").count(), 1);
@@ -60,7 +60,7 @@ try {
   assert.ok(844 - safeRect.y - safeRect.height >= 46, "dock clears bottom safe area");
   assert.ok(contentRect.y + contentRect.height <= safeRect.y, "content clears the raised dock");
   await page.close();
-  console.log("PASS: mobile six-pillar callbacks, active state, personalization inputs, bounds and single dock");
+  console.log("PASS: mobile quick-access callbacks, active state, personalization inputs, bounds and single dock");
 
   page = await fixture();
   await press(page);
@@ -138,34 +138,134 @@ try {
   console.log("PASS: keyboard and sustained pointer press respect reduced motion");
 
   page = await fixture();
-  await page.evaluate(() => window.dockFixture.save({
-    ...window.dockFixture.prefs,
-    dock: ["home", "learn", "shop", "move", "works", "connect"],
-    hiddenDock: ["shop", "move", "works"], favoriteDock: ["learn"],
-  }));
+  await button(page, "Spark").click();
+  const spark = page.getByRole("dialog", { name: "Spark", exact: true });
+  await spark.waitFor();
+  await count(page, "navigations", 0);
+  await page.clock.runFor(1);
+  assert.equal(await page.evaluate(() => document.activeElement?.getAttribute("aria-label")), "Close");
+  await page.keyboard.press("Shift+Tab");
+  assert.equal(await page.evaluate(() => document.activeElement?.textContent), "Customize Home");
+  await page.keyboard.press("Tab");
+  assert.equal(await page.evaluate(() => document.activeElement?.getAttribute("aria-label")), "Close");
+  await page.keyboard.press("Escape");
+  assert.equal(await spark.count(), 0);
+  assert.equal(await button(page, "Spark").evaluate(el => el === document.activeElement), true);
+  for (const label of ["Vibe", "HPay", "Messages", "Ask HOWDI"]) {
+    await button(page, "Spark").click();
+    await spark.getByRole("button", { name: label, exact: true }).click();
+    assert.equal(await spark.count(), 0);
+  }
+  await count(page, "navigations", 4);
+  console.log("PASS: Spark opens without navigation; Escape, focus trap/restore and action callbacks work");
+
+  await page.locator("#customize").click();
+  const custom = page.getByRole("dialog", { name: "Customize Home", exact: true });
+  await custom.getByRole("combobox", { name: "Replace Connect", exact: true }).selectOption("vibe");
+  await custom.getByRole("combobox", { name: "Replace Shop", exact: true }).selectOption("hpay");
+  await custom.getByRole("combobox", { name: "Replace Move", exact: true }).selectOption("messages");
+  await custom.getByRole("textbox", { name: "Personal label for Vibe", exact: true }).fill("WWWWWWWWWWWW");
+  await custom.getByRole("combobox", { name: "Icon style", exact: true }).selectOption("soft");
+  await custom.getByRole("button", { name: "Done", exact: true }).click();
   await page.reload();
-  await page.waitForFunction(() => window.dockFixture?.prefs.favoriteDock.includes("learn"));
-  assert.deepEqual(await page.locator(".v8-bottombar button").allTextContents(), ["Home", "Learn", "Connect"]);
+  await page.waitForFunction(() => window.dockFixture?.prefs.dock[0] === "vibe");
+  assert.deepEqual(await page.locator(".v8-bottombar button").allTextContents(), ["WWWWWWWWWWWW", "HPay", "Spark", "Messages", "Work", "Learn"]);
+  assert.ok(await page.locator(".v8-bottombar").evaluate(el => el.classList.contains("v8-dock-style-soft")));
+  const softBackground = await button(page, "Messages").locator("i").evaluate(el => getComputedStyle(el).backgroundColor);
+  assert.notEqual(softBackground, "rgba(0, 0, 0, 0)");
+  for (const [label, area] of [["WWWWWWWWWWWW", "vibe"], ["HPay", "hpay"], ["Messages", "messages"]]) {
+    await button(page, label).click();
+    assert.equal(await page.locator("#active").textContent(), area, "personal labels preserve canonical identity");
+  }
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
   await page.evaluate(() => window.dockFixture.setAccount("beta"));
-  await page.waitForFunction(() => document.querySelectorAll(".v8-bottombar button").length === 6);
+  await page.waitForFunction(() => window.dockFixture.prefs.dock[0] === "connect");
+  assert.deepEqual(await page.locator(".v8-bottombar button").allTextContents(), labels);
   await page.evaluate(() => window.dockFixture.setAccount("alpha"));
-  await page.waitForFunction(() => document.querySelectorAll(".v8-bottombar button").length === 3);
-  assert.deepEqual(await page.evaluate(() => window.dockFixture.prefs.favoriteDock), ["learn"]);
+  await page.waitForFunction(() => window.dockFixture.prefs.dock[0] === "vibe");
+  await page.locator("#customize").click();
+  await custom.getByRole("button", { name: "Reset", exact: true }).click();
+  await custom.getByRole("button", { name: "Done", exact: true }).click();
+  await page.reload();
+  await page.waitForFunction(() => window.dockFixture?.prefs.dock[0] === "connect");
+  assert.deepEqual(await page.locator(".v8-bottombar button").allTextContents(), labels);
+  assert.equal(await button(page, "Connect").locator("i").evaluate(el => getComputedStyle(el).backgroundColor), "rgba(0, 0, 0, 0)");
   await page.close();
-  console.log("PASS: account-scoped local persistence restores ordering, hidden pillars and favorites");
+  console.log("PASS: replacement shortcuts, presentation-only labels, Line/Soft style, per-account persistence and reset");
+
+  page = await fixture();
+  await page.evaluate(() => {
+    localStorage.setItem("howdi.v8.common-home.v1:alpha", JSON.stringify({
+      dock: ["home", "learn", "shop", "move", "works", "connect"],
+      hiddenDock: ["shop"], favoriteDock: ["learn"],
+      hiddenModules: ["vibe"], pinnedModules: ["shop"], moduleOrder: ["news", "shop"],
+    }));
+  });
+  await page.reload();
+  await page.waitForFunction(() => window.dockFixture?.prefs.dock[0] === "learn");
+  const migrated = await page.evaluate(() => window.dockFixture.prefs);
+  assert.deepEqual(migrated.dock, ["learn", "shop", "spark", "move", "works", "connect"]);
+  assert.deepEqual(migrated.hiddenDock, ["shop"]);
+  assert.deepEqual(migrated.favoriteDock, ["learn"]);
+  assert.deepEqual(migrated.hiddenModules, ["vibe"]);
+  assert.deepEqual(migrated.pinnedModules, ["shop"]);
+  assert.deepEqual(migrated.moduleOrder.slice(0, 2), ["news", "shop"]);
+  await page.locator("#customize").click();
+  await page.getByRole("button", { name: "Reset", exact: true }).click();
+  await page.getByRole("button", { name: "Done", exact: true }).click();
+  await page.reload();
+  await page.waitForFunction(() => !!window.dockFixture);
+  assert.deepEqual(await page.evaluate(() => window.dockFixture.prefs.dock), ["connect", "shop", "spark", "move", "works", "learn"]);
+  assert.deepEqual(await page.evaluate(() => window.dockFixture.prefs.hiddenModules), []);
+  await page.close();
+  console.log("PASS: v1 migration preserves account ordering, visibility, favorites and Home modules; reset persists over legacy data");
 
   for (const width of [768, 1440]) {
     page = await fixture(width);
     assert.equal(await page.locator(".v8-bottombar").isVisible(), false);
     assert.equal(await page.locator(".v8-rail").isVisible(), true);
-    for (const label of labels) {
+    for (const label of labels.filter(label => label !== "Spark")) {
       const railButton = page.locator(".v8-rail nav").getByRole("button", { name: label, exact: true });
       await railButton.click();
       assert.equal(await railButton.getAttribute("aria-current"), "page");
     }
-    await count(page, "navigations", 6);
+    await count(page, "navigations", 5);
+    await page.locator("#customize").click();
+    assert.ok(await page.getByRole("dialog", { name: "Customize Home", exact: true }).evaluate(el => el.scrollWidth <= el.clientWidth), "customization controls fit tablet/desktop dialog");
     await page.close();
   }
+  page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  page.on("pageerror", error => errors.push(error.message));
+  // Guest App routing smoke test: no live backend or third-party requests are needed.
+  await page.route("**/*", route => {
+    const url = new URL(route.request().url());
+    if (url.origin !== new URL(server.resolvedUrls.local[0]).origin || url.pathname.startsWith("/api/")) return route.abort();
+    return route.continue();
+  });
+  await page.goto(server.resolvedUrls.local[0]);
+  await button(page, "Spark").waitFor();
+  const initialPath = new URL(page.url()).pathname;
+  await button(page, "Spark").click();
+  const appSpark = page.getByRole("dialog", { name: "Spark", exact: true });
+  await appSpark.waitFor();
+  assert.equal(new URL(page.url()).pathname, initialPath);
+  await page.keyboard.press("Escape");
+  assert.equal(new URL(page.url()).pathname, initialPath);
+  await button(page, "Spark").click();
+  await appSpark.getByRole("button", { name: "Customize Home", exact: true }).click();
+  const appCustom = page.getByRole("dialog", { name: "Customize Home", exact: true });
+  for (const [label, area] of [["Connect", "vibe"], ["Shop", "hpay"], ["Move", "messages"]]) {
+    await appCustom.getByRole("combobox", { name: `Replace ${label}`, exact: true }).selectOption(area);
+  }
+  await appCustom.getByRole("button", { name: "Done", exact: true }).click();
+  for (const [label, path] of [["Vibe", "/connect/vibe"], ["Messages", "/connect/messages"], ["HPay", "/hpay"], ["Ask HOWDI", "/connect/ask"]]) {
+    await button(page, "Spark").click();
+    await appSpark.getByRole("button", { name: label, exact: true }).click();
+    await page.waitForURL(url => url.pathname === path);
+    if (label !== "Ask HOWDI") assert.equal(await button(page, label).getAttribute("aria-current"), "page");
+  }
+  await page.close();
+  console.log("PASS: production App Spark open/close preserves route and actions use canonical guest routes");
   assert.deepEqual(errors, []);
   console.log("PASS: tablet/desktop rail callbacks and no uncaught shell runtime errors");
 } finally {
