@@ -1,0 +1,55 @@
+/* HOWDI shell additions: Continue card + My Spaces switcher (Batch 1). Palette follows HowdiDockV2. */
+.howdi-continue{margin:0 0 16px;padding:14px;border:1px solid #e3ebe7;border-radius:18px;background:#fff;box-shadow:0 8px 24px rgba(13,38,31,.06)}
+.howdi-continue h2{margin:0 0 8px;font-size:15px;font-weight:800;color:#15392f}
+.howdi-continue ul{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.howdi-continue-row{width:100%;display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:12px;min-height:56px;padding:8px 10px;border:0;border-radius:14px;background:#f6f9f7;color:#15392f;text-align:left;font:inherit;cursor:pointer}
+.howdi-continue-row:hover{background:#edf3f0}.howdi-continue-row:focus-visible{outline:3px solid rgba(30,118,92,.35);outline-offset:2px}
+.howdi-continue-row.p1{background:#fdf5e3;box-shadow:inset 4px 0 0 #c98a1c}
+.howdi-continue-icon{width:38px;height:38px;display:grid;place-items:center;border-radius:12px;background:#fff;font-size:18px}
+.howdi-continue-text{display:grid;gap:2px;min-width:0}.howdi-continue-text b{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.howdi-continue-text small{color:#5b6b64;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.howdi-continue-action{font-size:12.5px;font-weight:800;color:#1e765c;white-space:nowrap}
+@media(min-width:1100px){.howdi-continue ul{grid-template-columns:repeat(3,minmax(0,1fr))}}
+.howdi-space{position:relative}
+.howdi-space-trigger{display:inline-flex;align-items:center;gap:6px;height:40px;padding:0 12px;border:1px solid #dbe5e0;border-radius:999px;background:#fff;color:#173d32;font:700 13px/1 system-ui,-apple-system,"Segoe UI",sans-serif;cursor:pointer}
+.howdi-space-trigger:focus-visible{outline:3px solid rgba(30,118,92,.3);outline-offset:2px}.howdi-space-trigger i{font-style:normal;opacity:.6}
+.howdi-space-panel{white-space:normal;text-align:left;position:absolute;right:0;top:calc(100% + 8px);width:min(320px,calc(100vw - 24px));padding:14px;border:1px solid #e3ebe7;border-radius:18px;background:#fff;box-shadow:0 20px 50px rgba(13,38,31,.18);z-index:9600;color:#15392f}
+.howdi-space-head{margin:0 0 10px;display:grid;gap:2px}.howdi-space-head small{color:#66756f;font-size:12px}
+.howdi-space-panel ul{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.howdi-space-row{width:100%;display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:52px;padding:8px 10px;border:1px solid #e3ebe7;border-radius:12px;background:#fff;color:#15392f;text-align:left;font:inherit}
+button.howdi-space-row{cursor:pointer}button.howdi-space-row:hover{background:#f6f9f7}
+.howdi-space-row span{display:grid;gap:1px}.howdi-space-row b{font-size:14px}.howdi-space-row small{color:#66756f;font-size:12px}
+.howdi-space-row.active{border-color:#1e765c;background:#eef6f2}.howdi-space-row.planned{opacity:.75}
+.howdi-space-row em{font-style:normal;font-size:11px;font-weight:800;padding:3px 8px;border-radius:999px;white-space:nowrap}
+.howdi-space-row em.active{background:#1e765c;color:#fff}.howdi-space-row em.planned{background:#edf0f4;color:#4d5a70}.howdi-space-row em.go{background:#fdf5e3;color:#7a5410}
+.howdi-space-foot{margin:10px 0 0;color:#66756f;font-size:12px;line-height:1.45}
+@media(max-width:900px){.howdi-space-trigger b,.howdi-space-trigger i{display:none}.howdi-space-trigger{width:40px;padding:0;justify-content:center}}
+/* Desktop rail logo is now a real Home button: keep its existing look, add button resets only */
+button.howdi-master-sidebar-head{width:100%;border-top:0;border-left:0;border-right:0;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}
+button.howdi-master-sidebar-head:hover{background:#f2f6f4}
+button.howdi-master-sidebar-head:focus-visible{outline:3px solid rgba(30,118,92,.35);outline-offset:2px}
+/* Unified Notifications Center (renders inside the existing #howdi-notification-panel) */
+.howdi-nc{display:flex;flex-direction:column;max-height:min(560px,calc(100vh - 140px));color:#15392f;white-space:normal;text-align:left}
+.howdi-nc-head{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:14px 16px 8px}
+.howdi-nc-head strong{font-size:16px;display:flex;align-items:center;gap:8px}
+.howdi-nc-count{min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:#c2410c;color:#fff;font-size:11px;display:inline-grid;place-items:center}
+.howdi-nc-markall{border:0;background:transparent;color:#1e765c;font-weight:800;font-size:13px;cursor:pointer;min-height:36px}.howdi-nc-markall:disabled{color:#9aa8a2;cursor:default}
+.howdi-nc-filters{display:flex;gap:6px;overflow-x:auto;padding:4px 16px 10px;border-bottom:1px solid #eef2f0;scrollbar-width:none}
+.howdi-nc-filters button{flex:0 0 auto;display:inline-flex;align-items:center;gap:5px;min-height:32px;padding:0 11px;border:1px solid #dbe5e0;border-radius:999px;background:#fff;color:#33483f;font:650 12.5px/1 system-ui,-apple-system,"Segoe UI",sans-serif;cursor:pointer}
+.howdi-nc-filters button.on{background:#173d32;border-color:#173d32;color:#fff}
+.howdi-nc-filters em{font-style:normal;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:#c2410c;color:#fff;font-size:10px;display:inline-grid;place-items:center}
+.howdi-nc-list{overflow-y:auto}
+.howdi-nc-item{display:flex;align-items:stretch;border-bottom:1px solid #f1f5f3}
+.howdi-nc-open{flex:1;min-width:0;display:flex;gap:11px;align-items:flex-start;padding:12px 16px;border:0;background:transparent;text-align:left;color:inherit;font:inherit;cursor:pointer}
+.howdi-nc-open:hover{background:#f6f9f7}.howdi-nc-open:disabled{cursor:default}
+.howdi-nc-item.unread .howdi-nc-open{background:#fbfdf9}
+.howdi-nc-icon{width:36px;height:36px;flex:0 0 36px;border-radius:11px;display:grid;place-items:center;background:#f1f5f3;font-size:17px}
+.howdi-nc-item.unread .howdi-nc-icon{background:#e6f4ec}
+.howdi-nc-text{min-width:0;flex:1;display:grid;gap:2px}.howdi-nc-text b{font-size:13.5px;font-weight:750}.howdi-nc-item.unread .howdi-nc-text b{font-weight:900}
+.howdi-nc-text small{color:#5b6b64;font-size:12.5px;line-height:1.4}.howdi-nc-text i{font-style:normal;color:#8a978f;font-size:11px}
+.howdi-nc-dot{width:8px;height:8px;margin-top:6px;border-radius:50%;background:#c2410c;flex:0 0 8px}
+.howdi-nc-read{flex:0 0 44px;border:0;border-left:1px solid #f1f5f3;background:transparent;color:#1e765c;font-size:16px;cursor:pointer}
+.howdi-nc-read:hover{background:#eef6f2}
+.howdi-nc-empty{margin:0;padding:30px 20px;text-align:center;color:#64748b}
+.howdi-nc-error{margin:10px 16px;padding:10px 12px;border-radius:10px;background:#fff4f2;color:#8c2f16;font-size:13px}
+.howdi-nc-error button{border:0;background:transparent;color:#1e765c;font-weight:800;cursor:pointer}
+.howdi-nc :focus-visible{outline:3px solid rgba(30,118,92,.35);outline-offset:-3px}

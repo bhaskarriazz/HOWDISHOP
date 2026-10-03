@@ -9,6 +9,11 @@ import { buildGlobalSearchPageUrl, normalizeGlobalSearchQuery, normalizeGlobalSe
 import HowdiFor from "./howdi-for/HowdiFor";
 import { HowdiForMenuRow, HowdiForFeedCard, HowdiForEmptyStateLink, insertFeedCard } from "./howdi-for/HowdiForEntryPoints";
 import { parseForPath } from "./howdi-for/routes";
+import HowdiContinue from "./components/HowdiContinue";
+import HowdiSpaceSwitcher from "./components/HowdiSpaceSwitcher";
+import { buildContinueItems } from "./components/howdiContinue";
+import HowdiNotificationCenter from "./components/HowdiNotificationCenter";
+import { normalizeAll as normalizeHowdiNotifications, unreadCount as howdiUnreadCount, markLocal as markHowdiNotificationsLocal } from "./components/howdiNotifications";
 import {
   recordTasteEvent,
   rememberRecentlyViewed,
@@ -12692,6 +12697,113 @@ const removeNotification = async (notificationId) => {
   };
 
   const homeIsConnectHome = navigationOSArea === "connect" && connectView === "dashboard";
+
+  // ---- HOWDI dock v2 bridge (Batch 1) -------------------------------------------------------------
+  // The global dock (mounted beside <App/> in main.jsx) asks for a canonical destination through a
+  // "howdi:navigate" event; the App answers with its EXISTING navigation and marks it handled.
+  // Shortcut labels never reach here — only canonical keys — so renaming never changes the destination.
+  const howdiDockNavRef=useRef(null);
+  howdiDockNavRef.current=(destination)=>{
+    switch(String(destination||"")){
+      case "connect": openNavigationOSArea("connect","home"); return true;
+      case "shop": openNavigationOSArea("shop","catalogue"); return true;
+      case "work": openNavigationOSArea("works","find"); return true;   // Works stays its own pillar
+      case "learn": openNavigationOSArea("learn","discover"); return true;
+      case "messages": openNavigationOSArea("connect","messages"); return true;
+      case "vibe": openNavigationOSArea("connect","vibe"); return true;
+      case "hpay": openNavigationOSArea("hpay","home"); return true;
+      case "profile": openMyHowdiMenu(); return true;
+      case "search": focusHowdiSearch(); return true;              // Spark → Ask HOWDI (existing global search)
+      default: return false;                                        // e.g. "move": no module on this build
+    }
+  };
+  useEffect(()=>{
+    const onDockNavigate=(event)=>{const detail=event?.detail;if(!detail)return;if(howdiDockNavRef.current?.(detail.destination))detail.handled=true;};
+    window.addEventListener("howdi:navigate",onDockNavigate);
+    return()=>window.removeEventListener("howdi:navigate",onDockNavigate);
+  },[]);
+  // Tell the dock which canonical destination is active (decided by App state, never by a label).
+  const howdiActiveDestination=navigationOSArea==="connect"
+    ?(connectView==="hpay"?"hpay":connectView==="messages"?"messages":connectContentMode==="vibe"?"vibe":"connect")
+    :navigationOSArea==="home"||navigationOSArea==="shop"?"shop"
+    :navigationOSArea==="works"?"work"
+    :navigationOSArea==="learn"?"learn"
+    :navigationOSArea==="myhowdi"?"profile":"";
+  useEffect(()=>{
+    window.__howdiActiveDestination=howdiActiveDestination;
+    window.dispatchEvent(new CustomEvent("howdi:active",{detail:{destination:howdiActiveDestination}}));
+  },[howdiActiveDestination]);
+  // Continue where you left off: orders and Works bookings already load on sign-in; Learn's next step
+  // is fetched once (existing /api/learning/me/home) when Connect Home is shown.
+  const continueLearnRequested=useRef("");
+  useEffect(()=>{
+    const who=currentUser?String(currentUser.public_username||"me"):"";
+    if(!who||!homeIsConnectHome||learnerHome||learnerHomeBusy||continueLearnRequested.current===who)return;
+    continueLearnRequested.current=who;loadLearnerHome();
+  },[currentUser,homeIsConnectHome]); // eslint-disable-line react-hooks/exhaustive-deps
+  // ---- Unified Notifications Center (Batch 2) --------------------------------------------------------
+  // One centre over the EXISTING sources (no parallel system). Only session-checked routes are called;
+  // ids stay internal (mark-read calls) and are never displayed.
+  const [howdiNcItems,setHowdiNcItems]=useState([]);
+  const [howdiNcLoaded,setHowdiNcLoaded]=useState(false);
+  const [howdiNcLoading,setHowdiNcLoading]=useState(false);
+  const [howdiNcError,setHowdiNcError]=useState("");
+  const [howdiNcFilter,setHowdiNcFilter]=useState("all");
+  const loadHowdiNotifications=async()=>{
+    if(!currentUser){setHowdiNcItems([]);setHowdiNcLoaded(false);return;}
+    setHowdiNcLoading(true);setHowdiNcError("");
+    const get=async(path,pick)=>{const r=await fetch(`${SHOP_API_BASE}${path}`,{cache:"no-store",headers:customerSessionHeaders()});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.message||"unavailable");return pick(d);};
+    const [general,orders,works,connect]=await Promise.allSettled([
+      get("/api/notifications/me",(d)=>Array.isArray(d.notifications)?d.notifications:[]),
+      get("/api/communications/user/me",(d)=>Array.isArray(d.notifications)?d.notifications:[]),
+      get("/api/works/customer/notifications",(d)=>Array.isArray(d.notifications)?d.notifications:[]),
+      get("/api/connect/notifications?limit=50",(d)=>Array.isArray(d.notifications)?d.notifications:[]),
+    ]);
+    const ok=(x)=>x.status==="fulfilled"?x.value:[];
+    setHowdiNcItems(normalizeHowdiNotifications({general:ok(general),orders:ok(orders),works:ok(works),connect:ok(connect)}));
+    const failed=[general,orders,works,connect].filter((x)=>x.status==="rejected").length;
+    setHowdiNcError(failed===4?"Couldn’t load notifications.":failed?"Some notifications couldn’t load.":"");
+    setHowdiNcLoaded(true);setHowdiNcLoading(false);
+  };
+  useEffect(()=>{if(currentUser)loadHowdiNotifications();else{setHowdiNcItems([]);setHowdiNcLoaded(false);}},[currentUser]); // eslint-disable-line react-hooks/exhaustive-deps
+  const howdiNcPersistRead=async(item)=>{
+    const h={method:"POST",headers:customerSessionHeaders()};const id=encodeURIComponent(item.sourceId);
+    try{
+      if(item.source==="general")await fetch(`${SHOP_API_BASE}/api/notifications/${id}/read`,h);
+      else if(item.source==="works")await fetch(`${WORKS_API_BASE}/api/works/customer/notifications/${id}/read`,{...h,method:"PATCH"});
+      else if(item.source==="connect")await fetch(`${SHOP_API_BASE}/api/connect/notifications/${id}/read`,{...h,method:"PATCH"});
+    }catch{/* the server state wins on the next load */}
+  };
+  const howdiNcMarkOne=async(item)=>{if(!item.canMarkOne)return;setHowdiNcItems((list)=>markHowdiNotificationsLocal(list,[item.key]));await howdiNcPersistRead(item);};
+  const howdiNcMarkAll=async()=>{
+    const unread=howdiNcItems.filter((i)=>i.unread);
+    setHowdiNcItems((list)=>markHowdiNotificationsLocal(list,unread.map((i)=>i.key)));
+    const h=customerSessionHeaders();const sources=new Set(unread.map((i)=>i.source));
+    await Promise.allSettled([
+      ...unread.filter((i)=>i.source==="general").map(howdiNcPersistRead),        // no session-safe bulk route for this table
+      sources.has("orders")?fetch(`${SHOP_API_BASE}/api/notifications/read-all`,{method:"POST",headers:h}):null,
+      sources.has("works")?fetch(`${WORKS_API_BASE}/api/works/customer/notifications/read-all`,{method:"PATCH",headers:h}):null,
+      sources.has("connect")?fetch(`${SHOP_API_BASE}/api/connect/notifications/read-all`,{method:"PATCH",headers:h}):null,
+    ]);
+    loadHowdiNotifications();
+  };
+  // Every notification opens its owning destination — never Notifications again.
+  const howdiNcOpen=async(item)=>{
+    if(item.unread&&item.canMarkOne)howdiNcMarkOne(item);
+    const t=item.target;if(!t)return;                                    // System notices have no page: read in place
+    setNotificationOpen(false);
+    if(t.area==="shop"){openHowdiAccount("orders");loadCustomerOrders().catch(()=>{});return;}
+    if(t.area==="connect"&&t.connectTarget&&item.raw){openNavigationOSArea("connect","home");openConnectNotification(item.raw);return;}
+    openNavigationOSArea(t.area,t.view);
+  };
+  const howdiBellUnread=howdiNcLoaded?howdiUnreadCount(howdiNcItems):(unreadNotificationCount+worksNotificationUnread);
+
+  const openContinueItem=(item)=>{
+    if(item.kind==="works"){openNavigationOSArea("works","bookings");return;}
+    // My Orders only renders in the My HOWDI area, so use the account path that switches to it (openOrders alone does not).
+    if(item.kind==="order"){openHowdiAccount("orders");loadCustomerOrders().catch(()=>{});window.setTimeout(()=>{setSelectedOrder(null);setSelectedTrackingOrder(item.source);},0);return;}
+    if(item.kind==="learn"){openNavigationOSArea("learn","home");openLearnerNextStep();}
+  };
   const pillarActive = (area) => area === "home" ? homeIsConnectHome
     : area === "connect" ? (navigationOSArea === "connect" && !homeIsConnectHome)
     : area === "shop" ? (navigationOSArea === "shop" || navigationOSArea === "home")
@@ -12747,6 +12859,7 @@ const removeNotification = async (notificationId) => {
                   </article>;
                   return (
                   <div className="hc-home-shell" aria-label="HOWDI Connect Home">
+                    {loggedIn&&<HowdiContinue items={buildContinueItems({orders,worksBookings:worksCustomerBookings,learnerHome,orderLabel:orderStatusLabel})} onOpen={openContinueItem}/>}
 
                     {/* 1. HOWDI Special (admin-managed) */}
                     {!homeSpecialDismissed&&<section className="hc-home-section hc-home-special">
@@ -13111,10 +13224,11 @@ const removeNotification = async (notificationId) => {
               style={{order: 30}}
               aria-label="Notifications"
               title="Notifications"
-              onClick={() => { setAccountMenuOpen(false); loadNotifications(); loadWorksNotifications(); setNotificationOpen(true); }}
+              onClick={() => { setAccountMenuOpen(false); loadNotifications(); loadWorksNotifications(); loadHowdiNotifications(); setNotificationOpen(true); }}
+              data-howdi-bell
             >
               <span>🔔</span>
-              {(unreadNotificationCount+worksNotificationUnread)>0 && <em>{unreadNotificationCount+worksNotificationUnread}</em>}
+              {howdiBellUnread>0 && <em>{howdiBellUnread}</em>}
             </button>
 
             {navigationOSArea === "shop" && (
@@ -13140,6 +13254,8 @@ const removeNotification = async (notificationId) => {
             >
               <span>▰</span><b>HPay</b>
             </button>
+
+            {currentUser && <HowdiSpaceSwitcher style={{order: 55}} onOpenStore={() => openNavigationOSArea("shop", "vendor")} />}
 
             <button
               type="button"
@@ -13200,10 +13316,11 @@ const removeNotification = async (notificationId) => {
 
       {/* HOWDI APPROVED PERSISTENT ECOSYSTEM SIDEBAR */}
       <aside className="howdi-master-sidebar" aria-label="HOWDI ecosystem">
-        <div className="howdi-master-sidebar-head">
+        {/* HOWDI logo = universal Home (desktop rail). Previously a plain div with no action. */}
+        <button type="button" className="howdi-master-sidebar-head" aria-label="HOWDI Home" onClick={()=>openNavigationOSArea("connect","home")}>
           <span className="howdi-master-sidebar-mark">H</span>
           <div><strong>HOWDI</strong><small>{navigationOSArea === "home" ? "HOME" : navigationOSArea === "connect" ? "CONNECT" : navigationOSArea === "shop" ? "SHOP" : navigationOSArea === "works" ? "WORKS" : navigationOSArea === "learn" ? "LEARN & EARN" : navigationOSArea === "myhowdi" ? "MY HOWDI" : "HPAY"}</small></div>
-        </div>
+        </button>
 
         <div className="howdi-master-nav-group">
           {OS_PILLARS.map((pillar)=>(
@@ -13248,29 +13365,8 @@ const removeNotification = async (notificationId) => {
 
       {notificationOpen && currentUser && (
         <div id="howdi-notification-panel" data-howdi-header-panel role="region" aria-label="Notifications" style={{ position: "fixed", top: "calc(var(--howdi-header-bottom) + 10px)", right: "24px", zIndex: 9001, width: "370px", maxWidth: "calc(100vw - 32px)", maxHeight: "calc(100dvh - var(--howdi-header-bottom) - 24px)", overflowY: "auto", background: "#fff", border: "1px solid #dbe3dc", borderRadius: "18px", boxShadow: "0 20px 50px rgba(15,23,42,.18)" }}>
-          <div style={{ padding: "15px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #eef2f0" }}>
-            <div><strong style={{ fontSize: "16px" }}>Notifications</strong>{(unreadNotificationCount+worksNotificationUnread) > 0 && <span style={{ marginLeft: "7px", fontSize: "11px", color: "#e11d48", fontWeight: 900 }}>{unreadNotificationCount+worksNotificationUnread} new</span>}</div>
-            <button type="button" onClick={async()=>{await Promise.all([markAllNotificationsRead(),markAllWorksNotificationsRead()]);}} disabled={!(unreadNotificationCount+worksNotificationUnread)} style={{ border: 0, background: "transparent", color: (unreadNotificationCount+worksNotificationUnread) ? "#365947" : "#94a3b8", fontWeight: 800, cursor: (unreadNotificationCount+worksNotificationUnread) ? "pointer" : "not-allowed" }}>Mark all read</button>
-          </div>
-          <div style={{ maxHeight: "420px", overflowY: "auto" }}>
-            {worksNotifications.slice(0,5).map((item)=>(
-              <button key={`works-${item.id}`} type="button" onClick={()=>markWorksNotificationRead(item.id)} style={{ width:"100%", display:"flex", gap:"11px", alignItems:"flex-start", textAlign:"left", padding:"14px 16px", border:0, borderBottom:"1px solid #f1f5f9", background:item.isRead?"#fff":"#f1faf4", cursor:"pointer" }}>
-                <span style={{ width:"38px",height:"38px",flex:"0 0 38px",borderRadius:"11px",display:"flex",alignItems:"center",justifyContent:"center",background:item.isRead?"#f1f5f9":"#dcfce7",fontSize:"19px" }}>{item.icon||"🛠️"}</span>
-                <span style={{minWidth:0,flex:1}}><span style={{display:"block",fontWeight:item.isRead?750:900,color:"#1e293b",fontSize:"13px"}}>{item.title}{!item.isRead&&<span style={{display:"inline-block",width:"6px",height:"6px",borderRadius:"50%",background:"#16a34a",marginLeft:"6px",verticalAlign:"middle"}}/>}</span><span style={{display:"block",marginTop:"3px",color:"#64748b",fontSize:"12px",lineHeight:1.4}}>{item.message}</span><span style={{display:"block",marginTop:"5px",color:"#94a3b8",fontSize:"10px"}}>{item.workCode}{item.createdAt?` · ${new Date(item.createdAt).toLocaleString("en-IN")}`:""}</span></span>
-              </button>
-            ))}
-            {worksNotifications.length===0 && notifications.length === 0 ? (
-              <div style={{ padding: "34px 20px", textAlign: "center", color: "#64748b" }}>🔔<br />You're all caught up.</div>
-            ) : notifications.slice(0, Math.max(0,5-Math.min(worksNotifications.length,5))).map((item) => (
-              <button key={item.id} type="button" onClick={() => markNotificationRead(item.id)} style={{ width: "100%", display: "flex", gap: "11px", alignItems: "flex-start", textAlign: "left", padding: "14px 16px", border: 0, borderBottom: "1px solid #f1f5f9", background: item.unread ? "#fff8fa" : "#fff", cursor: "pointer" }}>
-                <span style={{ width: "38px", height: "38px", flex: "0 0 38px", borderRadius: "11px", display: "flex", alignItems: "center", justifyContent: "center", background: item.unread ? "#ffe9ee" : "#f1f5f9", fontSize: "19px" }}>{item.icon}</span>
-                <span style={{ minWidth: 0, flex: 1 }}><span style={{ display: "block", fontWeight: item.unread ? 900 : 750, color: "#1e293b", fontSize: "13px" }}>{item.title}{item.unread && <span style={{ display: "inline-block", width: "6px", height: "6px", borderRadius: "50%", background: "#e11d48", marginLeft: "6px", verticalAlign: "middle" }} />}</span><span style={{ display: "block", marginTop: "3px", color: "#64748b", fontSize: "12px", lineHeight: 1.4 }}>{item.text}</span><span style={{ display: "block", marginTop: "5px", color: "#94a3b8", fontSize: "10px" }}>{item.time}</span></span>
-              </button>
-            ))}
-          </div>
-          <div style={{ padding: "11px 16px", borderTop: "1px solid #eef2f0", textAlign: "center" }}>
-            <button type="button" onClick={() => { setNotificationOpen(false); openHowdiAccount("notifications"); }} style={{ border: 0, background: "transparent", color: "#365947", fontWeight: 900, cursor: "pointer" }}>View all notifications →</button>
-          </div>
+          <HowdiNotificationCenter items={howdiNcItems} filter={howdiNcFilter} onFilter={setHowdiNcFilter} onOpen={howdiNcOpen} onMarkOne={howdiNcMarkOne} onMarkAll={howdiNcMarkAll} loading={howdiNcLoading} error={howdiNcError} onRetry={loadHowdiNotifications} />
+          {/* "View all notifications" removed: it reopened this same panel (dead end). The unified centre lists everything. */}
         </div>
       )}
 

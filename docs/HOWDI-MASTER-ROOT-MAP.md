@@ -36,14 +36,16 @@ Clicking the **HOWDI Logo → returns to HOWDI Connect Home** (`/` or `/conn
 
 ### Mobile
 
-Bottom navigation:
+> **Superseded (October 2026):** see the *LOCKED ADDENDUM — October 2026 navigation* at the end of this document. The text below is kept for history only; do not restore it.
+
+Historical bottom navigation (retired):
 
 ```text
 Home    Vibe    +    Messages    My HOWDI
 
 ```
 
-Tapping **Home → Connect Home**. We do NOT create multiple confusing "Home" pages.
+Tapping **Home → Connect Home**. We do NOT create multiple confusing "Home" pages. *(Current rule: the **HOWDI logo** is Home on every screen; Home is not a dock item.)*
 
 ---
 
@@ -470,6 +472,8 @@ One unified centre. Filters: All, Connect, Shop, Works, Learn & Earn, HPay, Syst
 
 Every notification must deep-link to the real destination (e.g. "Your worker accepted the booking" → tap → Works → Booking, not Notifications again).
 
+**Implementation (October 2026):** the bell opens one unified centre over the existing sources — general customer notifications (`/api/notifications/me`), order updates (`/api/communications/user/me`), Works (`/api/works/customer/notifications`) and Connect (`/api/connect/notifications`). No parallel notification system. States: unread/read, timestamp, category, title, short message, destination; mark one read, mark all read, unread badge. Display text never shows internal ids, codes, PINs or payment references. Notices with no owning page (System) are read in place — they never reopen Notifications.
+
 ---
 
 ## 34. GLOBAL SEARCH / ASK HOWDI 🔎
@@ -591,6 +595,9 @@ DISCOVER → CONNECT → SHOP/BOOK/LEARN → PAY → EARN/REWARD
 
 Mobile should not simply shrink the desktop header.
 
+> **Superseded (October 2026):** see the *LOCKED ADDENDUM — October 2026 navigation* at the end of this document. The text below is kept for history only; do not restore it.
+
+
 ```text
 ┌──────────────────────────────────┐
 │ Home │ Vibe │ + │ Messages │ Me │
@@ -626,7 +633,9 @@ Some can be icon-based depending on screen width.
 
 ## 46. MOBILE ECOSYSTEM SWITCHER
 
-See Section 55 for the finalised icon-row design. From Home, the customer needs simple access to Connect, Shop, Works, Learn & Earn without permanent bottom-nav positions — kept as a switcher, not bottom-nav tabs, to keep mobile navigation clean.
+> **Superseded (October 2026):** see the *LOCKED ADDENDUM — October 2026 navigation* at the end of this document. The text below is kept for history only; do not restore it.
+
+The personalised dock now gives one-tap access to the pillars, so no separate permanent switcher is required. Historical text: See Section 55 for the finalised icon-row design. From Home, the customer needs simple access to Connect, Shop, Works, Learn & Earn without permanent bottom-nav positions — kept as a switcher, not bottom-nav tabs, to keep mobile navigation clean.
 
 ---
 
@@ -846,7 +855,9 @@ LEARN & EARN — Skill Categories
 
 ## 55. MOBILE ECOSYSTEM ICON ROW
 
-Bottom nav stays exactly as locked (Section 44: Home | Vibe | + | Messages | My HOWDI). This section fills the gap flagged in Section 46: a visible way to jump between the four ecosystems.
+> **Superseded (October 2026):** see the *LOCKED ADDENDUM — October 2026 navigation* at the end of this document. The text below is kept for history only; do not restore it.
+
+Historical text: bottom nav stays exactly as locked (Section 44: Home | Vibe | + | Messages | My HOWDI). This section fills the gap flagged in Section 46: a visible way to jump between the four ecosystems.
 
 ```text
 [🏠 Connect] [🛍️ Shop] [🔧 Works] [🎓 Learn & Earn]
@@ -894,6 +905,8 @@ This addendum records the final architecture decisions agreed after review. Wher
 ## Connect Home preserved composition
 Connect is the universal HOWDI Home. Preserve the original homepage content inside the Connect feed:
 HOWDI Special → Hero / admin-managed daily media → Stories → personalised Vibe/community feed → Handpicked for You → Daily Quote ("A kinder brighter community with HOWDI") → creators/communities/articles → Shop recommendations → Works recommendations → Learn & Earn recommendations → recent/continuation activity.
+
+**Updated October 2026:** *Continue where you left off* (active Works bookings, Shop orders, Learn next step and other real active journeys) sits **near the top** of Connect Home, above HOWDI Special, and renders only when something is active. Older/recent activity may still appear later in the feed. Do not move the Continue card down to match the older sequence above.
 
 ## HOWDI Assistant — global locked feature
 HOWDI Assistant sits at the global tier alongside Search, Notifications and HPay.
@@ -955,10 +968,36 @@ SHOP → Storefront → Creator Storefront / Vendor Storefront.
 Creator and Vendor capabilities determine management features; customers browse/follow/message/purchase through the same Shop ecosystem.
 
 ## Mobile navigation
-Permanent bottom navigation stays:
+> **Superseded (October 2026):** see the *LOCKED ADDENDUM — October 2026 navigation* at the end of this document. The text below is kept for history only; do not restore it.
+
+Historical text: permanent bottom navigation stays:
 Home | Vibe | + | Messages | My HOWDI
 
 The ecosystem switcher stays separate:
 Connect | Shop | Works | Learn & Earn
 
 Home always returns to Connect.
+
+---
+
+# LOCKED ADDENDUM — October 2026 navigation
+
+This addendum supersedes every earlier mobile-navigation rule in this document (Sections 2, 44, 46, 55 and the September 2026 addendum's *Mobile navigation* paragraph). Future work must not restore `Home | Vibe | + | Messages | My HOWDI` or the permanent ecosystem icon row.
+
+## Navigation model
+- **HOWDI logo = Home** (Connect Home) on every screen and every width — header logo on mobile/tablet, rail logo on desktop.
+- **Home is NOT a dock item.**
+- **Personal floating dock = the primary bottom quick access.** Default: `Connect · Shop · Spark · Move · Work · Learn`.
+- **Spark is fixed permanently in the centre** (slot 3). It cannot be moved, replaced, hidden or renamed.
+- Members may **replace, reorder and rename** the non-Spark shortcuts (2-second long-press or the ⋯ button opens Customize).
+- **Renaming never changes the destination.** The dock sends the canonical destination key; the label is presentation only.
+- **Exactly one bottom navigation** on mobile: while the dock is mounted the legacy mobile bar is hidden.
+- **Desktop:** the existing sidebar stays. The dock floats centred over the content area to the right of the sidebar and never overlaps it.
+- **Works stays an independent pillar.** **Move** stays visibly unavailable until a real rides module exists (no mock rides).
+- **Global items stay global:** HPay, Search / Ask HOWDI, Notifications, My HOWDI, My Spaces.
+
+## Continue where you left off
+Near the top of Connect Home, only when there is an active journey; built only from existing APIs; opens the owning screen; never shows internal ids or codes.
+
+## My Spaces
+One account, different context. Personal = active. Business / Store opens the real seller area in Shop. School, College and Workplace are shown as Planned until real organisation backends exist.
