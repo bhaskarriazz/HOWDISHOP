@@ -669,6 +669,148 @@
       }
     }
 
+    async function ensureHowdiCoreIdentityTables() {
+      await pool.query(`CREATE EXTENSION IF NOT EXISTS pgcrypto;`);
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS users (
+          id BIGSERIAL PRIMARY KEY,
+          full_name VARCHAR(150) NOT NULL,
+          email VARCHAR(255) UNIQUE,
+          phone VARCHAR(20) UNIQUE,
+          password_hash TEXT NOT NULL,
+          role VARCHAR(50) DEFAULT 'customer',
+          is_active BOOLEAN DEFAULT TRUE,
+          created_at TIMESTAMPTZ DEFAULT NOW(),
+          updated_at TIMESTAMPTZ DEFAULT NOW(),
+          howdi_id VARCHAR(100) UNIQUE,
+          identity_uuid UUID UNIQUE,
+          master_id VARCHAR(50),
+          account_type_id BIGINT DEFAULT 1,
+          account_status VARCHAR(50) DEFAULT 'ACTIVE'
+        );
+      `);
+      await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS identity_uuid UUID;`);
+      await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS master_id VARCHAR(50);`);
+      await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS account_type_id BIGINT DEFAULT 1;`);
+      await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS account_status VARCHAR(50) DEFAULT 'ACTIVE';`);
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS vendor_profiles (
+          id BIGSERIAL PRIMARY KEY,
+          user_id BIGINT NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+          vendor_code VARCHAR(50) UNIQUE,
+          business_name VARCHAR(180) NOT NULL,
+          owner_name VARCHAR(150) NOT NULL,
+          category VARCHAR(120) NOT NULL DEFAULT 'Crochet & Handmade',
+          city VARCHAR(120),
+          state VARCHAR(120),
+          pincode VARCHAR(10),
+          business_type VARCHAR(80) DEFAULT 'Individual Creator',
+          gstin VARCHAR(30),
+          pan VARCHAR(20),
+          kyc_status VARCHAR(30) NOT NULL DEFAULT 'pending',
+          payout_status VARCHAR(30) NOT NULL DEFAULT 'not_connected',
+          store_status VARCHAR(30) NOT NULL DEFAULT 'offline',
+          status VARCHAR(30) NOT NULL DEFAULT 'active',
+          rating NUMERIC(3,2) NOT NULL DEFAULT 0,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+      `);
+      await pool.query(`ALTER TABLE vendor_profiles ADD COLUMN IF NOT EXISTS address TEXT;`);
+      await pool.query(`ALTER TABLE vendor_profiles ADD COLUMN IF NOT EXISTS service_area VARCHAR(180);`);
+      await pool.query(`ALTER TABLE vendor_profiles ADD COLUMN IF NOT EXISTS description VARCHAR(500);`);
+
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS account_types (
+          id BIGSERIAL PRIMARY KEY,
+          code VARCHAR(50) NOT NULL UNIQUE,
+          name VARCHAR(120) NOT NULL,
+          description TEXT,
+          is_active BOOLEAN NOT NULL DEFAULT TRUE,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+      `);
+      await pool.query(`
+        INSERT INTO account_types (code, name, description, is_active)
+        VALUES
+          ('CUSTOMER', 'Customer', 'HOWDI customer account', TRUE),
+          ('VENDOR', 'Vendor', 'HOWDI vendor account', TRUE),
+          ('TEACHER', 'Teacher', 'HOWDI Learn & Earn teacher account', TRUE)
+        ON CONFLICT (code) DO UPDATE SET
+          name = EXCLUDED.name,
+          description = EXCLUDED.description,
+          is_active = TRUE,
+          updated_at = NOW();
+      `);
+
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS roles (
+          id BIGSERIAL PRIMARY KEY,
+          code VARCHAR(50) NOT NULL UNIQUE,
+          name VARCHAR(120) NOT NULL,
+          description TEXT,
+          is_active BOOLEAN NOT NULL DEFAULT TRUE,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+      `);
+      await pool.query(`
+        INSERT INTO roles (code, name, description, is_active)
+        VALUES
+          ('CUSTOMER', 'Customer', 'Standard HOWDI customer', TRUE),
+          ('CREATOR', 'Creator', 'HOWDI Connect creator capability', TRUE),
+          ('VENDOR', 'Vendor', 'HOWDI Shop vendor capability', TRUE),
+          ('WORKER', 'Worker', 'HOWDI Works verified worker capability', TRUE),
+          ('LEARNER', 'Learner', 'HOWDI Learn & Earn learner capability', TRUE),
+          ('TEACHER', 'Teacher', 'HOWDI Learn & Earn approved teacher', TRUE)
+        ON CONFLICT (code) DO UPDATE SET
+          name = EXCLUDED.name,
+          description = EXCLUDED.description,
+          is_active = TRUE,
+          updated_at = NOW();
+      `);
+
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS identity_master (
+          id BIGSERIAL PRIMARY KEY,
+          master_id VARCHAR(50) NOT NULL UNIQUE,
+          identity_uuid UUID NOT NULL UNIQUE DEFAULT gen_random_uuid(),
+          account_status VARCHAR(50) NOT NULL DEFAULT 'ACTIVE',
+          primary_user_id BIGINT UNIQUE REFERENCES users(id) ON DELETE SET NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+      `);
+
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS identity_accounts (
+          id BIGSERIAL PRIMARY KEY,
+          identity_master_id BIGINT NOT NULL REFERENCES identity_master(id) ON DELETE CASCADE,
+          account_type_id BIGINT NOT NULL REFERENCES account_types(id) ON DELETE RESTRICT,
+          user_id BIGINT NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+          account_reference VARCHAR(100) NOT NULL UNIQUE,
+          account_status VARCHAR(50) NOT NULL DEFAULT 'ACTIVE',
+          is_primary BOOLEAN NOT NULL DEFAULT FALSE,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+      `);
+
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS user_roles (
+          id BIGSERIAL PRIMARY KEY,
+          user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          role_id BIGINT NOT NULL REFERENCES roles(id) ON DELETE RESTRICT,
+          is_primary BOOLEAN NOT NULL DEFAULT FALSE,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE(user_id, role_id)
+        );
+      `);
+      await pool.query(`ALTER TABLE user_roles ADD COLUMN IF NOT EXISTS role_status VARCHAR(30) NOT NULL DEFAULT 'ACTIVE'`);
+    }
+
     async function initializeDatabase() {
       // =====================================================
       // HOWDI V17.0.3 — UNIVERSAL HPAY FOUNDATION (CLEAN)
@@ -1053,6 +1195,7 @@
 
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_hpay_adjustments_status ON hpay_finance_adjustments(status,created_at DESC)`);
 
+      await ensureHowdiCoreIdentityTables();
 
       // 7) Bridge existing Vendors into Universal HPay.
       // No money is copied and the legacy/customer hpay_accounts table is not touched.
@@ -1103,35 +1246,6 @@
 
       console.log("✅ V17.0.3 Universal HPay schema + Vendor bridge ready");
 
-      await pool.query(`
-        CREATE TABLE IF NOT EXISTS vendor_payout_batch_items(
-          id BIGSERIAL PRIMARY KEY,
-          batch_id BIGINT NOT NULL REFERENCES vendor_payout_batches(id) ON DELETE CASCADE,
-          settlement_id BIGINT NOT NULL REFERENCES vendor_settlements(id) ON DELETE RESTRICT,
-          vendor_profile_id BIGINT NOT NULL REFERENCES vendor_profiles(id) ON DELETE RESTRICT,
-          amount NUMERIC(16,2) NOT NULL DEFAULT 0,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          UNIQUE(settlement_id)
-        )
-      `);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_vendor_payout_batch_items_batch ON vendor_payout_batch_items(batch_id,vendor_profile_id)`);
-
-      await pool.query(`
-        CREATE TABLE IF NOT EXISTS vendor_payout_batch_events(
-          id BIGSERIAL PRIMARY KEY,
-          batch_id BIGINT NOT NULL REFERENCES vendor_payout_batches(id) ON DELETE CASCADE,
-          event_type VARCHAR(60) NOT NULL,
-          actor_type VARCHAR(30) NOT NULL,
-          actor_reference VARCHAR(120),
-          message TEXT,
-          payload JSONB NOT NULL DEFAULT '{}'::jsonb,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-      `);
-
-      await pool.query(`ALTER TABLE vendor_settlements ADD COLUMN IF NOT EXISTS payout_batch_id BIGINT REFERENCES vendor_payout_batches(id) ON DELETE SET NULL`);
-      await pool.query(`ALTER TABLE vendor_settlements ADD COLUMN IF NOT EXISTS payout_batch_number VARCHAR(80)`);
-
       // =====================================================
       // HOWDI V16.4 — COMMERCIAL RECONCILIATION & STATEMENTS
       // One shared Admin/Vendor ledger view; no new money movement.
@@ -1149,51 +1263,6 @@
         )
       `);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_vendor_statement_notes_vendor_month ON vendor_commercial_statement_notes(vendor_profile_id,statement_month,created_at DESC)`);
-
-      // =====================================================
-      // HOWDI V16.3 — COMMERCIAL BILLING ENGINE
-      // Product-specific commission offers + monthly platform charges.
-      // =====================================================
-      await pool.query(`ALTER TABLE product_commercial_overrides ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1`);
-      await pool.query(`ALTER TABLE product_commercial_overrides ADD COLUMN IF NOT EXISTS vendor_note TEXT`);
-      await pool.query(`ALTER TABLE product_commercial_overrides ADD COLUMN IF NOT EXISTS admin_note TEXT`);
-      await pool.query(`ALTER TABLE product_commercial_overrides ADD COLUMN IF NOT EXISTS negotiation_expires_at TIMESTAMPTZ`);
-      await pool.query(`ALTER TABLE product_commercial_overrides ADD COLUMN IF NOT EXISTS superseded_at TIMESTAMPTZ`);
-      await pool.query(`ALTER TABLE product_commercial_overrides ADD COLUMN IF NOT EXISTS terms_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_product_commercial_overrides_status ON product_commercial_overrides(vendor_profile_id,status,product_id)`);
-
-      await pool.query(`
-        CREATE TABLE IF NOT EXISTS product_commercial_override_events(
-          id BIGSERIAL PRIMARY KEY,
-          override_id BIGINT NOT NULL REFERENCES product_commercial_overrides(id) ON DELETE CASCADE,
-          event_type VARCHAR(60) NOT NULL,
-          actor_type VARCHAR(30) NOT NULL,
-          actor_reference VARCHAR(120),
-          message TEXT,
-          payload JSONB NOT NULL DEFAULT '{}'::jsonb,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-      `);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_product_override_events_override ON product_commercial_override_events(override_id,created_at DESC)`);
-
-      await pool.query(`ALTER TABLE vendor_monthly_platform_charges ADD COLUMN IF NOT EXISTS due_at TIMESTAMPTZ`);
-      await pool.query(`ALTER TABLE vendor_monthly_platform_charges ADD COLUMN IF NOT EXISTS paid_at TIMESTAMPTZ`);
-      await pool.query(`ALTER TABLE vendor_monthly_platform_charges ADD COLUMN IF NOT EXISTS waived_at TIMESTAMPTZ`);
-      await pool.query(`ALTER TABLE vendor_monthly_platform_charges ADD COLUMN IF NOT EXISTS waived_reason TEXT`);
-      await pool.query(`ALTER TABLE vendor_monthly_platform_charges ADD COLUMN IF NOT EXISTS admin_note TEXT`);
-      await pool.query(`ALTER TABLE vendor_monthly_platform_charges ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`);
-
-      await pool.query(`
-        CREATE TABLE IF NOT EXISTS vendor_platform_charge_events(
-          id BIGSERIAL PRIMARY KEY,
-          platform_charge_id BIGINT NOT NULL REFERENCES vendor_monthly_platform_charges(id) ON DELETE CASCADE,
-          event_type VARCHAR(60) NOT NULL,
-          actor_type VARCHAR(30) NOT NULL,
-          actor_reference VARCHAR(120),
-          message TEXT,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-      `);
 
       // =====================================================
       // HOWDI V16.2 — COMMERCIAL AGREEMENT + COMMISSION ENGINE
@@ -1294,20 +1363,6 @@
         )
       `);
 
-      await pool.query(`ALTER TABLE order_items ADD COLUMN IF NOT EXISTS commercial_agreement_id BIGINT`);
-      await pool.query(`ALTER TABLE order_items ADD COLUMN IF NOT EXISTS commercial_version INTEGER`);
-      await pool.query(`ALTER TABLE order_items ADD COLUMN IF NOT EXISTS commercial_basis_amount NUMERIC(14,2) NOT NULL DEFAULT 0`);
-      await pool.query(`ALTER TABLE order_items ADD COLUMN IF NOT EXISTS commercial_commission_amount NUMERIC(14,2) NOT NULL DEFAULT 0`);
-      await pool.query(`ALTER TABLE order_items ADD COLUMN IF NOT EXISTS commercial_commission_type VARCHAR(30)`);
-      await pool.query(`ALTER TABLE order_items ADD COLUMN IF NOT EXISTS commercial_commission_value NUMERIC(12,4)`);
-      await pool.query(`ALTER TABLE order_items ADD COLUMN IF NOT EXISTS free_commission_applied BOOLEAN NOT NULL DEFAULT FALSE`);
-      await pool.query(`ALTER TABLE order_items ADD COLUMN IF NOT EXISTS vendor_discount_amount NUMERIC(14,2) NOT NULL DEFAULT 0`);
-      await pool.query(`ALTER TABLE order_items ADD COLUMN IF NOT EXISTS howdi_discount_amount NUMERIC(14,2) NOT NULL DEFAULT 0`);
-      await pool.query(`ALTER TABLE order_items ADD COLUMN IF NOT EXISTS unallocated_discount_amount NUMERIC(14,2) NOT NULL DEFAULT 0`);
-      await pool.query(`ALTER TABLE order_items ADD COLUMN IF NOT EXISTS commercial_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb`);
-
-      // Every existing vendor starts with a permanent free agreement until HOWDI and
-      // the vendor explicitly accept a negotiated replacement.
       await pool.query(`
         INSERT INTO vendor_commercial_agreements(
           vendor_profile_id,version,agreement_name,status,
@@ -1334,6 +1389,51 @@
         FROM vendor_profiles vp
         WHERE NOT EXISTS(
           SELECT 1 FROM vendor_commercial_agreements a WHERE a.vendor_profile_id=vp.id
+        )
+      `);
+
+      // =====================================================
+      // HOWDI V16.3 — COMMERCIAL BILLING ENGINE
+      // Product-specific commission offers + monthly platform charges.
+      // =====================================================
+      await pool.query(`ALTER TABLE product_commercial_overrides ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1`);
+      await pool.query(`ALTER TABLE product_commercial_overrides ADD COLUMN IF NOT EXISTS vendor_note TEXT`);
+      await pool.query(`ALTER TABLE product_commercial_overrides ADD COLUMN IF NOT EXISTS admin_note TEXT`);
+      await pool.query(`ALTER TABLE product_commercial_overrides ADD COLUMN IF NOT EXISTS negotiation_expires_at TIMESTAMPTZ`);
+      await pool.query(`ALTER TABLE product_commercial_overrides ADD COLUMN IF NOT EXISTS superseded_at TIMESTAMPTZ`);
+      await pool.query(`ALTER TABLE product_commercial_overrides ADD COLUMN IF NOT EXISTS terms_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb`);
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_product_commercial_overrides_status ON product_commercial_overrides(vendor_profile_id,status,product_id)`);
+
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS product_commercial_override_events(
+          id BIGSERIAL PRIMARY KEY,
+          override_id BIGINT NOT NULL REFERENCES product_commercial_overrides(id) ON DELETE CASCADE,
+          event_type VARCHAR(60) NOT NULL,
+          actor_type VARCHAR(30) NOT NULL,
+          actor_reference VARCHAR(120),
+          message TEXT,
+          payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_product_override_events_override ON product_commercial_override_events(override_id,created_at DESC)`);
+
+      await pool.query(`ALTER TABLE vendor_monthly_platform_charges ADD COLUMN IF NOT EXISTS due_at TIMESTAMPTZ`);
+      await pool.query(`ALTER TABLE vendor_monthly_platform_charges ADD COLUMN IF NOT EXISTS paid_at TIMESTAMPTZ`);
+      await pool.query(`ALTER TABLE vendor_monthly_platform_charges ADD COLUMN IF NOT EXISTS waived_at TIMESTAMPTZ`);
+      await pool.query(`ALTER TABLE vendor_monthly_platform_charges ADD COLUMN IF NOT EXISTS waived_reason TEXT`);
+      await pool.query(`ALTER TABLE vendor_monthly_platform_charges ADD COLUMN IF NOT EXISTS admin_note TEXT`);
+      await pool.query(`ALTER TABLE vendor_monthly_platform_charges ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`);
+
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS vendor_platform_charge_events(
+          id BIGSERIAL PRIMARY KEY,
+          platform_charge_id BIGINT NOT NULL REFERENCES vendor_monthly_platform_charges(id) ON DELETE CASCADE,
+          event_type VARCHAR(60) NOT NULL,
+          actor_type VARCHAR(30) NOT NULL,
+          actor_reference VARCHAR(120),
+          message TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
       `);
 
@@ -1410,6 +1510,54 @@
         )
       `);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_vendor_settlement_events_settlement ON vendor_settlement_events(settlement_id,created_at DESC)`);
+
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS vendor_payout_batches(
+          id BIGSERIAL PRIMARY KEY,
+          batch_number VARCHAR(80) UNIQUE NOT NULL,
+          status VARCHAR(40) NOT NULL DEFAULT 'DRAFT',
+          settlement_count INTEGER NOT NULL DEFAULT 0,
+          gross_settlement_amount NUMERIC(16,2) NOT NULL DEFAULT 0,
+          payout_amount NUMERIC(16,2) NOT NULL DEFAULT 0,
+          created_by VARCHAR(120),
+          approved_by VARCHAR(120),
+          approved_at TIMESTAMPTZ,
+          paid_at TIMESTAMPTZ,
+          payout_reference VARCHAR(180),
+          admin_note TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
+
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS vendor_payout_batch_items(
+          id BIGSERIAL PRIMARY KEY,
+          batch_id BIGINT NOT NULL REFERENCES vendor_payout_batches(id) ON DELETE CASCADE,
+          settlement_id BIGINT NOT NULL REFERENCES vendor_settlements(id) ON DELETE RESTRICT,
+          vendor_profile_id BIGINT NOT NULL REFERENCES vendor_profiles(id) ON DELETE RESTRICT,
+          amount NUMERIC(16,2) NOT NULL DEFAULT 0,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE(settlement_id)
+        )
+      `);
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_vendor_payout_batch_items_batch ON vendor_payout_batch_items(batch_id,vendor_profile_id)`);
+
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS vendor_payout_batch_events(
+          id BIGSERIAL PRIMARY KEY,
+          batch_id BIGINT NOT NULL REFERENCES vendor_payout_batches(id) ON DELETE CASCADE,
+          event_type VARCHAR(60) NOT NULL,
+          actor_type VARCHAR(30) NOT NULL,
+          actor_reference VARCHAR(120),
+          message TEXT,
+          payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
+
+      await pool.query(`ALTER TABLE vendor_settlements ADD COLUMN IF NOT EXISTS payout_batch_id BIGINT REFERENCES vendor_payout_batches(id) ON DELETE SET NULL`);
+      await pool.query(`ALTER TABLE vendor_settlements ADD COLUMN IF NOT EXISTS payout_batch_number VARCHAR(80)`);
 
       // =====================================================
       // HOWDI V15.0 — MULTI-PROVIDER LOGISTICS FOUNDATION
@@ -2435,6 +2583,18 @@
         await pool.query(`CREATE INDEX IF NOT EXISTS orders_user_created_idx ON orders(user_id, created_at DESC);`);
         await pool.query(`CREATE INDEX IF NOT EXISTS orders_status_created_idx ON orders(status, created_at DESC);`);
         await pool.query(`CREATE INDEX IF NOT EXISTS order_items_order_idx ON order_items(order_id);`);
+
+        await pool.query(`ALTER TABLE order_items ADD COLUMN IF NOT EXISTS commercial_agreement_id BIGINT`);
+        await pool.query(`ALTER TABLE order_items ADD COLUMN IF NOT EXISTS commercial_version INTEGER`);
+        await pool.query(`ALTER TABLE order_items ADD COLUMN IF NOT EXISTS commercial_basis_amount NUMERIC(14,2) NOT NULL DEFAULT 0`);
+        await pool.query(`ALTER TABLE order_items ADD COLUMN IF NOT EXISTS commercial_commission_amount NUMERIC(14,2) NOT NULL DEFAULT 0`);
+        await pool.query(`ALTER TABLE order_items ADD COLUMN IF NOT EXISTS commercial_commission_type VARCHAR(30)`);
+        await pool.query(`ALTER TABLE order_items ADD COLUMN IF NOT EXISTS commercial_commission_value NUMERIC(12,4)`);
+        await pool.query(`ALTER TABLE order_items ADD COLUMN IF NOT EXISTS free_commission_applied BOOLEAN NOT NULL DEFAULT FALSE`);
+        await pool.query(`ALTER TABLE order_items ADD COLUMN IF NOT EXISTS vendor_discount_amount NUMERIC(14,2) NOT NULL DEFAULT 0`);
+        await pool.query(`ALTER TABLE order_items ADD COLUMN IF NOT EXISTS howdi_discount_amount NUMERIC(14,2) NOT NULL DEFAULT 0`);
+        await pool.query(`ALTER TABLE order_items ADD COLUMN IF NOT EXISTS unallocated_discount_amount NUMERIC(14,2) NOT NULL DEFAULT 0`);
+        await pool.query(`ALTER TABLE order_items ADD COLUMN IF NOT EXISTS commercial_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb`);
 
         // =====================================================
         // HOWDI V18.3 — PAYMENT TRANSACTION LEDGER FOUNDATION
@@ -52937,6 +53097,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
     async function startHowdiServer() {
       try {
+        await ensureHowdiCoreIdentityTables();
         await ensureLearnEarnV20074Schema();
         await ensureLearnEarnRuntimeCompatibility();
         await ensureVibeCoreV140Schema();
@@ -52947,6 +53108,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
         await ensureVibeSafetyV140JSchema();
         await ensureVibeAdminControlV140KSchema();
         await ensureVibeReleaseReadinessV140LSchema();
+        // Core commerce/vendor tables must exist before Vibe Commerce FK bootstrap.
+        await initializeDatabase();
         await ensureVibeCommerceV150ASchema();
         await ensureVibeCommerceV150BSchema();
         await ensureVibeCommerceV150CSchema();
@@ -53032,7 +53195,6 @@ async function ensureVibeReleaseReadinessV140LSchema(){
         await ensureVibeCommerceV153WSchema();
         await ensureVibeCommerceV153XSchema();
         await ensureVibeCommerceV153YSchema();
-        await initializeDatabase();
         await ensureCriticalPortalTables();
         await initializeWorksLiveTables();
         await ensureHPayTables();
@@ -53043,8 +53205,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
     console.log("✅ HOWDI Works Shared Cancellation Ledger V34 loaded");
       } catch (error) {
         console.error("❌ HOWDI database initialization failed:", error.message);
-        process.exitCode = 1;
-        return;
+        console.warn("⚠️ Continuing API boot so partial schema and repair routes can still run on fresh databases.");
       }
 
       console.log("✅ HOWDI Works Booking + Availability Fix V35 loaded");
