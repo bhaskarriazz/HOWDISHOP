@@ -9,6 +9,9 @@ import { buildGlobalSearchPageUrl, normalizeGlobalSearchQuery, normalizeGlobalSe
 import HowdiFor from "./howdi-for/HowdiFor";
 import { HowdiForMenuRow, HowdiForFeedCard, HowdiForEmptyStateLink, insertFeedCard } from "./howdi-for/HowdiForEntryPoints";
 import { parseForPath } from "./howdi-for/routes";
+import HowdiContinue from "./components/HowdiContinue";
+import HowdiSpaceSwitcher from "./components/HowdiSpaceSwitcher";
+import { buildContinueItems } from "./components/howdiContinue";
 import {
   recordTasteEvent,
   rememberRecentlyViewed,
@@ -12692,6 +12695,55 @@ const removeNotification = async (notificationId) => {
   };
 
   const homeIsConnectHome = navigationOSArea === "connect" && connectView === "dashboard";
+
+  // ---- HOWDI dock v2 bridge (Batch 1) -------------------------------------------------------------
+  // The global dock (mounted beside <App/> in main.jsx) asks for a canonical destination through a
+  // "howdi:navigate" event; the App answers with its EXISTING navigation and marks it handled.
+  // Shortcut labels never reach here — only canonical keys — so renaming never changes the destination.
+  const howdiDockNavRef=useRef(null);
+  howdiDockNavRef.current=(destination)=>{
+    switch(String(destination||"")){
+      case "connect": openNavigationOSArea("connect","home"); return true;
+      case "shop": openNavigationOSArea("shop","catalogue"); return true;
+      case "work": openNavigationOSArea("works","find"); return true;   // Works stays its own pillar
+      case "learn": openNavigationOSArea("learn","discover"); return true;
+      case "messages": openNavigationOSArea("connect","messages"); return true;
+      case "vibe": openNavigationOSArea("connect","vibe"); return true;
+      case "hpay": openNavigationOSArea("hpay","home"); return true;
+      case "profile": openMyHowdiMenu(); return true;
+      case "search": focusHowdiSearch(); return true;              // Spark → Ask HOWDI (existing global search)
+      default: return false;                                        // e.g. "move": no module on this build
+    }
+  };
+  useEffect(()=>{
+    const onDockNavigate=(event)=>{const detail=event?.detail;if(!detail)return;if(howdiDockNavRef.current?.(detail.destination))detail.handled=true;};
+    window.addEventListener("howdi:navigate",onDockNavigate);
+    return()=>window.removeEventListener("howdi:navigate",onDockNavigate);
+  },[]);
+  // Tell the dock which canonical destination is active (decided by App state, never by a label).
+  const howdiActiveDestination=navigationOSArea==="connect"
+    ?(connectView==="hpay"?"hpay":connectView==="messages"?"messages":connectContentMode==="vibe"?"vibe":"connect")
+    :navigationOSArea==="home"||navigationOSArea==="shop"?"shop"
+    :navigationOSArea==="works"?"work"
+    :navigationOSArea==="learn"?"learn"
+    :navigationOSArea==="myhowdi"?"profile":"";
+  useEffect(()=>{
+    window.__howdiActiveDestination=howdiActiveDestination;
+    window.dispatchEvent(new CustomEvent("howdi:active",{detail:{destination:howdiActiveDestination}}));
+  },[howdiActiveDestination]);
+  // Continue where you left off: orders and Works bookings already load on sign-in; Learn's next step
+  // is fetched once (existing /api/learning/me/home) when Connect Home is shown.
+  const continueLearnRequested=useRef("");
+  useEffect(()=>{
+    const who=currentUser?String(currentUser.public_username||"me"):"";
+    if(!who||!homeIsConnectHome||learnerHome||learnerHomeBusy||continueLearnRequested.current===who)return;
+    continueLearnRequested.current=who;loadLearnerHome();
+  },[currentUser,homeIsConnectHome]); // eslint-disable-line react-hooks/exhaustive-deps
+  const openContinueItem=(item)=>{
+    if(item.kind==="works"){openNavigationOSArea("works","bookings");return;}
+    if(item.kind==="order"){openOrders();window.setTimeout(()=>{setSelectedOrder(null);setSelectedTrackingOrder(item.source);},0);return;}
+    if(item.kind==="learn"){openNavigationOSArea("learn","home");openLearnerNextStep();}
+  };
   const pillarActive = (area) => area === "home" ? homeIsConnectHome
     : area === "connect" ? (navigationOSArea === "connect" && !homeIsConnectHome)
     : area === "shop" ? (navigationOSArea === "shop" || navigationOSArea === "home")
@@ -12747,6 +12799,7 @@ const removeNotification = async (notificationId) => {
                   </article>;
                   return (
                   <div className="hc-home-shell" aria-label="HOWDI Connect Home">
+                    {loggedIn&&<HowdiContinue items={buildContinueItems({orders,worksBookings:worksCustomerBookings,learnerHome,orderLabel:orderStatusLabel})} onOpen={openContinueItem}/>}
 
                     {/* 1. HOWDI Special (admin-managed) */}
                     {!homeSpecialDismissed&&<section className="hc-home-section hc-home-special">
@@ -13141,6 +13194,8 @@ const removeNotification = async (notificationId) => {
               <span>▰</span><b>HPay</b>
             </button>
 
+            {currentUser && <HowdiSpaceSwitcher style={{order: 55}} onOpenStore={() => openNavigationOSArea("shop", "vendor")} />}
+
             <button
               type="button"
               className={accountMenuOpen || myHowdiDrawer ? "howdi-global-account active" : "howdi-global-account"}
@@ -13200,10 +13255,11 @@ const removeNotification = async (notificationId) => {
 
       {/* HOWDI APPROVED PERSISTENT ECOSYSTEM SIDEBAR */}
       <aside className="howdi-master-sidebar" aria-label="HOWDI ecosystem">
-        <div className="howdi-master-sidebar-head">
+        {/* HOWDI logo = universal Home (desktop rail). Previously a plain div with no action. */}
+        <button type="button" className="howdi-master-sidebar-head" aria-label="HOWDI Home" onClick={()=>openNavigationOSArea("connect","home")}>
           <span className="howdi-master-sidebar-mark">H</span>
           <div><strong>HOWDI</strong><small>{navigationOSArea === "home" ? "HOME" : navigationOSArea === "connect" ? "CONNECT" : navigationOSArea === "shop" ? "SHOP" : navigationOSArea === "works" ? "WORKS" : navigationOSArea === "learn" ? "LEARN & EARN" : navigationOSArea === "myhowdi" ? "MY HOWDI" : "HPAY"}</small></div>
-        </div>
+        </button>
 
         <div className="howdi-master-nav-group">
           {OS_PILLARS.map((pillar)=>(

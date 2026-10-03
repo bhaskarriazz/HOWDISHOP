@@ -41,39 +41,22 @@ function readDock() {
   }
 }
 
-function isVisible(node) {
-  if (!(node instanceof HTMLElement)) return false;
-  const style = window.getComputedStyle(node);
-  const rect = node.getBoundingClientRect();
-  return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+// Navigation handshake with the customer App (no DOM text matching).
+// The dock asks; App.jsx answers through its own existing navigation (openNavigationOSArea etc.)
+// and marks the request handled. If nothing answers, the destination isn't available on this build.
+export function requestHowdiDestination(destination) {
+  const detail = { destination, handled: false };
+  window.dispatchEvent(new CustomEvent('howdi:navigate', { detail }));
+  return detail.handled === true;
 }
 
-function clickExistingDestination(key) {
-  const terms = DESTINATIONS[key]?.terms || [];
-  const selectors = 'a,button,[role="button"],[role="tab"]';
-  const nodes = Array.from(document.querySelectorAll(selectors)).filter(
-    (node) => !node.closest('[data-howdi-dock-v2]') && isVisible(node),
-  );
-
-  const normalized = (value) => String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
-
-  for (const term of terms) {
-    const exact = nodes.find((node) => normalized(node.textContent) === normalized(term));
-    if (exact) {
-      exact.click();
-      return true;
-    }
-  }
-
-  for (const term of terms) {
-    const partial = nodes.find((node) => normalized(node.textContent).includes(normalized(term)));
-    if (partial) {
-      partial.click();
-      return true;
-    }
-  }
-
-  return false;
+// Which dock key should look active for the App's current canonical destination.
+// A destination that isn't pinned falls back to the pillar that owns it (Messages/Vibe live in Connect).
+export function dockActiveKey(active, keys) {
+  if (!active) return '';
+  if (keys.includes(active)) return active;
+  if ((active === 'messages' || active === 'vibe') && keys.includes('connect')) return 'connect';
+  return '';
 }
 
 export default function HowdiDockV2() {
@@ -81,7 +64,19 @@ export default function HowdiDockV2() {
   const [editing, setEditing] = useState(false);
   const [sparkOpen, setSparkOpen] = useState(false);
   const [notice, setNotice] = useState('');
+  const [active, setActive] = useState(() => (typeof window !== 'undefined' && window.__howdiActiveDestination) || '');
   const holdTimer = useRef(null);
+  const heldRef = useRef(false);
+
+  useEffect(() => {
+    const onActive = (event) => setActive(String(event.detail?.destination || ''));
+    window.addEventListener('howdi:active', onActive);
+    // The App mounts first and may have announced its destination before this listener existed.
+    if (window.__howdiActiveDestination) setActive(String(window.__howdiActiveDestination));
+    // One permanent bottom navigation on mobile: while the dock is mounted it replaces the legacy mobile bar.
+    document.documentElement.classList.add('howdi-dock-v2-on');
+    return () => { window.removeEventListener('howdi:active', onActive); document.documentElement.classList.remove('howdi-dock-v2-on'); };
+  }, []);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
@@ -95,7 +90,9 @@ export default function HowdiDockV2() {
 
   const beginHold = () => {
     if (holdTimer.current) window.clearTimeout(holdTimer.current);
+    heldRef.current = false;
     holdTimer.current = window.setTimeout(() => {
+      heldRef.current = true; // the release that follows a hold must not navigate
       setEditing(true);
       holdTimer.current = null;
     }, 2000);
@@ -108,21 +105,23 @@ export default function HowdiDockV2() {
     }
   };
 
+  const flash = (text) => { setNotice(text); window.setTimeout(() => setNotice(''), 3200); };
+
   const navigate = (key) => {
-    if (editing) return;
+    if (editing || heldRef.current) { heldRef.current = false; return; }
     if (key === 'spark') {
       setSparkOpen(true);
       return;
     }
-
-    const clicked = clickExistingDestination(key);
-    window.dispatchEvent(new CustomEvent('howdi:navigate', { detail: { destination: key } }));
-
-    if (!clicked) {
-      setNotice(`${DESTINATIONS[key].label} is reserved in your dock. Its live screen will connect here as that module is wired.`);
-      window.setTimeout(() => setNotice(''), 3200);
-    }
+    if (!requestHowdiDestination(key)) flash(`${DESTINATIONS[key].label} isn’t available on HOWDI yet.`);
   };
+
+  const sparkGo = (key) => {
+    setSparkOpen(false);
+    if (!requestHowdiDestination(key)) flash('That part of HOWDI isn’t available yet.');
+  };
+
+  const activeKey = dockActiveKey(active, items.map((item) => item.key));
 
   const renameItem = (index, label) => {
     if (items[index].key === 'spark') return;
@@ -171,9 +170,11 @@ export default function HowdiDockV2() {
             <button
               key={`${item.key}-${index}`}
               type="button"
-              className={`howdi-dock-v2-item ${isSpark ? 'is-spark' : ''}`}
+              className={`howdi-dock-v2-item ${isSpark ? 'is-spark' : ''} ${activeKey === item.key ? 'is-active' : ''}`}
               onClick={() => navigate(item.key)}
+              aria-current={activeKey === item.key ? 'page' : undefined}
               aria-label={isSpark ? 'Open Spark' : `Open ${item.label || meta.label}`}
+              data-destination={item.key}
             >
               <span className="howdi-dock-v2-icon" aria-hidden="true">{meta.icon}</span>
               <span className="howdi-dock-v2-label">{item.label || meta.label}</span>
@@ -271,9 +272,10 @@ export default function HowdiDockV2() {
               <button type="button" className="howdi-dock-v2-close" onClick={() => setSparkOpen(false)} aria-label="Close">×</button>
             </div>
             <div className="howdi-spark-v2-actions">
-              <button type="button" onClick={() => { setSparkOpen(false); clickExistingDestination('shop'); }}>Find a product</button>
-              <button type="button" onClick={() => { setSparkOpen(false); clickExistingDestination('work'); }}>Find a service</button>
-              <button type="button" onClick={() => { setSparkOpen(false); clickExistingDestination('learn'); }}>Find a class</button>
+              <button type="button" onClick={() => sparkGo('search')}>Ask HOWDI</button>
+              <button type="button" onClick={() => sparkGo('shop')}>Find a product</button>
+              <button type="button" onClick={() => sparkGo('work')}>Find a service</button>
+              <button type="button" onClick={() => sparkGo('learn')}>Find a class</button>
             </div>
           </section>
         </div>
