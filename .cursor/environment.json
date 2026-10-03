@@ -1,0 +1,6 @@
+{
+  "name": "HOWDI Shop",
+  "user": "ubuntu",
+  "install": "bash .cursor/cloud-agent-install.sh",
+  "start": "bash .cursor/start.sh"
+}

@@ -39,3 +39,12 @@
 - Run syntax/build checks after changes.
 - Report exact files changed, schema changes/migrations, tests run, and known limitations.
 - Do not claim completion unless UI + API + persistence are wired end-to-end.
+
+## Cursor Cloud specific instructions
+
+- **Install:** `bash .cursor/cloud-agent-install.sh` (npm deps for root, `backend/`, and `apps/customer/`, plus `node --check backend/server.js` and customer `npm run build`).
+- **Boot:** `bash .cursor/start.sh` starts PostgreSQL, ensures the local `howdi` database/user, launches the backend (`backend/server.js` on port 5000) and customer Vite dev server (port 5173) in tmux sessions `howdi-backend` and `howdi-customer`.
+- **Health:** `curl http://127.0.0.1:5000/api/health/live` and `curl http://127.0.0.1:5000/api/health/ready`.
+- **Smoke auth:** `POST /api/auth/register` with JSON `name`, `email`, `phone`, `password` (fresh DB bootstrap may log schema warnings but the API should still listen).
+- **Logs:** `/tmp/howdi-backend.log`, `/tmp/howdi-customer.log`.
+- Local dev credentials are created by `start.sh` in gitignored `backend/.env` and `apps/customer/.env`; do not commit them.
