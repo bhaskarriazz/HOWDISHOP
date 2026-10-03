@@ -29,3 +29,13 @@
 .howdi-dock-v2-item.is-spark.is-active .howdi-dock-v2-icon{background:#173d32;color:#f1c56e;box-shadow:0 0 0 3px #f1c56e,0 9px 22px rgba(18,61,50,.24)}
 /* One permanent mobile bottom navigation: the dock replaces the legacy .howdi-mobile-nav bar while mounted */
 @media(max-width:900px){html.howdi-dock-v2-on .howdi-app .howdi-mobile-nav{display:none!important}}
+
+/* Desktop: the floating dock centres on the content area to the right of the sidebar, never over it */
+@media(min-width:901px){
+  html .howdi-dock-v2{left:calc(var(--howdi-master-sidebar,0px) + (100vw - var(--howdi-master-sidebar,0px)) / 2)}
+  html .howdi-dock-v2-edit{left:calc(var(--howdi-master-sidebar,0px) + (100vw - var(--howdi-master-sidebar,0px)) / 2 + 262px)}
+  html .howdi-dock-v2-notice{left:calc(var(--howdi-master-sidebar,0px) + (100vw - var(--howdi-master-sidebar,0px)) / 2)}
+}
+/* Spark on the dock's true centre line: 2 slots left, 3 right, so left (incl. gaps) == right (incl. gaps). */
+html .howdi-dock-v2{grid-template-columns:81px 81px 72px 52px 52px 52px}
+@media(max-width:720px){html .howdi-dock-v2{grid-template-columns:1.5fr 1.5fr 1.3fr 1fr 1fr 1fr}}

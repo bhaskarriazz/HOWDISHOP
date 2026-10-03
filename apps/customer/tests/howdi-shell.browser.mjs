@@ -36,10 +36,19 @@ const logo = async (page) => { for (const sel of [".brand", ".howdi-master-sideb
 const dockBtn = (page, key) => page.locator(`.howdi-dock-v2 [data-destination="${key}"]`);
 const activeKey = (page) => page.locator(".howdi-dock-v2 .is-active").getAttribute("data-destination").catch(() => null);
 
-for (const width of [390, 768, 1440]) {
+for (const width of (process.env.WIDTHS || "390,768,1024,1280,1440").split(",").map(Number)) {
   const { ctx, page, errs } = await open(width);
   const labels = await page.locator(".howdi-dock-v2 .howdi-dock-v2-label").allTextContents();
   ok(width, "default dock Connect · Shop · Spark · Move · Work · Learn (no Home)", labels.join("|") === "Connect|Shop|Spark|Move|Work|Learn", labels.join("|"));
+  const geo = await page.evaluate(() => {
+    const r = (el) => el && getComputedStyle(el).display !== "none" ? el.getBoundingClientRect() : null;
+    const dock = r(document.querySelector(".howdi-dock-v2")), spark = r(document.querySelector('.howdi-dock-v2 [data-destination="spark"]'));
+    const side = r(document.querySelector(".howdi-master-sidebar")), edit = r(document.querySelector(".howdi-dock-v2-edit"));
+    return { dock: dock && { l: dock.left, r: dock.right }, sparkMid: spark && (spark.left + spark.right) / 2, side: side && side.width > 0 ? { r: side.right } : null, edit: edit && { l: edit.left, r: edit.right }, vw: innerWidth };
+  });
+  ok(width, "dock fully on screen (no clipping)", geo.dock.l >= 0 && geo.dock.r <= geo.vw && (!geo.edit || (geo.edit.l >= 0 && geo.edit.r <= geo.vw)), JSON.stringify(geo));
+  ok(width, "Spark sits at the dock’s centre", Math.abs(geo.sparkMid - (geo.dock.l + geo.dock.r) / 2) <= 3, JSON.stringify(geo));
+  if (geo.side) ok(width, "dock (and its ⋯ button) clear of the sidebar", geo.dock.l >= geo.side.r && (!geo.edit || geo.edit.l >= geo.side.r), JSON.stringify(geo));
   ok(width, "Spark fixed in slot 3", (await page.locator(".howdi-dock-v2 .howdi-dock-v2-item").nth(2).getAttribute("data-destination")) === "spark");
   // Logo = Connect Home; dock highlights Connect
   await (await logo(page)).click(); await page.waitForTimeout(400);
@@ -49,6 +58,7 @@ for (const width of [390, 768, 1440]) {
   await page.locator("[data-howdi-continue]").waitFor({ timeout: 8000 });
   const rows = await page.locator("[data-howdi-continue] .howdi-continue-row").evaluateAll((a) => a.map((b) => b.dataset.kind));
   ok(width, "Continue shows Works (arrived) → Shop (shipped) → Learn (live) from existing APIs", rows.join(",") === "works,order,learn", rows.join(","));
+  ok(width, "Continue is the first block on Connect Home", await page.evaluate(() => { const c = document.querySelector("[data-howdi-continue]"); return c && c.parentElement.firstElementChild === c; }));
   ok(width, "Continue exposes no ids, codes, PINs or phones", !TRAPS.test(await page.locator("[data-howdi-continue]").innerText()));
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/home-${width}.png` });
   // Dock wiring through the App's own navigation
@@ -79,6 +89,9 @@ for (const width of [390, 768, 1440]) {
   await (await logo(page)).click(); await page.locator("[data-howdi-continue]").waitFor();
   await page.locator('[data-howdi-continue] [data-kind="works"]').click(); await page.waitForTimeout(500);
   ok(width, "Continue › Works booking opens Works", (await activeKey(page)) === "work");
+  await (await logo(page)).click(); await page.locator("[data-howdi-continue]").waitFor();
+  await page.locator('[data-howdi-continue] [data-kind="order"]').click(); await page.waitForTimeout(700);
+  ok(width, "Continue › Shop order opens My Orders", await page.evaluate(() => document.body.innerText.includes("Your orders, all in one place")));
   // Global items preserved
   ok(width, "HPay, Notifications and Search still present", (await page.getByRole("button", { name: "Open HPay" }).count()) === 1 && (await page.getByRole("button", { name: "Notifications" }).count()) >= 1 && (await page.locator("header input").count()) >= 1);
   // HPay via header → dock has no HPay pinned → nothing wrongly active
