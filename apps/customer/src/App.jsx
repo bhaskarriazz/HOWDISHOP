@@ -22,6 +22,8 @@ import { V8Appearance, V8Permissions, V8IdentityBadges } from "./v8/V8Settings";
 import V8PublicInfo, { V8PublicFooter } from "./v8/public/V8PublicInfo";
 import { publicInfoPageForPath, publicInfoPathForPage } from "./v8/public/publicInfoRoutes";
 import { V8Confirm, V8OfflineBanner, V8SessionExpired, loadV8Prefs, applyV8Prefs, useV8Ui } from "./v8/V8System";
+import { RECOVERY_HANDOFF_EVENT } from "./v8/recovery/recoveryHandoffs";
+import { openRecoveryPreviewPage, RECOVERY_PREVIEW_PATH, reportRecoveryFailure } from "./v8/recovery/recoveryReport";
 import HowdiFor from "./howdi-for/HowdiFor";
 import { HowdiForMenuRow, HowdiForFeedCard, HowdiForEmptyStateLink, insertFeedCard } from "./howdi-for/HowdiForEntryPoints";
 import { cleanTopic, parseForPath, resolveForDestination } from "./howdi-for/routes";
@@ -10977,6 +10979,27 @@ return () => window.clearInterval(timer);
   };
 
   useEffect(() => {
+    const onRecoveryHandoff = (event) => {
+      const detail = event?.detail;
+      if (!detail?.kind) return;
+      if (detail.kind === "support") {
+        openHowdiAccount("support");
+        if (detail.subject) setSupportSubject(detail.subject);
+        if (detail.message) setSupportMessage(detail.message);
+        setSupportTicketOpen(true);
+      }
+      if (detail.kind === "spark") {
+        try {
+          sessionStorage.setItem("howdi:ask-prefill", String(detail.prompt || "").slice(0, 500));
+        } catch { /* ignore */ }
+        openNavigationOSArea("connect", "p:ask");
+      }
+    };
+    window.addEventListener(RECOVERY_HANDOFF_EVENT, onRecoveryHandoff);
+    return () => window.removeEventListener(RECOVERY_HANDOFF_EVENT, onRecoveryHandoff);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
     if (navigationOSArea !== "myhowdi" || !profileOpen || !currentUser) return;
     if (["overview", "shopping", "orders"].includes(profileTab)) loadCustomerOrders();
     if (["overview", "shopping", "wishlist"].includes(profileTab)) loadWishlist();
@@ -12743,6 +12766,7 @@ const removeNotification = async (notificationId) => {
     const p=String(pathname||"/").replace(/\/+$/,"")||"/";
     let m;
     if(p==="/"){openNavigationOSArea("home");return true;}
+    if(p===RECOVERY_PREVIEW_PATH){openNavigationOSArea("home");openRecoveryPreviewPage();return true;}
     const infoPage=publicInfoPageForPath(p);if(infoPage){openNavigationOSArea("info",infoPage);return true;}
     if(p==="/hpay"){openNavigationOSArea("hpay","home");return true;}
     if((m=p.match(/^\/connect(?:\/([A-Za-z0-9/_.-]{1,160}))?$/))){openNavigationOSArea("connect","p:"+(m[1]||"")+(window.location.search||""));return true;}
@@ -23306,7 +23330,25 @@ export async function howdiApiV166F(path,options={}){
       lastError=error?.name==="AbortError"
         ? new HowdiApiErrorV166F("HOWDI request timed out",{code:"REQUEST_TIMEOUT"})
         : error;
-      if(attempt>=retries) throw lastError;
+      if(attempt>=retries){
+        if(options.recovery){
+          try{
+            reportRecoveryFailure({
+              error:lastError,
+              method,
+              requestId:lastError?.requestId,
+              pillar:options.recovery.pillar,
+              surface:options.recovery.surface,
+              action:options.recovery.action,
+              sensitiveKind:options.recovery.sensitiveKind,
+              tags:options.recovery.tags,
+              draftScope:options.recovery.draftScope,
+              userMessage:options.recovery.userMessage,
+            });
+          }catch{/* ignore */}
+        }
+        throw lastError;
+      }
       await new Promise(r=>setTimeout(r,250*(attempt+1)));
     }finally{clearTimeout(timer);}
     attempt++;

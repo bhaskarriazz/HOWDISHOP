@@ -174,6 +174,16 @@ export function AskHowdi({ api, onNav, onRoute }) {
     } catch (e) { setPerm(e && e.name === "NotAllowedError" ? "denied" : "nospeech"); }
   };
   useEffect(() => () => { try { recRef.current?.stop(); } catch { /* ignore */ } }, []);
+  useEffect(() => {
+    try {
+      const pre = sessionStorage.getItem("howdi:ask-prefill");
+      if (pre) {
+        setQ(pre);
+        setPerm("idle");
+        sessionStorage.removeItem("howdi:ask-prefill");
+      }
+    } catch { /* ignore */ }
+  }, []);
   const feedback = async (helpful) => { setFb(helpful ? "up" : "down"); await api("POST", "/api/v8/ask/feedback", { question: d.question, helpful }); };
   return (
     <div className="v8d v8ask">
