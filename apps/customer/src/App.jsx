@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import "./App.css";
 import ShopCatalogue from "./components/ShopCatalogue";
 import "./v8/v8.css";
-import { V8Rail, V8Header, V8BottomBar, V8BuildLabel, V8_PILLARS } from "./v8/V8Shell";
+import { V8Rail, V8Header, V8BottomBar, V8BuildLabel, V8_PILLARS, V8_DOCK_ITEMS } from "./v8/V8Shell";
 import { useV8CommonHomePrefs, V8CustomizeHome } from "./v8/V8Personalization";
 import V8Home from "./v8/V8Home";
 import V8Profile from "./v8/V8Profile";
@@ -12671,14 +12671,34 @@ const removeNotification = async (notificationId) => {
   // V8: exactly one selected destination — Home, Connect, Shop, Works or Learn & Earn.
   const pillarActive = (area) => navigationOSArea === area;
   // HPay is a global utility (header), not a pillar: no rail item is selected while it is open.
-  const v8ActivePillar = navigationOSArea === "connect" && connectView === "hpay" ? "" : (["home", "connect", "shop", "move", "works", "learn"].includes(navigationOSArea) ? navigationOSArea : "");
+  // Desktop/tablet rail keeps canonical pillar selection (unchanged from the pre-dock baseline).
+  const v8RailActive = navigationOSArea === "connect" && connectView === "hpay" ? "" : (["home", "connect", "shop", "move", "works", "learn"].includes(navigationOSArea) ? navigationOSArea : "");
+  // Mobile dock: highlight the quick-access shortcut that owns the current canonical destination.
+  const v8ConnectSection = connectView === "v8" ? String(v8ConnectPath || "").split("/")[0] : "";
+  const v8DockDestination =
+    navigationOSArea !== "connect" ? navigationOSArea :
+    connectView === "hpay" ? "hpay" :
+    connectView === "messages" ? "messages" :
+    v8ConnectSection === "ask" ? "spark" :
+    (v8ConnectSection === "vibe" || connectContentMode === "vibe") ? "vibe" : "connect";
+  // A Connect sub-destination that is not pinned in the dock falls back to Connect; HPay stays a utility.
+  const v8ActivePillar = v8HomePrefs.dock.includes(v8DockDestination) ? v8DockDestination
+    : (["vibe", "messages"].includes(v8DockDestination) && v8HomePrefs.dock.includes("connect") ? "connect" : "");
   const v8VisiblePillars = v8HomePrefs.dock
     .filter((id) => !v8HomePrefs.hiddenDock.includes(id))
-    .map((id) => V8_PILLARS.find((pillar) => pillar.area === id))
+    .map((id, index) => {
+      const item = V8_DOCK_ITEMS.find((pillar) => pillar.area === id);
+      return item ? { ...item, slotKey: `${index}-${id}`, personalLabel: v8HomePrefs.dockLabels?.[id] || "" } : null;
+    })
     .filter(Boolean);
+  const V8_RAIL_PILLARS = [{ area: "home", label: "Home" }, ...V8_PILLARS.filter((p) => p.area !== "spark").map(({ area, label }) => ({ area, label }))];
   const V8_DEFAULT_VIEW = { home: "home", connect: "home", shop: "catalogue", move: "home", works: "find", learn: "discover" };
   const v8Navigate = (area) => {
-    if (area === "home") v8HomeChosenRef.current = true;
+    if (area === "home") { v8HomeChosenRef.current = true; setV8AskMode(false); openNavigationOSArea("home"); return; }
+    if (area === "spark") { setV8AskMode(false); openNavigationOSArea("connect", "p:ask"); return; }
+    if (area === "vibe") { setV8AskMode(false); openNavigationOSArea("connect", "vibe"); return; }
+    if (area === "hpay") { setV8AskMode(false); openNavigationOSArea("hpay", "home"); return; }
+    if (area === "messages") { setV8AskMode(false); openNavigationOSArea("connect", "messages"); return; }
     if (area === "shop") { setShopCatalogueQuery(""); setShopCatalogueNotice(""); }
     setV8AskMode(false);
     // Board 16: the Shop opens on the Handmade Crochet collection; "All" is one tap away.
@@ -13121,7 +13141,7 @@ const removeNotification = async (notificationId) => {
         onRoute={(r) => { const s = String(r || ""); if (s.startsWith("/connect")) openNavigationOSArea("connect", "p:" + s.replace(/^\/connect\/?/, "")); else if (s.startsWith("/@")) openNavigationOSArea("profile", s.slice(2)); else v8ApplyPath(s.split("?")[0]); }} />
       {currentUser ? <V8CallCenter apiBase={SHOP_API_BASE} getAuthHeaders={customerSessionHeaders} user={currentUser} /> : null}
       <a className="v8-skip" href="#v8-main" onClick={(e) => { e.preventDefault(); const m = document.querySelector(".v8-page") || document.getElementById("v8-main"); if (m) { m.setAttribute("tabindex", "-1"); m.focus(); } }}>Skip to content</a>
-      <V8Rail active={v8ActivePillar} onNavigate={v8Navigate} pillars={v8VisiblePillars} />
+      <V8Rail active={v8RailActive} onNavigate={v8Navigate} pillars={V8_RAIL_PILLARS} />
       <V8Header
         ref={headerRef}
         user={currentUser}
@@ -13147,7 +13167,7 @@ const removeNotification = async (notificationId) => {
         onSignIn={openLogin}
         onHome={() => v8Navigate("home")}
       />
-      <V8BottomBar active={v8ActivePillar} onNavigate={v8Navigate} pillars={v8VisiblePillars} onCustomize={() => setV8CustomizeOpen(true)} />
+      <V8BottomBar active={v8ActivePillar} onNavigate={v8Navigate} pillars={v8VisiblePillars} iconStyle={v8HomePrefs.dockIconStyle} onCustomize={() => setV8CustomizeOpen(true)} />
       <V8CustomizeHome open={v8CustomizeOpen} prefs={v8HomePrefs} onSave={setV8HomePrefs} onClose={() => setV8CustomizeOpen(false)} />
       <V8BuildLabel />
       <V8OfflineBanner onRetry={() => window.dispatchEvent(new Event("online"))} />
