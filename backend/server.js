@@ -51196,6 +51196,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
             // =====================================================
             // HOWDI CUSTOMER PREFERENCES CENTER — LIVE API
+            // Public preference columns are explicit in every SELECT/RETURNING below.
+            // Keep database row identity and other internal metadata out of this route.
             // =====================================================
             if(req.method==="GET" && pathname==="/api/preferences/me"){
               // STAGE 2B SECURITY FIX: session-derived, was /api/preferences/:id (IDOR — trusted the URL id)
@@ -51203,7 +51205,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               if(userId===null) return;
 
               let preferences=await pool.query(`
-                SELECT * FROM user_preferences WHERE user_id=$1
+                SELECT marketing_email,order_email,promotional_notifications,sms_updates,push_notifications,preferred_categories,preferred_sizes,preferred_languages,personalized_recommendations,save_shopping_activity,share_analytics_data,home_preferences FROM user_preferences WHERE user_id=$1
               `,[userId]);
 
               if(!preferences.rows[0]){
@@ -51215,7 +51217,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   INSERT INTO user_preferences(user_id)
                   VALUES($1)
                   ON CONFLICT (user_id) DO UPDATE SET user_id=EXCLUDED.user_id
-                  RETURNING *
+                  RETURNING marketing_email,order_email,promotional_notifications,sms_updates,push_notifications,preferred_categories,preferred_sizes,preferred_languages,personalized_recommendations,save_shopping_activity,share_analytics_data,home_preferences
                 `,[userId]);
               }
 
@@ -51233,7 +51235,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               const body=await getBody(req);
 
               const currentResult=await pool.query(`
-                SELECT * FROM user_preferences WHERE user_id=$1
+                SELECT marketing_email,order_email,promotional_notifications,sms_updates,push_notifications,preferred_categories,preferred_sizes,preferred_languages,personalized_recommendations,save_shopping_activity,share_analytics_data,home_preferences FROM user_preferences WHERE user_id=$1
               `,[userId]);
 
               let current=currentResult.rows[0];
@@ -51243,7 +51245,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   INSERT INTO user_preferences(user_id)
                   VALUES($1)
                   ON CONFLICT (user_id) DO UPDATE SET user_id=EXCLUDED.user_id
-                  RETURNING *
+                  RETURNING marketing_email,order_email,promotional_notifications,sms_updates,push_notifications,preferred_categories,preferred_sizes,preferred_languages,personalized_recommendations,save_shopping_activity,share_analytics_data,home_preferences
                 `,[userId]);
                 current=inserted.rows[0];
               }
@@ -51302,7 +51304,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                     home_preferences=$13::jsonb,
                     updated_at=NOW()
                 WHERE user_id=$1
-                RETURNING *
+                RETURNING marketing_email,order_email,promotional_notifications,sms_updates,push_notifications,preferred_categories,preferred_sizes,preferred_languages,personalized_recommendations,save_shopping_activity,share_analytics_data,home_preferences
               `,[
                 userId,
                 next.marketing_email,

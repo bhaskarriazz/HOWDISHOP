@@ -17,16 +17,23 @@ const routes = source.slice(start, end);
 const userRows = new Map([[101, row(101)], [202, row(202)]]);
 function row(id) { return { id, user_id:id, home_preferences:{}, marketing_email:true, order_email:true, promotional_notifications:true, sms_updates:false, push_notifications:true, preferred_categories:[], preferred_sizes:[], preferred_languages:['English'], personalized_recommendations:true, save_shopping_activity:true, share_analytics_data:false }; }
 
-async function call({method='GET',sessionUser=101,body={}}={}) {
+async function call({method='GET',sessionUser=101,body={},query={}}={}) {
   const calls=[];let response;
   const pool={query:async(sql,params=[])=>{
     calls.push({sql,params});const uid=Number(params[0]);
-    if(sql.includes('SELECT * FROM user_preferences WHERE user_id=$1')) return {rows:userRows.has(uid)?[{...userRows.get(uid)}]:[]};
-    if(sql.includes('INSERT INTO user_preferences')){if(!userRows.has(uid))userRows.set(uid,row(uid));return{rows:[{...userRows.get(uid)}]};}
-    if(sql.includes('UPDATE user_preferences')){const saved={...userRows.get(uid),home_preferences:JSON.parse(params[12])};userRows.set(uid,saved);return{rows:[{...saved}]};}
+    // Model PostgreSQL's SELECT/RETURNING projection, including the old wildcard.
+    const project=value=>{
+      const columns=sql.match(/SELECT\s+([\s\S]+?)\s+FROM user_preferences/i)?.[1] || sql.match(/RETURNING\s+([\s\S]+)$/i)?.[1];
+      assert.ok(columns, 'preference query has a projection');
+      if(columns.trim()==='*') return {...value};
+      return Object.fromEntries(columns.split(',').map(column=>{const key=column.trim();assert.ok(Object.hasOwn(value,key), 'known preference column '+key);return [key,value[key]];}));
+    };
+    if(/SELECT\s+[\s\S]+?FROM user_preferences WHERE user_id=\$1/.test(sql)) return {rows:userRows.has(uid)?[project(userRows.get(uid))]:[]};
+    if(sql.includes('INSERT INTO user_preferences')){if(!userRows.has(uid))userRows.set(uid,row(uid));return{rows:[project(userRows.get(uid))]};}
+    if(sql.includes('UPDATE user_preferences')){const saved={...userRows.get(uid),home_preferences:JSON.parse(params[12])};userRows.set(uid,saved);return{rows:[project(saved)]};}
     throw new Error('Unexpected SQL in C2 preferences route test: '+sql.slice(0,100));
   }};
-  const context={req:{method},res:{},pathname:'/api/preferences/me',pool,clean:x=>String(x??'').trim(),
+  const context={req:{method,url:'/api/preferences/me?'+new URLSearchParams(query)},res:{},pathname:'/api/preferences/me',pool,clean:x=>String(x??'').trim(),
     getBody:async()=>body,k5eRequireSelf:async()=>sessionUser===null?(response={status:401,json:{status:'error'}},null):sessionUser,
     k5eOmitUserId:value=>{const copy=JSON.parse(JSON.stringify(value));if(Array.isArray(copy))return copy.map(x=>{delete x.user_id;return x});delete copy.user_id;return copy;},
     sendJSON:(_res,status,json)=>(response={status,json}),normalizeHomePreferences,console:{error(){}}};
@@ -44,6 +51,30 @@ test('GET /api/preferences/me derives owner from session and returns that accoun
   assert.equal(b.response.json.preferences.home_preferences.dockLabels.works,'Beta');
   assert.ok(!('user_id' in a.response.json.preferences));
 });
+
+const publicFields=['marketing_email','order_email','promotional_notifications','sms_updates','push_notifications','preferred_categories','preferred_sizes','preferred_languages','personalized_recommendations','save_shopping_activity','share_analytics_data','home_preferences'];
+for(const method of ['GET','PUT']){
+  for(const fresh of [false,true]){
+    test(`${method} exposes only public preference fields (${fresh?'new':'existing'} row), ignoring forged ownership`,async()=>{
+      const owner= fresh ? 303 : 101;
+      if(fresh) userRows.delete(owner);
+      else userRows.set(owner,{...row(owner),created_at:'private timestamp',internal_account_id:owner});
+      const beforeB=JSON.stringify(userRows.get(202));
+      const r=await call({method,sessionUser:owner,query:{id:202,user_id:202,userId:202},body:{id:202,user_id:202,userId:202,home_preferences:{dock:['connect','shop','spark','move','works','learn'],dockLabels:{works:'My Jobs'}}}});
+      assert.equal(r.response.status,200);
+      const preferences=r.response.json.preferences;
+      assert.ok(!Object.hasOwn(preferences,'id'), 'internal preference row id must be absent');
+      assert.ok(!Object.hasOwn(preferences,'user_id'), 'internal owner id must be absent');
+      assert.deepEqual(Object.keys(preferences).sort(), [...publicFields].sort(), 'only approved public preference fields');
+      assert.equal(preferences.marketing_email,true);
+      assert.deepEqual(preferences.preferred_languages,['English']);
+      assert.equal(typeof preferences.home_preferences,'object');
+      assert.equal(JSON.stringify(userRows.get(202)),beforeB,'forged IDs cannot read/write B');
+      assert.ok(r.calls.every(call=>call.params[0]===owner),'every preference query uses the authenticated owner');
+      if(method==='PUT') assert.equal(preferences.home_preferences.dockLabels.works,'My Jobs');
+    });
+  }
+}
 test('GET normalizes a fresh empty home_preferences row to the approved default dock',async()=>{
   userRows.get(101).home_preferences={};
   const r=await call({sessionUser:101});
