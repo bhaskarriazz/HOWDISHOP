@@ -1,0 +1,68 @@
+name: Build B1 persisted defaults fix
+on:
+  push:
+    branches: [codex/b1-default-prefs-persist-bootstrap]
+permissions:
+  contents: write
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Persist canonical defaults in PostgreSQL
+        run: |
+          set -euo pipefail
+          git checkout --detach de8191d9333c56081a0069fe035667b544ad001d
+          node - <<'NODE'
+          const fs=require('fs');
+          const sp='backend/server.js';
+          let s=fs.readFileSync(sp,'utf8');
+          const old="          ADD COLUMN IF NOT EXISTS home_preferences JSONB NOT NULL DEFAULT '{}'::jsonb";
+          const neu="          ADD COLUMN IF NOT EXISTS home_preferences JSONB NOT NULL DEFAULT '\${JSON.stringify(normalizeHomePreferences(null))}'::jsonb";
+          if(!s.includes(old)) throw new Error('old home_preferences default not found');
+          s=s.replace(old,neu);
+          const anchor="        `);\n\n        console.log(\"✅ HOWDI Customer Preferences PostgreSQL Foundation ready\");";
+          const replacement=[
+            "        `);",
+            "",
+            "        await pool.query(`",
+            "          ALTER TABLE user_preferences",
+            "          ALTER COLUMN home_preferences SET DEFAULT '\${JSON.stringify(normalizeHomePreferences(null))}'::jsonb",
+            "        `);",
+            "",
+            "        await pool.query(`",
+            "          UPDATE user_preferences",
+            "          SET home_preferences='\${JSON.stringify(normalizeHomePreferences(null))}'::jsonb",
+            "          WHERE home_preferences='{}'::jsonb",
+            "        `);",
+            "",
+            "        console.log(\"✅ HOWDI Customer Preferences PostgreSQL Foundation ready\");"
+          ].join('\n');
+          const idx=s.indexOf(anchor,s.indexOf('ADD COLUMN IF NOT EXISTS home_preferences'));
+          if(idx<0) throw new Error('schema bootstrap anchor not found');
+          s=s.slice(0,idx)+replacement+s.slice(idx+anchor.length);
+          fs.writeFileSync(sp,s);
+
+          const tp='backend/tests/home-preferences-routes.test.cjs';
+          let t=fs.readFileSync(tp,'utf8');
+          const oldAssert="assert.match(source,/ALTER TABLE user_preferences\\s+ADD COLUMN IF NOT EXISTS home_preferences JSONB NOT NULL DEFAULT '\\{\\}'::jsonb/);";
+          const newAssert=[
+            "assert.match(source,/ADD COLUMN IF NOT EXISTS home_preferences JSONB NOT NULL DEFAULT/);",
+            "assert.match(source,/ALTER COLUMN home_preferences SET DEFAULT/);",
+            "assert.match(source,/WHERE home_preferences='\\{\\}'::jsonb/);"
+          ].join('\n');
+          if(!t.includes(oldAssert)) throw new Error('old schema assertion not found');
+          t=t.replace(oldAssert,newAssert);
+          fs.writeFileSync(tp,t);
+          NODE
+          git diff --check
+          node --test backend/tests/home-preferences-routes.test.cjs
+          npm run check --prefix backend
+          git config user.name "Codex"
+          git config user.email "codex@openai.com"
+          git add backend/server.js backend/tests/home-preferences-routes.test.cjs
+          git commit -m "fix: persist canonical default home preferences"
+          git push --force origin HEAD:refs/heads/codex/b1-default-prefs-fix
