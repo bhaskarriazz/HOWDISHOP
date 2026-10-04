@@ -1,0 +1,21 @@
+name: B1 inspect preferences route
+on:
+  push:
+    branches: [codex/b1-fix-default-home-prefs]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Print preferences route
+        run: |
+          node - <<'NODE'
+          const fs=require('fs');
+          const s=fs.readFileSync('backend/server.js','utf8');
+          const a=s.indexOf('if(req.method==="GET" && pathname==="/api/preferences/me"){');
+          const b=s.indexOf('// HOWDI CUSTOMER FEEDBACK & RATINGS CENTER',a);
+          if(a<0||b<0) process.exit(2);
+          console.log(s.slice(a,b));
+          NODE
