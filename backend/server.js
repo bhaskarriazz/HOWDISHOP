@@ -3667,7 +3667,18 @@
 
         await pool.query(`
           ALTER TABLE user_preferences
-          ADD COLUMN IF NOT EXISTS home_preferences JSONB NOT NULL DEFAULT '{}'::jsonb
+          ADD COLUMN IF NOT EXISTS home_preferences JSONB NOT NULL DEFAULT '${JSON.stringify(normalizeHomePreferences(null))}'::jsonb
+        `);
+
+        await pool.query(`
+          ALTER TABLE user_preferences
+          ALTER COLUMN home_preferences SET DEFAULT '${JSON.stringify(normalizeHomePreferences(null))}'::jsonb
+        `);
+
+        await pool.query(`
+          UPDATE user_preferences
+          SET home_preferences='${JSON.stringify(normalizeHomePreferences(null))}'::jsonb
+          WHERE home_preferences='{}'::jsonb
         `);
 
         console.log("✅ HOWDI Customer Preferences PostgreSQL Foundation ready");

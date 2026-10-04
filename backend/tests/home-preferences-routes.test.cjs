@@ -10,7 +10,9 @@ const start = source.indexOf('if(req.method==="GET" && pathname==="/api/preferen
 const end = source.indexOf('// HOWDI CUSTOMER FEEDBACK & RATINGS CENTER — LIVE API', start);
 assert.notEqual(start, -1, 'preferences GET route is present');
 assert.notEqual(end, -1, 'preferences routes end at feedback API');
-assert.match(source,/ALTER TABLE user_preferences\s+ADD COLUMN IF NOT EXISTS home_preferences JSONB NOT NULL DEFAULT '\{\}'::jsonb/);
+assert.match(source,/ADD COLUMN IF NOT EXISTS home_preferences JSONB NOT NULL DEFAULT/);
+assert.match(source,/ALTER COLUMN home_preferences SET DEFAULT/);
+assert.match(source,/WHERE home_preferences='\{\}'::jsonb/);
 const routes = source.slice(start, end);
 const userRows = new Map([[101, row(101)], [202, row(202)]]);
 function row(id) { return { id, user_id:id, home_preferences:{}, marketing_email:true, order_email:true, promotional_notifications:true, sms_updates:false, push_notifications:true, preferred_categories:[], preferred_sizes:[], preferred_languages:['English'], personalized_recommendations:true, save_shopping_activity:true, share_analytics_data:false }; }
