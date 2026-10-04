@@ -194,13 +194,18 @@ const pinnedLeaks=(v)=>PINNED.filter((p)=>JSON.stringify(v).includes(p));
   await test('Worker application upload errors: fixed message, detail only in the server log',async()=>{
     const {code}=blockOf('"/api/worker/applications"');
     const body=code.slice(code.indexOf('{')+1,code.lastIndexOf('}'));
-    const run=new AsyncFunction('req','res','pool','sendJSON','getBody','getSessionUserFromRequest','clean','number','savePrivateDataFile','workerApplicationRow','console',body);
-    const sent=[],logged=[];
+    // The extracted body still needs the enclosing handler's pathname and onboarding helpers.
+    const run=new AsyncFunction('req','res','pool','sendJSON','getBody','getSessionUserFromRequest','clean','number','savePrivateDataFile','workerApplicationRow','console','pathname','onboardingSubmissionError','removePrivateApplicationFiles',body);
+    const clean=(v)=>String(v??'').trim();
+    const onboardingSubmissionError=new Function('clean',functionSource('onboardingTextTooLong')+'\n'+functionSource('onboardingSubmissionError')+'\nreturn onboardingSubmissionError;')(clean);
+    const sent=[],logged=[],removed=[];
     const tiny={dataUrl:'data:image/png;base64,AA=='};
-    await run({},{},{query:async()=>({rows:[]})},(res,s,p)=>sent.push([s,p]),async()=>({fullName:'A',phone:'1',city:'C',claimedSkill:'S',gender:'m',age:30,consent:true,declaration:true,kycDocumentType:'x',kycIdLast4:'1234',profilePhoto:tiny,liveSelfie:tiny,kycDocument:tiny}),async()=>null,(v)=>String(v??'').trim(),(v,d)=>Number(v??d),
-      ()=>{throw new Error("EACCES: permission denied, open '/srv/howdi/backend/private_uploads/worker_applications/HOWDI-WA-1-profile.png'");},(x)=>x,{error:()=>{},warn:(...a)=>logged.push(a),log:()=>{}});
-    assert.strictEqual(sent[0][0],400);assert.strictEqual(sent[0][1].code,'APPLICATION_FILE_REJECTED');
+    await run({},{},{query:async()=>({rows:[]})},(res,s,p)=>sent.push([s,p]),async()=>({fullName:'A',phone:'1',city:'C',claimedSkill:'S',gender:'m',age:30,consent:true,declaration:true,kycDocumentType:'x',kycIdLast4:'1234',profilePhoto:tiny,liveSelfie:tiny,kycDocument:tiny}),async()=>null,clean,(v,d)=>Number(v??d),
+      ()=>{throw new Error("EACCES: permission denied, open '/srv/howdi/backend/private_uploads/worker_applications/HOWDI-WA-1-profile.png'");},(x)=>x,{error:()=>{},warn:(...a)=>logged.push(a),log:()=>{}},'/api/worker/applications',onboardingSubmissionError,(names)=>removed.push(names));
+    assert.deepStrictEqual(sent,[[400,{status:'error',code:'APPLICATION_FILE_REJECTED',message:'One of the uploaded files could not be accepted. Files must be JPG, PNG, WEBP or PDF and under 3 MB.'}]]);
     assert.ok(!/EACCES|srv|private_uploads|howdi/i.test(sent[0][1].message));
+    assert.deepStrictEqual(removed,[['','','','','']],'cleanup runs even when the first upload fails');
+    assert.strictEqual(logged.length,1);
     assert.ok(/EACCES/.test(String(logged[0][1])),'the raw error is logged server-side');
   });
 
