@@ -1,0 +1,31 @@
+name: Publish exact C2 commit
+
+on:
+  push:
+    branches:
+      - codex/c2-publish-bootstrap
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Reproduce and publish exact C2 commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp C2-application.patch /tmp/C2-application.patch
+          git checkout --detach cb8a8d75d57b718d315c83a355b6b7f4920b8c96
+          git config user.name "Codex"
+          git config user.email "codex@openai.com"
+          git am --committer-date-is-author-date /tmp/C2-application.patch
+          test "$(git rev-parse HEAD)" = "77298588388b36f08c4f7f136cf2e693a64034fb"
+          git push --force origin HEAD:refs/heads/codex/c2-dock-security-closure
