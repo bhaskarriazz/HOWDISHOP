@@ -51208,7 +51208,11 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 `,[userId]);
               }
 
-              return sendJSON(res,200,{status:"success",preferences:k5eOmitUserId(preferences.rows[0])});
+              const responsePreferences={
+                ...preferences.rows[0],
+                home_preferences:normalizeHomePreferences(preferences.rows[0].home_preferences)
+              };
+              return sendJSON(res,200,{status:"success",preferences:k5eOmitUserId(responsePreferences)});
             }
 
             if(req.method==="PUT" && pathname==="/api/preferences/me"){

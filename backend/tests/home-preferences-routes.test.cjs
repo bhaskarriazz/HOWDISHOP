@@ -42,6 +42,14 @@ test('GET /api/preferences/me derives owner from session and returns that accoun
   assert.equal(b.response.json.preferences.home_preferences.dockLabels.works,'Beta');
   assert.ok(!('user_id' in a.response.json.preferences));
 });
+test('GET normalizes a fresh empty home_preferences row to the approved default dock',async()=>{
+  userRows.get(101).home_preferences={};
+  const r=await call({sessionUser:101});
+  assert.equal(r.response.status,200);
+  assert.deepEqual(r.response.json.preferences.home_preferences.dock,['connect','shop','spark','move','works','learn']);
+  assert.equal(r.response.json.preferences.home_preferences.dockLabels.spark,undefined);
+});
+
 test('PUT ignores spoofed user ids and writes only the authenticated session account',async()=>{
   userRows.get(101).home_preferences={dock:['learn','shop','spark','move','works','connect'],dockLabels:{works:'Alpha'}};
   userRows.get(202).home_preferences={dock:['connect','shop','spark','move','works','learn'],dockLabels:{works:'Beta'}};
