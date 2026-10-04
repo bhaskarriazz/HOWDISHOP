@@ -1,0 +1,75 @@
+name: Build B1 default preferences fix
+
+on:
+  push:
+    branches:
+      - codex/b1-default-prefs-fix-bootstrap
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Apply minimal application fix and regression test
+        shell: bash
+        run: |
+          set -euo pipefail
+          git checkout --detach 77298588388b36f08c4f7f136cf2e693a64034fb
+          node - <<'NODE'
+          const fs=require('fs');
+
+          const serverPath='backend/server.js';
+          let server=fs.readFileSync(serverPath,'utf8');
+          const old='              return sendJSON(res,200,{status:"success",preferences:k5eOmitUserId(preferences.rows[0])});';
+          const neu=[
+            '              const responsePreferences={',
+            '                ...preferences.rows[0],',
+            '                home_preferences:normalizeHomePreferences(preferences.rows[0].home_preferences)',
+            '              };',
+            '              return sendJSON(res,200,{status:"success",preferences:k5eOmitUserId(responsePreferences)});'
+          ].join('\n');
+          const first=server.indexOf(old);
+          if(first<0) throw new Error('GET preferences response line not found');
+          if(server.lastIndexOf(old)!==first) throw new Error('GET preferences response line not unique');
+          server=server.replace(old,neu);
+          fs.writeFileSync(serverPath,server);
+
+          const testPath='backend/tests/home-preferences-routes.test.cjs';
+          let test=fs.readFileSync(testPath,'utf8');
+          const marker="test('GET /api/preferences/me derives owner from session and returns that account dock',async()=>{";
+          const pos=test.indexOf(marker);
+          if(pos<0) throw new Error('route test marker not found');
+          const next=test.indexOf("\ntest('PUT ignores spoofed user ids",pos);
+          if(next<0) throw new Error('next test marker not found');
+          const addition=[
+            '',
+            "test('GET normalizes a fresh empty home_preferences row to the approved default dock',async()=>{",
+            "  userRows.get(101).home_preferences={};",
+            "  const r=await call({sessionUser:101});",
+            "  assert.equal(r.response.status,200);",
+            "  assert.deepEqual(r.response.json.preferences.home_preferences.dock,['connect','shop','spark','move','works','learn']);",
+            "  assert.equal(r.response.json.preferences.home_preferences.dockLabels.spark,undefined);",
+            "});",
+            ''
+          ].join('\n');
+          test=test.slice(0,next)+addition+test.slice(next);
+          fs.writeFileSync(testPath,test);
+          NODE
+
+          git diff --check
+          node --test backend/tests/home-preferences-routes.test.cjs
+          npm run check --prefix backend
+
+          git config user.name "Codex"
+          git config user.email "codex@openai.com"
+          git add backend/server.js backend/tests/home-preferences-routes.test.cjs
+          git commit -m "fix: normalize default home preferences on read"
+          git push --force origin HEAD:refs/heads/codex/b1-default-prefs-fix
