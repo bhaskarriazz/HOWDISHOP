@@ -3,6 +3,7 @@
     const { Pool } = require("pg");
     const http = require("http");
     const https = require("https");
+    const { normalizeHomePreferences } = require("./home-preferences.cjs");
 
     const HOWDI_OPENAI_MODEL = String(process.env.OPENAI_MODEL || "gpt-5.6-luna").trim();
     const HOWDI_OPENAI_API_KEY = String(process.env.OPENAI_API_KEY || "").trim();
@@ -3662,6 +3663,11 @@
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
           );
+        `);
+
+        await pool.query(`
+          ALTER TABLE user_preferences
+          ADD COLUMN IF NOT EXISTS home_preferences JSONB NOT NULL DEFAULT '{}'::jsonb
         `);
 
         console.log("✅ HOWDI Customer Preferences PostgreSQL Foundation ready");
@@ -51278,6 +51284,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                     personalized_recommendations=$10,
                     save_shopping_activity=$11,
                     share_analytics_data=$12,
+                    home_preferences=$13::jsonb,
                     updated_at=NOW()
                 WHERE user_id=$1
                 RETURNING *
@@ -51293,7 +51300,12 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                 JSON.stringify(next.preferred_languages),
                 next.personalized_recommendations,
                 next.save_shopping_activity,
-                next.share_analytics_data
+                next.share_analytics_data,
+                JSON.stringify(normalizeHomePreferences(
+                  Object.prototype.hasOwnProperty.call(body,"home_preferences")
+                    ? body.home_preferences
+                    : current.home_preferences
+                ))
               ]);
 
               return sendJSON(res,200,{

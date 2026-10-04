@@ -2814,7 +2814,8 @@ function App() {
       return null;
     }
   });
-  const [v8HomePrefs, setV8HomePrefs] = useV8CommonHomePrefs(currentUser?.public_username || "guest");
+  const dockAccountScope = currentUser?.public_username || currentUser?.username || (currentUser ? "authenticated" : "");
+  const [v8HomePrefs, setV8HomePrefs] = useV8CommonHomePrefs(dockAccountScope, SHOP_API_BASE);
   const [v8CustomizeOpen, setV8CustomizeOpen] = useState(false);
 
   // One single customer identity source for header, welcome and My HOWDI.

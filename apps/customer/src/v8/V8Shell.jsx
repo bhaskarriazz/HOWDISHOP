@@ -203,7 +203,7 @@ export function V8BottomBar({ active, onNavigate, pillars = V8_PILLARS, onCustom
     <nav className={`v8-bottombar v8-dock-style-${iconStyle}`} aria-label="Quick access" onPointerDown={startHold} onPointerUp={endHold} onPointerCancel={endHold} onPointerLeave={endHold}>
       {pillars.map((p) => (
         <button key={p.slotKey || p.area} type="button" className={`${tapped === p.area ? "is-tapped" : ""} ${p.area === "spark" ? "is-spark" : ""}`.trim()} aria-current={active === p.area ? "page" : undefined} onPointerDown={() => tap(p.area)} onClick={() => { if (held.current) { held.current = false; return; } onNavigate(p.area); }}>
-          <i className="v8-dock-ico" aria-hidden="true"><V8Icon name={p.icon || p.area} size={p.area === "spark" ? 24 : 22} fill={p.area === "spark"} /></i><span>{p.personalLabel || p.label}</span>
+          <i className="v8-dock-ico" aria-hidden="true"><V8Icon name={p.icon || p.area} size={p.area === "spark" ? 24 : 22} fill={p.area === "spark"} /></i><span>{p.area === "spark" ? "Spark" : p.personalLabel || p.label}</span>
         </button>
       ))}
     </nav>

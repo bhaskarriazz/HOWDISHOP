@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { V8Icon } from "./V8Shell";
 import { V8Dialog } from "./V8System";
+import { createHomePreferenceSession } from "./homePreferenceSession.mjs";
 
 export const V8_DEFAULT_DOCK = ["connect", "shop", "spark", "move", "works", "learn"];
 export const V8_DOCK_CHOICES = [
@@ -8,6 +9,7 @@ export const V8_DOCK_CHOICES = [
   ["vibe", "Vibe"], ["hpay", "HPay"], ["messages", "Messages"],
 ];
 const V8_DOCK_IDS = V8_DOCK_CHOICES.map(([id]) => id);
+const V8_DOCK_ID_SET = new Set(V8_DOCK_IDS);
 const DOCK_LABEL = Object.fromEntries(V8_DOCK_CHOICES);
 export const V8_HOME_MODULES = [
   ["community", "Community"], ["vibe", "Vibe"], ["following", "Following updates"], ["tags", "Tags & mentions"],
@@ -15,10 +17,10 @@ export const V8_HOME_MODULES = [
   ["learn", "Learn & Earn"], ["continue", "Continue Learning"], ["live", "Live Classes"], ["hype", "Hype"],
   ["tips", "Tips"], ["trending", "Trending"], ["news", "Current affairs / News"], ["nearby", "Communities & nearby discovery"],
 ];
-const KEY = "howdi.v8.common-home.v2";
+const V8_HOME_MODULE_ID_SET = new Set(V8_HOME_MODULES.map(([id]) => id));
 const validDock = (dock) => {
   const seen = new Set();
-  const cleanDock = (Array.isArray(dock) ? dock : []).filter((id) => V8_DOCK_IDS.includes(id) && id !== "spark" && !seen.has(id) && seen.add(id));
+  const cleanDock = (Array.isArray(dock) ? dock : []).filter((id) => typeof id === "string" && V8_DOCK_ID_SET.has(id) && id !== "spark" && !seen.has(id) && seen.add(id));
   const left = cleanDock.slice(0, 2);
   const right = cleanDock.slice(2, 5);
   const fallback = V8_DEFAULT_DOCK.filter((id) => id !== "spark" && !seen.has(id));
@@ -32,22 +34,49 @@ export const cleanV8HomePrefs = (raw) => ({
   version: 2,
   dock: validDock(raw?.dock),
   hiddenDock: [],
-  favoriteDock: Array.isArray(raw?.favoriteDock) ? raw.favoriteDock.filter((x) => V8_DOCK_IDS.includes(x)) : [],
-  dockLabels: Object.fromEntries(Object.entries(raw?.dockLabels || {}).filter(([id, value]) => V8_DOCK_IDS.includes(id) && typeof value === "string" && value.trim()).map(([id, value]) => [id, value.trim().slice(0, 12)])),
+  favoriteDock: Array.isArray(raw?.favoriteDock) ? [...new Set(raw.favoriteDock.filter((x) => typeof x === "string" && V8_DOCK_ID_SET.has(x)))] : [],
+  dockLabels: Object.fromEntries(Object.entries(raw?.dockLabels || {}).filter(([id, value]) => V8_DOCK_ID_SET.has(id) && id !== "spark" && typeof value === "string" && value.trim()).map(([id, value]) => [id, value.trim().slice(0, 12)])),
   dockIconStyle: ["line", "soft"].includes(raw?.dockIconStyle) ? raw.dockIconStyle : "line",
-  hiddenModules: Array.isArray(raw?.hiddenModules) ? raw.hiddenModules.filter((x) => V8_HOME_MODULES.some(([id]) => id === x)) : [],
-  pinnedModules: Array.isArray(raw?.pinnedModules) ? raw.pinnedModules.filter((x) => V8_HOME_MODULES.some(([id]) => id === x)) : [],
-  moduleOrder: [...new Set([...(Array.isArray(raw?.moduleOrder) ? raw.moduleOrder : []), ...V8_HOME_MODULES.map(([id]) => id)])].filter((x) => V8_HOME_MODULES.some(([id]) => id === x)),
+  hiddenModules: Array.isArray(raw?.hiddenModules) ? [...new Set(raw.hiddenModules.filter((x) => typeof x === "string" && V8_HOME_MODULE_ID_SET.has(x)))] : [],
+  pinnedModules: Array.isArray(raw?.pinnedModules) ? [...new Set(raw.pinnedModules.filter((x) => typeof x === "string" && V8_HOME_MODULE_ID_SET.has(x)))] : [],
+  moduleOrder: [...new Set([...(Array.isArray(raw?.moduleOrder) ? raw.moduleOrder : []), ...V8_HOME_MODULES.map(([id]) => id)])].filter((x) => typeof x === "string" && V8_HOME_MODULE_ID_SET.has(x)),
 });
-const readV8HomePrefs = (key) => { try { return cleanV8HomePrefs(JSON.parse(localStorage.getItem(key) || "null")); } catch { return cleanV8HomePrefs(null); } };
-export function useV8CommonHomePrefs(accountKey) {
-  const key = `${KEY}:${String(accountKey || "guest")}`;
-  // Read synchronously per account key: no default-dock flash after refresh, and on an account
-  // switch the previous account's dock is never rendered or saved under the new key.
-  const [state, setState] = useState(() => ({ key, prefs: readV8HomePrefs(key) }));
-  const prefs = state.key === key ? state.prefs : readV8HomePrefs(key);
-  if (state.key !== key) setState({ key, prefs });
-  const save = (next) => { const value = cleanV8HomePrefs(typeof next === "function" ? next(prefs) : next); setState({ key, prefs: value }); try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* keep this session only */ } };
+function readSessionToken() { try { return localStorage.getItem("howdiSessionToken") || ""; } catch { return ""; } }
+export function useV8CommonHomePrefs(accountKey, apiBase) {
+  const token = readSessionToken();
+  const scope = accountKey && token ? `${String(accountKey)}\u0000${token}` : "guest";
+  const [state, setState] = useState(() => ({ scope, prefs: cleanV8HomePrefs(null) }));
+  const controllerRef = useRef(null);
+  const activeScopeRef = useRef(scope);
+  activeScopeRef.current = scope;
+  // Clear the previous account's dock synchronously before React commits this new scope.
+  if (state.scope !== scope) setState({ scope, prefs: cleanV8HomePrefs(null) });
+  const prefs = state.scope === scope ? state.prefs : cleanV8HomePrefs(null);
+
+  useEffect(() => {
+    if (!accountKey || !token) {
+      controllerRef.current = null;
+      setState({ scope, prefs: cleanV8HomePrefs(null) });
+      return undefined;
+    }
+    const controller = createHomePreferenceSession({
+      accountKey: String(accountKey), token, apiBase,
+      normalize: cleanV8HomePrefs,
+      onChange: (next) => { if (activeScopeRef.current === scope) setState({ scope, prefs: next }); },
+    });
+    controllerRef.current = { scope, controller };
+    setState({ scope, prefs: cleanV8HomePrefs(null) });
+    controller.load();
+    return () => {
+      controller.cancel();
+      if (controllerRef.current?.controller === controller) controllerRef.current = null;
+    };
+  }, [scope, apiBase]);
+
+  const save = useCallback((next) => {
+    if (activeScopeRef.current !== scope || controllerRef.current?.scope !== scope) return;
+    controllerRef.current.controller.save(next);
+  }, [scope]);
   return [prefs, save];
 }
 
