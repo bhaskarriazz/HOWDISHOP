@@ -99,4 +99,8 @@ Block merge for any high-confidence regression.
 - No backend/database changes required for this UI task.
 
 ## Implementation Notes
-_To be completed by Claude._
+- 2026-10-05 Codex implementation batch: the canonical Shop shortcut opens the full live catalogue; Handmade Crochet remains a collection inside Shop.
+- Spark accepts text without first requiring microphone permission, searches the existing public person/product/worker/course API, validates each result against a canonical route allow-list, and carries the original request into the owning feature for review. No booking, purchase, payment, or account change is performed by Spark; logout/account switch clears the handoff.
+- Where browser voice entry is supported, it defaults to the device language. Source-backed Ask HOWDI answers remain available; unsafe-request refusals do not display cross-pillar matches.
+- This batch does not connect an AI provider or claim that a prepared handoff is an executed action.
+- Responsive gate: the 390px floating dock requires physical Spark centering; at 768px and 1440px the approved shell hides that dock and tests Spark through Ask HOWDI plus the canonical Home/Connect/Shop/Move/Work/Learn rail.

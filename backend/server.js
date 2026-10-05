@@ -3667,7 +3667,18 @@
 
         await pool.query(`
           ALTER TABLE user_preferences
-          ADD COLUMN IF NOT EXISTS home_preferences JSONB NOT NULL DEFAULT '{}'::jsonb
+          ADD COLUMN IF NOT EXISTS home_preferences JSONB NOT NULL DEFAULT '${JSON.stringify(normalizeHomePreferences(null))}'::jsonb
+        `);
+
+        await pool.query(`
+          ALTER TABLE user_preferences
+          ALTER COLUMN home_preferences SET DEFAULT '${JSON.stringify(normalizeHomePreferences(null))}'::jsonb
+        `);
+
+        await pool.query(`
+          UPDATE user_preferences
+          SET home_preferences='${JSON.stringify(normalizeHomePreferences(null))}'::jsonb
+          WHERE home_preferences='{}'::jsonb
         `);
 
         console.log("✅ HOWDI Customer Preferences PostgreSQL Foundation ready");
@@ -29878,10 +29889,24 @@ async function ensureVibeReleaseReadinessV140LSchema(){
     if (req.method === "GET" && shopS1DetailMatch) {
       try {
         const idText = shopS1DetailMatch[1];
-        if (!/^\d{1,18}$/.test(idText)) return sendJSON(res, 400, { status: "error", message: "Invalid product id" });
-        const { rows, variantsByProduct } = await loadShopS1Rows({ id: idText });
+        let productId = idText;
+        if (/^PRD-[0-9A-F]{12}$/.test(idText)) {
+          // Search/deep links use public product codes. Resolve the code server-side, then
+          // pass the database key only to the existing visibility-gated catalogue loader.
+          const ref = (await pool.query(
+            `SELECT entity_key FROM howdi_public_refs WHERE entity_type='PRODUCT' AND public_code=$1`,
+            [idText]
+          )).rows[0];
+          if (!ref || !/^\d{1,18}$/.test(String(ref.entity_key || ""))) {
+            return sendJSON(res, 404, { status: "error", message: "Product not found" });
+          }
+          productId = String(ref.entity_key);
+        } else if (!/^\d{1,18}$/.test(productId)) {
+          return sendJSON(res, 400, { status: "error", message: "Invalid product id" });
+        }
+        const { rows, variantsByProduct } = await loadShopS1Rows({ id: productId });
         // Hidden / unpublished / archived / moderated / unknown all look identical to the caller.
-        const row = rows.find((r) => String(r.id) === idText);
+        const row = rows.find((r) => String(r.id) === productId);
         if (!row) return sendJSON(res, 404, { status: "error", message: "Product not found" });
         const model = shopS1Model(row, variantsByProduct.get(String(row.id)));
         const resolved = shopS1ResolveSelection(model, url.searchParams);
@@ -51185,6 +51210,8 @@ async function ensureVibeReleaseReadinessV140LSchema(){
 
             // =====================================================
             // HOWDI CUSTOMER PREFERENCES CENTER — LIVE API
+            // Public preference columns are explicit in every SELECT/RETURNING below.
+            // Keep database row identity and other internal metadata out of this route.
             // =====================================================
             if(req.method==="GET" && pathname==="/api/preferences/me"){
               // STAGE 2B SECURITY FIX: session-derived, was /api/preferences/:id (IDOR — trusted the URL id)
@@ -51192,7 +51219,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               if(userId===null) return;
 
               let preferences=await pool.query(`
-                SELECT * FROM user_preferences WHERE user_id=$1
+                SELECT marketing_email,order_email,promotional_notifications,sms_updates,push_notifications,preferred_categories,preferred_sizes,preferred_languages,personalized_recommendations,save_shopping_activity,share_analytics_data,home_preferences FROM user_preferences WHERE user_id=$1
               `,[userId]);
 
               if(!preferences.rows[0]){
@@ -51204,11 +51231,15 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   INSERT INTO user_preferences(user_id)
                   VALUES($1)
                   ON CONFLICT (user_id) DO UPDATE SET user_id=EXCLUDED.user_id
-                  RETURNING *
+                  RETURNING marketing_email,order_email,promotional_notifications,sms_updates,push_notifications,preferred_categories,preferred_sizes,preferred_languages,personalized_recommendations,save_shopping_activity,share_analytics_data,home_preferences
                 `,[userId]);
               }
 
-              return sendJSON(res,200,{status:"success",preferences:k5eOmitUserId(preferences.rows[0])});
+              const responsePreferences={
+                ...preferences.rows[0],
+                home_preferences:normalizeHomePreferences(preferences.rows[0].home_preferences)
+              };
+              return sendJSON(res,200,{status:"success",preferences:k5eOmitUserId(responsePreferences)});
             }
 
             if(req.method==="PUT" && pathname==="/api/preferences/me"){
@@ -51218,7 +51249,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
               const body=await getBody(req);
 
               const currentResult=await pool.query(`
-                SELECT * FROM user_preferences WHERE user_id=$1
+                SELECT marketing_email,order_email,promotional_notifications,sms_updates,push_notifications,preferred_categories,preferred_sizes,preferred_languages,personalized_recommendations,save_shopping_activity,share_analytics_data,home_preferences FROM user_preferences WHERE user_id=$1
               `,[userId]);
 
               let current=currentResult.rows[0];
@@ -51228,7 +51259,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                   INSERT INTO user_preferences(user_id)
                   VALUES($1)
                   ON CONFLICT (user_id) DO UPDATE SET user_id=EXCLUDED.user_id
-                  RETURNING *
+                  RETURNING marketing_email,order_email,promotional_notifications,sms_updates,push_notifications,preferred_categories,preferred_sizes,preferred_languages,personalized_recommendations,save_shopping_activity,share_analytics_data,home_preferences
                 `,[userId]);
                 current=inserted.rows[0];
               }
@@ -51287,7 +51318,7 @@ async function ensureVibeReleaseReadinessV140LSchema(){
                     home_preferences=$13::jsonb,
                     updated_at=NOW()
                 WHERE user_id=$1
-                RETURNING *
+                RETURNING marketing_email,order_email,promotional_notifications,sms_updates,push_notifications,preferred_categories,preferred_sizes,preferred_languages,personalized_recommendations,save_shopping_activity,share_analytics_data,home_preferences
               `,[
                 userId,
                 next.marketing_email,

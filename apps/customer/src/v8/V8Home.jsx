@@ -108,6 +108,9 @@ export default function V8Home({ apiBase, getAuthHeaders, user, displayName, onO
   return (
     <div className="v8-page" data-v8-page="home">
       <div className="v8-page-inner">
+        <div className="v8-home-topline">
+          <button type="button" className="v8-home-brand" onClick={() => onOpen("home", "home")} aria-label="HOWDI Home">HOWDI</button>
+        </div>
         <div className="v8-home-hello">
           <h1>{signedIn ? `Welcome back${first ? `, ${first}` : ""}` : "Welcome to HOWDI"}</h1>
           <p>People. Products. Services. Skills. A kinder, more useful everyday internet.</p>

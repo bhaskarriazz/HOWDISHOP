@@ -7,6 +7,7 @@ import { V8Icon, V8State } from "../V8Shell";
 import { V8Badges, useV8Ui } from "../V8System";
 import { Ava, Skel, Tabs, fmt, safeImg } from "./common";
 import { PostCard } from "./Post";
+import { normalizeSparkResults, sparkSearchQuery, sparkTargetFor } from "./sparkActions.mjs";
 
 const DISCOVER_TABS = [["explore", "Explore"], ["hype", "Hype"], ["tips", "Tips"], ["creators", "Creators"], ["communities", "Communities"]];
 export function DiscoverNav({ value, onNav }) {
@@ -150,16 +151,23 @@ export function Creators({ api, user, onNav, onRequireLogin, onOpenProfile }) {
 }
 
 // ------------------------------------------------------------------ Ask HOWDI
-export function AskHowdi({ api, onNav, onRoute }) {
+export function AskHowdi({ api, onNav, onRoute, onSparkHandoff }) {
   const [perm, setPerm] = useState("ask"); // ask · denied · listening · idle
   const [q, setQ] = useState(""); const [heard, setHeard] = useState(""); const [d, setD] = useState({ status: "idle" }); const [fb, setFb] = useState(null);
+  const [matches, setMatches] = useState({ status: "idle", items: [] }); const [prepared, setPrepared] = useState(null);
   const recRef = useRef(null);
   const SR = typeof window !== "undefined" ? window.SpeechRecognition || window.webkitSpeechRecognition : null;
   const ask = useCallback(async (question) => {
     const text = String(question || "").trim(); if (text.length < 4) return;
-    setD({ status: "loading", question: text }); setFb(null);
-    const r = await api("POST", "/api/v8/ask", { question: text });
-    setD(r.ok ? { ...r.json, status: "ready" } : { status: r.status === 0 ? "offline" : "error", question: text, message: r.json.message });
+    const searchText = sparkSearchQuery(text);
+    setD({ status: "loading", question: text }); setMatches({ status: "loading", items: [] }); setPrepared(null); setFb(null);
+    const [answer, search] = await Promise.all([
+      api("POST", "/api/v8/ask", { question: text }),
+      searchText.length >= 2 ? api("GET", `/api/search?q=${encodeURIComponent(searchText)}&types=person,product,worker,course&limit=8`) : Promise.resolve({ ok: true, json: { results: [] } }),
+    ]);
+    setD(answer.ok ? { ...answer.json, status: "ready" } : { status: answer.status === 0 ? "offline" : "error", question: text, message: answer.json.message });
+    setMatches(answer.ok && answer.json.kind === "refusal" ? { status: "ready", items: [] }
+      : search.ok ? { status: "ready", items: normalizeSparkResults(search.json.results) } : { status: "error", items: [] });
   }, [api]);
   const allowMic = async () => {
     try {
@@ -167,7 +175,7 @@ export function AskHowdi({ api, onNav, onRoute }) {
       const s = await navigator.mediaDevices.getUserMedia({ audio: true }); s.getTracks().forEach((t) => t.stop());
       if (!SR) { setPerm("nospeech"); return; }
       setPerm("listening"); setHeard("");
-      const rec = new SR(); recRef.current = rec; rec.lang = "en-IN"; rec.interimResults = true;
+      const rec = new SR(); recRef.current = rec; rec.lang = navigator.language || "en-IN"; rec.interimResults = true;
       rec.onresult = (e) => { const t = [...e.results].map((x) => x[0].transcript).join(" "); setHeard(t); if (e.results[e.results.length - 1].isFinal) { setQ(t); ask(t); } };
       rec.onerror = () => setPerm("idle"); rec.onend = () => setPerm((p) => (p === "listening" ? "idle" : p));
       rec.start();
@@ -177,22 +185,33 @@ export function AskHowdi({ api, onNav, onRoute }) {
   const feedback = async (helpful) => { setFb(helpful ? "up" : "down"); await api("POST", "/api/v8/ask/feedback", { question: d.question, helpful }); };
   return (
     <div className="v8d v8ask">
-      <header className="v8c-page-head"><button type="button" className="v8-icon-btn" aria-label="Back" onClick={() => onNav("explore")}><V8Icon name="back" size={22} /></button><div><h1>Ask HOWDI</h1><p>Ask by voice or text. Answers come from HOWDI Tips and Articles, with the source.</p></div><span className="v8-pill-test">Preview / Test</span></header>
+      <header className="v8c-page-head"><button type="button" className="v8-icon-btn" aria-label="Back" onClick={() => onNav("explore")}><V8Icon name="back" size={22} /></button><div><h1>Ask HOWDI</h1><p>Ask by text, or by voice where your device supports it. Spark finds public HOWDI results and prepares a handoff for the owning feature.</p></div><span className="v8-pill-test">Preview / Test</span></header>
       {d.status === "idle" && perm === "ask" ? (
-        <section className="v8-card v8ask-perm"><span className="v8ask-mic"><V8Icon name="mic" size={40} /></span><h2>Allow microphone access?</h2><p>To search with your voice, allow HOWDI to use your microphone. Audio is turned into text on your device and isn’t stored.</p>
-          <button type="button" className="v8-btn v8-btn-primary v8-btn-block" onClick={allowMic}>Allow microphone</button><button type="button" className="v8-btn v8-btn-block" onClick={() => setPerm("idle")}>Not now — type instead</button></section>
+        <section className="v8-card v8ask-perm"><span className="v8ask-mic"><V8Icon name="spark" size={40} /></span><h2>How can I help?</h2><p>Ask by text or voice. Spark can find people, products, services and classes on HOWDI.</p></section>
       ) : null}
       {perm === "denied" ? <div className="v8-banner-error" role="alert"><V8Icon name="mic" size={20} /><span><b>Microphone is blocked.</b> Allow it in your browser’s site settings, or type your question below.</span></div> : null}
       {perm === "nospeech" ? <div className="v8-card v8c-muted" role="status"><V8Icon name="info" size={16} /> Voice search isn’t available in this browser. Type your question below.</div> : null}
       {perm === "listening" ? <section className="v8-card v8ask-listen" aria-live="polite"><span className="v8ask-wave"><i /><i /><i /><i /></span><b>Listening…</b><p>{heard || "Ask something like “How do I start crocheting a granny square?”"}</p><button type="button" className="v8-btn" onClick={() => { try { recRef.current?.stop(); } catch { /* ignore */ } setPerm("idle"); }}>Stop</button></section> : null}
-      {perm !== "ask" || d.status !== "idle" ? (
-        <form className="v8ask-form" onSubmit={(e) => { e.preventDefault(); ask(q); }}>
-          <input value={q} maxLength={300} onChange={(e) => setQ(e.target.value)} placeholder="How do I start crocheting a granny square?" aria-label="Your question" />
-          {SR ? <button type="button" className="v8-icon-btn" aria-label="Ask by voice" onClick={allowMic}><V8Icon name="mic" size={20} /></button> : null}
-          <button type="submit" className="v8-btn v8-btn-primary" disabled={q.trim().length < 4 || d.status === "loading"}>Ask</button>
-        </form>
-      ) : null}
+      <form className="v8ask-form" onSubmit={(e) => { e.preventDefault(); ask(q); }}>
+        <input value={q} maxLength={300} onChange={(e) => setQ(e.target.value)} placeholder="Find a crochet class, a nearby worker, or handmade gifts" aria-label="Your question" />
+        {SR ? <button type="button" className="v8-icon-btn" aria-label="Ask by voice" onClick={allowMic}><V8Icon name="mic" size={20} /></button> : null}
+        <button type="submit" className="v8-btn v8-btn-primary" disabled={q.trim().length < 4 || d.status === "loading"}>Ask</button>
+      </form>
       {d.status === "loading" ? <section className="v8-card"><p className="v8ask-q"><V8Icon name="mic" size={16} />{d.question}</p><Skel h={16} w="70%" /><Skel h={14} /><Skel h={14} w="80%" /></section> : null}
+      {matches.status === "loading" ? <section className="v8-card" aria-live="polite"><h2>Finding people, products, services and classes</h2><Skel h={14} w="70%" /></section> : null}
+      {matches.status === "ready" && matches.items.length ? <section className="v8-card v8ask-results" aria-label="Spark results">
+        <h2>From HOWDI</h2>
+        <p>Choose a result to prepare the next step. The owning HOWDI area will review and confirm it.</p>
+        <ul>{matches.items.map((item) => <li key={`${item.type}:${item.route}`}>
+          <span><b>{item.title}</b><small>{sparkTargetFor(item.type)}{item.subtitle ? ` · ${item.subtitle}` : ""}</small></span>
+          <button type="button" className="v8-btn v8-btn-soft" onClick={() => setPrepared({ ...item, request: d.question })}>Prepare</button>
+        </li>)}</ul>
+      </section> : null}
+      {prepared ? <section className="v8-card v8ask-prepared" aria-live="polite" aria-label="Prepared action">
+        <V8Icon name="check" size={20} /><div><b>Prepared for {sparkTargetFor(prepared.type)}</b><p><strong>Your request:</strong> {prepared.request} <br />{prepared.title}. Nothing has been booked, purchased or changed. Review it in {sparkTargetFor(prepared.type)} to continue.</p>
+          <div className="v8ask-prepared-actions"><button type="button" className="v8-btn v8-btn-primary" onClick={() => { if (onSparkHandoff) onSparkHandoff(prepared.route, { type: prepared.type, request: prepared.request }); else onRoute(prepared.route); }}>Review in {sparkTargetFor(prepared.type)}</button><button type="button" className="v8-btn" onClick={() => setPrepared(null)}>Clear</button></div>
+        </div>
+      </section> : null}
       {d.status === "error" || d.status === "offline" ? <section className="v8-card"><V8State kind="error" title={d.status === "offline" ? "You’re offline" : "HOWDI couldn’t answer right now"} message={d.message || "Please try again."} actionLabel="Retry" onAction={() => ask(d.question)} /></section> : null}
       {d.status === "ready" ? (
         <section className="v8-card v8ask-answer" aria-live="polite">

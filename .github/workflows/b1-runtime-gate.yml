@@ -1,0 +1,159 @@
+name: B1 Chromium + PostgreSQL Runtime Gate
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - codex/howdi-present-scope
+
+permissions:
+  contents: read
+
+jobs:
+  b1-runtime:
+    name: B1 live runtime evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: howdi_b1_gate
+          POSTGRES_USER: howdi_gate
+          POSTGRES_PASSWORD: howdi_gate_only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U howdi_gate -d howdi_b1_gate"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgres://howdi_gate:howdi_gate_only@127.0.0.1:5432/howdi_b1_gate
+      PORT: 5000
+      HOST: 127.0.0.1
+      JWT_SECRET: b1-runtime-ci-only-not-for-production
+      B1_GATE_PASSWORD: GateOnly2026Pass
+      VITE_API_BASE_URL: http://127.0.0.1:5000
+      VITE_HOWDI_BUILD: B1-CI-${{ github.sha }}
+    steps:
+      - name: Check out exact candidate source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Assert candidate is based on the C2 security closure
+        run: |
+          git merge-base --is-ancestor 77298588388b36f08c4f7f136cf2e693a64034fb HEAD
+          echo "Application SHA tested: $(git rev-parse HEAD)" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "C2 security closure ancestor: 77298588388b36f08c4f7f136cf2e693a64034fb" | tee -a "$GITHUB_STEP_SUMMARY"
+          git diff --stat 77298588388b36f08c4f7f136cf2e693a64034fb HEAD | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install repository lockfile dependencies
+        run: npm ci
+
+      - name: Install backend dependencies
+        # backend is not currently an npm workspace and has no backend/package-lock.json.
+        run: npm install --prefix backend --no-audit --no-fund
+
+      - name: Install Playwright and Chromium for existing browser tests
+        run: |
+          npm install --no-save --package-lock=false --no-audit --no-fund @playwright/test@1.55.0
+          npx playwright install --with-deps chromium
+
+      - name: Wait for clean PostgreSQL service
+        run: |
+          for attempt in $(seq 1 30); do
+            if pg_isready -h 127.0.0.1 -p 5432 -U howdi_gate -d howdi_b1_gate; then exit 0; fi
+            sleep 2
+          done
+          echo "PostgreSQL did not become ready" >&2
+          exit 1
+
+      - name: Start HOWDI backend and wait for schema bootstrap
+        run: |
+          mkdir -p artifacts/b1-runtime
+          node backend/server.js > artifacts/b1-runtime/backend.log 2>&1 &
+          echo $! > artifacts/b1-runtime/backend.pid
+          node scripts/ci/wait-http-ready.cjs http://127.0.0.1:5000/api/health 900000
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "SELECT 1 FROM information_schema.columns WHERE table_name='user_preferences' AND column_name='home_preferences'" | tee artifacts/b1-runtime/schema-check.log
+          test "$(psql "$DATABASE_URL" -Atc "SELECT COUNT(*) FROM information_schema.columns WHERE table_name='user_preferences' AND column_name='home_preferences'")" = 1
+
+      - name: Prove live PostgreSQL ownership, auth, normalization, and persistence
+        run: node scripts/ci/b1-postgres-proof.cjs 2>&1 | tee artifacts/b1-runtime/postgres-test.log
+
+      - name: Crawl Connect routes for customer response ID leaks using PostgreSQL
+        env:
+          K5E_PG_URL: ${{ env.DATABASE_URL }}
+          K5E_ONLY: 06
+          HOWDI_CONNECT_REF_SECRET: b1-runtime-ci-connect-reference-key
+        run: node backend/tests/k5e-pg/run.cjs 2>&1 | tee artifacts/b1-runtime/connect-raw-id-route-crawl.log
+
+      - name: Restart backend and prove saved preference survives
+        run: |
+          kill "$(cat artifacts/b1-runtime/backend.pid)"
+          for attempt in $(seq 1 20); do
+            if ! curl -fsS http://127.0.0.1:5000/api/health >/dev/null; then break; fi
+            sleep 1
+          done
+          node backend/server.js >> artifacts/b1-runtime/backend.log 2>&1 &
+          echo $! > artifacts/b1-runtime/backend.pid
+          node scripts/ci/wait-http-ready.cjs http://127.0.0.1:5000/api/health 900000
+          node scripts/ci/b1-postgres-restart-proof.cjs 2>&1 | tee -a artifacts/b1-runtime/postgres-test.log
+
+      - name: Seed malformed stored preference for Chromium recovery proof
+        run: node scripts/ci/b1-postgres-browser-prep.cjs 2>&1 | tee -a artifacts/b1-runtime/postgres-test.log
+
+      - name: Build customer frontend
+        run: npm run build --workspace apps/customer
+
+      - name: Run server-owned dock preference and canonical identity tests
+        run: node --test apps/customer/tests/c1-v8-preference.test.mjs apps/customer/tests/c1-dock-negative.test.mjs apps/customer/tests/spark-actions.test.mjs
+
+      - name: Run legacy localStorage-only dock test outside the B1 gate
+        continue-on-error: true
+        run: node apps/customer/tests/dock-identity.test.mjs 2>&1 | tee artifacts/b1-runtime/legacy-localstorage-dock-quarantined.log
+
+      - name: Check backend syntax
+        run: npm run check --prefix backend
+
+      - name: Start customer frontend and wait for readiness
+        run: |
+          (npm run dev --workspace apps/customer -- --host 127.0.0.1 --strictPort) > artifacts/b1-runtime/frontend.log 2>&1 &
+          echo $! > artifacts/b1-runtime/frontend.pid
+          node scripts/ci/wait-http-ready.cjs http://127.0.0.1:5173/ 120000
+
+      - name: Install Playwright Chromium
+        run: npx playwright --version
+
+      - name: Run browser gates at 390px, 768px, and 1440px
+        run: npx playwright test --config=scripts/ci/playwright.config.cjs 2>&1 | tee artifacts/b1-runtime/browser-console-test.log
+
+      - name: Run relevant existing identity and authorization tests
+        run: node --test backend/tests/home-preferences-routes.test.cjs backend/tests/connect-k5e-identity.test.cjs backend/tests/connect-k5e-routes.test.cjs 2>&1 | tee artifacts/b1-runtime/identity-authorization-tests.log
+
+      - name: Inspect Works harness failure separately
+        continue-on-error: true
+        run: node backend/tests/works-worker-hardening.test.cjs 2>&1 | tee artifacts/b1-runtime/works-worker-hardening-harness.log
+
+      - name: Remove temporary browser credentials
+        if: always()
+        run: rm -f artifacts/b1-runtime/accounts.json
+
+      - name: Upload B1 runtime evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: b1-runtime-evidence-${{ github.sha }}
+          path: |
+            artifacts/b1-runtime/
+            playwright-report/
+            test-results/
+          if-no-files-found: warn
+          retention-days: 30

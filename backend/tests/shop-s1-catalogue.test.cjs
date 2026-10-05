@@ -89,6 +89,11 @@ async function call(route,{db=seed()}={}){
     const sql=String(rawSql).replace(/\s+/g,' ').trim();queries.push({sql,params});
     if(db.failWith)throw new Error(db.failWith);
     if(!db.moderationTable&&sql.includes('howdi_shop_product_moderation_v162c'))throw Object.assign(new Error('relation "howdi_shop_product_moderation_v162c" does not exist'),{code:'42P01'});
+    if(sql.includes('FROM howdi_public_refs')){
+      const publicKeys={'PRD-AAAAAAAAAAAA':'1','PRD-BBBBBBBBBBBB':'3'};
+      const entityKey=publicKeys[String(params[0])];
+      return {rows:entityKey?[{entity_key:entityKey}]:[]};
+    }
     if(sql.includes('FROM vendor_products p')){
       const m=sql.match(/p\.id\s*=\s*\$(\d+)/);
       let rows=db.products;
@@ -152,6 +157,31 @@ test('direct detail access to hidden/unpublished/archived/moderated/suspended/sc
     const withVariant=await call(`/api/shop/catalogue/products/${id}?variant=101`);
     assert.equal(withVariant.status,404);assert.deepEqual(withVariant.data,unknown.data);
   }
+});
+test('public PRD deep links reuse the catalogue detail model and server-confirmed variants',async()=>{
+  const code='PRD-AAAAAAAAAAAA';
+  const detail=await call(`/api/shop/catalogue/products/${code}`);
+  assert.equal(detail.status,200);
+  assert.equal(detail.data.product.name,'Tote Bag');
+  assert.equal(detail.data.product.images.length,4,'gallery includes parent and active variant images');
+  assert.equal(detail.data.product.variants.length,3,'active and inactive variants remain subject to the standard chooser/validator');
+  assertNoInternalIdentity(detail.data,'public-code detail');
+  assert.ok(detail.queries.some(q=>q.sql.includes('FROM howdi_public_refs')&&q.params[0]===code),'public code is resolved server-side');
+  const selected=await call(`/api/shop/catalogue/products/${code}?variant=101`);
+  assert.equal(selected.status,200);
+  assert.equal(selected.data.product.selection.id,'101');
+  assert.equal(selected.data.product.selection.price.current,999);
+  assert.equal(selected.data.product.selection.availability.inStock,true);
+  assert.equal((await call(`/api/shop/catalogue/products/${code}?variant=103`)).status,404,'inactive variant cannot be selected through a public code');
+  assert.equal((await call(`/api/shop/catalogue/products/${code}?variant=201`)).status,404,'another product variant cannot be selected through a public code');
+  const hidden=await call('/api/shop/catalogue/products/PRD-BBBBBBBBBBBB');
+  assert.equal(hidden.status,404,'a public code cannot bypass catalogue visibility');
+  assert.deepEqual(hidden.data,{status:'error',message:'Product not found'});
+  const unknown=await call('/api/shop/catalogue/products/PRD-CCCCCCCCCCCC');
+  assert.deepEqual(unknown.data,hidden.data,'hidden and unknown public codes are indistinguishable');
+  const malformed=await call('/api/shop/catalogue/products/PRD-not-a-code');
+  assert.equal(malformed.status,400);
+  assert.equal(malformed.queries.length,0);
 });
 test('related products and the category tree never include hidden products',async()=>{
   // Draft Basket / Rejected Rug share category or creator with visible products, so they would be picked up if the gate leaked.
@@ -504,9 +534,8 @@ test('UI: product cards, chips and controls are real buttons with accessible nam
 test('UI: no demo fallback, no purchase behaviour, only the public catalogue endpoints',async()=>{
   const code=jsx.replace(/\/\*[\s\S]*?\*\//g,'').replace(/^\s*\/\/.*$/gm,'');
   assert.doesNotMatch(code,/fallbackProducts|demoProducts|sampleProducts|Math\.random|localStorage|sessionStorage/);
-  // Shop S2 adds Wishlist/Add to cart/Buy now, but they live in ShopProductActions.jsx (see shop-s2-product-actions.test.cjs);
-  // this component itself still never touches coupons, checkout, payment, orders or the cart API.
-  assert.doesNotMatch(code,/coupon|checkout|payment|razorpay|\/api\/cart|\/api\/orders|\/api\/checkout/i);
+  // Shop S2 actions are callbacks; the catalogue must not call cart/order/checkout or payment-provider APIs itself.
+  assert.doesNotMatch(code,/razorpay|fetchJson\([^)]*\/api\/(?:cart|orders|checkout)|\b(?:coupon|payment)\s*:/i);
   const apis=code.match(/\/api\/[A-Za-z0-9/_${}.-]+/g)||[];
   assert.ok(apis.length>=3);
   for(const a of apis)assert.match(a,/^\/api\/shop\/catalogue\/products/,'unexpected endpoint '+a);
@@ -528,15 +557,12 @@ test('UI: styles are scoped to .sc- and the layout is mobile-safe',async()=>{
   assert.match(css,/@media \(max-width:860px\)/);assert.match(css,/@media \(max-width:520px\)/);
   assert.match(css,/prefers-reduced-motion/);
 });
-test('App wiring: only the Shop entry points open the catalogue and the legacy Shop home is preserved',async()=>{
-  assert.match(app,/import ShopCatalogue from "\.\/components\/ShopCatalogue";/);
-  assert.equal((app.match(/openNavigationOSArea\("shop","catalogue"\)/g)||[]).length,3,'header Shop button + sidebar Shop pillar + (S2) opening a saved product');
-  assert.match(app,/<ShopCatalogue apiBase=\{SHOP_API_BASE\}/);
-  assert.match(app,/shopOSView==="catalogue" && <ShopCatalogue/);
-  assert.match(app,/className="hs2-layout" style=\{shopOSView==="catalogue"\?\{display:"none"\}:undefined\}/,'legacy Shop home is hidden, not deleted');
-  assert.match(app,/\["catalogue","Catalogue"\],\["home","Shop Home"\],\["cart","Cart"\],\["vendor","Vendor \/ Creator"\]/);
-  assert.match(app,/const shopView=view==="categories"\|\|view==="discovery"\?"catalogue":view;/);
-  // Connect entry points are untouched
-  assert.match(app,/openNavigationOSArea\("connect","home"\)/);
-  assert.match(app,/onOpenShop=\{\(\)=>openNavigationOSArea\("shop","home"\)\}/,'Connect → Shop keeps its original target');
+test('App wiring: the V8 public product route mounts the shared catalogue detail with validated Shop actions',async()=>{
+  assert.match(app,/import ShopCatalogue from \"\.\/components\/ShopCatalogue\";/);
+  assert.match(app,/v8ShopPath\.slice\(\"products\/\"\.length\)/,'public PRD code is forwarded as the catalogue detail key');
+  assert.match(app,/ShopCatalogue apiBase=\{SHOP_API_BASE\} v8/);
+  assert.match(app,/onAddToCart=\{addCatalogueLineToCart\} onBuyNow=\{buyCatalogueLine\}/);
+  assert.ok(app.includes('!/^products\\/PRD-[0-9A-F]{12}$/.test(v8ShopPath)'), 'bag/orders keep using the existing V8 purchase routes');
+  assert.ok(app.includes('ShopCatalogue apiBase={SHOP_API_BASE} v8'), 'canonical catalogue is mounted for the direct route');
+  assert.match(app,/openNavigationOSArea\("shop",String\(p\|\|"home"\)\)/);
 });

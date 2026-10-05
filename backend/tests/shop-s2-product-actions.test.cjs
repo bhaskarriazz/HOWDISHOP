@@ -317,9 +317,11 @@ test('Catalogue wiring: hearts on cards, actions on the product page, wishlist v
   assert.match(catalogue,/import \{ ShopActionsContext, useShopWishlistActions, WishlistHeart, ActionNotice, ProductActions, WishlistPanel \} from "\.\/ShopProductActions";/);
   assert.match(catalogue,/<WishlistHeart productId=\{product\.id\} name=\{product\.name\} \/>/);
   assert.match(catalogue,/<ProductActions product=\{product\} selectedVariant=\{selectedVariant\} needsChoice=\{needsChoice\} availability=\{shownAvailability\} \/>/);
-  assert.equal((catalogue.match(/<ShopActionsContext\.Provider value=\{actions\}>/g)||[]).length,3,'browse, detail and wishlist views share one actions instance');
+  assert.equal((catalogue.match(/<ShopActionsContext\.Provider value=\{actions\}>/g)||[]).length,4,'browse, detail, wishlist and V8 browse paths share the same actions instance');
   assert.match(catalogue,/data-shop-catalogue="wishlist"/);
-  assert.match(app,/<ShopCatalogue apiBase=\{SHOP_API_BASE\} onExit=\{\(\)=>openNavigationOSArea\("shop","home"\)\}\s+signedIn=\{Boolean\(currentUser\?\.id\)\} getAuthHeaders=\{customerSessionHeaders\} onRequireLogin=\{openLogin\}\s+onAddToCart=\{addCatalogueLineToCart\} onBuyNow=\{buyCatalogueLine\}/);
+  assert.match(app,/<ShopCatalogue apiBase=\{SHOP_API_BASE\} v8/,'the V8 shell mounts the shared catalogue component');
+  assert.match(app,/onAddToCart=\{addCatalogueLineToCart\} onBuyNow=\{buyCatalogueLine\}/,'product actions retain the server-validated cart callbacks');
+  assert.match(app,/openProductId=\{v8ShopPath\.slice\("products\/"\.length\)\}/,'the public PRD route opens the same catalogue detail');
   assert.match(app,/openProductId=\{shopCatalogueProductId\} onOpenProductHandled=\{\(\)=>setShopCatalogueProductId\(""\)\}/);
 });
 test('App wishlist: the localhost/user-id calls are gone; everything goes through the session API',()=>{
@@ -349,8 +351,11 @@ test('App cart: Remove works for keyed lines, lines are re-checked against the s
   assert.match(app,/setCart\(\(current\) => \{\s*let changed = false;/,'no state churn when nothing changed');
   assert.match(app,/const catalogueLineToCartItem = \(line\) => \(\{/);
   assert.match(app,/selectedVariantId: line\.variantId \|\| null,/,'the chosen variant id travels into checkout');
-  // Connect / Works / Learn entry points untouched
-  assert.match(app,/openNavigationOSArea\("works","find"\)/);assert.match(app,/openNavigationOSArea\("learn","discover"\)/);
+  // Connect / Works / Learn entry points remain in the shared dynamic V8 rail map.
+  assert.ok(app.includes('works: [["find", "Find Worker"]'));
+  assert.ok(app.includes('learn: [["home", "For You"]'));
+  assert.ok(app.includes('onClick: () => { openNavigationOSArea("works", id);'));
+  assert.ok(app.includes('onClick: () => openNavigationOSArea("learn", id)'));
 });
 
 test('regression: "Picked for you" and cart "Complete your cart" tolerate plain products (they used to throw and blank the app)',()=>{

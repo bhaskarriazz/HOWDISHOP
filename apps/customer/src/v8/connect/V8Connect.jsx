@@ -11,6 +11,7 @@
 import { lazy, Suspense, useCallback, useState } from "react";
 import "./connect.css";
 import { useApi } from "./common";
+import { V8Dialog } from "../V8System";
 import ConnectHub from "./Hub";
 import VibeScreen from "./Vibe";
 import VibeCreate from "./VibeCreate";
@@ -31,13 +32,36 @@ const Creators = lazy(() => import("./Discover").then((m) => ({ default: m.Creat
 const MessagesScreen = lazy(() => import("./Messages"));
 const AskHowdi = lazy(() => import("./Discover").then((m) => ({ default: m.AskHowdi })));
 
+// Spark is an action surface over the current destination. Keeping it in a dialog
+// preserves the active route until the user explicitly chooses a prepared result.
+export function V8SparkOverlay({ open, apiBase, getAuthHeaders, onClose, onNavigate, onRequireLogin, onOpenProfile, onOpenArea, onSparkHandoff }) {
+  const api = useApi(apiBase, getAuthHeaders);
+  const route = useCallback((r) => {
+    const s = String(r || "");
+    if (s.startsWith("/connect")) { onClose(); return onNavigate(s.replace(/^\/connect\/?/, "")); }
+    if (s.startsWith("/@")) { onClose(); return onOpenProfile(s.slice(2)); }
+    const m = s.match(/^\/(shop|learn|works)(?:\/(.*))?$/);
+    if (m && m[1] === "shop" && /^products\/PRD-[0-9A-F]{12}$/.test(m[2] || "")) { onClose(); return onOpenArea("shop", m[2]); }
+    if (m) { onClose(); return onOpenArea(m[1], m[1] === "shop" ? "crochet" : (m[2] || "home")); }
+    return undefined;
+  }, [onClose, onNavigate, onOpenProfile, onOpenArea]);
+  const common = { api, onNav: onClose, onRequireLogin, onOpenProfile, onRoute: route, onSparkHandoff, apiBase, getAuthHeaders };
+  return (
+    <V8Dialog open={open} title="Spark" onClose={onClose} wide>
+      <Suspense fallback={<div className="v8-card" role="status">Opening Spark…</div>}>
+        <AskHowdi {...common} />
+      </Suspense>
+    </V8Dialog>
+  );
+}
+
 export function parseConnectPath(path) {
   const [p, qs] = String(path || "").split("?");
   const parts = p.split("/").filter(Boolean);
   return { section: parts[0] || "", id: parts[1] || "", sub: parts[2] || "", query: new URLSearchParams(qs || "") };
 }
 
-export default function V8Connect({ apiBase, getAuthHeaders, user, path, onNavigate, onRequireLogin, onOpenProfile, onOpenArea }) {
+export default function V8Connect({ apiBase, getAuthHeaders, user, path, onNavigate, onRequireLogin, onOpenProfile, onOpenArea, onSparkHandoff }) {
   const api = useApi(apiBase, getAuthHeaders);
   const [story, setStory] = useState(null); // {groups, index}
   const [storyCreate, setStoryCreate] = useState(false);
@@ -54,7 +78,7 @@ export default function V8Connect({ apiBase, getAuthHeaders, user, path, onNavig
     if (m) return onOpenArea(m[1], m[1] === "shop" ? "crochet" : (m[2] || "home"));
     return undefined;
   }, [onNavigate, onOpenProfile, onOpenArea]);
-  const common = { api, user, onNav: nav, onRequireLogin, onOpenProfile, onRoute: route, apiBase, getAuthHeaders };
+  const common = { api, user, onNav: nav, onRequireLogin, onOpenProfile, onRoute: route, onSparkHandoff, apiBase, getAuthHeaders };
   let body;
   const pst = /^PST-[0-9A-F]{12}$/.test(id) ? id : "";
   if (!section) body = <ConnectHub key={hubKey} {...common} onOpenStory={(groups, index) => setStory({ groups, index })} onCreateStory={() => setStoryCreate(true)} />;

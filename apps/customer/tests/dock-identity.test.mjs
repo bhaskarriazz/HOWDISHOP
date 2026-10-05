@@ -34,10 +34,11 @@ const bar = await p.locator(".v8-bottombar").boundingBox();
 ok("dock inside 390 viewport", bar.x >= 0 && bar.x + bar.width <= 390 && bar.y + bar.height <= 844, JSON.stringify(bar));
 ok("single mobile dock", await p.locator(".v8-bottombar").count() === 1);
 ok("no Ask HOWDI duplicate visible on mobile", !(await p.locator(".v8-ask").isVisible()));
-await dockBtn(p, "Spark").click(); await p.waitForTimeout(400);
-ok("Spark opens /connect/ask", new URL(p.url()).pathname === "/connect/ask", p.url());
-ok("Spark marked current on Ask", await dockBtn(p, "Spark").getAttribute("aria-current") === "page");
-ok("Connect not current while on Ask", await dockBtn(p, "Connect").getAttribute("aria-current") === null);
+const beforeSpark = p.url();
+await dockBtn(p, "Spark").click(); await p.waitForTimeout(250);
+ok("Spark opens without changing the current route", p.url() === beforeSpark && await p.getByRole("dialog", { name: "Spark" }).isVisible(), p.url());
+await p.getByRole("button", { name: "Close", exact: true }).click(); await p.waitForTimeout(150);
+ok("closing Spark restores the current route", p.url() === beforeSpark && !(await p.getByRole("dialog", { name: "Spark" }).isVisible()), p.url());
 await p.locator(".v8-header .v8-logo").click(); await p.waitForTimeout(400);
 ok("HOWDI logo opens Home", new URL(p.url()).pathname === "/" , p.url());
 for (const [name, path] of [["Shop","/shop"],["Move","/move"],["Work","/works"],["Learn","/learn"],["Connect","/connect"]]) {

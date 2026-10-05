@@ -176,7 +176,7 @@ export const V8Header = forwardRef(function V8Header({
         <input id="v8-global-search" ref={searchRef} type="search" value={search} maxLength={80} placeholder={searchPlaceholder}
           onChange={(e) => onSearchChange(e.target.value)} autoComplete="off" />
       </form>
-      <button type="button" className="v8-ask v8-desktop-only" aria-pressed={Boolean(askActive)} onClick={onAsk}>
+      <button type="button" className="v8-ask v8-desktop-only" aria-label="Ask HOWDI" aria-pressed={Boolean(askActive)} onClick={onAsk}>
         <V8Icon name="spark" size={17} fill /><b>Ask HOWDI</b>
       </button>
       <button type="button" className="v8-location" onClick={onLocation} aria-expanded={Boolean(locationOpen)} aria-controls="howdi-location-panel" aria-label={`Location: ${location}. Change location`}>

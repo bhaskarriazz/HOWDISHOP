@@ -3,12 +3,12 @@ import { createPortal } from "react-dom";
 import "./App.css";
 import ShopCatalogue from "./components/ShopCatalogue";
 import "./v8/v8.css";
-import { V8Rail, V8Header, V8BottomBar, V8BuildLabel, V8_PILLARS, V8_DOCK_ITEMS } from "./v8/V8Shell";
+import { V8Rail, V8Header, V8BottomBar, V8BuildLabel, V8Icon, V8_PILLARS, V8_DOCK_ITEMS } from "./v8/V8Shell";
 import { useV8CommonHomePrefs, V8CustomizeHome } from "./v8/V8Personalization";
 import V8Home from "./v8/V8Home";
 import V8Profile from "./v8/V8Profile";
 import V8Access from "./v8/V8Access";
-import V8Connect from "./v8/connect/V8Connect";
+import V8Connect, { V8SparkOverlay } from "./v8/connect/V8Connect";
 import V8Notifications, { useV8Unread } from "./v8/V8Notifications";
 import V8CallCenter from "./v8/connect/Calls";
 import V8Works from "./v8/works/V8Works";
@@ -2675,6 +2675,8 @@ function App() {
   const [shopCatalogueQuery,setShopCatalogueQuery]=useState("");
   const [shopCatalogueNotice,setShopCatalogueNotice]=useState("");
   const [v8AskMode,setV8AskMode]=useState(false);
+  const [v8SparkOpen,setV8SparkOpen]=useState(false);
+  const [v8SparkHandoff,setV8SparkHandoff]=useState(null);
   // V8 S2: settings pages (profile hub), public profile route, appearance prefs, session-expiry dialog
   const [v8MeView,setV8MeView]=useState("appearance");
   // V8 Connect feature hub: sub-path under /connect (""=hub, "vibe", "vibe/VIB-…", "live", "spaces", "articles", "communities/slug" …)
@@ -2814,9 +2816,19 @@ function App() {
       return null;
     }
   });
+  const sparkHandoffScope = String(currentUser?.public_username || (currentUser ? "authenticated" : "guest"));
+  const sparkHandoffScopeRef = useRef(sparkHandoffScope);
+  useEffect(() => {
+    if (sparkHandoffScopeRef.current !== sparkHandoffScope) {
+      sparkHandoffScopeRef.current = sparkHandoffScope;
+      setV8SparkHandoff(null);
+    }
+  }, [sparkHandoffScope]);
   const dockAccountScope = currentUser?.public_username || currentUser?.username || (currentUser ? "authenticated" : "");
   const [v8HomePrefs, setV8HomePrefs] = useV8CommonHomePrefs(dockAccountScope, SHOP_API_BASE);
   const [v8CustomizeOpen, setV8CustomizeOpen] = useState(false);
+  const closeV8Spark = () => { setV8SparkOpen(false); setV8AskMode(false); };
+  useEffect(() => { closeV8Spark(); }, [sparkHandoffScope]);
 
   // One single customer identity source for header, welcome and My HOWDI.
   useEffect(() => {
@@ -12696,14 +12708,14 @@ const removeNotification = async (notificationId) => {
   const V8_DEFAULT_VIEW = { home: "home", connect: "home", shop: "catalogue", move: "home", works: "find", learn: "discover" };
   const v8Navigate = (area) => {
     if (area === "home") { v8HomeChosenRef.current = true; setV8AskMode(false); openNavigationOSArea("home"); return; }
-    if (area === "spark") { setV8AskMode(false); openNavigationOSArea("connect", "p:ask"); return; }
+    if (area === "spark") { setV8AskMode(true); setV8SparkOpen(true); return; }
     if (area === "vibe") { setV8AskMode(false); openNavigationOSArea("connect", "vibe"); return; }
     if (area === "hpay") { setV8AskMode(false); openNavigationOSArea("hpay", "home"); return; }
     if (area === "messages") { setV8AskMode(false); openNavigationOSArea("connect", "messages"); return; }
     if (area === "shop") { setShopCatalogueQuery(""); setShopCatalogueNotice(""); }
     setV8AskMode(false);
-    // Board 16: the Shop opens on the Handmade Crochet collection; "All" is one tap away.
-    openNavigationOSArea(area, area === "shop" ? "crochet" : (V8_DEFAULT_VIEW[area] || "home"));
+    // The Shop pillar opens the full live catalogue. Handmade Crochet remains a collection inside Shop.
+    openNavigationOSArea(area, V8_DEFAULT_VIEW[area] || "home");
   };
   // Header search (Slice 1): Shop products are searchable today. People / services / courses search is the
   // K5B Global Search UI, which is not built yet — the notice says so instead of pretending.
@@ -12767,6 +12779,15 @@ const removeNotification = async (notificationId) => {
     if((m=p.match(/^\/learn\/(courses(?:\/CRS-[0-9A-F]{12})?|lessons\/LSN-[0-9A-F]{12}|mine|teach(?:\/CRS-[0-9A-F]{12})?|certificates\/[A-Z0-9-]{6,80})$/))){openNavigationOSArea("learn",m[1]);return true;}
     if((m=p.match(/^\/@([a-z0-9._]{3,30})$/i))){openNavigationOSArea("profile",m[1].toLowerCase());return true;}
     return false;
+  };
+  const handleSparkHandoff = (route, handoff) => {
+    const type = String(handoff?.type || ""), path = String(route || "");
+    const routes = { person: /^\/@[a-z0-9._]{3,30}$/i, product: /^\/shop\/products\/PRD-[0-9A-F0-9]{12}$/, worker: /^\/works\/workers\/[A-Za-z0-9][A-Za-z0-9_-]{2,63}$/, course: /^\/learn\/courses\/CRS-[0-9A-F0-9]{12}$/ };
+    const targets = { person: "Connect", product: "Shop", worker: "Work", course: "Learn" };
+    if (!Object.hasOwn(routes, type) || !routes[type].test(path)) return;
+    setV8SparkHandoff({ scope: sparkHandoffScope, target: targets[type], request: String(handoff?.request || "").slice(0, 300) });
+    if (v8ApplyPath(path)) closeV8Spark();
+    else setV8SparkHandoff(null);
   };
   const v8RouterReady=useRef(false);
   const [v8RouterOn,setV8RouterOn]=useState(false);
@@ -13153,7 +13174,7 @@ const removeNotification = async (notificationId) => {
         searchRef={searchInputRef}
         searchPlaceholder={v8AskMode ? "Ask HOWDI — try “crochet tote” or “yarn”" : navigationOSArea === "shop" ? "Search handmade crochet, bags, home decor…" : "Search people, products, services, skills…"}
         askActive={v8AskMode}
-        onAsk={() => { setV8AskMode(false); openNavigationOSArea("connect", "p:ask"); }}
+        onAsk={() => { setV8AskMode(true); setV8SparkOpen(true); }}
         location={customerLocation}
         onLocation={() => toggleHeaderPanel("location")}
         locationOpen={locationPickerOpen}
@@ -13168,7 +13189,15 @@ const removeNotification = async (notificationId) => {
         onSignIn={openLogin}
         onHome={() => v8Navigate("home")}
       />
+      {v8SparkHandoff?.scope === sparkHandoffScope ? <aside className="v8-spark-handoff" role="status" aria-label="Spark prepared request">
+        <div><b>Prepared for {v8SparkHandoff.target}</b><p>{v8SparkHandoff.request}</p><small>Review details and confirm in {v8SparkHandoff.target}. Spark has not taken action.</small></div>
+        <button type="button" className="v8-icon-btn" aria-label="Dismiss prepared Spark request" onClick={() => setV8SparkHandoff(null)}><V8Icon name="x" size={18} /></button>
+      </aside> : null}
       <V8BottomBar active={v8ActivePillar} onNavigate={v8Navigate} pillars={v8VisiblePillars} iconStyle={v8HomePrefs.dockIconStyle} onCustomize={() => setV8CustomizeOpen(true)} />
+      <V8SparkOverlay open={v8SparkOpen} apiBase={SHOP_API_BASE} getAuthHeaders={customerSessionHeaders} onClose={closeV8Spark}
+        onNavigate={(p) => openNavigationOSArea("connect", "p:" + String(p || ""))}
+        onRequireLogin={openLogin} onOpenProfile={(h) => openNavigationOSArea("profile", String(h || ""))}
+        onOpenArea={(area, view) => openNavigationOSArea(area, view)} onSparkHandoff={handleSparkHandoff} />
       <V8CustomizeHome open={v8CustomizeOpen} prefs={v8HomePrefs} onSave={setV8HomePrefs} onClose={() => setV8CustomizeOpen(false)} />
       <V8BuildLabel />
       <V8OfflineBanner onRetry={() => window.dispatchEvent(new Event("online"))} />
@@ -18111,7 +18140,8 @@ const removeNotification = async (notificationId) => {
           <V8Connect apiBase={SHOP_API_BASE} getAuthHeaders={customerSessionHeaders} user={currentUser} path={v8ConnectPath}
             onNavigate={(p) => openNavigationOSArea("connect", "p:" + String(p || ""))}
             onRequireLogin={openLogin} onOpenProfile={(h) => openNavigationOSArea("profile", String(h || ""))}
-            onOpenArea={(area, view) => openNavigationOSArea(area, view)} />
+            onOpenArea={(area, view) => openNavigationOSArea(area, view)}
+            onSparkHandoff={handleSparkHandoff} />
         )}
         {/* V8 HOME-001: the one Common Home (board 04/15). */}
         {navigationOSArea === "home" && (
@@ -19222,7 +19252,20 @@ const removeNotification = async (notificationId) => {
             SHOP — V8 SHP-001: the one canonical Shop (board 16). Handmade Crochet is a collection chip;
             the legacy "Shop Home" (hs2) page is retired. Cart and vendor open on top of this page.
         ==================================== */}
-        {navigationOSArea==="shop" && shopOSView==="v8" && (
+        {navigationOSArea==="shop" && shopOSView==="v8" && /^products\/PRD-[0-9A-F]{12}$/.test(v8ShopPath) && (
+          <div className="v8-page" data-v8-page="shop">
+            <div className="v8-page-inner">
+              <ShopCatalogue apiBase={SHOP_API_BASE} v8
+                signedIn={Boolean(currentUser)} getAuthHeaders={customerSessionHeaders} onRequireLogin={openLogin}
+                onAddToCart={addCatalogueLineToCart} onBuyNow={buyCatalogueLine}
+                openProductId={v8ShopPath.slice("products/".length)}
+                cartSummary={{ items: cart, subtotal: cartSubtotal }}
+                onOpenCart={()=>openNavigationOSArea("shop","cart")}
+                onCheckout={openCheckout} />
+            </div>
+          </div>
+        )}
+        {navigationOSArea==="shop" && shopOSView==="v8" && !/^products\/PRD-[0-9A-F]{12}$/.test(v8ShopPath) && (
           <V8Shop apiBase={SHOP_API_BASE} getAuthHeaders={customerSessionHeaders} user={currentUser} path={v8ShopPath}
             onNavigate={(p)=>openNavigationOSArea("shop",String(p||"home"))} onRequireLogin={openLogin} />
         )}

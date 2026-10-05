@@ -274,6 +274,9 @@ body:has(.howdi-app.v8) { background: var(--v8-bg); color: var(--v8-ink); font-f
 
 /* ---------- Common Home (HOME-001 / HOME-002) ---------- */
 .v8-home-hello h1 { margin: 0; font: 800 34px/1.15 var(--v8-font); letter-spacing: -.02em; color: var(--v8-ink); }
+.v8-home-topline { display: flex; justify-content: flex-end; margin: 0 0 8px; }
+.v8-home-brand { border: 0; background: none; padding: 4px 0 4px 12px; cursor: pointer; font: 800 22px/1 var(--v8-font); letter-spacing: -.01em; color: var(--v8-primary); }
+.v8-home-brand:focus-visible { outline: 3px solid var(--v8-primary); outline-offset: 3px; border-radius: 4px; }
 .v8-home-hello p { margin: 6px 0 24px; color: var(--v8-muted); font-size: 16px; }
 .v8-home-grid { display: grid; gap: 18px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .v8-home-grid.v8-row2 { margin-top: 18px; }

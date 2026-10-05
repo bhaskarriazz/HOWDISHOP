@@ -711,6 +711,20 @@ button.v8c-rail-item { width: 100%; border-left: 0; border-right: 0; border-bott
 .v8ask-logo { font: 900 16px var(--v8-font); color: var(--v8-primary); letter-spacing: .02em; }
 .v8ask-sources { display: grid; gap: 4px; } .v8ask-sources small { color: var(--v8-muted); }
 .v8ask-fb { display: flex; gap: 8px; align-items: center; color: var(--v8-muted); font-size: 14px; } .v8ask-fb .on { color: var(--v8-primary); background: var(--v8-primary-soft); }
+.v8ask-results h2 { margin: 0; font-size: 19px; }
+.v8ask-results > p { margin: -4px 0 0; color: var(--v8-muted); }
+.v8ask-results ul { list-style: none; display: grid; gap: 8px; margin: 0; padding: 0; }
+.v8ask-results li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: 1px solid var(--v8-line); min-width: 0; }
+.v8ask-results li > span { display: grid; gap: 4px; min-width: 0; }
+.v8ask-results li small { color: var(--v8-muted); overflow-wrap: anywhere; }
+.v8ask-prepared { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; align-items: start; border-color: var(--v8-primary); }
+.v8ask-prepared > svg { color: var(--v8-primary); }
+.v8ask-prepared p { margin: 5px 0 12px; color: var(--v8-muted); }
+.v8ask-prepared-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.v8-spark-handoff { position: fixed; top: calc(var(--v8-header-h) + 8px); right: 16px; z-index: 9350; width: min(460px, calc(100vw - var(--v8-rail) - 32px)); display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 14px 16px; border: 1px solid var(--v8-primary); border-radius: 14px; background: var(--v8-surface); color: var(--v8-ink); box-shadow: var(--v8-shadow); }
+.v8-spark-handoff p { margin: 5px 0; overflow-wrap: anywhere; }
+.v8-spark-handoff small { color: var(--v8-muted); }
+@media (max-width: 760px) { .v8-spark-handoff { left: 16px; right: 16px; width: auto; } }
 
 @media (max-width: 1280px) { .v8cr-grid { grid-template-columns: 280px minmax(0, 1fr); } .v8cr-grid > .v8cr-col:last-child { grid-column: 1 / -1; grid-template-columns: repeat(3, minmax(0, 1fr)); } .v8d-cols { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 1024px) {

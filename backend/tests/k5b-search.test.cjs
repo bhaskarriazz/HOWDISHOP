@@ -188,10 +188,11 @@ test('server.js wires search after the K5A handler and before the request logger
   assert.match(SERVER, /issuePublicRefs: connectHomeK5A\._internal\.issueRefs/);
   assert.equal((SERVER.match(/require\("\.\/search-k5b\.cjs"\)/g) || []).length, 1);
 });
-test('scope: no legacy search reuse, no schema change, no cursor, no UI', () => {
+test('scope: no legacy search reuse, no schema change, no cursor; Spark uses the approved search API', () => {
   assert.ok(!/\/api\/users\/search|mention-search/.test(SRC.replace(/\/\/.*$/gm, '')), 'legacy /api/users/search is never called');
   assert.ok(!/CREATE TABLE|ALTER TABLE|INSERT INTO|UPDATE |DELETE FROM/i.test(SRC.replace(/\/\/.*$/gm, '')), 'no schema or write SQL in the module');
   assert.ok(!/cursor|offset/i.test(SRC.replace(/\/\/.*$/gm, '').replace(/'cursor'|cursor \(/g, '')), 'no cursor/offset pagination');
-  const uiRefs = fs.readFileSync(path.join(__dirname, '../../apps/customer/src/App.jsx'), 'utf8');
-  assert.ok(!/\/api\/search\b/.test(uiRefs), 'Part 1 does not wire any UI to /api/search');
+  const spark = fs.readFileSync(path.join(__dirname, '../../apps/customer/src/v8/connect/Discover.jsx'), 'utf8');
+  assert.match(spark, /\/api\/search\?q=.*types=person,product,worker,course/, 'Spark uses the canonical public search result types');
+  assert.ok(!/\/api\/users\/search|mention-search/.test(spark), 'Spark does not reuse legacy search routes');
 });
